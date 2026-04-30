@@ -3,13 +3,11 @@ import pathlib
 import psycopg2
 import pytest
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
-    if not DATABASE_URL:
-        pytest.skip("DATABASE_URL not set")
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = True
     sql = pathlib.Path("db/schema.sql").read_text()
