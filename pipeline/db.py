@@ -1,9 +1,9 @@
 import psycopg2
 
 # Day-of-week map: PostgreSQL EXTRACT(DOW) returns 0=Sunday ... 6=Saturday
-_DOW_PG = {"月": "1", "火": "2", "水": "3", "木": "4", "金": "5", "土": "6", "日": "0"}
+_DOW_PG = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 0}
 
-# Template — caller must supply agency_id as the first bind param ($1 / %s)
+# Template — caller must supply {"agency_id": <int>} as the params dict
 _DEDUP_INNER = """\
         SELECT route_code, service_type, scheduled_time,
                trip_id, DATE(captured_at) AS date, stop_sequence,
@@ -18,9 +18,9 @@ _DEDUP_TEMPLATE = """\
 """
 
 
-def _dedup_cte(agency_id: int) -> tuple[str, list]:
-    """Return (CTE SQL, params) with agency_id bound."""
-    return _DEDUP_TEMPLATE.format(inner=_DEDUP_INNER), [agency_id]
+def _dedup_cte(agency_id: int) -> tuple[str, dict]:
+    """Return (CTE SQL, params dict) with agency_id bound."""
+    return _DEDUP_TEMPLATE.format(inner=_DEDUP_INNER), {"agency_id": agency_id}
 
 
 _VALID_PARTITIONS = frozenset({
@@ -31,7 +31,7 @@ _VALID_PARTITIONS = frozenset({
 })
 
 
-def _pct_sql(partition: str, agency_id: int) -> tuple[str, list]:
+def _pct_sql(partition: str, agency_id: int) -> tuple[str, dict]:
     if partition not in _VALID_PARTITIONS:
         raise ValueError(f"Invalid partition: {partition!r}")
     sql = (
@@ -42,7 +42,7 @@ def _pct_sql(partition: str, agency_id: int) -> tuple[str, list]:
         f"    FROM deduped\n"
         f")\n"
     )
-    return sql, [agency_id]
+    return sql, {"agency_id": agency_id}
 
 
 def _agg_loaded(conn, agency_id: int) -> bool:
@@ -54,6 +54,7 @@ def _agg_loaded(conn, agency_id: int) -> bool:
             )
             return cur.fetchone() is not None
     except psycopg2.errors.UndefinedTable:
+        conn.rollback()
         return False
 
 
@@ -66,4 +67,5 @@ def _static_loaded(conn, agency_id: int) -> bool:
             )
             return cur.fetchone() is not None
     except psycopg2.errors.UndefinedTable:
+        conn.rollback()
         return False
