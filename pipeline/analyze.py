@@ -1,0 +1,195 @@
+import psycopg2.extras
+from pipeline.db import _static_loaded
+
+_DEDUP_INNER = """\
+        SELECT route_code, service_type, scheduled_time,
+               trip_id, DATE(captured_at) AS date, stop_sequence,
+               MAX(dep_delay) AS dep_delay
+        FROM updates
+        WHERE dep_delay IS NOT NULL AND agency_id = %(agency_id)s
+        GROUP BY route_code, service_type, scheduled_time, trip_id, DATE(captured_at), stop_sequence"""
+
+
+def _run_query(sql: str, params: dict, conn) -> list:
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) -> None:
+    if not rows:
+        return
+    col_list = ", ".join(col_names)
+    placeholders = ", ".join(["%s"] * len(col_names))
+    conflict_cols = ", ".join(pk_cols)
+    update_set = ", ".join(
+        f"{c}=EXCLUDED.{c}" for c in col_names if c not in pk_cols
+    )
+    sql = (
+        f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+        f"ON CONFLICT ({conflict_cols}) DO UPDATE SET {update_set}"
+    )
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(cur, sql, rows)
+    conn.commit()
+
+
+def analyze(agency_id: int, conn) -> None:
+    p = {"agency_id": agency_id}
+
+    # ── agg_route_stats ──────────────────────────────────────────────────────
+    sql = f"""
+        WITH deduped AS ({_DEDUP_INNER}),
+        ranked AS (
+            SELECT *, PERCENT_RANK() OVER (
+                PARTITION BY route_code, service_type ORDER BY dep_delay
+            ) AS pct FROM deduped
+        )
+        SELECT
+            %(agency_id)s AS agency_id,
+            route_code, service_type,
+            ROUND(AVG(dep_delay)/60.0::numeric, 2)  AS avg_min,
+            ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
+            ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
+            SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,
+            ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,
+            ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS late5_pct,
+            COUNT(*) AS samples
+        FROM ranked
+        GROUP BY route_code, service_type
+        HAVING COUNT(*) > 20
+        ORDER BY avg_min DESC
+    """
+    rows = _run_query(sql, p, conn)
+    _upsert_agg(
+        "agg_route_stats",
+        ["agency_id", "route_code", "service_type"],
+        ["agency_id", "route_code", "service_type", "avg_min", "p50_min",
+         "p90_min", "late_5min_plus", "on_time_pct", "late5_pct", "samples"],
+        rows, conn,
+    )
+    print(f"  agg_route_stats: {len(rows)} rows")
+
+    # ── agg_route_hour ───────────────────────────────────────────────────────
+    sql = f"""
+        WITH deduped AS ({_DEDUP_INNER}),
+        ranked AS (
+            SELECT *, PERCENT_RANK() OVER (
+                PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay
+            ) AS pct FROM deduped
+        )
+        SELECT
+            %(agency_id)s,
+            route_code, service_type, scheduled_time,
+            ROUND(AVG(dep_delay)/60.0::numeric, 2),
+            ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2),
+            ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2),
+            COUNT(*)
+        FROM ranked
+        GROUP BY route_code, service_type, scheduled_time
+        ORDER BY route_code, scheduled_time
+    """
+    rows = _run_query(sql, p, conn)
+    _upsert_agg(
+        "agg_route_hour",
+        ["agency_id", "route_code", "service_type", "scheduled_time"],
+        ["agency_id", "route_code", "service_type", "scheduled_time",
+         "avg_min", "p50_min", "p90_min", "samples"],
+        rows, conn,
+    )
+    print(f"  agg_route_hour: {len(rows)} rows")
+
+    # ── agg_route_dow ────────────────────────────────────────────────────────
+    sql = f"""
+        WITH deduped AS ({_DEDUP_INNER})
+        SELECT
+            %(agency_id)s,
+            route_code, service_type,
+            CASE EXTRACT(DOW FROM date::date)::int
+                WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
+                WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
+                ELSE '土' END  AS dow,
+            ROUND(AVG(dep_delay)/60.0::numeric, 2),
+            COUNT(*)
+        FROM deduped
+        GROUP BY route_code, service_type, dow
+        ORDER BY route_code
+    """
+    rows = _run_query(sql, p, conn)
+    _upsert_agg(
+        "agg_route_dow",
+        ["agency_id", "route_code", "service_type", "dow"],
+        ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples"],
+        rows, conn,
+    )
+    print(f"  agg_route_dow: {len(rows)} rows")
+
+    # ── agg_daily_trend ──────────────────────────────────────────────────────
+    sql = f"""
+        WITH deduped AS ({_DEDUP_INNER})
+        SELECT
+            %(agency_id)s,
+            date::text, route_code, service_type,
+            ROUND(AVG(dep_delay)/60.0::numeric, 2),
+            COUNT(*)
+        FROM deduped
+        GROUP BY date, route_code, service_type
+        ORDER BY date, route_code
+    """
+    rows = _run_query(sql, p, conn)
+    _upsert_agg(
+        "agg_daily_trend",
+        ["agency_id", "date", "route_code", "service_type"],
+        ["agency_id", "date", "route_code", "service_type", "avg_min", "samples"],
+        rows, conn,
+    )
+    print(f"  agg_daily_trend: {len(rows)} rows")
+
+    # ── agg_stop_seq ─────────────────────────────────────────────────────────
+    if _static_loaded(conn, agency_id):
+        sql = f"""
+            WITH deduped AS ({_DEDUP_INNER})
+            SELECT
+                %(agency_id)s,
+                d.route_code, d.stop_sequence,
+                COALESCE(MAX(ss.stop_name),
+                         CAST(d.stop_sequence AS TEXT) || '番停留所') AS stop_name,
+                ROUND(AVG(d.dep_delay)/60.0::numeric, 2),
+                COUNT(*)
+            FROM deduped d
+            LEFT JOIN static_stop_times sst
+                ON d.trip_id = sst.trip_id
+                AND d.stop_sequence = sst.stop_sequence
+                AND sst.agency_id = %(agency_id)s
+            LEFT JOIN static_stops ss
+                ON sst.stop_id = ss.stop_id
+                AND ss.agency_id = %(agency_id)s
+            WHERE d.stop_sequence IS NOT NULL
+            GROUP BY d.route_code, d.stop_sequence
+            HAVING COUNT(*) > 5
+            ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) DESC
+        """
+    else:
+        sql = f"""
+            WITH deduped AS ({_DEDUP_INNER})
+            SELECT
+                %(agency_id)s,
+                route_code, stop_sequence,
+                CAST(stop_sequence AS TEXT) || '番停留所' AS stop_name,
+                ROUND(AVG(dep_delay)/60.0::numeric, 2),
+                COUNT(*)
+            FROM deduped
+            WHERE stop_sequence IS NOT NULL
+            GROUP BY route_code, stop_sequence
+            HAVING COUNT(*) > 5
+            ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) DESC
+        """
+    rows = _run_query(sql, p, conn)
+    _upsert_agg(
+        "agg_stop_seq",
+        ["agency_id", "route_code", "stop_sequence"],
+        ["agency_id", "route_code", "stop_sequence", "stop_name", "avg_min", "samples"],
+        rows, conn,
+    )
+    print(f"  agg_stop_seq: {len(rows)} rows")
+    print("Analysis complete.")
