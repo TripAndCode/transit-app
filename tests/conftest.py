@@ -1,0 +1,46 @@
+import os
+import pathlib
+import psycopg2
+import pytest
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def apply_schema():
+    if not DATABASE_URL:
+        pytest.skip("DATABASE_URL not set")
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = True
+    sql = pathlib.Path("db/schema.sql").read_text()
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    conn.close()
+
+
+@pytest.fixture
+def pg_conn(apply_schema):
+    conn = psycopg2.connect(DATABASE_URL)
+    yield conn
+    conn.rollback()
+    with conn.cursor() as cur:
+        cur.execute("""
+            TRUNCATE agencies, updates, static_stops, static_stop_times,
+            static_trips, static_routes, static_calendar_dates,
+            agg_route_stats, agg_route_hour, agg_route_dow,
+            agg_daily_trend, agg_stop_seq CASCADE
+        """)
+    conn.commit()
+    conn.close()
+
+
+@pytest.fixture
+def agency_id(pg_conn):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+            ("テスト交通", "http://example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+    return aid
