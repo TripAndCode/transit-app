@@ -18,7 +18,6 @@ _STATIC_FILE_MAP = [
 ]
 
 _DB_COLS = {
-    "static_stops":          ["agency_id", "stop_id", "stop_name", "stop_lat", "stop_lon"],
     "static_stop_times":     ["agency_id", "trip_id", "stop_sequence", "stop_id",
                                "arrival_time", "departure_time"],
     "static_trips":          ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id"],
@@ -32,11 +31,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
     if p.is_dir():
         zips = sorted(p.glob("*_static.zip"))
         if not zips:
-            print(f"No *_static.zip found in {p}"); return
+            raise FileNotFoundError(f"No *_static.zip found in {p}")
         p = zips[-1]
         print(f"Using: {p.name}")
     if not p.exists():
-        print(f"File not found: {p}"); return
+        raise FileNotFoundError(f"File not found: {p}")
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
         names_in_zip = set(zf.namelist())
@@ -58,31 +57,34 @@ def load_static(path: str, agency_id: int, conn) -> None:
                     stop_id, stop_name = row[0], row[1]
                     try:
                         lat, lon = float(row[2]), float(row[3])
-                        geom_sql = "ST_SetSRID(ST_MakePoint(%s, %s), 4326)"
-                        params = [agency_id, stop_id, stop_name, lat, lon, lon, lat]
                     except (TypeError, ValueError):
-                        geom_sql = "NULL"
-                        params = [agency_id, stop_id, stop_name, None, None]
+                        lat, lon = None, None
                     cur.execute(
-                        f"INSERT INTO static_stops "
-                        f"(agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
-                        f"VALUES (%s, %s, %s, %s, %s, {geom_sql}) "
-                        f"ON CONFLICT (agency_id, stop_id) DO UPDATE SET "
-                        f"stop_name=EXCLUDED.stop_name, stop_lat=EXCLUDED.stop_lat, "
-                        f"stop_lon=EXCLUDED.stop_lon, geom=EXCLUDED.geom",
-                        params,
+                        "INSERT INTO static_stops "
+                        "(agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+                        "VALUES (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)) "
+                        "ON CONFLICT (agency_id, stop_id) DO UPDATE SET "
+                        "stop_name=EXCLUDED.stop_name, stop_lat=EXCLUDED.stop_lat, "
+                        "stop_lon=EXCLUDED.stop_lon, geom=EXCLUDED.geom",
+                        [agency_id, stop_id, stop_name, lat, lon, lon, lat],
                     )
             else:
                 db_cols = _DB_COLS[table]
                 col_list = ", ".join(db_cols)
                 placeholders = ", ".join(["%s"] * len(db_cols))
                 pg_rows = [[agency_id] + row for row in raw_rows]
-                psycopg2.extras.execute_batch(
+                # Use execute_values with RETURNING to detect silently skipped duplicates
+                from psycopg2.extras import execute_values
+                inserted = execute_values(
                     cur,
-                    f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
-                    f"ON CONFLICT DO NOTHING",
+                    f"INSERT INTO {table} ({col_list}) VALUES %s "
+                    f"ON CONFLICT DO NOTHING RETURNING 1",
                     pg_rows,
+                    fetch=True,
                 )
+                skipped = len(pg_rows) - len(inserted)
+                if skipped:
+                    print(f"  WARNING: {skipped} duplicate rows skipped in {table}")
 
             conn.commit()
             print(f"  {table}: {len(raw_rows):,} rows")
