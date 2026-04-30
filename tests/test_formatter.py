@@ -65,3 +65,30 @@ def test_fmt_by_date():
     result = format_result("by_date", rows, intent)
     assert "2026-04-15" in result
     assert "44372" in result
+
+
+def test_fmt_route_info_empty_rows():
+    result = format_result("route_info", [], {"route": "44372"})
+    assert "データがありません" in result  # falls back to _no_data()
+
+
+def test_format_guidance_menu_empty_rows_no_blank():
+    # Verify empty ranking yields "(データなし)" not blank line
+    from pipeline.query.formatter import format_guidance_menu
+    # We can test the output string by checking the rendered text without a DB
+    # by inspecting the constant structure
+    import asyncio
+
+    async def _run():
+        class FakeConn:
+            async def fetch(self, sql, *args):
+                return []
+        return await format_guidance_menu(FakeConn(), 1)
+
+    result = asyncio.run(_run())
+    assert "データなし" in result
+    # The LLM context menu should not have an empty line between header and menu
+    lines = result.split("\n")
+    header_idx = next(i for i, l in enumerate(lines) if "遅延ランキング上位10系統" in l)
+    # Line immediately after header should not be empty
+    assert lines[header_idx + 1].strip() != ""

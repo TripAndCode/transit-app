@@ -201,18 +201,18 @@ def _fmt_routes_at_stop(rows: list, intent: dict) -> str:
     stop_name = intent.get("stop_name", "")
     actual_stop = rows[0][2] if rows else stop_name
     def _code(route_id: str) -> str:
-        import re as _re
-        m = _re.search(r"\((\d+)\)", route_id)
+        m = re.search(r"\((\d+)\)", route_id)
         return m.group(1) if m else route_id
     lines = [f"系統{_code(r[0])} {r[1]}" for r in rows]
     return f"【「{actual_stop}」を経由する系統（{len(rows)}系統）】\n" + "\n".join(lines)
 
 
 def _fmt_route_info(rows: list, intent: dict) -> str:
-    import re as _re
+    if not rows:
+        return ""
     r = rows[0]
     route_id, route_short_name, stop_count, first_dep, last_dep, trip_count = r
-    m = _re.search(r"\((\d+)\)", route_id)
+    m = re.search(r"\((\d+)\)", route_id)
     code = m.group(1) if m else route_id
     return (
         f"【系統{code} 路線情報】\n"
@@ -289,9 +289,12 @@ async def format_guidance_menu(conn, agency_id: int, model: str = "llama3.2") ->
         _log.warning("format_guidance_menu DB error: %s", exc)
         rows = []
 
-    ranking = "\n".join(
-        f"{i}位: 系統{r[0]}（{r[1]}）平均{r[2]}分、p50={r[3]}分、p90={r[4]}分（{r[5]}件）"
-        for i, r in enumerate(rows, 1)
+    ranking = (
+        "\n".join(
+            f"{i}位: 系統{r[0]}（{r[1]}）平均{r[2]}分、p50={r[3]}分、p90={r[4]}分（{r[5]}件）"
+            for i, r in enumerate(rows, 1)
+        )
+        if rows else "（データなし）"
     )
 
     return (
@@ -324,18 +327,22 @@ async def format_unknown(
     prompt = _PROMPT.format(context=context, question=question)
 
     def _sync_call():
-        result = []
-        for chunk in ollama.chat(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            stream=True,
-            options={"temperature": 0},
-        ):
-            result.append(chunk.message.content or "")
-        return "".join(result)
+        try:
+            result = []
+            for chunk in ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+                options={"temperature": 0},
+            ):
+                result.append(chunk.message.content or "")
+            return "".join(result)
+        except Exception as exc:
+            _log.warning("format_unknown Ollama error: %s", exc)
+            return "申し訳ありませんが、回答の生成中にエラーが発生しました。"
 
     raw = await asyncio.to_thread(_sync_call)
     return _fix(raw)
