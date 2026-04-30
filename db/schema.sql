@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS agencies (
     feed_url    TEXT NOT NULL,
     static_url  TEXT,
     timezone    TEXT NOT NULL DEFAULT 'Asia/Tokyo',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (feed_url)
 );
 
 -- Raw GTFS-RT data
@@ -21,12 +22,12 @@ CREATE TABLE IF NOT EXISTS updates (
     service_type   TEXT NOT NULL,
     scheduled_time TEXT NOT NULL,
     route_code     TEXT NOT NULL,
-    stop_sequence  INTEGER,
+    stop_sequence  INTEGER NOT NULL DEFAULT 0,
     dep_delay      INTEGER,
-    UNIQUE (agency_id, file_name, route_code, stop_sequence)
+    UNIQUE (agency_id, file_name, trip_id, stop_sequence)
 );
 CREATE INDEX IF NOT EXISTS idx_updates_agency_route ON updates (agency_id, route_code);
-CREATE INDEX IF NOT EXISTS idx_updates_captured_at  ON updates (captured_at);
+CREATE INDEX IF NOT EXISTS idx_updates_agency_at ON updates (agency_id, captured_at);
 
 -- Static GTFS: stops (with PostGIS geometry)
 CREATE TABLE IF NOT EXISTS static_stops (
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS static_stops (
     geom       GEOMETRY(Point, 4326),
     PRIMARY KEY (agency_id, stop_id)
 );
+CREATE INDEX IF NOT EXISTS idx_static_stops_geom ON static_stops USING GIST(geom);
 
 CREATE TABLE IF NOT EXISTS static_stop_times (
     agency_id      INTEGER NOT NULL REFERENCES agencies(agency_id),
