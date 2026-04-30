@@ -44,3 +44,31 @@ def agency_id(pg_conn):
         aid = cur.fetchone()[0]
     pg_conn.commit()
     return aid
+
+
+@pytest.fixture
+async def aconn(apply_schema):
+    import asyncpg
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    yield conn
+    # clean up
+    try:
+        await conn.execute("""
+            TRUNCATE agencies, updates, static_stops, static_stop_times,
+            static_trips, static_routes, static_calendar_dates,
+            agg_route_stats, agg_route_hour, agg_route_dow,
+            agg_daily_trend, agg_stop_seq, rag_chunks CASCADE
+        """)
+    except Exception:
+        pass
+    await conn.close()
+
+
+@pytest.fixture
+async def aagency_id(aconn):
+    row = await aconn.fetchrow(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
+        "テスト交通",
+        "http://example.com/feed.pb",
+    )
+    return row["agency_id"]

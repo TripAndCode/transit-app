@@ -97,3 +97,9 @@ def test_validate_intent_routes_at_stop_requires_stop_name():
     from pipeline.query.intent import validate_intent
     result = validate_intent({"query_type": "routes_at_stop"})
     assert result["unknown"] is True
+
+
+@pytest.mark.asyncio
+async def test_aconn_connects(aconn):
+    row = await aconn.fetchrow("SELECT 1 AS val")
+    assert row["val"] == 1
