@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["pipeline", "pipeline.query", "tests"]
+packages = ["pipeline", "pipeline.query", "api", "api.routers", "tests"]
 
 [tool.setuptools.package-data]
 pipeline = ["query/*"]
