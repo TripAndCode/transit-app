@@ -1,6 +1,5 @@
--- Extensions (requires PostgreSQL with PostGIS and pgvector installed)
--- Note: These will fail gracefully if extensions are not available
--- PostGIS and pgvector installation required for full functionality
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Master catalog
 CREATE TABLE IF NOT EXISTS agencies (
@@ -29,14 +28,14 @@ CREATE TABLE IF NOT EXISTS updates (
 CREATE INDEX IF NOT EXISTS idx_updates_agency_route ON updates (agency_id, route_code);
 CREATE INDEX IF NOT EXISTS idx_updates_captured_at  ON updates (captured_at);
 
--- Static GTFS: stops (with PostGIS geometry - falls back to BYTEA if PostGIS unavailable)
+-- Static GTFS: stops (with PostGIS geometry)
 CREATE TABLE IF NOT EXISTS static_stops (
     agency_id  INTEGER NOT NULL REFERENCES agencies(agency_id),
     stop_id    TEXT    NOT NULL,
     stop_name  TEXT,
     stop_lat   DOUBLE PRECISION,
     stop_lon   DOUBLE PRECISION,
-    geom       BYTEA,
+    geom       GEOMETRY(Point, 4326),
     PRIMARY KEY (agency_id, stop_id)
 );
 
@@ -134,16 +133,13 @@ CREATE TABLE IF NOT EXISTS agg_stop_seq (
     PRIMARY KEY (agency_id, route_code, stop_sequence)
 );
 
--- RAG chunks (pgvector - falls back to BYTEA if pgvector unavailable)
+-- RAG chunks (pgvector)
 CREATE TABLE IF NOT EXISTS rag_chunks (
     chunk_id     TEXT    NOT NULL,
     agency_id    INTEGER NOT NULL REFERENCES agencies(agency_id),
     content      TEXT    NOT NULL,
-    embedding    BYTEA,
+    embedding    VECTOR(384),
     content_hash TEXT    NOT NULL,
     embedded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (agency_id, chunk_id)
 );
--- Note: To use pgvector and ivfflat index after installing pgvector:
---   ALTER TABLE rag_chunks ALTER COLUMN embedding TYPE VECTOR(384);
---   CREATE INDEX ON rag_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
