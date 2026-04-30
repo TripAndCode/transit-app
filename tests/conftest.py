@@ -10,7 +10,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 def apply_schema():
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = True
-    sql = pathlib.Path("db/schema.sql").read_text()
+    sql = (pathlib.Path(__file__).parent.parent / "db" / "schema.sql").read_text()
     with conn.cursor() as cur:
         cur.execute(sql)
     conn.close()
@@ -20,16 +20,18 @@ def apply_schema():
 def pg_conn(apply_schema):
     conn = psycopg2.connect(DATABASE_URL)
     yield conn
-    conn.rollback()
-    with conn.cursor() as cur:
-        cur.execute("""
-            TRUNCATE agencies, updates, static_stops, static_stop_times,
-            static_trips, static_routes, static_calendar_dates,
-            agg_route_stats, agg_route_hour, agg_route_dow,
-            agg_daily_trend, agg_stop_seq CASCADE
-        """)
-    conn.commit()
-    conn.close()
+    try:
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute("""
+                TRUNCATE agencies, updates, static_stops, static_stop_times,
+                static_trips, static_routes, static_calendar_dates,
+                agg_route_stats, agg_route_hour, agg_route_dow,
+                agg_daily_trend, agg_stop_seq, rag_chunks CASCADE
+            """)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture
