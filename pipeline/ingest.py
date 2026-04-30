@@ -178,7 +178,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                             for r in rows
                         ]
                         psycopg2.extras.execute_batch(cur, _INSERT_SQL, pg_rows)
-                        n_inserted += len(pg_rows)
+                        n_inserted += len(pg_rows)  # counts attempted rows; ON CONFLICT rows are not subtracted
                         done.add(f"{d}/{pb_name}")
                         if j % 300 == 0 and j > 0:
                             conn.commit()
@@ -186,6 +186,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             except Exception as e:
                 print(f"  [ERROR] {e}")
                 n_errors += 1
+                conn.rollback()
             conn.commit()
 
         new_pb = [
@@ -203,7 +204,8 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                     for r in rows
                 ]
                 psycopg2.extras.execute_batch(cur, _INSERT_SQL, pg_rows)
-                n_inserted += len(pg_rows)
+                n_inserted += len(pg_rows)  # counts attempted rows; ON CONFLICT rows are not subtracted
+                done.add(f"{d}/{path.name}")
                 if j % 500 == 0:
                     conn.commit()
                     print(f"  {j}/{len(new_pb)}")
