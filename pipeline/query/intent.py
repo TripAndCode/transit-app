@@ -1,8 +1,12 @@
 """Intent classifier: maps Japanese bus delay questions to structured query intents."""
 
+import asyncio
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
+
+_log = logging.getLogger(__name__)
 
 VALID_QUERY_TYPES = {
     "ranking", "by_hour", "by_dow", "by_stop", "by_date",
@@ -103,7 +107,7 @@ def _normalize_date_token(value) -> str | None:
         return s
     mdy = re.match(r"^(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日$", s)
     if mdy:
-        y = int(mdy.group(1)) if mdy.group(1) else 2026
+        y = int(mdy.group(1)) if mdy.group(1) else date.today().year
         m = int(mdy.group(2))
         d = int(mdy.group(3))
         try:
@@ -224,7 +228,7 @@ def validate_intent(raw: dict) -> dict:
 
 async def classify_intent(question: str, model: str = "llama3.2") -> dict:
     """Send question to local Ollama LLM and return validated intent dict."""
-    import asyncio, ollama
+    import ollama
 
     def _sync():
         try:
@@ -239,7 +243,8 @@ async def classify_intent(question: str, model: str = "llama3.2") -> dict:
             )
             content = response.message.content or ""
             return json.loads(content)
-        except Exception:
+        except Exception as exc:
+            _log.warning("classify_intent failed: %s", exc)
             return None
 
     raw = await asyncio.to_thread(_sync)
