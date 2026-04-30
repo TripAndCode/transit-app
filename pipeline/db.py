@@ -9,7 +9,7 @@ _DEDUP_INNER = """\
                trip_id, DATE(captured_at) AS date, stop_sequence,
                MAX(dep_delay) AS dep_delay
         FROM updates WHERE dep_delay IS NOT NULL AND agency_id = %(agency_id)s
-        GROUP BY route_code, service_type, trip_id, DATE(captured_at), stop_sequence"""
+        GROUP BY route_code, service_type, scheduled_time, trip_id, DATE(captured_at), stop_sequence"""
 
 _DEDUP_TEMPLATE = """\
     WITH deduped AS (

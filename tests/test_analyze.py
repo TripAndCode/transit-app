@@ -79,6 +79,42 @@ def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id):
     assert "番停留所" in stop_name
 
 
+def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id):
+    _seed_updates(pg_conn, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, %s)",
+            (agency_id, "S1", "青森駅"),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (agency_id, "平日_11時37分_系統44372", 1, "S1", "11:37"),
+        )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s AND stop_sequence = 1",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == "青森駅"
+
+
+def test_analyze_creates_agg_daily_trend(pg_conn, agency_id):
+    _seed_updates(pg_conn, agency_id)
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM agg_daily_trend WHERE agency_id = %s",
+            (agency_id,),
+        )
+        count = cur.fetchone()[0]
+    assert count > 0
+
+
 def test_analyze_agency_isolated(pg_conn):
     """analyze() only touches rows for its own agency_id."""
     with pg_conn.cursor() as cur:

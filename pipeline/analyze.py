@@ -1,13 +1,10 @@
 import psycopg2.extras
-from pipeline.db import _static_loaded
+from pipeline.db import _static_loaded, _DEDUP_INNER
 
-_DEDUP_INNER = """\
-        SELECT route_code, service_type, scheduled_time,
-               trip_id, DATE(captured_at) AS date, stop_sequence,
-               MAX(dep_delay) AS dep_delay
-        FROM updates
-        WHERE dep_delay IS NOT NULL AND agency_id = %(agency_id)s
-        GROUP BY route_code, service_type, scheduled_time, trip_id, DATE(captured_at), stop_sequence"""
+_VALID_AGG_TABLES = frozenset({
+    "agg_route_stats", "agg_route_hour", "agg_route_dow",
+    "agg_daily_trend", "agg_stop_seq",
+})
 
 
 def _run_query(sql: str, params: dict, conn) -> list:
@@ -17,6 +14,8 @@ def _run_query(sql: str, params: dict, conn) -> list:
 
 
 def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) -> None:
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
     if not rows:
         return
     col_list = ", ".join(col_names)
@@ -79,12 +78,12 @@ def analyze(agency_id: int, conn) -> None:
             ) AS pct FROM deduped
         )
         SELECT
-            %(agency_id)s,
+            %(agency_id)s AS agency_id,
             route_code, service_type, scheduled_time,
-            ROUND(AVG(dep_delay)/60.0::numeric, 2),
-            ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2),
-            ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2),
-            COUNT(*)
+            ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+            ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
+            ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
+            COUNT(*) AS samples
         FROM ranked
         GROUP BY route_code, service_type, scheduled_time
         ORDER BY route_code, scheduled_time
@@ -103,16 +102,20 @@ def analyze(agency_id: int, conn) -> None:
     sql = f"""
         WITH deduped AS ({_DEDUP_INNER})
         SELECT
-            %(agency_id)s,
+            %(agency_id)s AS agency_id,
             route_code, service_type,
             CASE EXTRACT(DOW FROM date::date)::int
                 WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
                 WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
                 ELSE '土' END  AS dow,
-            ROUND(AVG(dep_delay)/60.0::numeric, 2),
-            COUNT(*)
+            ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+            COUNT(*) AS samples
         FROM deduped
-        GROUP BY route_code, service_type, dow
+        GROUP BY route_code, service_type,
+                 CASE EXTRACT(DOW FROM date::date)::int
+                     WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
+                     WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
+                     ELSE '土' END
         ORDER BY route_code
     """
     rows = _run_query(sql, p, conn)
@@ -128,10 +131,10 @@ def analyze(agency_id: int, conn) -> None:
     sql = f"""
         WITH deduped AS ({_DEDUP_INNER})
         SELECT
-            %(agency_id)s,
+            %(agency_id)s AS agency_id,
             date::text, route_code, service_type,
-            ROUND(AVG(dep_delay)/60.0::numeric, 2),
-            COUNT(*)
+            ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+            COUNT(*) AS samples
         FROM deduped
         GROUP BY date, route_code, service_type
         ORDER BY date, route_code
@@ -150,12 +153,12 @@ def analyze(agency_id: int, conn) -> None:
         sql = f"""
             WITH deduped AS ({_DEDUP_INNER})
             SELECT
-                %(agency_id)s,
+                %(agency_id)s AS agency_id,
                 d.route_code, d.stop_sequence,
                 COALESCE(MAX(ss.stop_name),
                          CAST(d.stop_sequence AS TEXT) || '番停留所') AS stop_name,
-                ROUND(AVG(d.dep_delay)/60.0::numeric, 2),
-                COUNT(*)
+                ROUND(AVG(d.dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples
             FROM deduped d
             LEFT JOIN static_stop_times sst
                 ON d.trip_id = sst.trip_id
@@ -173,11 +176,11 @@ def analyze(agency_id: int, conn) -> None:
         sql = f"""
             WITH deduped AS ({_DEDUP_INNER})
             SELECT
-                %(agency_id)s,
+                %(agency_id)s AS agency_id,
                 route_code, stop_sequence,
                 CAST(stop_sequence AS TEXT) || '番停留所' AS stop_name,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2),
-                COUNT(*)
+                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples
             FROM deduped
             WHERE stop_sequence IS NOT NULL
             GROUP BY route_code, stop_sequence
