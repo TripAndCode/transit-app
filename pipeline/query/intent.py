@@ -3,10 +3,27 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta
 
 _log = logging.getLogger(__name__)
+
+_groq_client = None
+
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    return _groq_client
+
+
+def _reset_groq_client():
+    """Reset the client singleton — used in tests via monkeypatch."""
+    global _groq_client
+    _groq_client = None
 
 VALID_QUERY_TYPES = {
     "ranking", "by_hour", "by_dow", "by_stop", "by_date",
@@ -226,35 +243,21 @@ def validate_intent(raw: dict) -> dict:
     return intent
 
 
-async def classify_intent(question: str, model: str = "llama3.2") -> dict:
-    """Send question to local Ollama LLM and return validated intent dict."""
-    import ollama
+async def classify_intent(question: str, model: str = "llama-3.2-11b-text-preview") -> dict:
+    """Send question to Groq LLM and return validated intent dict."""
+    client = _get_groq_client()
 
     def _sync():
-        try:
-            response = ollama.chat(
-                model=model,
-                format="json",
-                messages=[
-                    {"role": "system", "content": INTENT_SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
-                ],
-                options={"temperature": 0},
-            )
-            content = response.message.content or ""
-            return json.loads(content)
-        except Exception as exc:
-            _log.warning("classify_intent failed: %s", exc)
-            return None
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": INTENT_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        return json.loads(response.choices[0].message.content or "")
 
     raw = await asyncio.to_thread(_sync)
-    if raw is None:
-        return {
-            "query_type": "unknown", "unknown": True,
-            "route": None, "route_name": None, "service": None,
-            "dow": None, "dow_group": None, "date": None,
-            "stop_name": None, "time_band": None,
-            "trend_direction": "any", "compare_polarity": "any",
-            "sort_order": "desc", "limit": 15,
-        }
     return validate_intent(raw)
