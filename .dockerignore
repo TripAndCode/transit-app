@@ -1,0 +1,15 @@
+.git/
+.worktrees/
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+dist/
+build/
+chroma_db/
+gtfs.db
+.env
+docs/
+tests/
+.github/
+*.md
