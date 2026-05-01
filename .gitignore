@@ -7,5 +7,4 @@ build/
 chroma_db/
 gtfs.db
 .env
-docs/
 .claude/
