@@ -41,7 +41,8 @@ async def _route_codes_from_name(route_name: str, conn, agency_id: int) -> list[
             agency_id, route_name, f"%{route_name}%",
         )
         codes = [r["route_code"] for r in rows]
-    except Exception:
+    except Exception as exc:
+        _log.warning("_route_codes_from_name DB error for %r: %s", route_name, exc)
         codes = []
     if not codes:
         codes = re.findall(r"\((\d+)\)", route_name)
@@ -180,7 +181,6 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
     order = _order_keyword(intent.get("sort_order"), default="DESC")
 
     route_cond, route_vals, n = _route_in_clause(route_codes, 2)  # $2...$N
-    tb_cond, tb_vals, n = _time_band_clause(time_band, n)
 
     conds = [f"agency_id=$1", route_cond]
     params: list = [agency_id] + route_vals
@@ -189,6 +189,8 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
         conds.append(f"service_type=${n}")
         params.append(service)
         n += 1
+
+    tb_cond, tb_vals, n = _time_band_clause(time_band, n)
     if tb_cond:
         conds.append(tb_cond)
         params.extend(tb_vals)
@@ -604,10 +606,11 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
         # raw fallback — outer uses route_cond from $2
         outer_cond = route_cond
         outer_params = route_vals[:]
-        outer_n = n
+        outer_n = 2 + len(route_vals)
         if service:
             outer_cond += f" AND service_type=${outer_n}"
             outer_params.append(service)
+            outer_n += 1
         rows = await conn.fetch(
             f"WITH deduped AS ({_DEDUP_INNER}) "
             "SELECT route_code, service_type, ROUND(AVG(dep_delay)/60.0::numeric, 2), "

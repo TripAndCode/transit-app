@@ -69,3 +69,49 @@ async def test_execute_agency_isolation(aconn, aagency_id):
     rows = await execute(intent, aconn, aagency_id)
     # aagency_id has no data, should return empty
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_exec_by_hour_service_and_time_band(aconn, aagency_id):
+    """Bug 1 regression: by_hour with service + time_band must not crash."""
+    # Need to seed agg_route_hour directly to test the agg path
+    await aconn.execute(
+        "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "
+        "avg_min, p50_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        aagency_id, "44372", "平日", "08:00", 2.5, 2.0, 5.0, 50,
+    )
+    intent = {
+        "query_type": "by_hour",
+        "route": "44372",
+        "service": "平日",
+        "time_band": "morning",
+        "sort_order": "desc",
+        "unknown": False,
+    }
+    rows = await execute(intent, aconn, aagency_id)
+    assert isinstance(rows, list)
+    # The seeded row IS in morning band (08:00 is between 05:00 and 10:00)
+    assert len(rows) > 0
+
+
+@pytest.mark.asyncio
+async def test_exec_on_time_with_route_and_service_raw(aconn, aagency_id):
+    """Bug 2 regression: on_time with route + service must not crash on raw path."""
+    for i in range(12):
+        await aconn.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+            "($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            aagency_id, f"on{i}.pb", f"2026-04-{i+1:02d}T08:00:00",
+            "平日_08時00分_系統44372", "平日", "08:00", "44372", 1, 30 + i * 10,
+        )
+    intent = {
+        "query_type": "on_time",
+        "route": "44372",
+        "service": "平日",
+        "sort_order": "desc",
+        "limit": 5,
+        "unknown": False,
+    }
+    rows = await execute(intent, aconn, aagency_id)
+    assert isinstance(rows, list)
