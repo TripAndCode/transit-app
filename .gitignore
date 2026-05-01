@@ -9,3 +9,4 @@ gtfs.db
 .env
 .claude/
 docs/superpowers/
+.worktrees/
