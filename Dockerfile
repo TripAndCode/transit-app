@@ -9,7 +9,6 @@ RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction
 
 COPY . .
-RUN poetry install --only main --no-interaction
 
 EXPOSE 8000
 
