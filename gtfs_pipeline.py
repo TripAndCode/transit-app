@@ -68,6 +68,25 @@ def cmd_analyze(args):
     conn.close()
 
 
+def cmd_ingest_live(args):
+    from pipeline.ingest import ingest_live
+    conn = _get_conn()
+    if args.agency_id is not None:
+        ingest_live(int(args.agency_id), conn)
+    else:
+        with conn.cursor() as cur:
+            cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+            agency_ids = [r[0] for r in cur.fetchall()]
+        if not agency_ids:
+            print("No agencies found.")
+            conn.close()
+            return
+        for aid in agency_ids:
+            print(f"--- Ingesting agency_id={aid} ---")
+            ingest_live(aid, conn)
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
@@ -88,6 +107,9 @@ def main():
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)
 
+    p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
+    p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
+
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
@@ -97,6 +119,8 @@ def main():
         cmd_load_static(args)
     elif args.command == "analyze":
         cmd_analyze(args)
+    elif args.command == "ingest_live":
+        cmd_ingest_live(args)
     else:
         parser.print_help()
 

@@ -2,6 +2,7 @@ import re
 import struct
 import tarfile
 import pathlib
+import urllib.request
 from datetime import datetime
 import psycopg2.extras
 
@@ -229,4 +230,49 @@ def ingest(folder: str, agency_id: int, conn) -> int:
     if n_errors:
         print(f"Skipped {n_errors} files with parse errors")
     print(f"\nDone: {n_inserted} new rows inserted")
+    return n_inserted
+
+
+def ingest_live(agency_id: int, conn) -> int:
+    """Fetch the agency's GTFS-RT feed_url and ingest it live.
+
+    Returns the number of new rows inserted.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT feed_url, trip_id_pattern FROM agencies WHERE agency_id = %s",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+
+    if row is None or not row[0]:
+        raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
+
+    feed_url: str = row[0]
+    trip_id_pattern_str = row[1] if row[1] else None
+
+    if trip_id_pattern_str:
+        pattern = re.compile(trip_id_pattern_str)
+    else:
+        pattern = _TRIP_RE_DEFAULT
+
+    print(f"Fetching live feed from {feed_url}")
+    with urllib.request.urlopen(feed_url) as resp:
+        raw = resp.read()
+
+    captured_at = datetime.now().isoformat()
+    file_name = "live"
+
+    rows = parse_pb(raw, captured_at, file_name, pattern=pattern)
+    pg_rows = [
+        (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
+        for r in rows
+    ]
+
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(cur, _INSERT_SQL, pg_rows)
+    conn.commit()
+
+    n_inserted = len(pg_rows)
+    print(f"Done: {n_inserted} rows inserted (live)")
     return n_inserted
