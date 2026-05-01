@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime
 from pipeline.query.executor import execute
 
 
@@ -39,7 +40,7 @@ async def test_execute_returns_tuples(aconn, aagency_id):
             "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
             "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
             "($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            aagency_id, f"f{i}.pb", f"2026-04-{(i%28)+1:02d}T11:37:00",
+            aagency_id, f"f{i}.pb", datetime(2026, 4, (i % 28) + 1, 11, 37, 0),
             "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120 + i * 10,
         )
     intent = {"query_type": "ranking", "unknown": False, "limit": 5, "sort_order": "desc"}
@@ -62,7 +63,7 @@ async def test_execute_agency_isolation(aconn, aagency_id):
             "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
             "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
             "($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            other_id, f"f{i}.pb", f"2026-04-{(i%28)+1:02d}T11:37:00",
+            other_id, f"f{i}.pb", datetime(2026, 4, (i % 28) + 1, 11, 37, 0),
             "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 999,
         )
     intent = {"query_type": "ranking", "unknown": False, "limit": 5, "sort_order": "desc"}
@@ -74,7 +75,12 @@ async def test_execute_agency_isolation(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_exec_by_hour_service_and_time_band(aconn, aagency_id):
     """Bug 1 regression: by_hour with service + time_band must not crash."""
-    # Need to seed agg_route_hour directly to test the agg path
+    # Seed agg_route_stats so _agg_loaded() returns True (it checks this table)
+    await aconn.execute(
+        "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p50_min, "
+        "p90_min, late_5min_plus, on_time_pct, late5_pct, samples) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        aagency_id, "44372", "平日", 2.5, 2.0, 5.0, 0, 80.0, 5.0, 50,
+    )
     await aconn.execute(
         "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "
         "avg_min, p50_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
@@ -102,7 +108,7 @@ async def test_exec_on_time_with_route_and_service_raw(aconn, aagency_id):
             "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
             "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
             "($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            aagency_id, f"on{i}.pb", f"2026-04-{i+1:02d}T08:00:00",
+            aagency_id, f"on{i}.pb", datetime(2026, 4, i + 1, 8, 0, 0),
             "平日_08時00分_系統44372", "平日", "08:00", "44372", 1, 30 + i * 10,
         )
     intent = {
