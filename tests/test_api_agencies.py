@@ -24,3 +24,66 @@ async def test_health_endpoint(app_client):
     resp = await app_client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+@pytest.fixture
+async def agencies_client(apply_schema):
+    from api.main import app
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    app.state.pool = pool
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # clean up agencies between tests
+        yield client
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "TRUNCATE agencies, updates, static_stops, static_stop_times, "
+                "static_trips, static_routes, static_calendar_dates, "
+                "agg_route_stats, agg_route_hour, agg_route_dow, "
+                "agg_daily_trend, agg_stop_seq, rag_chunks CASCADE"
+            )
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_list_agencies_empty(agencies_client):
+    resp = await agencies_client.get("/agencies")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_create_agency(agencies_client):
+    payload = {"agency_name": "Aomori Bus", "feed_url": "http://aomori.example.com"}
+    resp = await agencies_client.post("/agencies", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "agency_id" in data
+    assert data["agency_name"] == "Aomori Bus"
+    assert data["static_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_agency(agencies_client):
+    payload = {"agency_name": "Test Agency", "feed_url": "http://test2.example.com"}
+    create_resp = await agencies_client.post("/agencies", json=payload)
+    aid = create_resp.json()["agency_id"]
+    resp = await agencies_client.get(f"/agencies/{aid}")
+    assert resp.status_code == 200
+    assert resp.json()["agency_id"] == aid
+
+
+@pytest.mark.asyncio
+async def test_get_agency_not_found(agencies_client):
+    resp = await agencies_client.get("/agencies/99999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_agencies_returns_multiple(agencies_client):
+    await agencies_client.post("/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"})
+    await agencies_client.post("/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"})
+    resp = await agencies_client.get("/agencies")
+    assert resp.status_code == 200
+    assert len(resp.json()) >= 2
