@@ -4,8 +4,11 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from api.middleware.auth import APIKeyMiddleware
+from api.middleware.ratelimit import limiter
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.map import router as map_router
@@ -24,6 +27,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
