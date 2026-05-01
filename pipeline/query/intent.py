@@ -248,16 +248,19 @@ async def classify_intent(question: str, model: str = "llama-3.2-11b-text-previe
     client = _get_groq_client()
 
     def _sync():
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": INTENT_SYSTEM_PROMPT},
-                {"role": "user", "content": question},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        return json.loads(response.choices[0].message.content or "")
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": INTENT_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            return json.loads(response.choices[0].message.content or "{}")
+        except Exception:
+            return {}
 
     raw = await asyncio.to_thread(_sync)
     return validate_intent(raw)

@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
 ALTER TABLE agencies ADD COLUMN IF NOT EXISTS trip_id_pattern TEXT;
 
 CREATE TABLE IF NOT EXISTS api_keys (
-    key         TEXT PRIMARY KEY,
+    key         TEXT PRIMARY KEY,  -- stored in plaintext; hash at rest in a future iteration
     owner_email TEXT NOT NULL,
     tier        TEXT NOT NULL DEFAULT 'pro',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()

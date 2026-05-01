@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "transit-delay-app"
 version = "0.1.0"
-description = "Transit delay analysis pipeline and API for Aomori City Bus"
+description = "Transit delay analysis platform for Japanese GTFS-JP agencies"
 authors = []
 packages = [
     {include = "pipeline"},

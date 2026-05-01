@@ -21,6 +21,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not os.environ.get("GROQ_API_KEY"):
+        raise RuntimeError("GROQ_API_KEY env var is required")
     app.state.pool = await asyncpg.create_pool(DATABASE_URL)
     yield
     await app.state.pool.close()
