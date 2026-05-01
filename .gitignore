@@ -8,3 +8,4 @@ chroma_db/
 gtfs.db
 .env
 .claude/
+docs/superpowers/
