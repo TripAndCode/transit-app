@@ -3,6 +3,7 @@ import io
 import zipfile
 import pathlib
 import psycopg2.extras
+from psycopg2.extras import execute_values
 
 _STATIC_FILE_MAP = [
     ("stops.txt",          "static_stops",
@@ -73,8 +74,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 col_list = ", ".join(db_cols)
                 placeholders = ", ".join(["%s"] * len(db_cols))
                 pg_rows = [[agency_id] + row for row in raw_rows]
-                # Use execute_values with RETURNING to detect silently skipped duplicates
-                from psycopg2.extras import execute_values
+                # RETURNING lets us count how many rows actually landed vs were deduped
                 inserted = execute_values(
                     cur,
                     f"INSERT INTO {table} ({col_list}) VALUES %s "

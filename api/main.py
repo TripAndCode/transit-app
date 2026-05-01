@@ -5,6 +5,13 @@ import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routers.agencies import router as agencies_router
+from api.routers.ask import router as ask_router
+from api.routers.map import router as map_router
+from api.routers.query import router as query_router
+from api.routers.static import router as static_router
+from api.routers.ws import router as ws_router
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
@@ -23,12 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from api.routers.agencies import router as agencies_router
-from api.routers.ask import router as ask_router
-from api.routers.query import router as query_router
-from api.routers.ws import router as ws_router
-from api.routers.map import router as map_router
-from api.routers.static import router as static_router
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(query_router)
