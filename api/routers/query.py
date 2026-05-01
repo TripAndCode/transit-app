@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_conn, get_agency
+from api.middleware.ratelimit import limiter, FREE_LIMIT, PRO_LIMIT
 from pipeline.query.executor import execute
 from pipeline.query.formatter import format_result
 
@@ -35,7 +36,9 @@ class QueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=QueryResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def query(
+    request: Request,
     body: QueryRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
