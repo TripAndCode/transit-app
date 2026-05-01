@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: install test fmt lint check serve schema ingest load_static analyze
+.PHONY: install test fmt lint check serve db db-down schema ingest load_static analyze
 
 install:
 	poetry install
@@ -30,6 +30,14 @@ serve:
 	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT)
 
 # ── Database ─────────────────────────────────────────────────────────────────
+
+db:
+	docker compose up -d --build
+	docker compose exec db sh -c 'until pg_isready -U transit -d transit; do sleep 1; done'
+	docker exec -i transit-pg psql -U transit -d transit < db/schema.sql
+
+db-down:
+	docker compose down
 
 schema:
 	docker exec -i transit-pg psql -U transit -d transit < db/schema.sql
