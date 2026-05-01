@@ -344,15 +344,18 @@ async def format_unknown(
     client = _get_groq_client()
 
     def _sync():
-        stream = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            stream=True,
-        )
-        return "".join(chunk.choices[0].delta.content or "" for chunk in stream)
+        try:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+            )
+            return "".join(chunk.choices[0].delta.content or "" for chunk in stream)
+        except Exception:
+            return "申し訳ありません、エラーが発生しました。"
 
     raw = await asyncio.to_thread(_sync)
     return _fix(raw)

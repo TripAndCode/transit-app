@@ -36,7 +36,7 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
         with patch("pipeline.ingest.parse_pb", return_value=[]) as mock_parse:
             ingest_live(1, mock_conn)
 
-    mock_urlopen.assert_called_once_with("https://example.com/feed.pb")
+    mock_urlopen.assert_called_once_with("https://example.com/feed.pb", timeout=30)
     mock_parse.assert_called_once()
     args, kwargs = mock_parse.call_args
     assert args[0] == fake_bytes

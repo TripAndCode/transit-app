@@ -3,7 +3,7 @@ import struct
 import tarfile
 import pathlib
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 import psycopg2.extras
 
 
@@ -98,14 +98,13 @@ def parse_pb(raw: bytes, captured_at: str, file_name: str, pattern: re.Pattern =
         if not trip_id:
             continue
         parsed = parse_trip_id(trip_id, pattern=pattern)
-        if parsed:
-            service = parsed.get("service")
-            hour = parsed.get("hour", "")
-            minute = parsed.get("minute", "")
-            sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
-            route = parsed.get("route")
-        else:
-            service = sched = route = None
+        if parsed is None:
+            continue
+        service = parsed.get("service")
+        hour = parsed.get("hour", "")
+        minute = parsed.get("minute", "")
+        sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
+        route = parsed.get("route")
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
             stop_seq = stu.get(1, [None])[0]
@@ -257,16 +256,17 @@ def ingest_live(agency_id: int, conn) -> int:
         pattern = _TRIP_RE_DEFAULT
 
     print(f"Fetching live feed from {feed_url}")
-    with urllib.request.urlopen(feed_url) as resp:
+    with urllib.request.urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 
-    captured_at = datetime.now().isoformat()
-    file_name = "live"
+    captured_at = datetime.now(timezone.utc).isoformat()
+    file_name = f"live_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
     rows = parse_pb(raw, captured_at, file_name, pattern=pattern)
     pg_rows = [
         (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
         for r in rows
+        if r[3] is not None  # skip unmatched trips
     ]
 
     with conn.cursor() as cur:
