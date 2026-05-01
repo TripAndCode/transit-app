@@ -7,7 +7,7 @@ EXPECTED_TABLES = [
     "static_routes", "static_calendar_dates",
     "agg_route_stats", "agg_route_hour", "agg_route_dow",
     "agg_daily_trend", "agg_stop_seq",
-    "rag_chunks",
+    "rag_chunks", "api_keys",
 ]
 
 
@@ -49,3 +49,23 @@ def test_agencies_insert(pg_conn):
         aid = cur.fetchone()[0]
     pg_conn.commit()
     assert isinstance(aid, int)
+
+
+def test_agencies_has_trip_id_pattern(pg_conn):
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'agencies' AND column_name = 'trip_id_pattern'
+        """)
+        assert cur.fetchone() is not None, "agencies.trip_id_pattern column missing"
+
+
+def test_api_keys_columns(pg_conn):
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'api_keys'
+            ORDER BY column_name
+        """)
+        cols = {r[0] for r in cur.fetchall()}
+    assert {"key", "owner_email", "tier", "created_at"} <= cols

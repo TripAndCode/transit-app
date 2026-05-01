@@ -145,3 +145,13 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
     embedded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (agency_id, chunk_id)
 );
+
+-- v2 migrations (idempotent)
+ALTER TABLE agencies ADD COLUMN IF NOT EXISTS trip_id_pattern TEXT;
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key         TEXT PRIMARY KEY,
+    owner_email TEXT NOT NULL,
+    tier        TEXT NOT NULL DEFAULT 'pro',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
