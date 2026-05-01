@@ -5,6 +5,7 @@ import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.middleware.auth import APIKeyMiddleware
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.map import router as map_router
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+app.add_middleware(APIKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
