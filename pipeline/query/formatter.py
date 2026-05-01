@@ -1,8 +1,25 @@
 import asyncio
 import logging
+import os
 import re
 
 _log = logging.getLogger(__name__)
+
+_groq_client = None
+
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    return _groq_client
+
+
+def _reset_groq_client():
+    """Reset the client singleton — used in tests via monkeypatch."""
+    global _groq_client
+    _groq_client = None
 
 _SYSTEM = """\
 You are a Japanese bus delay analyst. Reply ONLY in Japanese (日本語).
@@ -277,7 +294,7 @@ def format_result(query_type: str, rows, intent: dict) -> str:
     return fmt(rows, intent)
 
 
-async def format_guidance_menu(conn, agency_id: int, model: str = "llama3.2") -> str:
+async def format_guidance_menu(conn, agency_id: int) -> str:
     try:
         rows = await conn.fetch(
             "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
@@ -319,30 +336,23 @@ async def format_guidance_menu(conn, agency_id: int, model: str = "llama3.2") ->
 
 
 async def format_unknown(
-    question: str, conn, agency_id: int, model: str = "llama3.2"
+    question: str, conn=None, agency_id: int = 0, model: str = "llama-3.2-11b-text-preview"
 ) -> str:
-    import ollama
+    context = await format_guidance_menu(conn, agency_id) if conn is not None else ""
+    prompt = _PROMPT.format(context=context, question=question) if context else question
 
-    context = await format_guidance_menu(conn, agency_id, model)
-    prompt = _PROMPT.format(context=context, question=question)
+    client = _get_groq_client()
 
-    def _sync_call():
-        try:
-            result = []
-            for chunk in ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                stream=True,
-                options={"temperature": 0},
-            ):
-                result.append(chunk.message.content or "")
-            return "".join(result)
-        except Exception as exc:
-            _log.warning("format_unknown Ollama error: %s", exc)
-            return "申し訳ありませんが、回答の生成中にエラーが発生しました。"
+    def _sync():
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            stream=True,
+        )
+        return "".join(chunk.choices[0].delta.content or "" for chunk in stream)
 
-    raw = await asyncio.to_thread(_sync_call)
+    raw = await asyncio.to_thread(_sync)
     return _fix(raw)
