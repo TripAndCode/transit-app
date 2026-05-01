@@ -7,15 +7,17 @@ from pipeline.ingest import ingest, parse_trip_id
 
 
 def test_parse_trip_id_weekday():
-    service, time, route = parse_trip_id("平日_11時37分_系統44372")
-    assert service == "平日"
-    assert time == "11:37"
-    assert route == "44372"
+    result = parse_trip_id("平日_11時37分_系統44372")
+    assert result is not None
+    assert result["service"] == "平日"
+    assert result["hour"] == "11"
+    assert result["minute"] == "37"
+    assert result["route"] == "44372"
 
 
 def test_parse_trip_id_invalid():
-    service, time, route = parse_trip_id("invalid")
-    assert service is None
+    result = parse_trip_id("invalid")
+    assert result is None
 
 
 def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):

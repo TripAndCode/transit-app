@@ -51,20 +51,16 @@ def _dec(b):
 
 # ── trip_id parser ─────────────────────────────────────────────────────────────
 
-_TRIP_RE = re.compile(
+_TRIP_RE_DEFAULT = re.compile(
     r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$"
 )
 
 
-def parse_trip_id(trip_id: str):
-    m = _TRIP_RE.match(trip_id)
+def parse_trip_id(trip_id: str, pattern: re.Pattern = _TRIP_RE_DEFAULT) -> dict | None:
+    m = pattern.match(trip_id)
     if m:
-        return (
-            m.group("service"),
-            f"{m.group('hour').zfill(2)}:{m.group('minute').zfill(2)}",
-            m.group("route"),
-        )
-    return (None, None, None)
+        return m.groupdict()
+    return None
 
 
 def _ts(date_str: str, pb_name: str) -> str:
@@ -82,7 +78,7 @@ def _ts(date_str: str, pb_name: str) -> str:
 
 # ── Protobuf row parser ────────────────────────────────────────────────────────
 
-def parse_pb(raw: bytes, captured_at: str, file_name: str) -> list:
+def parse_pb(raw: bytes, captured_at: str, file_name: str, pattern: re.Pattern = _TRIP_RE_DEFAULT) -> list:
     rows = []
     try:
         top = _fields(raw)
@@ -100,7 +96,15 @@ def parse_pb(raw: bytes, captured_at: str, file_name: str) -> list:
                 trip_id = _dec(trip[1][0])
         if not trip_id:
             continue
-        service, sched, route = parse_trip_id(trip_id)
+        parsed = parse_trip_id(trip_id, pattern=pattern)
+        if parsed:
+            service = parsed.get("service")
+            hour = parsed.get("hour", "")
+            minute = parsed.get("minute", "")
+            sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
+            route = parsed.get("route")
+        else:
+            service = sched = route = None
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
             stop_seq = stu.get(1, [None])[0]
@@ -148,6 +152,17 @@ def ingest(folder: str, agency_id: int, conn) -> int:
         )
         done = {r[0] for r in cur.fetchall()}
 
+    # load agency-specific trip_id pattern, fall back to Aomori default
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_id_pattern FROM agencies WHERE agency_id = %s", (agency_id,)
+        )
+        row = cur.fetchone()
+    if row and row[0]:
+        pattern = re.compile(row[0])
+    else:
+        pattern = _TRIP_RE_DEFAULT
+
     tarballs = sorted(folder.glob("*.tar.gz")) + sorted(folder.glob("*.tgz"))
     pb_loose = sorted(folder.rglob("*.pb"))
     print(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb")
@@ -172,7 +187,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                     for j, (member, pb_name, d) in enumerate(new):
                         ts = _ts(d, pb_name)
                         raw = tf.extractfile(member).read()
-                        rows = parse_pb(raw, ts, f"{d}/{pb_name}")
+                        rows = parse_pb(raw, ts, f"{d}/{pb_name}", pattern=pattern)
                         pg_rows = [
                             (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
                             for r in rows
@@ -198,7 +213,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = path.parent.name if re.fullmatch(r"\d{8}", path.parent.name) else ""
                 ts = _ts(d, path.name)
-                rows = parse_pb(path.read_bytes(), ts, f"{d}/{path.name}")
+                rows = parse_pb(path.read_bytes(), ts, f"{d}/{path.name}", pattern=pattern)
                 pg_rows = [
                     (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
                     for r in rows
