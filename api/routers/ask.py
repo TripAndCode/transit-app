@@ -30,5 +30,5 @@ async def ask(
         answer = await format_unknown(body.question, conn, agency_id, model=body.model)
     else:
         rows = await execute(intent, conn, agency_id)
-        answer = format_result(intent["query_type"], rows or [], intent)
+        answer = format_result(intent["query_type"], rows, intent)
     return AskResponse(answer=answer, intent=intent)

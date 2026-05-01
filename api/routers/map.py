@@ -36,7 +36,7 @@ async def delay_heatmap(
         SELECT
             ss.stop_id, ss.stop_name,
             ST_X(ss.geom) AS lon, ST_Y(ss.geom) AS lat,
-            ROUND(AVG(u.dep_delay) / 60.0, 2) AS avg_delay_min,
+            ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
             COUNT(*) AS samples
         FROM updates u
         JOIN static_stop_times sst

@@ -20,7 +20,8 @@ async def chat(websocket: WebSocket, agency_id: int):
                 )
                 if not row:
                     await websocket.send_json({"error": f"Agency {agency_id} not found"})
-                    continue
+                    await websocket.close(code=4004)
+                    return
                 intent = await classify_intent(question)
                 if intent.get("unknown"):
                     answer = await format_unknown(question, conn, agency_id)

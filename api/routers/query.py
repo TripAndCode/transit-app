@@ -41,6 +41,6 @@ async def query(
     conn=Depends(get_conn),
 ):
     intent = body.model_dump()
-    rows = await execute(intent, conn, agency_id) or []
+    rows = await execute(intent, conn, agency_id)
     answer = format_result(intent["query_type"], rows, intent)
-    return QueryResponse(answer=answer, rows=rows)
+    return QueryResponse(answer=answer, rows=rows or [])
