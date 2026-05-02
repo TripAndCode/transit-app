@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCreateAgency } from "../api/hooks";
 
 type Props = { onClose: () => void };
@@ -9,15 +9,27 @@ export function AgencyForm({ onClose }: Props) {
   const [staticUrl, setStaticUrl] = useState("");
   const create = useCreateAgency();
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name || !feed) return;
-    await create.mutateAsync({
-      agency_name: name,
-      feed_url: feed,
-      static_url: staticUrl || null,
-    });
-    onClose();
+    try {
+      await create.mutateAsync({
+        agency_name: name,
+        feed_url: feed,
+        static_url: staticUrl || null,
+      });
+      onClose();
+    } catch {
+      // error surfaced via create.error
+    }
   }
 
   return (
@@ -34,6 +46,9 @@ export function AgencyForm({ onClose }: Props) {
       }}
     >
       <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agency-form-title"
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
         style={{
@@ -44,9 +59,15 @@ export function AgencyForm({ onClose }: Props) {
           maxWidth: "90vw",
         }}
       >
-        <h3 style={{ marginTop: 0 }}>新規事業者登録</h3>
+        <h3 id="agency-form-title" style={{ marginTop: 0 }}>新規事業者登録</h3>
         <Field label="事業者名">
-          <input value={name} onChange={(e) => setName(e.target.value)} required style={{ width: "100%" }} />
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            style={{ width: "100%" }}
+          />
         </Field>
         <Field label="GTFS-RT Feed URL">
           <input value={feed} onChange={(e) => setFeed(e.target.value)} required style={{ width: "100%" }} />
