@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: install test fmt lint check serve db db-down schema ingest load_static analyze
+.PHONY: install test fmt lint check serve db db-down schema fetch fetch-ingest ingest load_static analyze
 
 install:
 	poetry install
@@ -41,6 +41,15 @@ db-down:
 
 schema:
 	docker exec -i transit-pg psql -U transit -d transit < db/schema.sql
+
+# ── Data fetch (pull from Oracle Cloud collection server) ────────────────────
+# Requires: ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY or ORACLE_SSH_KEY_PATH
+
+fetch:
+	bash scripts/fetch_archives.sh
+
+fetch-ingest:
+	bash scripts/fetch_and_ingest.sh
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
