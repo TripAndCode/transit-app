@@ -10,11 +10,6 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
 [[crons]]
-name = "ingest"
-schedule = "*/15 * * * *"
-command = "python gtfs_pipeline.py ingest_live"
-
-[[crons]]
-name = "analyze"
+name = "fetch-and-ingest"
 schedule = "0 * * * *"
-command = "python gtfs_pipeline.py analyze"
+command = "bash scripts/fetch_and_ingest.sh"
