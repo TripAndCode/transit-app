@@ -10,5 +10,7 @@ raw_archives/
 raw_archives_static/
 .env
 .claude/
-docs/
+docs/*
+!docs/superpowers/
 .worktrees/
+.superpowers/
