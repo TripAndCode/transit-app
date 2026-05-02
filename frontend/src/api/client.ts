@@ -1,4 +1,4 @@
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? "") as string;
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export class ApiError extends Error {
   status: number;
@@ -23,7 +23,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const apiKey = typeof window !== "undefined" ? localStorage.getItem("api_key") : null;
+  const apiKey = localStorage.getItem("api_key");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
@@ -33,5 +33,9 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     const text = await r.text().catch(() => "");
     throw new ApiError(r.status, text);
   }
-  return (await r.json()) as T;
+  try {
+    return (await r.json()) as T;
+  } catch {
+    throw new ApiError(r.status, "Response was not valid JSON");
+  }
 }
