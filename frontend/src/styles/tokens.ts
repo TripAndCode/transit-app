@@ -17,10 +17,12 @@ export const DELAY_RAMP = {
   severe: "#a85d52",   // > 10 min  brick
 } as const;
 
+// Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
+// GTFS-RT dep_delay is signed: negative = early, positive = late.
 export function delayColor(minutes: number): string {
-  const m = Math.abs(minutes);
-  if (m < 2) return DELAY_RAMP.ok;
-  if (m < 5) return DELAY_RAMP.mild;
-  if (m < 10) return DELAY_RAMP.moderate;
+  if (minutes <= 0) return DELAY_RAMP.ok;
+  if (minutes < 2) return DELAY_RAMP.ok;
+  if (minutes < 5) return DELAY_RAMP.mild;
+  if (minutes < 10) return DELAY_RAMP.moderate;
   return DELAY_RAMP.severe;
 }
