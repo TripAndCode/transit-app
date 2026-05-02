@@ -25,21 +25,15 @@ export type LiveDelay = {
   captured_at: string;        // ISO timestamp
 };
 
-export type HeatmapFeature = {
-  type: "Feature";
-  geometry: { type: "Point"; coordinates: [number, number] };
-  properties: {
-    stop_id: string;
-    stop_name: string;
-    avg_delay_min: number;
-    samples: number;
-  };
+export type HeatmapProps = {
+  stop_id: string;
+  stop_name: string;
+  avg_delay_min: number;
+  samples: number;
 };
 
-export type HeatmapCollection = {
-  type: "FeatureCollection";
-  features: HeatmapFeature[];
-};
+export type HeatmapFeature = GeoJSON.Feature<GeoJSON.Point, HeatmapProps>;
+export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps>;
 
 export type ReportMeta = {
   report_type: string;
