@@ -35,6 +35,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
       <span style={{ flex: 1 }}>{messageFor(error)}</span>
       {onRetry && (
         <button
+          type="button"
           onClick={onRetry}
           style={{
             background: "transparent",
