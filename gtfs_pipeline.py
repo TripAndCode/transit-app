@@ -87,6 +87,16 @@ def cmd_ingest_live(args):
     conn.close()
 
 
+def cmd_migrate(args):
+    from db.migrate import migrate_down, migrate_up
+    conn = _get_conn()
+    if args.direction == "up":
+        migrate_up(conn)
+    else:
+        migrate_down(args.target, conn)
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
@@ -110,6 +120,16 @@ def main():
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
+    p_migrate = sub.add_parser("migrate", help="Apply or roll back schema migrations")
+    p_migrate.add_argument(
+        "direction", choices=["up", "down"], nargs="?", default="up"
+    )
+    p_migrate.add_argument(
+        "--target",
+        default=None,
+        help="Roll back to (not including) this version, e.g. --target 0002",
+    )
+
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
@@ -121,6 +141,8 @@ def main():
         cmd_analyze(args)
     elif args.command == "ingest_live":
         cmd_ingest_live(args)
+    elif args.command == "migrate":
+        cmd_migrate(args)
     else:
         parser.print_help()
 
