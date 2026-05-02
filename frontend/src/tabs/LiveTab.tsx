@@ -110,16 +110,30 @@ const td: React.CSSProperties = { padding: "10px 14px", fontSize: 14 };
 function Th({ label, k, sort, onClick }: { label: string; k: SortKey; sort: { key: SortKey; dir: "asc" | "desc" }; onClick: (k: SortKey) => void }) {
   const active = sort.key === k;
   return (
-    <th
-      onClick={() => onClick(k)}
-      style={{ ...td, fontWeight: 500, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}
-    >
-      {label} {active && (sort.dir === "asc" ? "▲" : "▼")}
+    <th scope="col" style={{ ...td, fontWeight: 500, color: "var(--text-secondary)", padding: 0 }}>
+      <button
+        type="button"
+        onClick={() => onClick(k)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          padding: "10px 14px",
+          font: "inherit",
+          color: "inherit",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+      >
+        {label} {active && (sort.dir === "asc" ? "▲" : "▼")}
+      </button>
     </th>
   );
 }
 
 function formatDelay(seconds: number): string {
+  if (seconds === 0) return "定刻";
   const sign = seconds < 0 ? "-" : "+";
   const abs = Math.abs(seconds);
   const m = Math.floor(abs / 60);
@@ -134,6 +148,7 @@ function formatTime(ts: number): string {
 
 function relativeTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!isFinite(diff) || diff < 0) return "—";
   if (diff < 60) return `${Math.floor(diff)}秒前`;
   if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
   return `${Math.floor(diff / 3600)}時間前`;
