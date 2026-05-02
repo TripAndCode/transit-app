@@ -12,6 +12,7 @@ def _get_groq_client():
     global _groq_client
     if _groq_client is None:
         from groq import Groq
+
         _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
     return _groq_client
 
@@ -20,6 +21,7 @@ def _reset_groq_client():
     """Reset the client singleton — used in tests via monkeypatch."""
     global _groq_client
     _groq_client = None
+
 
 _SYSTEM = """\
 You are a Japanese bus delay analyst. Reply ONLY in Japanese (日本語).
@@ -91,8 +93,7 @@ def _fmt_ranking(rows: list, intent: dict) -> str:
 def _fmt_by_hour(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
     lines = [
-        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）"
-        for r in rows
+        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）" for r in rows
     ]
     return f"【{scope} 発車時刻別遅延】\n" + "\n".join(lines)
 
@@ -150,8 +151,7 @@ def _fmt_on_time(rows: list, intent: dict) -> str:
         ]
         return f"【{scope} 定時率】\n" + "\n".join(lines)
     lines = [
-        f"{i}位: 系統{r[0]}（{r[1]}）定時率{_r(r[2], 1)}%、平均{_r(r[3])}分（{r[4]}件）"
-        for i, r in enumerate(rows, 1)
+        f"{i}位: 系統{r[0]}（{r[1]}）定時率{_r(r[2], 1)}%、平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)
     ]
     return f"【{label}定時率ランキング】\n" + "\n".join(lines)
 
@@ -176,10 +176,7 @@ def _fmt_compare(rows: list, intent: dict) -> str:
 
 def _fmt_worst_5min(rows: list, intent: dict) -> str:
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [
-        f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[3]}回、平均{_r(r[2])}分（{r[4]}件）"
-        for i, r in enumerate(rows, 1)
-    ]
+    lines = [f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[3]}回、平均{_r(r[2])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
     return f"【{label}5分超遅延ランキング】\n" + "\n".join(lines)
 
 
@@ -213,27 +210,24 @@ def _fmt_compare_ranking(rows: list, intent: dict) -> str:
     for i, r in enumerate(rows, 1):
         signed = float(r[4]) if len(r) >= 5 else (float(r[2] or 0) - float(r[1] or 0))
         direction = "土日祝>平日" if signed > 0 else ("平日>土日祝" if signed < 0 else "同程度")
-        lines.append(
-            f"{i}位: 系統{r[0]} 平日{_r(r[1])}分 / 土日祝{_r(r[2])}分（差: {_r(r[3])}分, {direction}）"
-        )
+        lines.append(f"{i}位: 系統{r[0]} 平日{_r(r[1])}分 / 土日祝{_r(r[2])}分（差: {_r(r[3])}分, {direction}）")
     return "【平日・土日祝 遅延差ランキング】\n" + "\n".join(lines)
 
 
 def _fmt_stop_list(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
-    lines = [
-        f"{r[0]}番: {r[1]}（{r[2]}発）" if r[2] else f"{r[0]}番: {r[1]}"
-        for r in rows
-    ]
+    lines = [f"{r[0]}番: {r[1]}（{r[2]}発）" if r[2] else f"{r[0]}番: {r[1]}" for r in rows]
     return f"【{scope} 停車駅一覧（{len(rows)}駅）】\n" + "\n".join(lines)
 
 
 def _fmt_routes_at_stop(rows: list, intent: dict) -> str:
     stop_name = intent.get("stop_name", "")
     actual_stop = rows[0][2] if rows else stop_name
+
     def _code(route_id: str) -> str:
         m = re.search(r"\((\d+)\)", route_id)
         return m.group(1) if m else route_id
+
     lines = [f"系統{_code(r[0])} {r[1]}" for r in rows]
     return f"【「{actual_stop}」を経由する系統（{len(rows)}系統）】\n" + "\n".join(lines)
 
@@ -275,22 +269,22 @@ _NO_STATIC_MSG = (
 )
 
 FORMATTERS = {
-    "ranking":          _fmt_ranking,
-    "by_hour":          _fmt_by_hour,
-    "by_dow":           _fmt_by_dow,
-    "by_stop":          _fmt_by_stop,
-    "by_date":          _fmt_by_date,
-    "trend":            _fmt_trend,
-    "on_time":          _fmt_on_time,
-    "compare":          _fmt_compare,
-    "worst_5min":       _fmt_worst_5min,
-    "stop_ranking":     _fmt_stop_ranking,
-    "dow_ranking":      _fmt_dow_ranking,
-    "compare_ranking":  _fmt_compare_ranking,
-    "stop_list":        _fmt_stop_list,
-    "routes_at_stop":   _fmt_routes_at_stop,
-    "route_info":       _fmt_route_info,
-    "timetable":        _fmt_timetable,
+    "ranking": _fmt_ranking,
+    "by_hour": _fmt_by_hour,
+    "by_dow": _fmt_by_dow,
+    "by_stop": _fmt_by_stop,
+    "by_date": _fmt_by_date,
+    "trend": _fmt_trend,
+    "on_time": _fmt_on_time,
+    "compare": _fmt_compare,
+    "worst_5min": _fmt_worst_5min,
+    "stop_ranking": _fmt_stop_ranking,
+    "dow_ranking": _fmt_dow_ranking,
+    "compare_ranking": _fmt_compare_ranking,
+    "stop_list": _fmt_stop_list,
+    "routes_at_stop": _fmt_routes_at_stop,
+    "route_info": _fmt_route_info,
+    "timetable": _fmt_timetable,
 }
 
 
@@ -317,7 +311,7 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
         )
         if snap:
             lines = snap["text"].split("\n")
-            data_lines = [l for l in lines[1:] if l.strip()][:10]
+            data_lines = [line for line in lines[1:] if line.strip()][:10]
             if data_lines:
                 ranking = "\n".join(data_lines)
         else:
@@ -329,8 +323,7 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
             rows = [tuple(r) for r in rows]
             if rows:
                 ranking = "\n".join(
-                    f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、"
-                    f"p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
+                    f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
                     for i, r in enumerate(rows, 1)
                 )
     except Exception as exc:
@@ -357,9 +350,7 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
     )
 
 
-async def format_unknown(
-    question: str, conn=None, agency_id: int = 0, model: str = "llama-3.3-70b-versatile"
-) -> str:
+async def format_unknown(question: str, conn=None, agency_id: int = 0, model: str = "llama-3.3-70b-versatile") -> str:
     context = await format_guidance_menu(conn, agency_id) if conn is not None else ""
 
     if conn is not None:
@@ -367,7 +358,8 @@ async def format_unknown(
             try:
                 row = await conn.fetchrow(
                     "SELECT text FROM snapshots WHERE agency_id=$1 AND report_type=$2",
-                    agency_id, rtype,
+                    agency_id,
+                    rtype,
                 )
                 if row and row["text"]:
                     context += "\n\n" + row["text"]

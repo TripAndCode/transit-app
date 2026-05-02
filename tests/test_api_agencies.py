@@ -1,8 +1,9 @@
-import pytest
-import httpx
-from httpx import ASGITransport
-import asyncpg
 import os
+
+import asyncpg
+import httpx
+import pytest
+from httpx import ASGITransport
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -10,11 +11,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 @pytest.fixture
 async def app_client(apply_schema):
     from api.main import app
+
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
-    async with httpx.AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await pool.close()
 
@@ -29,11 +29,10 @@ async def test_health_endpoint(app_client):
 @pytest.fixture
 async def agencies_client(apply_schema):
     from api.main import app
+
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
-    async with httpx.AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # clean up agencies between tests
         yield client
         async with pool.acquire() as conn:

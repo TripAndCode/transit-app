@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import re
 
@@ -15,16 +16,12 @@ _DEDUP_INNER = """\
 
 
 async def _agg_loaded(conn, agency_id: int) -> bool:
-    row = await conn.fetchrow(
-        "SELECT 1 FROM agg_route_stats WHERE agency_id=$1 LIMIT 1", agency_id
-    )
+    row = await conn.fetchrow("SELECT 1 FROM agg_route_stats WHERE agency_id=$1 LIMIT 1", agency_id)
     return row is not None
 
 
 async def _static_loaded(conn, agency_id: int) -> bool:
-    row = await conn.fetchrow(
-        "SELECT 1 FROM static_stops WHERE agency_id=$1 LIMIT 1", agency_id
-    )
+    row = await conn.fetchrow("SELECT 1 FROM static_stops WHERE agency_id=$1 LIMIT 1", agency_id)
     return row is not None
 
 
@@ -38,7 +35,9 @@ async def _route_codes_from_name(route_name: str, conn, agency_id: int) -> list[
             "WHERE u.agency_id=$1 AND sr.agency_id=$1 "
             "AND (sr.route_short_name=$2 OR sr.route_short_name LIKE $3 OR sr.route_id LIKE $3) "
             "ORDER BY u.route_code",
-            agency_id, route_name, f"%{route_name}%",
+            agency_id,
+            route_name,
+            f"%{route_name}%",
         )
         codes = [r["route_code"] for r in rows]
     except Exception as exc:
@@ -73,23 +72,21 @@ def _route_in_clause(route_codes: list, n: int) -> tuple[str, list, int]:
     return f"route_code IN ({phs})", list(route_codes), n + len(route_codes)
 
 
-def _time_band_clause(
-    time_band: str | None, n: int, col: str = "scheduled_time"
-) -> tuple[str, list, int]:
+def _time_band_clause(time_band: str | None, n: int, col: str = "scheduled_time") -> tuple[str, list, int]:
     """Return (sql_fragment, values, next_n)."""
     if not time_band:
         return "", [], n
     if time_band == "morning":
-        return f"{col} >= ${n} AND {col} < ${n+1}", ["05:00", "10:00"], n + 2
+        return f"{col} >= ${n} AND {col} < ${n + 1}", ["05:00", "10:00"], n + 2
     if time_band == "day":
-        return f"{col} >= ${n} AND {col} < ${n+1}", ["10:00", "16:00"], n + 2
+        return f"{col} >= ${n} AND {col} < ${n + 1}", ["10:00", "16:00"], n + 2
     if time_band == "evening":
-        return f"{col} >= ${n} AND {col} < ${n+1}", ["16:00", "20:00"], n + 2
+        return f"{col} >= ${n} AND {col} < ${n + 1}", ["16:00", "20:00"], n + 2
     if time_band == "night":
-        return f"({col} >= ${n} OR {col} < ${n+1})", ["20:00", "05:00"], n + 2
+        return f"({col} >= ${n} OR {col} < ${n + 1})", ["20:00", "05:00"], n + 2
     if time_band == "rush":
         return (
-            f"(({col} >= ${n} AND {col} < ${n+1}) OR ({col} >= ${n+2} AND {col} < ${n+3}))",
+            f"(({col} >= ${n} AND {col} < ${n + 1}) OR ({col} >= ${n + 2} AND {col} < ${n + 3}))",
             ["07:00", "10:00", "17:00", "20:00"],
             n + 4,
         )
@@ -108,6 +105,7 @@ def _dow_group_values(dow_group: str | None) -> list[str]:
 # _exec_ranking
 # ---------------------------------------------------------------------------
 
+
 async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
     service = intent.get("service")
     limit = intent.get("limit", 15)
@@ -119,7 +117,9 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
                 "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
                 f"FROM agg_route_stats WHERE agency_id=$1 AND service_type=$2 "
                 f"ORDER BY avg_min {order} LIMIT $3",
-                agency_id, service, limit,
+                agency_id,
+                service,
+                limit,
             )
         else:
             rows = await conn.fetch(
@@ -130,7 +130,8 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
                 "SUM(samples) AS samples "
                 f"FROM agg_route_stats WHERE agency_id=$1 "
                 f"GROUP BY route_code ORDER BY SUM(avg_min * samples) / NULLIF(SUM(samples), 0) {order} LIMIT $2",
-                agency_id, limit,
+                agency_id,
+                limit,
             )
         return [tuple(r) for r in rows]
 
@@ -150,7 +151,9 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
             "FROM ranked WHERE service_type=$2\n"
             "GROUP BY route_code, service_type HAVING COUNT(*) > 20\n"
             f"ORDER BY avg_min {order} LIMIT $3",
-            agency_id, service, limit,
+            agency_id,
+            service,
+            limit,
         )
     else:
         rows = await conn.fetch(
@@ -168,7 +171,8 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
             "    SUM(samples) AS samples\n"
             "FROM per_svc\n"
             f"GROUP BY route_code ORDER BY SUM(avg_min * samples) / NULLIF(SUM(samples), 0) {order} LIMIT $2",
-            agency_id, limit,
+            agency_id,
+            limit,
         )
     return [tuple(r) for r in rows]
 
@@ -176,6 +180,7 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_by_hour
 # ---------------------------------------------------------------------------
+
 
 async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -188,7 +193,7 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
 
     route_cond, route_vals, n = _route_in_clause(route_codes, 2)  # $2...$N
 
-    conds = [f"agency_id=$1", route_cond]
+    conds = ["agency_id=$1", route_cond]
     params: list = [agency_id] + route_vals
 
     if service:
@@ -230,7 +235,7 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
     rows = await conn.fetch(
         f"WITH deduped AS ({_DEDUP_INNER}),\n"
         "ranked AS (\n"
-        "    SELECT *, PERCENT_RANK() OVER (PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay) AS pct\n"
+        "    SELECT *, PERCENT_RANK() OVER (PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay) AS pct\n"  # noqa: E501
         "    FROM deduped\n"
         ")\n"
         "SELECT route_code, service_type, scheduled_time,\n"
@@ -240,7 +245,8 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
         "    COUNT(*) AS samples\n"
         f"FROM ranked WHERE {outer_where}\n"
         f"GROUP BY route_code, service_type, scheduled_time ORDER BY avg_min {order}",
-        agency_id, *outer_params_vals,
+        agency_id,
+        *outer_params_vals,
     )
     return [tuple(r) for r in rows]
 
@@ -270,7 +276,7 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
     route_cond, route_vals, n = _route_in_clause(route_codes, 2)
 
     if await _agg_loaded(conn, agency_id):
-        conds = [f"agency_id=$1", route_cond]
+        conds = ["agency_id=$1", route_cond]
         params: list = [agency_id] + route_vals
         n_agg = 2 + len(route_vals)
 
@@ -303,7 +309,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
                 "SUM(samples) AS samples "
                 f"FROM agg_route_dow WHERE {where_sql} "
                 f"GROUP BY route_code, service_type ORDER BY avg_min {order}",
-                *params, *group_dows,
+                *params,
+                *group_dows,
             )
             return [tuple(r) for r in rows]
 
@@ -339,7 +346,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             f"FROM deduped WHERE {where_sql} "
             f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
-            agency_id, *outer_vals,
+            agency_id,
+            *outer_vals,
         )
         return [tuple(r) for r in rows]
 
@@ -354,7 +362,9 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             f"FROM deduped WHERE {where_sql} "
             f"GROUP BY route_code, service_type ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
-            agency_id, *outer_vals, *dow_nums,
+            agency_id,
+            *outer_vals,
+            *dow_nums,
         )
         return [tuple(r) for r in rows]
 
@@ -365,7 +375,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
         "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {where_sql} "
         f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
-        agency_id, *outer_vals,
+        agency_id,
+        *outer_vals,
     )
     return [tuple(r) for r in rows]
 
@@ -373,6 +384,7 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_by_stop
 # ---------------------------------------------------------------------------
+
 
 async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -386,7 +398,7 @@ async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
     route_cond, route_vals, n = _route_in_clause(route_codes, 2)
 
     if await _agg_loaded(conn, agency_id):
-        conds = [f"agency_id=$1", route_cond]
+        conds = ["agency_id=$1", route_cond]
         params: list = [agency_id] + route_vals
         cur_n = 2 + len(route_vals)
 
@@ -437,11 +449,12 @@ async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
             "COALESCE(MAX(ss.stop_name), CAST(d.stop_sequence AS TEXT) || '番停留所'), "
             "ROUND(AVG(d.dep_delay)/60.0::numeric, 2), COUNT(*) "
             "FROM deduped d "
-            "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "
+            "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "  # noqa: E501
             "LEFT JOIN static_stops ss ON sst.stop_id=ss.stop_id AND ss.agency_id=$1 "
             f"WHERE {where_sql} "
-            f"GROUP BY d.stop_sequence HAVING COUNT(*) > 3 ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) {order} LIMIT {limit_ph}",
-            agency_id, *outer_vals,
+            f"GROUP BY d.stop_sequence HAVING COUNT(*) > 3 ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) {order} LIMIT {limit_ph}",  # noqa: E501
+            agency_id,
+            *outer_vals,
         )
         return [tuple(r) for r in rows]
 
@@ -452,8 +465,10 @@ async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
         "SELECT stop_sequence, CAST(stop_sequence AS TEXT) || '番停留所', "
         "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {route_cond} AND stop_sequence IS NOT NULL "
-        f"GROUP BY stop_sequence HAVING COUNT(*) > 3 ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT {limit_ph}",
-        agency_id, *route_vals, limit,
+        f"GROUP BY stop_sequence HAVING COUNT(*) > 3 ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT {limit_ph}",  # noqa: E501
+        agency_id,
+        *route_vals,
+        limit,
     )
     return [tuple(r) for r in rows]
 
@@ -461,6 +476,7 @@ async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_by_date
 # ---------------------------------------------------------------------------
+
 
 async def _exec_by_date(intent: dict, conn, agency_id: int) -> list:
     date_value = intent.get("date")
@@ -516,7 +532,8 @@ async def _exec_by_date(intent: dict, conn, agency_id: int) -> list:
         "SELECT route_code, service_type, ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {outer_where} "
         f"GROUP BY route_code, service_type ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {sort_order} LIMIT 20",
-        agency_id, *outer_vals,
+        agency_id,
+        *outer_vals,
     )
     return [tuple(r) for r in rows]
 
@@ -524,6 +541,7 @@ async def _exec_by_date(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_trend
 # ---------------------------------------------------------------------------
+
 
 async def _exec_trend(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -564,7 +582,7 @@ async def _exec_trend(intent: dict, conn, agency_id: int) -> list:
         "older AS (\n"
         "    SELECT route_code, service_type, AVG(avg_min) AS o_avg, COUNT(*) AS n\n"
         "    FROM agg_daily_trend, max_d\n"
-        f"    WHERE agency_id=$1 AND date BETWEEN max_d.d::date - '28 days'::interval AND max_d.d::date - '14 days'::interval{extra_cond}\n"
+        f"    WHERE agency_id=$1 AND date BETWEEN max_d.d::date - '28 days'::interval AND max_d.d::date - '14 days'::interval{extra_cond}\n"  # noqa: E501
         "    GROUP BY route_code, service_type HAVING COUNT(*) >= 3\n"
         "),\n"
         "joined AS (\n"
@@ -577,7 +595,8 @@ async def _exec_trend(intent: dict, conn, agency_id: int) -> list:
         ")\n"
         f"SELECT route_code, service_type, r_avg, o_avg, delta FROM joined\n"
         f"{direction_where} ORDER BY ABS(delta) {sort_order} LIMIT 10",
-        agency_id, *extra_params,
+        agency_id,
+        *extra_params,
     )
     return [tuple(r) for r in rows]
 
@@ -585,6 +604,7 @@ async def _exec_trend(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_on_time
 # ---------------------------------------------------------------------------
+
 
 async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -623,7 +643,8 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
             "ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*)::numeric, 1), "
             "ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*)::numeric, 1), COUNT(*) "
             f"FROM deduped WHERE {outer_cond} GROUP BY route_code, service_type",
-            agency_id, *outer_params,
+            agency_id,
+            *outer_params,
         )
         return [tuple(r) for r in rows]
 
@@ -632,14 +653,17 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
         if service:
             rows = await conn.fetch(
                 "SELECT route_code, service_type, on_time_pct, avg_min, samples "
-                f"FROM agg_route_stats WHERE agency_id=$1 AND service_type=$2 ORDER BY on_time_pct {sort_order} LIMIT $3",
-                agency_id, service, limit,
+                f"FROM agg_route_stats WHERE agency_id=$1 AND service_type=$2 ORDER BY on_time_pct {sort_order} LIMIT $3",  # noqa: E501
+                agency_id,
+                service,
+                limit,
             )
         else:
             rows = await conn.fetch(
                 "SELECT route_code, service_type, on_time_pct, avg_min, samples "
                 f"FROM agg_route_stats WHERE agency_id=$1 ORDER BY on_time_pct {sort_order} LIMIT $2",
-                agency_id, limit,
+                agency_id,
+                limit,
             )
         return [tuple(r) for r in rows]
 
@@ -652,7 +676,9 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             "FROM deduped WHERE service_type=$2 GROUP BY route_code, service_type HAVING COUNT(*) > 10 "
             f"ORDER BY on_time_pct {sort_order} LIMIT $3",
-            agency_id, service, limit,
+            agency_id,
+            service,
+            limit,
         )
     else:
         rows = await conn.fetch(
@@ -662,7 +688,8 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             "FROM deduped GROUP BY route_code, service_type HAVING COUNT(*) > 10 "
             f"ORDER BY on_time_pct {sort_order} LIMIT $2",
-            agency_id, limit,
+            agency_id,
+            limit,
         )
     return [tuple(r) for r in rows]
 
@@ -670,6 +697,7 @@ async def _exec_on_time(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_compare
 # ---------------------------------------------------------------------------
+
 
 async def _exec_compare(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -681,7 +709,8 @@ async def _exec_compare(intent: dict, conn, agency_id: int) -> list:
         f"WITH deduped AS ({_DEDUP_INNER}) "
         "SELECT service_type, ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {route_cond} GROUP BY service_type",
-        agency_id, *route_vals,
+        agency_id,
+        *route_vals,
     )
     return [tuple(r) for r in rows]
 
@@ -689,6 +718,7 @@ async def _exec_compare(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_worst_5min
 # ---------------------------------------------------------------------------
+
 
 async def _exec_worst_5min(intent: dict, conn, agency_id: int) -> list:
     service = intent.get("service")
@@ -701,14 +731,17 @@ async def _exec_worst_5min(intent: dict, conn, agency_id: int) -> list:
                 "SELECT route_code, service_type, avg_min, late_5min_plus, samples "
                 "FROM agg_route_stats WHERE agency_id=$1 AND late_5min_plus > 0 AND service_type=$2 "
                 f"ORDER BY late_5min_plus {sort_order} LIMIT $3",
-                agency_id, service, limit,
+                agency_id,
+                service,
+                limit,
             )
         else:
             rows = await conn.fetch(
                 "SELECT route_code, service_type, avg_min, late_5min_plus, samples "
                 "FROM agg_route_stats WHERE agency_id=$1 AND late_5min_plus > 0 "
                 f"ORDER BY late_5min_plus {sort_order} LIMIT $2",
-                agency_id, limit,
+                agency_id,
+                limit,
             )
         return [tuple(r) for r in rows]
 
@@ -720,7 +753,9 @@ async def _exec_worst_5min(intent: dict, conn, agency_id: int) -> list:
             "FROM deduped WHERE service_type=$2 GROUP BY route_code, service_type "
             "HAVING SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0 "
             f"ORDER BY SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) {sort_order} LIMIT $3",
-            agency_id, service, limit,
+            agency_id,
+            service,
+            limit,
         )
     else:
         rows = await conn.fetch(
@@ -730,7 +765,8 @@ async def _exec_worst_5min(intent: dict, conn, agency_id: int) -> list:
             "FROM deduped GROUP BY route_code, service_type "
             "HAVING SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0 "
             f"ORDER BY SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) {sort_order} LIMIT $2",
-            agency_id, limit,
+            agency_id,
+            limit,
         )
     return [tuple(r) for r in rows]
 
@@ -738,6 +774,7 @@ async def _exec_worst_5min(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_stop_ranking
 # ---------------------------------------------------------------------------
+
 
 async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
     limit = intent.get("limit", 15)
@@ -750,13 +787,16 @@ async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
                 "SELECT route_code, stop_sequence, stop_name, avg_min, samples "
                 "FROM agg_stop_seq WHERE agency_id=$1 AND stop_name LIKE $2 "
                 f"ORDER BY avg_min {sort_order} LIMIT $3",
-                agency_id, f"%{stop_name}%", limit,
+                agency_id,
+                f"%{stop_name}%",
+                limit,
             )
         else:
             rows = await conn.fetch(
                 "SELECT route_code, stop_sequence, stop_name, avg_min, samples "
                 f"FROM agg_stop_seq WHERE agency_id=$1 ORDER BY avg_min {sort_order} LIMIT $2",
-                agency_id, limit,
+                agency_id,
+                limit,
             )
         return [tuple(r) for r in rows]
 
@@ -768,12 +808,14 @@ async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
                 "COALESCE(MAX(ss.stop_name), CAST(d.stop_sequence AS TEXT) || '番停留所'), "
                 "ROUND(AVG(d.dep_delay)/60.0::numeric, 2), COUNT(*) "
                 "FROM deduped d "
-                "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "
+                "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "  # noqa: E501
                 "LEFT JOIN static_stops ss ON sst.stop_id=ss.stop_id AND ss.agency_id=$1 "
                 "WHERE d.stop_sequence IS NOT NULL AND ss.stop_name LIKE $2 "
                 "GROUP BY d.route_code, d.stop_sequence HAVING COUNT(*) > 10 "
                 f"ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) {sort_order} LIMIT $3",
-                agency_id, f"%{stop_name}%", limit,
+                agency_id,
+                f"%{stop_name}%",
+                limit,
             )
         else:
             rows = await conn.fetch(
@@ -782,12 +824,13 @@ async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
                 "COALESCE(MAX(ss.stop_name), CAST(d.stop_sequence AS TEXT) || '番停留所'), "
                 "ROUND(AVG(d.dep_delay)/60.0::numeric, 2), COUNT(*) "
                 "FROM deduped d "
-                "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "
+                "LEFT JOIN static_stop_times sst ON d.trip_id=sst.trip_id AND d.stop_sequence=sst.stop_sequence AND sst.agency_id=$1 "  # noqa: E501
                 "LEFT JOIN static_stops ss ON sst.stop_id=ss.stop_id AND ss.agency_id=$1 "
                 "WHERE d.stop_sequence IS NOT NULL "
                 "GROUP BY d.route_code, d.stop_sequence HAVING COUNT(*) > 10 "
                 f"ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) {sort_order} LIMIT $2",
-                agency_id, limit,
+                agency_id,
+                limit,
             )
         return [tuple(r) for r in rows]
 
@@ -798,7 +841,8 @@ async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
         "FROM deduped WHERE stop_sequence IS NOT NULL "
         "GROUP BY route_code, stop_sequence HAVING COUNT(*) > 10 "
         f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {sort_order} LIMIT $2",
-        agency_id, limit,
+        agency_id,
+        limit,
     )
     return [tuple(r) for r in rows]
 
@@ -806,6 +850,7 @@ async def _exec_stop_ranking(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_compare_ranking
 # ---------------------------------------------------------------------------
+
 
 async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
     limit = intent.get("limit", 15)
@@ -833,7 +878,8 @@ async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
             ") "
             "SELECT route_code, heijitsu, kyujitsu, abs_delta, signed_delta "
             f"FROM d {polarity_where} ORDER BY abs_delta {sort_order} LIMIT $2",
-            agency_id, limit,
+            agency_id,
+            limit,
         )
         return [tuple(r) for r in rows]
 
@@ -852,7 +898,8 @@ async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
         ") "
         "SELECT route_code, heijitsu, kyujitsu, abs_delta, signed_delta "
         f"FROM d {polarity_where} ORDER BY abs_delta {sort_order} LIMIT $2",
-        agency_id, limit,
+        agency_id,
+        limit,
     )
     return [tuple(r) for r in rows]
 
@@ -860,6 +907,7 @@ async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_dow_ranking
 # ---------------------------------------------------------------------------
+
 
 async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
     dow = intent.get("dow")
@@ -967,6 +1015,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
 # _exec_stop_list
 # ---------------------------------------------------------------------------
 
+
 async def _exec_stop_list(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
     if not route_codes:
@@ -977,7 +1026,8 @@ async def _exec_stop_list(intent: dict, conn, agency_id: int) -> list:
         "JOIN static_routes sr ON st.route_id = sr.route_id "
         "WHERE sr.agency_id=$1 AND st.agency_id=$1 "
         "AND sr.route_id LIKE '%(' || $2 || ')' LIMIT 1",
-        agency_id, route_code,
+        agency_id,
+        route_code,
     )
     if not trip:
         return []
@@ -986,7 +1036,8 @@ async def _exec_stop_list(intent: dict, conn, agency_id: int) -> list:
         "FROM static_stop_times sst "
         "JOIN static_stops ss ON sst.stop_id = ss.stop_id AND ss.agency_id=$1 "
         "WHERE sst.agency_id=$1 AND sst.trip_id=$2 ORDER BY sst.stop_sequence",
-        agency_id, trip["trip_id"],
+        agency_id,
+        trip["trip_id"],
     )
     return [tuple(r) for r in rows]
 
@@ -994,6 +1045,7 @@ async def _exec_stop_list(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_routes_at_stop
 # ---------------------------------------------------------------------------
+
 
 async def _exec_routes_at_stop(intent: dict, conn, agency_id: int) -> list:
     stop_name = intent.get("stop_name")
@@ -1006,7 +1058,8 @@ async def _exec_routes_at_stop(intent: dict, conn, agency_id: int) -> list:
         "JOIN static_trips st ON sst.trip_id = st.trip_id AND st.agency_id=$1 "
         "JOIN static_routes sr ON st.route_id = sr.route_id AND sr.agency_id=$1 "
         "WHERE sst.agency_id=$1 AND ss.stop_name LIKE $2 ORDER BY sr.route_short_name",
-        agency_id, f"%{stop_name}%",
+        agency_id,
+        f"%{stop_name}%",
     )
     return [tuple(r) for r in rows]
 
@@ -1014,6 +1067,7 @@ async def _exec_routes_at_stop(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_route_info
 # ---------------------------------------------------------------------------
+
 
 async def _exec_route_info(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -1030,7 +1084,8 @@ async def _exec_route_info(intent: dict, conn, agency_id: int) -> list:
         "JOIN static_trips st ON st.route_id = sr.route_id AND st.agency_id=$1 "
         "JOIN static_stop_times sst ON sst.trip_id = st.trip_id AND sst.agency_id=$1 "
         "WHERE sr.agency_id=$1 AND sr.route_id LIKE '%(' || $2 || ')' GROUP BY sr.route_id, sr.route_short_name",
-        agency_id, route_code,
+        agency_id,
+        route_code,
     )
     return [tuple(r) for r in rows]
 
@@ -1038,6 +1093,7 @@ async def _exec_route_info(intent: dict, conn, agency_id: int) -> list:
 # ---------------------------------------------------------------------------
 # _exec_timetable
 # ---------------------------------------------------------------------------
+
 
 async def _exec_timetable(intent: dict, conn, agency_id: int) -> list:
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
@@ -1100,22 +1156,22 @@ async def _exec_timetable(intent: dict, conn, agency_id: int) -> list:
 _STATIC_REQUIRED = frozenset({"stop_list", "routes_at_stop", "route_info", "timetable"})
 
 EXECUTORS = {
-    "ranking":          _exec_ranking,
-    "by_hour":          _exec_by_hour,
-    "by_dow":           _exec_by_dow,
-    "by_stop":          _exec_by_stop,
-    "by_date":          _exec_by_date,
-    "trend":            _exec_trend,
-    "on_time":          _exec_on_time,
-    "compare":          _exec_compare,
-    "worst_5min":       _exec_worst_5min,
-    "stop_ranking":     _exec_stop_ranking,
-    "dow_ranking":      _exec_dow_ranking,
-    "compare_ranking":  _exec_compare_ranking,
-    "stop_list":        _exec_stop_list,
-    "routes_at_stop":   _exec_routes_at_stop,
-    "route_info":       _exec_route_info,
-    "timetable":        _exec_timetable,
+    "ranking": _exec_ranking,
+    "by_hour": _exec_by_hour,
+    "by_dow": _exec_by_dow,
+    "by_stop": _exec_by_stop,
+    "by_date": _exec_by_date,
+    "trend": _exec_trend,
+    "on_time": _exec_on_time,
+    "compare": _exec_compare,
+    "worst_5min": _exec_worst_5min,
+    "stop_ranking": _exec_stop_ranking,
+    "dow_ranking": _exec_dow_ranking,
+    "compare_ranking": _exec_compare_ranking,
+    "stop_list": _exec_stop_list,
+    "routes_at_stop": _exec_routes_at_stop,
+    "route_info": _exec_route_info,
+    "timetable": _exec_timetable,
 }
 
 

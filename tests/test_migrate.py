@@ -1,7 +1,9 @@
 import os
+
 import psycopg2
 import pytest
-from db.migrate import migrate_up, migrate_down
+
+from db.migrate import migrate_down, migrate_up
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 

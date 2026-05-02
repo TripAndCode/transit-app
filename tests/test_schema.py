@@ -1,13 +1,19 @@
-import psycopg2
-import pytest
-
 EXPECTED_TABLES = [
-    "agencies", "updates",
-    "static_stops", "static_stop_times", "static_trips",
-    "static_routes", "static_calendar_dates",
-    "agg_route_stats", "agg_route_hour", "agg_route_dow",
-    "agg_daily_trend", "agg_stop_seq",
-    "rag_chunks", "api_keys", "snapshots",
+    "agencies",
+    "updates",
+    "static_stops",
+    "static_stop_times",
+    "static_trips",
+    "static_routes",
+    "static_calendar_dates",
+    "agg_route_stats",
+    "agg_route_hour",
+    "agg_route_dow",
+    "agg_daily_trend",
+    "agg_stop_seq",
+    "rag_chunks",
+    "api_keys",
+    "snapshots",
 ]
 
 
@@ -79,5 +85,4 @@ def test_snapshots_table_exists(pg_conn):
             ORDER BY column_name
         """)
         cols = {r[0] for r in cur.fetchall()}
-    assert {"agency_id", "report_type", "rendered_at", "text"} <= cols, \
-        f"snapshots columns missing, found: {cols}"
+    assert {"agency_id", "report_type", "rendered_at", "text"} <= cols, f"snapshots columns missing, found: {cols}"

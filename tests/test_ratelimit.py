@@ -1,10 +1,4 @@
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
-from api.middleware.ratelimit import limiter, FREE_LIMIT, PRO_LIMIT, _key_func
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, _key_func
 
 
 def test_free_limit_constant():
@@ -17,6 +11,7 @@ def test_pro_limit_constant():
 
 def test_key_func_free_tier_uses_ip():
     from unittest.mock import MagicMock
+
     request = MagicMock()
     request.state.tier = "free"
     request.headers = {}
@@ -29,6 +24,7 @@ def test_key_func_free_tier_uses_ip():
 
 def test_key_func_pro_tier_uses_api_key():
     from unittest.mock import MagicMock
+
     request = MagicMock()
     request.state.tier = "pro"
     request.headers.get = lambda k, default=None: "my-api-key" if k == "X-API-Key" else default

@@ -16,6 +16,7 @@ def _get_groq_client():
     global _groq_client
     if _groq_client is None:
         from groq import Groq
+
         _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
     return _groq_client
 
@@ -25,11 +26,24 @@ def _reset_groq_client():
     global _groq_client
     _groq_client = None
 
+
 VALID_QUERY_TYPES = {
-    "ranking", "by_hour", "by_dow", "by_stop", "by_date",
-    "trend", "on_time", "compare", "worst_5min", "stop_ranking", "dow_ranking",
+    "ranking",
+    "by_hour",
+    "by_dow",
+    "by_stop",
+    "by_date",
+    "trend",
+    "on_time",
+    "compare",
+    "worst_5min",
+    "stop_ranking",
+    "dow_ranking",
     "compare_ranking",
-    "stop_list", "routes_at_stop", "route_info", "timetable",
+    "stop_list",
+    "routes_at_stop",
+    "route_info",
+    "timetable",
 }
 
 _VALID_DOW = {"月", "火", "水", "木", "金", "土", "日"}
@@ -42,30 +56,58 @@ _ROUTE_REQUIRED = {"by_hour", "by_dow", "by_stop", "compare", "stop_list", "rout
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _RELATIVE_DATE_OFFSETS = {
-    "今日": 0, "きょう": 0, "本日": 0,
-    "昨日": -1, "きのう": -1,
-    "一昨日": -2, "おととい": -2,
+    "今日": 0,
+    "きょう": 0,
+    "本日": 0,
+    "昨日": -1,
+    "きのう": -1,
+    "一昨日": -2,
+    "おととい": -2,
 }
 
 _TIME_BAND_MAP = {
-    "朝": "morning", "午前": "morning", "昼": "day", "午後": "day",
-    "夕方": "evening", "夜": "night", "深夜": "night", "ラッシュ": "rush",
-    "morning": "morning", "day": "day", "evening": "evening", "night": "night", "rush": "rush",
+    "朝": "morning",
+    "午前": "morning",
+    "昼": "day",
+    "午後": "day",
+    "夕方": "evening",
+    "夜": "night",
+    "深夜": "night",
+    "ラッシュ": "rush",
+    "morning": "morning",
+    "day": "day",
+    "evening": "evening",
+    "night": "night",
+    "rush": "rush",
 }
 
 _DOW_GROUP_MAP = {
-    "週末": "weekend", "土日": "weekend", "土日祝": "weekend", "weekend": "weekend",
-    "平日": "weekday", "weekday": "weekday",
+    "週末": "weekend",
+    "土日": "weekend",
+    "土日祝": "weekend",
+    "weekend": "weekend",
+    "平日": "weekday",
+    "weekday": "weekday",
 }
 
 _TREND_DIRECTION_MAP = {
-    "up": "up", "増加": "up", "増えている": "up", "悪化": "up",
-    "down": "down", "改善": "down", "減少": "down", "any": "any",
+    "up": "up",
+    "増加": "up",
+    "増えている": "up",
+    "悪化": "up",
+    "down": "down",
+    "改善": "down",
+    "減少": "down",
+    "any": "any",
 }
 
 _COMPARE_POLARITY_MAP = {
-    "holiday_worse": "holiday_worse", "休日が遅い": "holiday_worse", "土日祝が遅い": "holiday_worse",
-    "weekday_worse": "weekday_worse", "平日が遅い": "weekday_worse", "any": "any",
+    "holiday_worse": "holiday_worse",
+    "休日が遅い": "holiday_worse",
+    "土日祝が遅い": "holiday_worse",
+    "weekday_worse": "weekday_worse",
+    "平日が遅い": "weekday_worse",
+    "any": "any",
 }
 
 _SORT_ORDER_MAP = {"desc": "desc", "降順": "desc", "昇順": "asc", "asc": "asc"}
@@ -138,11 +180,18 @@ def validate_intent(raw: dict) -> dict:
     """Validate and normalise a raw intent dict from the LLM."""
     intent = {
         "query_type": raw.get("query_type", "unknown"),
-        "route": None, "route_name": None, "service": None,
-        "dow": None, "dow_group": None, "date": None,
-        "stop_name": None, "time_band": None,
-        "trend_direction": "any", "compare_polarity": "any",
-        "sort_order": "desc", "limit": 15,
+        "route": None,
+        "route_name": None,
+        "service": None,
+        "dow": None,
+        "dow_group": None,
+        "date": None,
+        "stop_name": None,
+        "time_band": None,
+        "trend_direction": "any",
+        "compare_polarity": "any",
+        "sort_order": "desc",
+        "limit": 15,
         "unknown": bool(raw.get("unknown", False)),
     }
 

@@ -1,5 +1,3 @@
-import pytest
-import psycopg2
 from pipeline.snapshots import write_snapshots
 
 
@@ -20,9 +18,9 @@ def test_write_snapshots_with_route_stats_data(pg_conn, agency_id):
             " late_5min_plus, on_time_pct, late5_pct, samples) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [
-                (agency_id, "44", "平日",  4.2, 3.1, 6.8, 5,  75.0, 10.0, 1000),
-                (agency_id, "44", "土日祝", 6.8, 5.0, 9.0, 10, 60.0, 20.0,  500),
-                (agency_id, "22", "平日",  2.1, 1.5, 3.5, 1,  90.0,  5.0,  800),
+                (agency_id, "44", "平日", 4.2, 3.1, 6.8, 5, 75.0, 10.0, 1000),
+                (agency_id, "44", "土日祝", 6.8, 5.0, 9.0, 10, 60.0, 20.0, 500),
+                (agency_id, "22", "平日", 2.1, 1.5, 3.5, 1, 90.0, 5.0, 800),
             ],
         )
     pg_conn.commit()

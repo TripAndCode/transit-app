@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from api.deps import get_conn, get_agency
+from api.deps import get_agency, get_conn
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["static"])
 
@@ -11,8 +11,7 @@ async def list_routes(
     conn=Depends(get_conn),
 ):
     rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes "
-        "WHERE agency_id=$1 ORDER BY route_id",
+        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id=$1 ORDER BY route_id",
         agency_id,
     )
     return [dict(r) for r in rows]
@@ -24,8 +23,7 @@ async def list_stops(
     conn=Depends(get_conn),
 ):
     rows = await conn.fetch(
-        "SELECT stop_id, stop_name, stop_lat, stop_lon "
-        "FROM static_stops WHERE agency_id=$1 ORDER BY stop_id",
+        "SELECT stop_id, stop_name, stop_lat, stop_lon FROM static_stops WHERE agency_id=$1 ORDER BY stop_id",
         agency_id,
     )
     return [dict(r) for r in rows]

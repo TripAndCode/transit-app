@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 
-from api.deps import get_conn, get_agency
+from api.deps import get_agency, get_conn
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
@@ -21,7 +21,8 @@ async def live_delays(
         ORDER BY trip_id, captured_at DESC
         LIMIT $2
         """,
-        agency_id, limit,
+        agency_id,
+        limit,
     )
     return [dict(r) for r in rows]
 

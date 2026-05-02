@@ -1,4 +1,5 @@
 import os
+
 import psycopg2
 import pytest
 
@@ -8,6 +9,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
     from db.migrate import migrate_up
+
     conn = psycopg2.connect(DATABASE_URL)
     migrate_up(conn)
     conn.close()
@@ -46,6 +48,7 @@ def agency_id(pg_conn):
 @pytest.fixture
 async def aconn(apply_schema):
     import asyncpg
+
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
     yield conn
     # clean up

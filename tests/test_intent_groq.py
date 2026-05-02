@@ -1,7 +1,9 @@
 import json
-import pytest
 from unittest.mock import MagicMock, patch
-from pipeline.query.intent import classify_intent, _reset_groq_client
+
+import pytest
+
+from pipeline.query.intent import _reset_groq_client, classify_intent
 
 
 @pytest.fixture(autouse=True)
@@ -26,11 +28,24 @@ def _make_mock_client(content: str):
 @pytest.mark.asyncio
 async def test_classify_intent_live_delays():
     mock_client = _make_mock_client(
-        json.dumps({"query_type": "ranking", "route": None, "route_name": None,
-                    "service": None, "dow": None, "dow_group": None, "date": None,
-                    "stop_name": None, "time_band": None, "trend_direction": "any",
-                    "compare_polarity": "any", "sort_order": "desc", "limit": 10,
-                    "unknown": False})
+        json.dumps(
+            {
+                "query_type": "ranking",
+                "route": None,
+                "route_name": None,
+                "service": None,
+                "dow": None,
+                "dow_group": None,
+                "date": None,
+                "stop_name": None,
+                "time_band": None,
+                "trend_direction": "any",
+                "compare_polarity": "any",
+                "sort_order": "desc",
+                "limit": 10,
+                "unknown": False,
+            }
+        )
     )
     with patch("pipeline.query.intent._get_groq_client", return_value=mock_client):
         result = await classify_intent("今走っているバスは？")
@@ -40,11 +55,24 @@ async def test_classify_intent_live_delays():
 @pytest.mark.asyncio
 async def test_classify_intent_unknown():
     mock_client = _make_mock_client(
-        json.dumps({"query_type": "unknown", "route": None, "route_name": None,
-                    "service": None, "dow": None, "dow_group": None, "date": None,
-                    "stop_name": None, "time_band": None, "trend_direction": "any",
-                    "compare_polarity": "any", "sort_order": "desc", "limit": 10,
-                    "unknown": True})
+        json.dumps(
+            {
+                "query_type": "unknown",
+                "route": None,
+                "route_name": None,
+                "service": None,
+                "dow": None,
+                "dow_group": None,
+                "date": None,
+                "stop_name": None,
+                "time_band": None,
+                "trend_direction": "any",
+                "compare_polarity": "any",
+                "sort_order": "desc",
+                "limit": 10,
+                "unknown": True,
+            }
+        )
     )
     with patch("pipeline.query.intent._get_groq_client", return_value=mock_client):
         result = await classify_intent("天気は？")

@@ -1,7 +1,8 @@
-import pytest
-import httpx
-import asyncpg
 import os
+
+import asyncpg
+import httpx
+import pytest
 from httpx import ASGITransport
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
@@ -10,11 +11,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 @pytest.fixture
 async def reports_app(apply_schema):
     from api.main import app
+
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
-        "Reports Test Agency", "http://reports-test.example.com",
+        "Reports Test Agency",
+        "http://reports-test.example.com",
     )
     agency_id = row["agency_id"]
     yield app, agency_id, pool
@@ -31,9 +34,7 @@ async def reports_app(apply_schema):
 @pytest.fixture
 async def reports_client(reports_app):
     app, agency_id, pool = reports_app
-    async with httpx.AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, agency_id, pool
 
 
@@ -50,9 +51,9 @@ async def test_reports_list_returns_inserted_snapshot(reports_client):
     client, agency_id, pool = reports_client
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) "
-            "VALUES ($1, $2, NOW(), $3)",
-            agency_id, "ranking",
+            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
+            agency_id,
+            "ranking",
             "【遅延ランキング上位100系統】\n1位: 系統44 平均4.2分（平日3.1分・土日祝6.8分、計1204件）",
         )
     resp = await client.get(f"/api/{agency_id}/reports")
@@ -80,9 +81,10 @@ async def test_reports_get_returns_text_and_rows(reports_client):
     )
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) "
-            "VALUES ($1, $2, NOW(), $3)",
-            agency_id, "ranking", snapshot_text,
+            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
+            agency_id,
+            "ranking",
+            snapshot_text,
         )
     resp = await client.get(f"/api/{agency_id}/reports/ranking")
     assert resp.status_code == 200
@@ -97,15 +99,15 @@ async def test_reports_get_returns_text_and_rows(reports_client):
 async def test_reports_get_limit_truncates_text(reports_client):
     client, agency_id, pool = reports_client
     lines = ["【遅延ランキング上位100系統】"] + [
-        f"{i}位: 系統{i} 平均{i}.0分（平日{i}.0分・土日祝{i}.0分、計100件）"
-        for i in range(1, 11)
+        f"{i}位: 系統{i} 平均{i}.0分（平日{i}.0分・土日祝{i}.0分、計100件）" for i in range(1, 11)
     ]
     snapshot_text = "\n".join(lines)
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) "
-            "VALUES ($1, $2, NOW(), $3)",
-            agency_id, "ranking", snapshot_text,
+            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
+            agency_id,
+            "ranking",
+            snapshot_text,
         )
     resp = await client.get(f"/api/{agency_id}/reports/ranking?limit=3")
     assert resp.status_code == 200
