@@ -49,6 +49,13 @@ def _fix(text: str) -> str:
     return _FIX_RE.sub("系統", text).replace("系统", "系統")
 
 
+def _r(x, d: int = 1) -> str:
+    """Round a numeric DB value to d decimal places and return as string."""
+    if x is None:
+        return "—"
+    return str(round(float(x), d))
+
+
 def _no_data(label: str = "") -> str:
     return f"{label}データがありません。" if label else "データがありません。"
 
@@ -66,18 +73,25 @@ def _route_scope_label(intent: dict) -> str:
 def _fmt_ranking(rows: list, intent: dict) -> str:
     if not rows:
         return ""
-    label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [
-        f"{i}位: 系統{r[0]}（{r[1]}）平均{r[2]}分、p50={r[3]}分、p90={r[4]}分（{r[5]}件）"
-        for i, r in enumerate(rows, 1)
-    ]
+    service = intent.get("service")
+    label = f"{service}の" if service else ""
+    if service:
+        lines = [
+            f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
+            for i, r in enumerate(rows, 1)
+        ]
+    else:
+        lines = [
+            f"{i}位: 系統{r[0]} 平均{_r(r[2])}分（平日{_r(r[3])}分・土日祝{_r(r[4])}分、計{r[5]}件）"
+            for i, r in enumerate(rows, 1)
+        ]
     return f"【{label}遅延ランキング上位{intent.get('limit', 15)}系統】\n" + "\n".join(lines)
 
 
 def _fmt_by_hour(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
     lines = [
-        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{r[3]}分、p50={r[4]}分、p90={r[5]}分（{r[6]}件）"
+        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）"
         for r in rows
     ]
     return f"【{scope} 発車時刻別遅延】\n" + "\n".join(lines)
@@ -87,7 +101,7 @@ def _fmt_by_dow(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
-    lines = [f"系統{r[0]}（{r[1]}）{r[2]}: 平均{r[3]}分（{r[4]}件）" for r in rows]
+    lines = [f"系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for r in rows]
     if dow:
         header = f"【{scope} {dow}曜の遅延】"
     elif dow_group == "weekend":
@@ -103,13 +117,13 @@ def _fmt_by_stop(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
     stop_name = intent.get("stop_name")
     label = f"「{stop_name}」付近 " if stop_name else ""
-    lines = [f"{r[1] or str(r[0]) + '番停留所'}（{r[0]}番）: 平均{r[2]}分（{r[3]}件）" for r in rows]
+    lines = [f"{r[1] or str(r[0]) + '番停留所'}（{r[0]}番）: 平均{_r(r[2])}分（{r[3]}件）" for r in rows]
     return f"【{scope} {label}停留所別遅延（上位{len(rows)}）】\n" + "\n".join(lines)
 
 
 def _fmt_by_date(rows: list, intent: dict) -> str:
     date_value = intent.get("date", "")
-    lines = [f"系統{r[0]}（{r[1]}）: 平均{r[2]}分（{r[3]}件）" for r in rows]
+    lines = [f"系統{r[0]}（{r[1]}）: 平均{_r(r[2])}分（{r[3]}件）" for r in rows]
     return f"【{date_value} 遅延データ】\n" + "\n".join(lines)
 
 
@@ -117,8 +131,8 @@ def _fmt_trend(rows: list, intent: dict) -> str:
     if not rows:
         return "トレンド計算に必要なデータが不足しています（28日以上のデータが必要）。"
     lines = [
-        f"{'↑悪化' if r[4] > 0 else '↓改善'} 系統{r[0]}（{r[1]}）: "
-        f"直近{r[2]}分、前期{r[3]}分（{'+' if r[4] > 0 else ''}{r[4]}分）"
+        f"{'↑悪化' if float(r[4]) > 0 else '↓改善'} 系統{r[0]}（{r[1]}）: "
+        f"直近{_r(r[2])}分、前期{_r(r[3])}分（{'+' if float(r[4]) > 0 else ''}{_r(r[4])}分）"
         for r in rows
     ]
     return "【遅延トレンド（直近14日 vs 前14日）】\n" + "\n".join(lines)
@@ -131,12 +145,12 @@ def _fmt_on_time(rows: list, intent: dict) -> str:
     if route or route_name:
         scope = _route_scope_label(intent)
         lines = [
-            f"系統{r[0]}（{r[1]}）: 定時率{r[3]}%、5分超遅延率{r[4]}%、平均遅延{r[2]}分（{r[5]}件）"
+            f"系統{r[0]}（{r[1]}）: 定時率{_r(r[3], 1)}%、5分超遅延率{_r(r[4], 1)}%、平均遅延{_r(r[2])}分（{r[5]}件）"
             for r in rows
         ]
         return f"【{scope} 定時率】\n" + "\n".join(lines)
     lines = [
-        f"{i}位: 系統{r[0]}（{r[1]}）定時率{r[2]}%、平均{r[3]}分（{r[4]}件）"
+        f"{i}位: 系統{r[0]}（{r[1]}）定時率{_r(r[2], 1)}%、平均{_r(r[3])}分（{r[4]}件）"
         for i, r in enumerate(rows, 1)
     ]
     return f"【{label}定時率ランキング】\n" + "\n".join(lines)
@@ -144,13 +158,13 @@ def _fmt_on_time(rows: list, intent: dict) -> str:
 
 def _fmt_compare(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
-    lines = [f"{scope}（{r[0]}）: 平均{r[1]}分（{r[2]}件）" for r in rows]
-    by_service = {r[0]: r[1] for r in rows}
+    lines = [f"{scope}（{r[0]}）: 平均{_r(r[1])}分（{r[2]}件）" for r in rows]
+    by_service = {r[0]: float(r[1]) for r in rows if r[1] is not None}
     heijitsu = by_service.get("平日")
     kyujitsu = by_service.get("土日祝")
     verdict = ""
     if heijitsu is not None and kyujitsu is not None:
-        delta = round(abs(kyujitsu - heijitsu), 2)
+        delta = round(abs(kyujitsu - heijitsu), 1)
         if kyujitsu > heijitsu:
             verdict = f"\n判定: 土日祝のほうが{delta}分遅いです。"
         elif heijitsu > kyujitsu:
@@ -163,7 +177,7 @@ def _fmt_compare(rows: list, intent: dict) -> str:
 def _fmt_worst_5min(rows: list, intent: dict) -> str:
     label = f"{intent.get('service')}の" if intent.get("service") else ""
     lines = [
-        f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[3]}回、平均{r[2]}分（{r[4]}件）"
+        f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[3]}回、平均{_r(r[2])}分（{r[4]}件）"
         for i, r in enumerate(rows, 1)
     ]
     return f"【{label}5分超遅延ランキング】\n" + "\n".join(lines)
@@ -174,7 +188,7 @@ def _fmt_stop_ranking(rows: list, intent: dict) -> str:
     stop_name = intent.get("stop_name")
     label = f"「{stop_name}」付近 " if stop_name else ""
     lines = [
-        f"{i}位: 系統{r[0]} {r[2] or str(r[1]) + '番停留所'}（{r[1]}番）: 平均{r[3]}分（{r[4]}件）"
+        f"{i}位: 系統{r[0]} {r[2] or str(r[1]) + '番停留所'}（{r[1]}番）: 平均{_r(r[3])}分（{r[4]}件）"
         for i, r in enumerate(rows, 1)
     ]
     return f"【{label}停留所別遅延ランキング上位{limit}】\n" + "\n".join(lines)
@@ -184,7 +198,7 @@ def _fmt_dow_ranking(rows: list, intent: dict) -> str:
     dow = intent.get("dow", "")
     dow_group = intent.get("dow_group")
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [f"{i}位: 系統{r[0]}（{r[1]}）{r[2]}: 平均{r[3]}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
+    lines = [f"{i}位: 系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
     if dow_group == "weekend":
         header = f"【{label}週末遅延ランキング】"
     elif dow_group == "weekday":
@@ -197,10 +211,10 @@ def _fmt_dow_ranking(rows: list, intent: dict) -> str:
 def _fmt_compare_ranking(rows: list, intent: dict) -> str:
     lines = []
     for i, r in enumerate(rows, 1):
-        signed = r[4] if len(r) >= 5 else (r[2] - r[1])
+        signed = float(r[4]) if len(r) >= 5 else (float(r[2] or 0) - float(r[1] or 0))
         direction = "土日祝>平日" if signed > 0 else ("平日>土日祝" if signed < 0 else "同程度")
         lines.append(
-            f"{i}位: 系統{r[0]} 平日{r[1]}分 / 土日祝{r[2]}分（差: {r[3]}分, {direction}）"
+            f"{i}位: 系統{r[0]} 平日{_r(r[1])}分 / 土日祝{_r(r[2])}分（差: {_r(r[3])}分, {direction}）"
         )
     return "【平日・土日祝 遅延差ランキング】\n" + "\n".join(lines)
 
@@ -308,7 +322,7 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
 
     ranking = (
         "\n".join(
-            f"{i}位: 系統{r[0]}（{r[1]}）平均{r[2]}分、p50={r[3]}分、p90={r[4]}分（{r[5]}件）"
+            f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
             for i, r in enumerate(rows, 1)
         )
         if rows else "（データなし）"

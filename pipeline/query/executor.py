@@ -123,8 +123,13 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
             )
         else:
             rows = await conn.fetch(
-                "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
-                f"FROM agg_route_stats WHERE agency_id=$1 ORDER BY avg_min {order} LIMIT $2",
+                "SELECT route_code, '全日' AS service_type, "
+                "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+                "MAX(CASE WHEN service_type = '平日'  THEN avg_min END) AS heijitsu_avg, "
+                "MAX(CASE WHEN service_type = '土日祝' THEN avg_min END) AS kyujitsu_avg, "
+                "SUM(samples) AS samples "
+                f"FROM agg_route_stats WHERE agency_id=$1 "
+                f"GROUP BY route_code ORDER BY SUM(avg_min * samples) / NULLIF(SUM(samples), 0) {order} LIMIT $2",
                 agency_id, limit,
             )
         return [tuple(r) for r in rows]
@@ -150,18 +155,19 @@ async def _exec_ranking(intent: dict, conn, agency_id: int) -> list:
     else:
         rows = await conn.fetch(
             f"WITH deduped AS ({_DEDUP_INNER}),\n"
-            "ranked AS (\n"
-            "    SELECT *, PERCENT_RANK() OVER (PARTITION BY route_code, service_type ORDER BY dep_delay) AS pct\n"
-            "    FROM deduped\n"
+            "per_svc AS (\n"
+            "    SELECT route_code, service_type,\n"
+            "        ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+            "        COUNT(*) AS samples\n"
+            "    FROM deduped GROUP BY route_code, service_type HAVING COUNT(*) > 20\n"
             ")\n"
-            "SELECT route_code, service_type,\n"
-            "    ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-            "    ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,\n"
-            "    ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,\n"
-            "    COUNT(*) AS samples\n"
-            "FROM ranked\n"
-            "GROUP BY route_code, service_type HAVING COUNT(*) > 20\n"
-            f"ORDER BY avg_min {order} LIMIT $2",
+            "SELECT route_code, '全日' AS service_type,\n"
+            "    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min,\n"
+            "    MAX(CASE WHEN service_type = '平日'  THEN avg_min END) AS heijitsu_avg,\n"
+            "    MAX(CASE WHEN service_type = '土日祝' THEN avg_min END) AS kyujitsu_avg,\n"
+            "    SUM(samples) AS samples\n"
+            "FROM per_svc\n"
+            f"GROUP BY route_code ORDER BY SUM(avg_min * samples) / NULLIF(SUM(samples), 0) {order} LIMIT $2",
             agency_id, limit,
         )
     return [tuple(r) for r in rows]
