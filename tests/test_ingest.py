@@ -1,8 +1,8 @@
 # tests/test_ingest.py
-import pathlib
-import tarfile
 import io
+import tarfile
 from unittest.mock import patch
+
 from pipeline.ingest import ingest, parse_trip_id
 
 
@@ -24,16 +24,17 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
     """Ingest a fake tarball and verify rows land in updates with correct agency_id."""
     fake_row = (
         "20260401/TripUpdate_113700.pb",  # file_name
-        "2026-04-01T11:37:00",            # captured_at
-        "平日_11時37分_系統44372",          # trip_id
-        "平日",                            # service_type
-        "11:37",                           # scheduled_time
-        "44372",                           # route_code
-        1,                                 # stop_sequence
-        None,                              # stop_id
-        None, None,                        # arr_delay, arr_time
-        120,                               # dep_delay (seconds)
-        None,                              # dep_time
+        "2026-04-01T11:37:00",  # captured_at
+        "平日_11時37分_系統44372",  # trip_id
+        "平日",  # service_type
+        "11:37",  # scheduled_time
+        "44372",  # route_code
+        1,  # stop_sequence
+        None,  # stop_id
+        None,
+        None,  # arr_delay, arr_time
+        120,  # dep_delay (seconds)
+        None,  # dep_time
     )
     with patch("pipeline.ingest.parse_pb", return_value=[fake_row]):
         pb_data = b"\x00"
@@ -63,9 +64,18 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
 def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
     """Running ingest twice on the same folder inserts 0 rows the second time."""
     fake_row = (
-        "20260401/TripUpdate_113700.pb", "2026-04-01T11:37:00",
-        "平日_11時37分_系統44372", "平日", "11:37", "44372", 1,
-        None, None, None, 120, None,
+        "20260401/TripUpdate_113700.pb",
+        "2026-04-01T11:37:00",
+        "平日_11時37分_系統44372",
+        "平日",
+        "11:37",
+        "44372",
+        1,
+        None,
+        None,
+        None,
+        120,
+        None,
     )
     with patch("pipeline.ingest.parse_pb", return_value=[fake_row]):
         pb_data = b"\x00"
@@ -100,14 +110,32 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
     pg_conn.commit()
 
     fake_row_a = (
-        "20260401/TripUpdate_113700.pb", "2026-04-01T11:37:00",
-        "平日_11時37分_系統44372", "平日", "11:37", "44372", 1,
-        None, None, None, 60, None,
+        "20260401/TripUpdate_113700.pb",
+        "2026-04-01T11:37:00",
+        "平日_11時37分_系統44372",
+        "平日",
+        "11:37",
+        "44372",
+        1,
+        None,
+        None,
+        None,
+        60,
+        None,
     )
     fake_row_b = (
-        "20260401/TripUpdate_113700.pb", "2026-04-01T11:37:00",
-        "平日_11時37分_系統44372", "平日", "11:37", "44372", 1,
-        None, None, None, 90, None,
+        "20260401/TripUpdate_113700.pb",
+        "2026-04-01T11:37:00",
+        "平日_11時37分_系統44372",
+        "平日",
+        "11:37",
+        "44372",
+        1,
+        None,
+        None,
+        None,
+        90,
+        None,
     )
     pb_data = b"\x00"
 
@@ -119,8 +147,10 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
             tf.addfile(info, io.BytesIO(pb_data))
         path.write_bytes(buf.getvalue())
 
-    dir_a = tmp_path / "a"; dir_a.mkdir()
-    dir_b = tmp_path / "b"; dir_b.mkdir()
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
     make_tgz(dir_a / "20260401.tar.gz")
     make_tgz(dir_b / "20260401.tar.gz")
 

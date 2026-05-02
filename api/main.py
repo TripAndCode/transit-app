@@ -28,11 +28,7 @@ async def lifespan(app: FastAPI):
     await app.state.pool.close()
 
 
-_CORS_ORIGINS = [
-    o.strip()
-    for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
-    if o.strip()
-]
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 app = FastAPI(title="Transit Delay API", lifespan=lifespan)
 app.state.limiter = limiter

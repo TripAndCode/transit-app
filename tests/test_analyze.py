@@ -1,4 +1,3 @@
-import pytest
 from pipeline.analyze import analyze
 
 
@@ -137,8 +136,17 @@ def test_analyze_agency_isolated(pg_conn):
                     "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
                     "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
                     "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (agency_id, f"f{i}_{agency_id}.pb", f"2026-04-{(i%25)+1:02d}T11:37:00",
-                     "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, delay),
+                    (
+                        agency_id,
+                        f"f{i}_{agency_id}.pb",
+                        f"2026-04-{(i % 25) + 1:02d}T11:37:00",
+                        "平日_11時37分_系統44372",
+                        "平日",
+                        "11:37",
+                        "44372",
+                        1,
+                        delay,
+                    ),
                 )
         pg_conn.commit()
 
@@ -146,13 +154,9 @@ def test_analyze_agency_isolated(pg_conn):
     analyze(aid_b, pg_conn)
 
     with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT avg_min FROM agg_route_stats WHERE agency_id = %s", (aid_a,)
-        )
+        cur.execute("SELECT avg_min FROM agg_route_stats WHERE agency_id = %s", (aid_a,))
         avg_a = cur.fetchone()[0]
-        cur.execute(
-            "SELECT avg_min FROM agg_route_stats WHERE agency_id = %s", (aid_b,)
-        )
+        cur.execute("SELECT avg_min FROM agg_route_stats WHERE agency_id = %s", (aid_b,))
         avg_b = cur.fetchone()[0]
 
     assert round(float(avg_a), 1) == round(120 / 60, 1)

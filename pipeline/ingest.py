@@ -1,18 +1,20 @@
+import pathlib
 import re
 import struct
 import tarfile
-import pathlib
 import urllib.request
 from datetime import datetime, timezone
+
 import psycopg2.extras
 
-
 # ── Protobuf parser (zero external dependencies) ──────────────────────────────
+
 
 def _read_varint(data, pos):
     result, shift = 0, 0
     while True:
-        b = data[pos]; pos += 1
+        b = data[pos]
+        pos += 1
         result |= (b & 0x7F) << shift
         if not (b & 0x80):
             break
@@ -22,23 +24,30 @@ def _read_varint(data, pos):
 
 def _read_ld(data, pos):
     length, pos = _read_varint(data, pos)
-    return data[pos: pos + length], pos + length
+    return data[pos : pos + length], pos + length
 
 
 def _fields(data):
-    pos = 0; f = {}
+    pos = 0
+    f = {}
     while pos < len(data):
         try:
             tw, pos = _read_varint(data, pos)
             fn, wt = tw >> 3, tw & 7
             if wt == 0:
-                v, pos = _read_varint(data, pos); f.setdefault(fn, []).append(v)
+                v, pos = _read_varint(data, pos)
+                f.setdefault(fn, []).append(v)
             elif wt == 2:
-                v, pos = _read_ld(data, pos); f.setdefault(fn, []).append(v)
+                v, pos = _read_ld(data, pos)
+                f.setdefault(fn, []).append(v)
             elif wt == 1:
-                v = struct.unpack_from("<Q", data, pos)[0]; pos += 8; f.setdefault(fn, []).append(v)
+                v = struct.unpack_from("<Q", data, pos)[0]
+                pos += 8
+                f.setdefault(fn, []).append(v)
             elif wt == 5:
-                v = struct.unpack_from("<I", data, pos)[0]; pos += 4; f.setdefault(fn, []).append(v)
+                v = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+                f.setdefault(fn, []).append(v)
             else:
                 break
         except Exception:
@@ -52,9 +61,7 @@ def _dec(b):
 
 # ── trip_id parser ─────────────────────────────────────────────────────────────
 
-_TRIP_RE_DEFAULT = re.compile(
-    r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$"
-)
+_TRIP_RE_DEFAULT = re.compile(r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$")
 
 
 def parse_trip_id(trip_id: str, pattern: re.Pattern = _TRIP_RE_DEFAULT) -> dict | None:
@@ -78,6 +85,7 @@ def _ts(date_str: str, pb_name: str) -> str:
 
 
 # ── Protobuf row parser ────────────────────────────────────────────────────────
+
 
 def parse_pb(raw: bytes, captured_at: str, file_name: str, pattern: re.Pattern = _TRIP_RE_DEFAULT) -> list:
     rows = []
@@ -120,8 +128,22 @@ def parse_pb(raw: bytes, captured_at: str, file_name: str, pattern: re.Pattern =
                 dep = _fields(stu[3][0])
                 dep_delay = dep.get(1, [None])[0]
                 dep_time = dep.get(2, [None])[0]
-            rows.append((file_name, captured_at, trip_id, service, sched, route,
-                         stop_seq, stop_id, arr_delay, arr_time, dep_delay, dep_time))
+            rows.append(
+                (
+                    file_name,
+                    captured_at,
+                    trip_id,
+                    service,
+                    sched,
+                    route,
+                    stop_seq,
+                    stop_id,
+                    arr_delay,
+                    arr_time,
+                    dep_delay,
+                    dep_time,
+                )
+            )
     return rows
 
 
@@ -154,9 +176,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
 
     # load agency-specific trip_id pattern, fall back to Aomori default
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT trip_id_pattern FROM agencies WHERE agency_id = %s", (agency_id,)
-        )
+        cur.execute("SELECT trip_id_pattern FROM agencies WHERE agency_id = %s", (agency_id,))
         row = cur.fetchone()
     if row and row[0]:
         pattern = re.compile(row[0])
@@ -188,10 +208,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                         ts = _ts(d, pb_name)
                         raw = tf.extractfile(member).read()
                         rows = parse_pb(raw, ts, f"{d}/{pb_name}", pattern=pattern)
-                        pg_rows = [
-                            (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
-                            for r in rows
-                        ]
+                        pg_rows = [(agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10]) for r in rows]
                         psycopg2.extras.execute_batch(cur, _INSERT_SQL, pg_rows)
                         n_inserted += len(pg_rows)  # counts attempted rows; ON CONFLICT rows are not subtracted
                         done.add(f"{d}/{pb_name}")
@@ -205,7 +222,8 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             conn.commit()
 
         new_pb = [
-            p for p in pb_loose
+            p
+            for p in pb_loose
             if f"{p.parent.name if re.fullmatch(r'\d{8}', p.parent.name) else ''}/{p.name}" not in done
         ]
         if new_pb:
@@ -214,10 +232,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                 d = path.parent.name if re.fullmatch(r"\d{8}", path.parent.name) else ""
                 ts = _ts(d, path.name)
                 rows = parse_pb(path.read_bytes(), ts, f"{d}/{path.name}", pattern=pattern)
-                pg_rows = [
-                    (agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10])
-                    for r in rows
-                ]
+                pg_rows = [(agency_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10]) for r in rows]
                 psycopg2.extras.execute_batch(cur, _INSERT_SQL, pg_rows)
                 n_inserted += len(pg_rows)  # counts attempted rows; ON CONFLICT rows are not subtracted
                 done.add(f"{d}/{path.name}")

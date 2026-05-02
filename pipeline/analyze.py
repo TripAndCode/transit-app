@@ -1,11 +1,17 @@
 import psycopg2.extras
-from pipeline.db import _static_loaded, _DEDUP_INNER
+
+from pipeline.db import _DEDUP_INNER, _static_loaded
 from pipeline.snapshots import write_snapshots
 
-_VALID_AGG_TABLES = frozenset({
-    "agg_route_stats", "agg_route_hour", "agg_route_dow",
-    "agg_daily_trend", "agg_stop_seq",
-})
+_VALID_AGG_TABLES = frozenset(
+    {
+        "agg_route_stats",
+        "agg_route_hour",
+        "agg_route_dow",
+        "agg_daily_trend",
+        "agg_stop_seq",
+    }
+)
 
 
 def _run_query(sql: str, params: dict, conn) -> list:
@@ -22,9 +28,7 @@ def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) ->
     col_list = ", ".join(col_names)
     placeholders = ", ".join(["%s"] * len(col_names))
     conflict_cols = ", ".join(pk_cols)
-    update_set = ", ".join(
-        f"{c}=EXCLUDED.{c}" for c in col_names if c not in pk_cols
-    )
+    update_set = ", ".join(f"{c}=EXCLUDED.{c}" for c in col_names if c not in pk_cols)
     sql = (
         f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
         f"ON CONFLICT ({conflict_cols}) DO UPDATE SET {update_set}"
@@ -64,9 +68,20 @@ def analyze(agency_id: int, conn) -> None:
     _upsert_agg(
         "agg_route_stats",
         ["agency_id", "route_code", "service_type"],
-        ["agency_id", "route_code", "service_type", "avg_min", "p50_min",
-         "p90_min", "late_5min_plus", "on_time_pct", "late5_pct", "samples"],
-        rows, conn,
+        [
+            "agency_id",
+            "route_code",
+            "service_type",
+            "avg_min",
+            "p50_min",
+            "p90_min",
+            "late_5min_plus",
+            "on_time_pct",
+            "late5_pct",
+            "samples",
+        ],
+        rows,
+        conn,
     )
     print(f"  agg_route_stats: {len(rows)} rows")
 
@@ -93,9 +108,9 @@ def analyze(agency_id: int, conn) -> None:
     _upsert_agg(
         "agg_route_hour",
         ["agency_id", "route_code", "service_type", "scheduled_time"],
-        ["agency_id", "route_code", "service_type", "scheduled_time",
-         "avg_min", "p50_min", "p90_min", "samples"],
-        rows, conn,
+        ["agency_id", "route_code", "service_type", "scheduled_time", "avg_min", "p50_min", "p90_min", "samples"],
+        rows,
+        conn,
     )
     print(f"  agg_route_hour: {len(rows)} rows")
 
@@ -124,7 +139,8 @@ def analyze(agency_id: int, conn) -> None:
         "agg_route_dow",
         ["agency_id", "route_code", "service_type", "dow"],
         ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples"],
-        rows, conn,
+        rows,
+        conn,
     )
     print(f"  agg_route_dow: {len(rows)} rows")
 
@@ -145,7 +161,8 @@ def analyze(agency_id: int, conn) -> None:
         "agg_daily_trend",
         ["agency_id", "date", "route_code", "service_type"],
         ["agency_id", "date", "route_code", "service_type", "avg_min", "samples"],
-        rows, conn,
+        rows,
+        conn,
     )
     print(f"  agg_daily_trend: {len(rows)} rows")
 
@@ -193,7 +210,8 @@ def analyze(agency_id: int, conn) -> None:
         "agg_stop_seq",
         ["agency_id", "route_code", "stop_sequence"],
         ["agency_id", "route_code", "stop_sequence", "stop_name", "avg_min", "samples"],
-        rows, conn,
+        rows,
+        conn,
     )
     print(f"  agg_stop_seq: {len(rows)} rows")
     print("Analysis complete.")

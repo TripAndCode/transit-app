@@ -1,6 +1,6 @@
 import re
-import pytest
-from pipeline.ingest import parse_trip_id, _TRIP_RE_DEFAULT
+
+from pipeline.ingest import parse_trip_id
 
 
 def test_parse_trip_id_default_pattern():
@@ -9,9 +9,7 @@ def test_parse_trip_id_default_pattern():
 
 
 def test_parse_trip_id_custom_pattern():
-    custom = re.compile(
-        r"^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$"
-    )
+    custom = re.compile(r"^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$")
     result = parse_trip_id("weekday_8h30_route5", pattern=custom)
     assert result == {"service": "weekday", "hour": "8", "minute": "30", "route": "5"}
 

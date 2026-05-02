@@ -1,28 +1,22 @@
 import csv
 import io
-import zipfile
 import pathlib
-import psycopg2.extras
+import zipfile
+
 from psycopg2.extras import execute_values
 
 _STATIC_FILE_MAP = [
-    ("stops.txt",          "static_stops",
-     ["stop_id", "stop_name", "stop_lat", "stop_lon"]),
-    ("stop_times.txt",     "static_stop_times",
-     ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
-    ("trips.txt",          "static_trips",
-     ["trip_id", "route_id", "trip_headsign", "shape_id"]),
-    ("routes.txt",         "static_routes",
-     ["route_id", "route_short_name"]),
-    ("calendar_dates.txt", "static_calendar_dates",
-     ["service_id", "date", "exception_type"]),
+    ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon"]),
+    ("stop_times.txt", "static_stop_times", ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
+    ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id"]),
+    ("routes.txt", "static_routes", ["route_id", "route_short_name"]),
+    ("calendar_dates.txt", "static_calendar_dates", ["service_id", "date", "exception_type"]),
 ]
 
 _DB_COLS = {
-    "static_stop_times":     ["agency_id", "trip_id", "stop_sequence", "stop_id",
-                               "arrival_time", "departure_time"],
-    "static_trips":          ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id"],
-    "static_routes":         ["agency_id", "route_id", "route_short_name"],
+    "static_stop_times": ["agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
+    "static_trips": ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id"],
+    "static_routes": ["agency_id", "route_id", "route_short_name"],
     "static_calendar_dates": ["agency_id", "service_id", "date", "exception_type"],
 }
 
@@ -45,9 +39,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 print(f"  {filename} not in zip — skipped")
                 continue
 
-            cur.execute(
-                f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,)
-            )
+            cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
 
             with zf.open(filename) as f:
                 reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
@@ -72,13 +64,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
             else:
                 db_cols = _DB_COLS[table]
                 col_list = ", ".join(db_cols)
-                placeholders = ", ".join(["%s"] * len(db_cols))
                 pg_rows = [[agency_id] + row for row in raw_rows]
                 # RETURNING lets us count how many rows actually landed vs were deduped
                 inserted = execute_values(
                     cur,
-                    f"INSERT INTO {table} ({col_list}) VALUES %s "
-                    f"ON CONFLICT DO NOTHING RETURNING 1",
+                    f"INSERT INTO {table} ({col_list}) VALUES %s ON CONFLICT DO NOTHING RETURNING 1",
                     pg_rows,
                     fetch=True,
                 )

@@ -1,4 +1,5 @@
 import logging
+
 from pipeline.query.formatter import format_result
 
 _log = logging.getLogger(__name__)

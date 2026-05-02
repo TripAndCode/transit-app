@@ -1,8 +1,9 @@
-import pytest
+from unittest.mock import AsyncMock, MagicMock
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from unittest.mock import AsyncMock, MagicMock
+
 from api.middleware.auth import APIKeyMiddleware
 
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Thin CLI wrapper for the GTFS pipeline jobs."""
+
 import argparse
 import os
 import sys
+
 import psycopg2
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
@@ -34,8 +36,7 @@ def cmd_add_agency(args):
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agencies (agency_name, feed_url, static_url) "
-            "VALUES (%s, %s, %s) RETURNING agency_id",
+            "INSERT INTO agencies (agency_name, feed_url, static_url) VALUES (%s, %s, %s) RETURNING agency_id",
             (args.name, args.feed_url, args.static_url),
         )
         aid = cur.fetchone()[0]
@@ -46,6 +47,7 @@ def cmd_add_agency(args):
 
 def cmd_ingest(args):
     from pipeline.ingest import ingest
+
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
     ingest(args.folder, agency_id, conn)
@@ -54,6 +56,7 @@ def cmd_ingest(args):
 
 def cmd_load_static(args):
     from pipeline.static_loader import load_static
+
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
     load_static(args.path, agency_id, conn)
@@ -62,6 +65,7 @@ def cmd_load_static(args):
 
 def cmd_analyze(args):
     from pipeline.analyze import analyze
+
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
     analyze(agency_id, conn)
@@ -70,6 +74,7 @@ def cmd_analyze(args):
 
 def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
+
     conn = _get_conn()
     if args.agency_id is not None:
         ingest_live(int(args.agency_id), conn)
@@ -89,6 +94,7 @@ def cmd_ingest_live(args):
 
 def cmd_migrate(args):
     from db.migrate import migrate_down, migrate_up
+
     conn = _get_conn()
     if args.direction == "up":
         migrate_up(conn)
@@ -121,9 +127,7 @@ def main():
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
     p_migrate = sub.add_parser("migrate", help="Apply or roll back schema migrations")
-    p_migrate.add_argument(
-        "direction", choices=["up", "down"], nargs="?", default="up"
-    )
+    p_migrate.add_argument("direction", choices=["up", "down"], nargs="?", default="up")
     p_migrate.add_argument(
         "--target",
         default=None,

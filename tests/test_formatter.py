@@ -1,10 +1,8 @@
 import pytest
+
 from pipeline.query.formatter import (
-    format_result,
-    _fmt_ranking,
-    _no_data,
     _fix,
-    _FIX_RE,
+    format_result,
 )
 
 
@@ -74,21 +72,23 @@ def test_fmt_route_info_empty_rows():
 
 def test_format_guidance_menu_empty_rows_no_blank():
     # Verify empty ranking yields "(データなし)" not blank line
-    from pipeline.query.formatter import format_guidance_menu
     # We can test the output string by checking the rendered text without a DB
     # by inspecting the constant structure
     import asyncio
+
+    from pipeline.query.formatter import format_guidance_menu
 
     async def _run():
         class FakeConn:
             async def fetch(self, sql, *args):
                 return []
+
         return await format_guidance_menu(FakeConn(), 1)
 
     result = asyncio.run(_run())
     assert "データなし" in result
     # The LLM context menu should not have an empty line between header and menu
     lines = result.split("\n")
-    header_idx = next(i for i, l in enumerate(lines) if "遅延ランキング上位10系統" in l)
+    header_idx = next(i for i, line in enumerate(lines) if "遅延ランキング上位10系統" in line)
     # Line immediately after header should not be empty
     assert lines[header_idx + 1].strip() != ""

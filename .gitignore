@@ -6,7 +6,9 @@ dist/
 build/
 chroma_db/
 gtfs.db
+raw_archives/
+raw_archives_static/
 .env
 .claude/
-docs/superpowers/
+docs/
 .worktrees/

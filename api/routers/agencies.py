@@ -21,9 +21,7 @@ class AgencyOut(BaseModel):
 
 @router.get("", response_model=list[AgencyOut])
 async def list_agencies(conn=Depends(get_conn)):
-    rows = await conn.fetch(
-        "SELECT agency_id, agency_name, feed_url, static_url FROM agencies ORDER BY agency_id"
-    )
+    rows = await conn.fetch("SELECT agency_id, agency_name, feed_url, static_url FROM agencies ORDER BY agency_id")
     return [dict(r) for r in rows]
 
 
@@ -43,6 +41,8 @@ async def create_agency(body: AgencyCreate, conn=Depends(get_conn)):
     row = await conn.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url, static_url) VALUES ($1, $2, $3) "
         "RETURNING agency_id, agency_name, feed_url, static_url",
-        body.agency_name, body.feed_url, body.static_url,
+        body.agency_name,
+        body.feed_url,
+        body.static_url,
     )
     return dict(row)

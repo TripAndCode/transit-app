@@ -10,14 +10,14 @@ from pipeline.query.executor import execute
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
 _REPORT_INTENTS: dict[str, dict] = {
-    "ranking":         {"query_type": "ranking",         "limit": 100},
-    "ranking_best":    {"query_type": "ranking",         "limit": 100, "sort_order": "asc"},
-    "on_time":         {"query_type": "on_time",         "limit": 100},
-    "worst_5min":      {"query_type": "worst_5min",      "limit": 100},
-    "trend":           {"query_type": "trend"},
+    "ranking": {"query_type": "ranking", "limit": 100},
+    "ranking_best": {"query_type": "ranking", "limit": 100, "sort_order": "asc"},
+    "on_time": {"query_type": "on_time", "limit": 100},
+    "worst_5min": {"query_type": "worst_5min", "limit": 100},
+    "trend": {"query_type": "trend"},
     "compare_ranking": {"query_type": "compare_ranking", "limit": 100},
-    "dow_weekend":     {"query_type": "dow_ranking",     "dow_group": "weekend", "limit": 100},
-    "dow_weekday":     {"query_type": "dow_ranking",     "dow_group": "weekday", "limit": 100},
+    "dow_weekend": {"query_type": "dow_ranking", "dow_group": "weekend", "limit": 100},
+    "dow_weekday": {"query_type": "dow_ranking", "dow_group": "weekday", "limit": 100},
 }
 
 
@@ -41,8 +41,7 @@ async def list_reports(
     conn=Depends(get_conn),
 ):
     rows = await conn.fetch(
-        "SELECT report_type, rendered_at FROM snapshots "
-        "WHERE agency_id=$1 ORDER BY report_type",
+        "SELECT report_type, rendered_at FROM snapshots WHERE agency_id=$1 ORDER BY report_type",
         agency_id,
     )
     return [{"report_type": r["report_type"], "rendered_at": r["rendered_at"]} for r in rows]
@@ -58,9 +57,9 @@ async def get_report(
     conn=Depends(get_conn),
 ):
     snap = await conn.fetchrow(
-        "SELECT report_type, rendered_at, text FROM snapshots "
-        "WHERE agency_id=$1 AND report_type=$2",
-        agency_id, report_type,
+        "SELECT report_type, rendered_at, text FROM snapshots WHERE agency_id=$1 AND report_type=$2",
+        agency_id,
+        report_type,
     )
     if not snap:
         raise HTTPException(

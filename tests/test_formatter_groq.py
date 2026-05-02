@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import MagicMock, patch
-from pipeline.query.formatter import format_unknown, _reset_groq_client
+
+import pytest
+
+from pipeline.query.formatter import _reset_groq_client, format_unknown
 
 
 @pytest.fixture(autouse=True)

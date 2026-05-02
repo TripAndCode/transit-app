@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from api.deps import get_conn, get_agency
-from api.middleware.ratelimit import limiter, FREE_LIMIT, PRO_LIMIT
+from api.deps import get_agency, get_conn
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from pipeline.query.executor import execute
 from pipeline.query.formatter import format_result
 

@@ -1,7 +1,7 @@
 # tests/test_static_loader.py
 import io
 import zipfile
-import pytest
+
 from pipeline.static_loader import load_static
 
 
@@ -84,8 +84,10 @@ def test_load_static_agency_isolated(pg_conn, tmp_path):
         aid_b = cur.fetchone()[0]
     pg_conn.commit()
 
-    dir_a = tmp_path / "a"; dir_a.mkdir()
-    dir_b = tmp_path / "b"; dir_b.mkdir()
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
     zip_a = _make_zip(dir_a, stops_rows=["S1,駅A,40.0,140.0"])
     zip_b = _make_zip(dir_b, stops_rows=["S1,駅B,41.0,141.0"])
 

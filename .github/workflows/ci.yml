@@ -39,9 +39,9 @@ jobs:
         run: poetry install
 
       - name: Apply schema
-        run: psql postgresql://transit:transit@localhost:5433/transit -f db/schema.sql
+        run: poetry run python gtfs_pipeline.py migrate up
         env:
-          PGPASSWORD: transit
+          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
 
       - name: Lint and format check
         run: |

@@ -11,9 +11,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             request.state.tier = "free"
             return await call_next(request)
         pool: asyncpg.Pool = request.app.state.pool
-        row = await pool.fetchrow(
-            "SELECT tier FROM api_keys WHERE key = $1", key
-        )
+        row = await pool.fetchrow("SELECT tier FROM api_keys WHERE key = $1", key)
         if row is None:
             return JSONResponse({"detail": "Invalid API key"}, status_code=401)
         request.state.tier = row["tier"]
