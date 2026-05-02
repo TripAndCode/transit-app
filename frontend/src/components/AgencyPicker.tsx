@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useNavigate, useParams, useMatch } from "react-router-dom";
 import { useAgencies } from "../api/hooks";
 
 export function AgencyPicker() {
   const { data: agencies, isLoading } = useAgencies();
   const { agencyId } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
+  const tabMatch = useMatch("/agencies/:agencyId/:tab/*");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -54,8 +54,7 @@ export function AgencyPicker() {
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    // preserve current tab path; default to map
-    const tab = location.pathname.match(/\/agencies\/\d+\/([^/]+)/)?.[1] ?? "map";
+    const tab = tabMatch?.params.tab ?? "map";
     navigate(`/agencies/${id}/${tab}`);
   }
 
