@@ -35,7 +35,7 @@ export function useReport(
   reportType: string | null,
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["report", agencyId, reportType],
+    queryKey: ["reports", agencyId, reportType],
     queryFn: () =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}`),
     enabled: agencyId != null && !!reportType,
@@ -65,16 +65,21 @@ export function useLiveDelays(
 
 export function useAsk(agencyId: number | null) {
   return useMutation({
-    mutationFn: (question: string) =>
-      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question }),
+    mutationFn: (question: string) => {
+      if (agencyId == null) {
+        return Promise.reject(new Error("事業者が選択されていません"));
+      }
+      return apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
+    },
   });
 }
+
+export type CreateAgencyBody = Omit<Agency, "agency_id">;
 
 export function useCreateAgency() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { agency_name: string; feed_url: string; static_url?: string | null }) =>
-      apiPost<Agency>("/agencies", body),
+    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/agencies", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agencies"] });
     },
