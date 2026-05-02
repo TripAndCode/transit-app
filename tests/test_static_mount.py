@@ -4,11 +4,11 @@ from fastapi.testclient import TestClient
 from api.main import app
 
 
-# Override the session-scoped autouse fixture from conftest.py so this module
-# does not attempt a real PostgreSQL connection (Docker is not running locally).
+# Override conftest's session-scoped autouse `apply_schema` for this module only.
+# conftest.apply_schema does psycopg2.connect(DATABASE_URL); these tests don't
+# touch the DB, so we skip it (avoids needing the Postgres container running).
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
-    """No-op override: static mount tests don't need a database."""
     return
 
 
@@ -28,7 +28,14 @@ def client(monkeypatch, tmp_path):
     from api.main import _maybe_mount_static
     _maybe_mount_static(app)
 
-    return TestClient(app)
+    yield TestClient(app)
+
+    # Teardown: strip the SPA routes so other test modules start with a clean app.
+    # monkeypatch restores STATIC_DIR but not the mutated app.routes list.
+    app.routes[:] = [
+        r for r in app.routes
+        if getattr(r, "name", None) not in ("spa_fallback", "assets")
+    ]
 
 
 def test_root_returns_spa_index(client):
