@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 import type { StyleSpecification } from "maplibre-gl";
 
 const OSM_RASTER: StyleSpecification = {
