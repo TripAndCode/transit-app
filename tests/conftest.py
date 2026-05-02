@@ -24,7 +24,7 @@ def pg_conn(apply_schema):
                 TRUNCATE agencies, updates, static_stops, static_stop_times,
                 static_trips, static_routes, static_calendar_dates,
                 agg_route_stats, agg_route_hour, agg_route_dow,
-                agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
+                agg_daily_trend, agg_stop_seq, rag_chunks, api_keys, snapshots CASCADE
             """)
         conn.commit()
     finally:
@@ -54,7 +54,7 @@ async def aconn(apply_schema):
             TRUNCATE agencies, updates, static_stops, static_stop_times,
             static_trips, static_routes, static_calendar_dates,
             agg_route_stats, agg_route_hour, agg_route_dow,
-            agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
+            agg_daily_trend, agg_stop_seq, rag_chunks, api_keys, snapshots CASCADE
         """)
     except Exception:
         pass

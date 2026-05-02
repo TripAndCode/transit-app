@@ -7,7 +7,7 @@ EXPECTED_TABLES = [
     "static_routes", "static_calendar_dates",
     "agg_route_stats", "agg_route_hour", "agg_route_dow",
     "agg_daily_trend", "agg_stop_seq",
-    "rag_chunks", "api_keys",
+    "rag_chunks", "api_keys", "snapshots",
 ]
 
 
@@ -69,3 +69,15 @@ def test_api_keys_columns(pg_conn):
         """)
         cols = {r[0] for r in cur.fetchall()}
     assert {"key", "owner_email", "tier", "created_at"} <= cols
+
+
+def test_snapshots_table_exists(pg_conn):
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'snapshots'
+            ORDER BY column_name
+        """)
+        cols = {r[0] for r in cur.fetchall()}
+    assert {"agency_id", "report_type", "rendered_at", "text"} <= cols, \
+        f"snapshots columns missing, found: {cols}"
