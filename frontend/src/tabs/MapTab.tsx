@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap } from "../api/hooks";
+import type { HeatmapProps } from "../api/types";
 import { getMapStyle } from "../styles/mapStyle";
 import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
@@ -18,8 +19,10 @@ export function MapTab() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
+  const popupRef = useRef<Popup | null>(null);
+  const styleLoadedRef = useRef(false);
 
-  // init map once
+  // init map once; register layer handlers once after style load
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const m = new maplibregl.Map({
@@ -29,27 +32,59 @@ export function MapTab() {
       zoom: 11,
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+
+    const onClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      const p = f.properties as HeatmapProps;
+      popupRef.current?.remove();
+      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div style="font: 13px sans-serif">
+             <strong>${escapeHtml(p.stop_name)}</strong><br/>
+             平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
+             サンプル: ${p.samples}件
+           </div>`,
+        )
+        .addTo(m);
+    };
+    const onEnter = () => { m.getCanvas().style.cursor = "pointer"; };
+    const onLeave = () => { m.getCanvas().style.cursor = ""; };
+
+    m.on("load", () => { styleLoadedRef.current = true; });
+    m.on("click", LAYER, onClick);
+    m.on("mouseenter", LAYER, onEnter);
+    m.on("mouseleave", LAYER, onLeave);
+
     mapRef.current = m;
     return () => {
+      popupRef.current?.remove();
+      popupRef.current = null;
+      m.off("click", LAYER, onClick);
+      m.off("mouseenter", LAYER, onEnter);
+      m.off("mouseleave", LAYER, onLeave);
       m.remove();
       mapRef.current = null;
+      styleLoadedRef.current = false;
     };
   }, []);
 
-  // sync data
+  // sync data into source/layer
   useEffect(() => {
     const m = mapRef.current;
     if (!m || !data) return;
     const snapshot = data;
 
-    function updateData() {
+    function applyData() {
       if (!m) return;
+      popupRef.current?.remove();
+      popupRef.current = null;
+
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
-      m.addSource(SOURCE, {
-        type: "geojson",
-        data: snapshot as GeoJSON.FeatureCollection<GeoJSON.Point>,
-      });
+
+      m.addSource(SOURCE, { type: "geojson", data: snapshot });
       m.addLayer({
         id: LAYER,
         type: "circle",
@@ -75,39 +110,22 @@ export function MapTab() {
           "circle-stroke-color": "#fff",
         },
       });
-      // popup on click
-      m.on("click", LAYER, (e) => {
-        const f = e.features?.[0];
-        if (!f) return;
-        const p = f.properties as { stop_name: string; avg_delay_min: number; samples: number };
-        new Popup({ closeButton: true, closeOnClick: true })
-          .setLngLat(e.lngLat)
-          .setHTML(
-            `<div style="font: 13px sans-serif">
-               <strong>${escapeHtml(p.stop_name)}</strong><br/>
-               平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
-               サンプル: ${p.samples}件
-             </div>`
-          )
-          .addTo(m);
-      });
-      m.on("mouseenter", LAYER, () => { m.getCanvas().style.cursor = "pointer"; });
-      m.on("mouseleave", LAYER, () => { m.getCanvas().style.cursor = ""; });
 
-      // fit bounds if features present
       if (snapshot.features.length > 0) {
-        const lons = snapshot.features.map((f) => f.geometry.coordinates[0]);
-        const lats = snapshot.features.map((f) => f.geometry.coordinates[1]);
-        const bounds: [[number, number], [number, number]] = [
-          [Math.min(...lons), Math.min(...lats)],
-          [Math.max(...lons), Math.max(...lats)],
-        ];
-        m.fitBounds(bounds, { padding: 40, duration: 600 });
+        let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+        for (const f of snapshot.features) {
+          const [lon, lat] = f.geometry.coordinates;
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+        m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
       }
     }
 
-    if (m.isStyleLoaded()) updateData();
-    else m.once("load", updateData);
+    if (styleLoadedRef.current) applyData();
+    else m.once("load", applyData);
   }, [data]);
 
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
