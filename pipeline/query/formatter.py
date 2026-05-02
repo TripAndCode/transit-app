@@ -361,6 +361,19 @@ async def format_unknown(
     question: str, conn=None, agency_id: int = 0, model: str = "llama-3.3-70b-versatile"
 ) -> str:
     context = await format_guidance_menu(conn, agency_id) if conn is not None else ""
+
+    if conn is not None:
+        for rtype in ("trend", "compare_ranking"):
+            try:
+                row = await conn.fetchrow(
+                    "SELECT text FROM snapshots WHERE agency_id=$1 AND report_type=$2",
+                    agency_id, rtype,
+                )
+                if row and row["text"]:
+                    context += "\n\n" + row["text"]
+            except Exception:
+                pass
+
     prompt = _PROMPT.format(context=context, question=question) if context else question
 
     client = _get_groq_client()
