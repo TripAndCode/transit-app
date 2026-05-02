@@ -1,5 +1,4 @@
 import os
-import pathlib
 import psycopg2
 import pytest
 
@@ -8,11 +7,9 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
+    from db.migrate import migrate_up
     conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = True
-    sql = (pathlib.Path(__file__).parent.parent / "db" / "schema.sql").read_text()
-    with conn.cursor() as cur:
-        cur.execute(sql)
+    migrate_up(conn)
     conn.close()
 
 
