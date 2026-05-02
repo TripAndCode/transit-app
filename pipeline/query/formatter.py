@@ -336,7 +336,7 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
 
 
 async def format_unknown(
-    question: str, conn=None, agency_id: int = 0, model: str = "llama-3.2-11b-text-preview"
+    question: str, conn=None, agency_id: int = 0, model: str = "llama-3.3-70b-versatile"
 ) -> str:
     context = await format_guidance_menu(conn, agency_id) if conn is not None else ""
     prompt = _PROMPT.format(context=context, question=question) if context else question

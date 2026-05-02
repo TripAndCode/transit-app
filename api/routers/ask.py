@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
 
 class AskRequest(BaseModel):
     question: str
-    model: str = "llama-3.2-11b-text-preview"
+    model: str = "llama-3.3-70b-versatile"
 
 
 class AskResponse(BaseModel):

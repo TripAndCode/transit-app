@@ -243,7 +243,7 @@ def validate_intent(raw: dict) -> dict:
     return intent
 
 
-async def classify_intent(question: str, model: str = "llama-3.2-11b-text-preview") -> dict:
+async def classify_intent(question: str, model: str = "llama-3.3-70b-versatile") -> dict:
     """Send question to Groq LLM and return validated intent dict."""
     client = _get_groq_client()
 
