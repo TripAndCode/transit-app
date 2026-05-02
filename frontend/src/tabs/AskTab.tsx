@@ -23,17 +23,28 @@ export function AskTab() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [msgs, ask.isPending]);
 
+  async function ask_(question: string) {
+    if (ask.isPending) return;
+    try {
+      const r = await ask.mutateAsync(question);
+      setMsgs((m) => [...m, { role: "assistant", text: r.answer, intent: r.intent }]);
+    } catch {
+      // error renders via ask.error below
+    }
+  }
+
   async function submit(question: string) {
     const trimmed = question.trim();
     if (!trimmed || ask.isPending) return;
     setMsgs((m) => [...m, { role: "user", text: trimmed }]);
     setInput("");
-    try {
-      const r = await ask.mutateAsync(trimmed);
-      setMsgs((m) => [...m, { role: "assistant", text: r.answer, intent: r.intent }]);
-    } catch {
-      // error renders via ask.error below
-    }
+    await ask_(trimmed);
+  }
+
+  async function retry() {
+    const last = [...msgs].reverse().find((m) => m.role === "user");
+    if (!last) return;
+    await ask_(last.text);
   }
 
   return (
@@ -48,14 +59,11 @@ export function AskTab() {
           <Bubble key={i} msg={m} />
         ))}
         {ask.isPending && (
-          <div style={{ padding: 12, color: "var(--text-tertiary)" }}>考え中...</div>
+          <div role="status" aria-live="polite" style={{ padding: 12, color: "var(--text-tertiary)" }}>
+            考え中...
+          </div>
         )}
-        {ask.error && (
-          <ErrorBanner error={ask.error} onRetry={() => {
-            const last = [...msgs].reverse().find((m) => m.role === "user");
-            if (last) submit(last.text);
-          }} />
-        )}
+        {ask.error && <ErrorBanner error={ask.error} onRetry={retry} />}
       </div>
       <div style={{ borderTop: "1px solid var(--border-soft)", padding: "12px 0", marginTop: 12 }}>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
@@ -85,6 +93,7 @@ export function AskTab() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            aria-label="質問を入力"
             placeholder="例: 系統5の今月の遅延傾向は?"
             style={{ flex: 1 }}
             disabled={ask.isPending}
