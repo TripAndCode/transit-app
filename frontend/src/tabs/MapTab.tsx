@@ -46,8 +46,10 @@ export function MapTab() {
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      m.addSource(SOURCE, { type: "geojson", data: snapshot as any });
+      m.addSource(SOURCE, {
+        type: "geojson",
+        data: snapshot as GeoJSON.FeatureCollection<GeoJSON.Point>,
+      });
       m.addLayer({
         id: LAYER,
         type: "circle",
