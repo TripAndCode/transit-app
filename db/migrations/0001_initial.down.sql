@@ -1,0 +1,15 @@
+DROP TABLE IF EXISTS rag_chunks;
+DROP TABLE IF EXISTS agg_stop_seq;
+DROP TABLE IF EXISTS agg_daily_trend;
+DROP TABLE IF EXISTS agg_route_dow;
+DROP TABLE IF EXISTS agg_route_hour;
+DROP TABLE IF EXISTS agg_route_stats;
+DROP TABLE IF EXISTS static_calendar_dates;
+DROP TABLE IF EXISTS static_routes;
+DROP TABLE IF EXISTS static_trips;
+DROP TABLE IF EXISTS static_stop_times;
+DROP TABLE IF EXISTS static_stops;
+DROP TABLE IF EXISTS updates;
+DROP TABLE IF EXISTS agencies;
+DROP EXTENSION IF EXISTS vector;
+DROP EXTENSION IF EXISTS postgis;
