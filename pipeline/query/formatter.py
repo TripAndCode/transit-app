@@ -309,24 +309,32 @@ def format_result(query_type: str, rows, intent: dict) -> str:
 
 
 async def format_guidance_menu(conn, agency_id: int) -> str:
+    ranking = "（データなし）"
     try:
-        rows = await conn.fetch(
-            "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
-            "FROM agg_route_stats WHERE agency_id=$1 ORDER BY avg_min DESC LIMIT 10",
+        snap = await conn.fetchrow(
+            "SELECT text FROM snapshots WHERE agency_id=$1 AND report_type='ranking'",
             agency_id,
         )
-        rows = [tuple(r) for r in rows]
+        if snap:
+            lines = snap["text"].split("\n")
+            data_lines = [l for l in lines[1:] if l.strip()][:10]
+            if data_lines:
+                ranking = "\n".join(data_lines)
+        else:
+            rows = await conn.fetch(
+                "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
+                "FROM agg_route_stats WHERE agency_id=$1 ORDER BY avg_min DESC LIMIT 10",
+                agency_id,
+            )
+            rows = [tuple(r) for r in rows]
+            if rows:
+                ranking = "\n".join(
+                    f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、"
+                    f"p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
+                    for i, r in enumerate(rows, 1)
+                )
     except Exception as exc:
         _log.warning("format_guidance_menu DB error: %s", exc)
-        rows = []
-
-    ranking = (
-        "\n".join(
-            f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
-            for i, r in enumerate(rows, 1)
-        )
-        if rows else "（データなし）"
-    )
 
     return (
         f"【遅延ランキング上位10系統】\n{ranking}\n\n"
