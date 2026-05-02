@@ -13,6 +13,7 @@ from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.map import router as map_router
 from api.routers.query import router as query_router
+from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.routers.ws import router as ws_router
 
@@ -49,6 +50,7 @@ app.add_middleware(
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(query_router)
+app.include_router(reports_router)
 app.include_router(ws_router)
 app.include_router(map_router)
 app.include_router(static_router)
