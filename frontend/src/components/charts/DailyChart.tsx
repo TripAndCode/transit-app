@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { delayColor } from "../../styles/tokens";
 import type { TrendDay } from "../../api/types";
 
@@ -6,6 +6,12 @@ type Props = { days: TrendDay[]; height?: number };
 
 export function DailyChart({ days, height = 240 }: Props) {
   const [hover, setHover] = useState<number | null>(null);
+
+  // If the data shrinks (filter narrowed), drop a stale hover index so the
+  // tooltip doesn't dereference out-of-bounds.
+  useEffect(() => {
+    if (hover != null && hover >= days.length) setHover(null);
+  }, [days.length, hover]);
   const W = 760;
   const H = height;
   const padL = 44;
@@ -117,7 +123,7 @@ export function DailyChart({ days, height = 240 }: Props) {
           );
         })}
       </svg>
-      {hover != null && (
+      {hover != null && hover < days.length && (
         <div
           style={{
             position: "absolute",

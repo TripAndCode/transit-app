@@ -15,7 +15,6 @@ import type {
   ReportResponse,
   Route,
   RouteSummaryResponse,
-  TrendResponse,
 } from "./types";
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
@@ -68,16 +67,6 @@ export function useHeatmap(
       apiGet<HeatmapCollection>(
         `/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`,
       ),
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useTrend(agencyId: number | null, ctx: RangeCtx): UseQueryResult<TrendResponse> {
-  return useQuery({
-    queryKey: ["trend", agencyId, ctx.from, ctx.to, ctx.dow, ctx.time_band],
-    queryFn: () =>
-      apiGet<TrendResponse>(`/api/${agencyId}/trend?${ctxToQueryString(ctx)}`),
     enabled: agencyId != null,
     staleTime: 60 * 1000,
   });

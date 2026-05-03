@@ -41,12 +41,19 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json")
 
 
+async def _init_connection(conn: asyncpg.Connection) -> None:
+    """Per-connection setup. Pin the session to Asia/Tokyo so ``captured_at::date``
+    casts honor the operator's local calendar instead of UTC (Aomori observations
+    span midnight JST and would otherwise straddle two UTC dates)."""
+    await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit."""
     if not os.environ.get("GROQ_API_KEY"):
         raise RuntimeError("GROQ_API_KEY env var is required")
-    app.state.pool = await asyncpg.create_pool(DATABASE_URL)
+    app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection)
     yield
     await app.state.pool.close()
 
