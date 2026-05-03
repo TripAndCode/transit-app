@@ -28,6 +28,7 @@ TimeBand = Literal[
     "night",
     "late_night",
 ]
+ServiceType = Literal["all", "平日", "土日祝"]
 
 # (start_inclusive, end_exclusive) clock times as 'HH:MM' strings; compared
 # textually against scheduled_time, which is also 'HH:MM:SS' text. Lexicographic
@@ -54,6 +55,8 @@ class RangeCtx:
     to_date: date
     dow: DowFilter = "all"
     time_band: TimeBand = "all"
+    service: ServiceType = "all"
+    routes: tuple[str, ...] = ()
 
     @property
     def days(self) -> int:
@@ -65,6 +68,8 @@ def get_range_ctx(
     to: str | None = Query(default=None),
     dow: DowFilter = Query(default="all"),
     time_band: TimeBand = Query(default="all"),
+    service: ServiceType = Query(default="all"),
+    routes: str | None = Query(default=None, description="Comma-separated route_codes"),
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
@@ -81,7 +86,18 @@ def get_range_ctx(
     if (to_date - from_date).days >= MAX_RANGE_DAYS:
         from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
 
-    return RangeCtx(from_date=from_date, to_date=to_date, dow=dow, time_band=time_band)
+    route_tuple: tuple[str, ...] = ()
+    if routes:
+        route_tuple = tuple(r.strip() for r in routes.split(",") if r.strip())
+
+    return RangeCtx(
+        from_date=from_date,
+        to_date=to_date,
+        dow=dow,
+        time_band=time_band,
+        service=service,
+        routes=route_tuple,
+    )
 
 
 def _parse_date(s: str | None) -> date | None:
@@ -144,8 +160,8 @@ def time_band_clause(
 def build_updates_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     """Combined WHERE fragment for the ``updates`` table.
 
-    Applies date range + DOW filter on ``captured_at`` and time-band filter on
-    ``scheduled_time``. Returns a single AND-joined fragment.
+    Applies date range + DOW + time-band + service + routes filters. Returns
+    a single AND-joined fragment plus the asyncpg-style parameter list.
     """
     parts: list[str] = []
     params: list = []
@@ -164,6 +180,17 @@ def build_updates_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int
     if frag != "TRUE":
         parts.append(frag)
         params.extend(p)
+
+    if ctx.service != "all":
+        parts.append(f"service_type = ${n}")
+        params.append(ctx.service)
+        n += 1
+
+    if ctx.routes:
+        # ANY array — efficient with the existing index on route_code
+        parts.append(f"route_code = ANY(${n}::text[])")
+        params.append(list(ctx.routes))
+        n += 1
 
     return " AND ".join(parts), params, n
 

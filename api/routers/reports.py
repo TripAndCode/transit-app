@@ -50,6 +50,8 @@ class ReportCtx(BaseModel):
     to: str
     dow: str
     time_band: str
+    service: str = "all"
+    routes: list[str] = []
 
 
 class ReportResponse(BaseModel):
@@ -66,6 +68,8 @@ def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
         to=ctx.to_date.isoformat(),
         dow=ctx.dow,
         time_band=ctx.time_band,
+        service=ctx.service,
+        routes=list(ctx.routes),
     )
 
 
