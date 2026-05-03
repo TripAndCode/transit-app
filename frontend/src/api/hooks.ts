@@ -13,8 +13,18 @@ import type {
   LiveResponse,
   ReportMeta,
   ReportResponse,
+  Route,
   TrendResponse,
 } from "./types";
+
+export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
+  return useQuery({
+    queryKey: ["routes", agencyId],
+    queryFn: () => apiGet<Route[]>(`/api/${agencyId}/routes`),
+    enabled: agencyId != null,
+    staleTime: 60 * 60 * 1000, // 1 hour: static data
+  });
+}
 
 export function useAgencies(): UseQueryResult<Agency[]> {
   return useQuery({
