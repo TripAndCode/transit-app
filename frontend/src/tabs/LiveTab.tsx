@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useLiveDelays } from "../api/hooks";
 import type { LiveDelay } from "../api/types";
 import { delayColor } from "../styles/tokens";
+import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
@@ -88,7 +89,7 @@ export function LiveTab() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.trip_id} style={{ borderTop: "1px solid var(--border-soft)" }}>
+              <tr key={`${r.trip_id}|${r.captured_at}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
                 <td style={td}>{r.route_code ?? "—"}</td>
                 <td style={td}>{r.service_type ?? "—"}</td>
                 <td style={td}>{r.scheduled_time ?? "—"}</td>
@@ -144,12 +145,4 @@ function formatDelay(seconds: number): string {
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function relativeTime(iso: string): string {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (!isFinite(diff) || diff < 0) return "—";
-  if (diff < 60) return `${Math.floor(diff)}秒前`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
-  return `${Math.floor(diff / 3600)}時間前`;
 }

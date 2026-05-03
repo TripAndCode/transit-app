@@ -70,10 +70,21 @@ export function AgencyForm({ onClose }: Props) {
           />
         </Field>
         <Field label="GTFS-RT Feed URL">
-          <input value={feed} onChange={(e) => setFeed(e.target.value)} required style={{ width: "100%" }} />
+          <input
+            type="url"
+            value={feed}
+            onChange={(e) => setFeed(e.target.value)}
+            required
+            style={{ width: "100%" }}
+          />
         </Field>
         <Field label="GTFS Static URL (任意)">
-          <input value={staticUrl} onChange={(e) => setStaticUrl(e.target.value)} style={{ width: "100%" }} />
+          <input
+            type="url"
+            value={staticUrl}
+            onChange={(e) => setStaticUrl(e.target.value)}
+            style={{ width: "100%" }}
+          />
         </Field>
         {create.error && (
           <div style={{ color: "var(--error-fg)", fontSize: 13, marginTop: 8 }}>
