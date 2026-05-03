@@ -51,6 +51,69 @@ async def live_delays(
     }
 
 
+@router.get("/today/route-summary")
+async def today_route_summary(
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Per-route operational summary for the most recent observation date.
+
+    Powers the 最新観測 tab. Each row is one route_code with:
+    - avg_delay_sec, worst_delay_sec, trips_observed, last_seen_at, service_type
+    Sorted by worst delay descending so problem routes float to the top.
+    """
+    latest = await conn.fetchrow(
+        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
+        agency_id,
+    )
+    latest_ts = latest["ts"] if latest else None
+    if latest_ts is None:
+        return {"latest_captured_at": None, "date": None, "routes": []}
+
+    rows = await conn.fetch(
+        """
+        WITH dedup AS (
+            SELECT DISTINCT ON (trip_id, stop_sequence)
+                trip_id, route_code, service_type, dep_delay, captured_at
+            FROM updates
+            WHERE agency_id=$1
+              AND dep_delay IS NOT NULL
+              AND captured_at::date = $2::date
+            ORDER BY trip_id, stop_sequence, captured_at DESC
+        )
+        SELECT
+            route_code,
+            service_type,
+            ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
+            MAX(dep_delay) AS worst_delay_sec,
+            COUNT(DISTINCT trip_id) AS trips_observed,
+            COUNT(*) AS samples,
+            MAX(captured_at) AS last_seen_at
+        FROM dedup
+        GROUP BY route_code, service_type
+        ORDER BY worst_delay_sec DESC NULLS LAST
+        """,
+        agency_id,
+        latest_ts,
+    )
+    return {
+        "latest_captured_at": latest_ts.isoformat(),
+        "date": latest_ts.date().isoformat(),
+        "routes": [
+            {
+                "route_code": r["route_code"],
+                "service_type": r["service_type"],
+                "avg_delay_sec": r["avg_delay_sec"],
+                "worst_delay_sec": r["worst_delay_sec"],
+                "trips_observed": r["trips_observed"],
+                "samples": r["samples"],
+                "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/delays/heatmap")
 async def delay_heatmap(
     agency_id: int = Depends(get_agency),

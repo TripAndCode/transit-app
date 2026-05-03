@@ -1,56 +1,69 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useLiveDelays } from "../api/hooks";
-import type { LiveDelay } from "../api/types";
+import { useTodayRouteSummary } from "../api/hooks";
+import { useRouteNames } from "../api/useRouteNames";
+import type { RouteSummary } from "../api/types";
 import { delayColor } from "../styles/tokens";
 import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 
-type SortKey = keyof Pick<LiveDelay, "route_code" | "service_type" | "scheduled_time" | "dep_delay" | "captured_at">;
+type SortKey = "worst" | "avg" | "trips" | "name";
 
 export function LiveTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const { data, isLoading, error, refetch, dataUpdatedAt, isFetching } =
-    useLiveDelays(id, { autoRefresh });
-  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
-    key: "dep_delay",
-    dir: "desc",
+  const { data, isLoading, error, refetch, dataUpdatedAt, isFetching } = useTodayRouteSummary(id, {
+    autoRefresh,
   });
+  const routeNames = useRouteNames(id);
+  const [sort, setSort] = useState<SortKey>("worst");
+  const [filter, setFilter] = useState("");
 
-  const rawRows = data?.rows ?? [];
-  const latestCapturedAt = data?.latest_captured_at ?? null;
-  const rows = useMemo(() => {
-    if (!rawRows.length) return [];
-    const sorted = [...rawRows].sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (av < bv) return sort.dir === "asc" ? -1 : 1;
-      if (av > bv) return sort.dir === "asc" ? 1 : -1;
-      return 0;
+  const cards = useMemo<RouteSummary[]>(() => {
+    if (!data?.routes) return [];
+    const filtered = filter.trim()
+      ? data.routes.filter((r) => {
+          const name = routeNames.format(r.route_code).toLowerCase();
+          const q = filter.trim().toLowerCase();
+          return name.includes(q) || r.route_code.includes(q);
+        })
+      : data.routes;
+    const sorted = [...filtered].sort((a, b) => {
+      if (sort === "worst") return b.worst_delay_sec - a.worst_delay_sec;
+      if (sort === "avg") return b.avg_delay_sec - a.avg_delay_sec;
+      if (sort === "trips") return b.trips_observed - a.trips_observed;
+      return routeNames.format(a.route_code).localeCompare(routeNames.format(b.route_code));
     });
     return sorted;
-  }, [rawRows, sort]);
+  }, [data, filter, sort, routeNames]);
 
-  function toggleSort(key: SortKey) {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
-  }
+  const latest = data?.latest_captured_at;
+  const stale = latest ? Date.now() - new Date(latest).getTime() > 60 * 60 * 1000 : false;
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-secondary)" }}>
-          <input
-            type="checkbox"
-            checked={autoRefresh}
-            onChange={(e) => setAutoRefresh(e.target.checked)}
-          />
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>
+          最新観測 {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
+        </h2>
+        {latest && (
+          <span
+            style={{
+              fontSize: 12,
+              padding: "2px 10px",
+              borderRadius: 999,
+              background: stale ? "var(--error-bg)" : "var(--accent-soft)",
+              color: stale ? "var(--error-fg)" : "var(--accent)",
+            }}
+          >
+            最終観測: {relativeTime(latest)}
+          </span>
+        )}
+        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-secondary)", marginLeft: "auto" }}>
+          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
           自動更新 (30秒)
         </label>
         <button
@@ -61,86 +74,120 @@ export function LiveTab() {
             border: "1px solid var(--border-subtle)",
             padding: "4px 12px",
             borderRadius: 4,
+            fontSize: 13,
           }}
         >
           手動更新
         </button>
-        <span style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-          {isFetching ? "更新中..." : dataUpdatedAt ? `最終更新: ${formatTime(dataUpdatedAt)}` : ""}
-        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="系統で絞り込み"
+          style={{ flex: "1 1 240px", maxWidth: 320 }}
+        />
+        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>並び順</span>
+        <SortPill active={sort === "worst"} onClick={() => setSort("worst")}>最大遅延</SortPill>
+        <SortPill active={sort === "avg"} onClick={() => setSort("avg")}>平均遅延</SortPill>
+        <SortPill active={sort === "trips"} onClick={() => setSort("trips")}>運行便数</SortPill>
+        <SortPill active={sort === "name"} onClick={() => setSort("name")}>名前順</SortPill>
+        {data && (
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)", marginLeft: "auto" }}>
+            {isFetching ? "更新中..." : dataUpdatedAt ? `更新: ${formatLocal(dataUpdatedAt)}` : ""}
+          </span>
+        )}
       </div>
 
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {isLoading && (
-        <div>
-          {[...Array(6)].map((_, i) => <Skeleton key={i} height={32} style={{ margin: "6px 0" }} />)}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+          {[...Array(6)].map((_, i) => <Skeleton key={i} height={120} />)}
         </div>
       )}
-      {data && rawRows.length === 0 && (
+      {data?.routes && data.routes.length === 0 && (
         <EmptyState
           title={
-            latestCapturedAt
-              ? `最新観測: ${formatLatest(latestCapturedAt)} — このタブはこの観測日の便を表示します`
+            data.latest_captured_at
+              ? `観測データがありません (最終: ${relativeTime(data.latest_captured_at)})`
               : "観測データがありません"
           }
-          hint={!latestCapturedAt ? "make fetch-ingest を実行してください" : undefined}
+          hint="make fetch-ingest を実行してください"
         />
       )}
 
-      {data && rawRows.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--bg-surface)", borderRadius: "var(--radius)", overflow: "hidden", border: "1px solid var(--border-soft)" }}>
-          <thead>
-            <tr style={{ background: "var(--bg-soft)", textAlign: "left" }}>
-              <Th label="系統" k="route_code" sort={sort} onClick={toggleSort} />
-              <Th label="種別" k="service_type" sort={sort} onClick={toggleSort} />
-              <Th label="予定時刻" k="scheduled_time" sort={sort} onClick={toggleSort} />
-              <Th label="遅延" k="dep_delay" sort={sort} onClick={toggleSort} />
-              <Th label="観測時刻" k="captured_at" sort={sort} onClick={toggleSort} />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={`${r.trip_id}|${r.captured_at}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                <td style={td}>{r.route_code ?? "—"}</td>
-                <td style={td}>{r.service_type ?? "—"}</td>
-                <td style={td}>{r.scheduled_time ?? "—"}</td>
-                <td style={{ ...td, color: delayColor(r.dep_delay / 60), fontWeight: 600 }}>
-                  {formatDelay(r.dep_delay)}
-                </td>
-                <td style={{ ...td, color: "var(--text-secondary)" }}>{relativeTime(r.captured_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {cards.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+          {cards.map((c) => (
+            <RouteCard key={`${c.route_code}|${c.service_type}`} card={c} formatRoute={routeNames.format} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-const td: React.CSSProperties = { padding: "10px 14px", fontSize: 14 };
-
-function Th({ label, k, sort, onClick }: { label: string; k: SortKey; sort: { key: SortKey; dir: "asc" | "desc" }; onClick: (k: SortKey) => void }) {
-  const active = sort.key === k;
+function SortPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <th scope="col" style={{ ...td, fontWeight: 500, color: "var(--text-secondary)", padding: 0 }}>
-      <button
-        type="button"
-        onClick={() => onClick(k)}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          background: "none",
-          border: "none",
-          padding: "10px 14px",
-          font: "inherit",
-          color: "inherit",
-          cursor: "pointer",
-          userSelect: "none",
-        }}
-      >
-        {label} {active && (sort.dir === "asc" ? "▲" : "▼")}
-      </button>
-    </th>
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: active ? "var(--accent-soft)" : "var(--bg-surface)",
+        color: active ? "var(--accent)" : "var(--text-secondary)",
+        border: `1px solid ${active ? "var(--accent)" : "var(--border-subtle)"}`,
+        borderRadius: 999,
+        padding: "4px 12px",
+        fontSize: 12,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc: string) => string }) {
+  const avgMin = card.avg_delay_sec / 60;
+  const worstMin = card.worst_delay_sec / 60;
+  return (
+    <div
+      style={{
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-soft)",
+        borderRadius: "var(--radius-lg)",
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {formatRoute(card.route_code)}
+        </span>
+        {card.service_type && (
+          <span style={{ fontSize: 11, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>{card.service_type}</span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Stat label="平均" value={formatDelay(card.avg_delay_sec)} color={delayColor(avgMin)} />
+        <Stat label="最大" value={formatDelay(card.worst_delay_sec)} color={delayColor(worstMin)} />
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+        {card.trips_observed} 便 / {card.samples.toLocaleString()} 観測
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color }}>{value}</div>
+    </div>
   );
 }
 
@@ -150,21 +197,10 @@ function formatDelay(seconds: number): string {
   const abs = Math.abs(seconds);
   const m = Math.floor(abs / 60);
   const s = abs % 60;
+  if (m === 0) return `${sign}${s}秒`;
   return `${sign}${m}分${s.toString().padStart(2, "0")}秒`;
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function formatLatest(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatLocal(ts: number): string {
+  return new Date(ts).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
