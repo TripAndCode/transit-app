@@ -8,6 +8,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
+import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
 import { ReportTable } from "../components/ReportTable";
 
 const REPORT_LABEL: Record<string, string> = {
@@ -111,7 +112,7 @@ export function ReportsTab() {
               )}
             </div>
             {detail.data.report_type === "trend" ? (
-              <DailyChart days={detail.data.rows as unknown as TrendDay[]} />
+              <TrendBlock data={detail.data.rows as unknown as { days: TrendDay[]; hourly: HourlyCell[] }[]} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
@@ -147,6 +148,16 @@ export function ReportsTab() {
         )}
       </div>
       </div>
+    </div>
+  );
+}
+
+function TrendBlock({ data }: { data: { days: TrendDay[]; hourly: HourlyCell[] }[] }) {
+  const payload = data[0] ?? { days: [], hourly: [] };
+  return (
+    <div>
+      <DailyChart days={payload.days} />
+      <HourlyHeatmap cells={payload.hourly} />
     </div>
   );
 }
