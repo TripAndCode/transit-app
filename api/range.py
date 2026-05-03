@@ -88,7 +88,18 @@ def get_range_ctx(
 
     route_tuple: tuple[str, ...] = ()
     if routes:
-        route_tuple = tuple(r.strip() for r in routes.split(",") if r.strip())
+        # Cap at 100 codes to bound query and JSON envelope; UI surface is much
+        # smaller than that. Drop empties, dedupe while preserving order.
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for raw in routes.split(","):
+            r = raw.strip()
+            if r and r not in seen:
+                seen.add(r)
+                cleaned.append(r)
+            if len(cleaned) >= 100:
+                break
+        route_tuple = tuple(cleaned)
 
     return RangeCtx(
         from_date=from_date,

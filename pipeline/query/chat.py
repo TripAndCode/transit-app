@@ -73,7 +73,7 @@ async def chat_with_tools(
             )
             return resp.choices[0].message
         except Exception as exc:
-            _log.warning("Groq chat call failed: %s", exc)
+            _log.warning("Groq chat call failed (%s): %r", exc.__class__.__name__, exc)
             return None
 
     msg = await asyncio.to_thread(_sync)
@@ -90,11 +90,19 @@ async def chat_with_tools(
         text = (msg.content or "").strip() or "ご質問の内容を理解できませんでした。"
         return {"answer": text, "tool_call": None, "result": None}
 
+    if len(tool_calls) > 1:
+        _log.info("LLM emitted %d tool calls; using the first only", len(tool_calls))
     call = tool_calls[0]
     name = call.function.name
     try:
         args = json.loads(call.function.arguments or "{}")
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.warning(
+            "Bad tool args from LLM (tool=%s): %s — raw=%r",
+            name,
+            exc,
+            call.function.arguments,
+        )
         args = {}
 
     try:
