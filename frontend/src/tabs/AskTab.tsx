@@ -1,18 +1,20 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useAsk } from "../api/hooks";
-import type { Intent } from "../api/types";
+import { useRangeContext } from "../api/rangeContext";
+import type { ToolResult } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
 
 type Msg =
   | { role: "user"; text: string }
-  | { role: "assistant"; text: string; intent: Intent };
+  | { role: "assistant"; text: string; tool_call: { name: string; arguments: Record<string, unknown> } | null; result: ToolResult | null };
 
 const SUGGESTIONS = ["今日の遅延ランキング", "系統5の遅延傾向", "雨天時の比較"];
 
 export function AskTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
+  const [ctx] = useRangeContext();
   const ask = useAsk(id);
 
   const [input, setInput] = useState("");
@@ -26,8 +28,11 @@ export function AskTab() {
   async function ask_(question: string) {
     if (ask.isPending) return;
     try {
-      const r = await ask.mutateAsync(question);
-      setMsgs((m) => [...m, { role: "assistant", text: r.answer, intent: r.intent }]);
+      const r = await ask.mutateAsync({ question, ctx });
+      setMsgs((m) => [
+        ...m,
+        { role: "assistant", text: r.answer, tool_call: r.tool_call, result: r.result },
+      ]);
     } catch {
       // error renders via ask.error below
     }
@@ -133,11 +138,11 @@ function Bubble({ msg }: { msg: Msg }) {
         }}
       >
         {msg.text}
-        {!isUser && "intent" in msg && (
+        {!isUser && "result" in msg && (msg.tool_call || msg.result) && (
           <details style={{ marginTop: 8, color: "var(--text-tertiary)", fontSize: 12 }}>
             <summary style={{ cursor: "pointer" }}>詳細</summary>
-            <pre style={{ overflowX: "auto", marginTop: 6 }}>
-              {JSON.stringify(msg.intent, null, 2)}
+            <pre style={{ overflowX: "auto", marginTop: 6, whiteSpace: "pre" }}>
+              {JSON.stringify({ tool_call: msg.tool_call, result: msg.result }, null, 2)}
             </pre>
           </details>
         )}

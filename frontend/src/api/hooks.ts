@@ -5,13 +5,15 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
+import { ctxToQueryString, type RangeCtx } from "./rangeContext";
 import type {
   Agency,
   AskResponse,
   HeatmapCollection,
-  LiveDelay,
+  LiveResponse,
   ReportMeta,
   ReportResponse,
+  TrendResponse,
 } from "./types";
 
 export function useAgencies(): UseQueryResult<Agency[]> {
@@ -33,31 +35,50 @@ export function useReports(agencyId: number | null): UseQueryResult<ReportMeta[]
 export function useReport(
   agencyId: number | null,
   reportType: string | null,
+  ctx: RangeCtx,
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType],
+    queryKey: ["reports", agencyId, reportType, ctx.from, ctx.to, ctx.dow, ctx.time_band],
     queryFn: () =>
-      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}`),
+      apiGet<ReportResponse>(
+        `/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`,
+      ),
     enabled: agencyId != null && !!reportType,
   });
 }
 
-export function useHeatmap(agencyId: number | null): UseQueryResult<HeatmapCollection> {
+export function useHeatmap(
+  agencyId: number | null,
+  ctx: RangeCtx,
+): UseQueryResult<HeatmapCollection> {
   return useQuery({
-    queryKey: ["heatmap", agencyId],
-    queryFn: () => apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap`),
+    queryKey: ["heatmap", agencyId, ctx.from, ctx.to, ctx.dow, ctx.time_band],
+    queryFn: () =>
+      apiGet<HeatmapCollection>(
+        `/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`,
+      ),
     enabled: agencyId != null,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useTrend(agencyId: number | null, ctx: RangeCtx): UseQueryResult<TrendResponse> {
+  return useQuery({
+    queryKey: ["trend", agencyId, ctx.from, ctx.to, ctx.dow, ctx.time_band],
+    queryFn: () =>
+      apiGet<TrendResponse>(`/api/${agencyId}/trend?${ctxToQueryString(ctx)}`),
+    enabled: agencyId != null,
+    staleTime: 60 * 1000,
   });
 }
 
 export function useLiveDelays(
   agencyId: number | null,
   options: { autoRefresh: boolean } = { autoRefresh: true },
-): UseQueryResult<LiveDelay[]> {
+): UseQueryResult<LiveResponse> {
   return useQuery({
     queryKey: ["live", agencyId],
-    queryFn: () => apiGet<LiveDelay[]>(`/api/${agencyId}/delays/live`),
+    queryFn: () => apiGet<LiveResponse>(`/api/${agencyId}/delays/live`),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
   });
@@ -65,11 +86,19 @@ export function useLiveDelays(
 
 export function useAsk(agencyId: number | null) {
   return useMutation({
-    mutationFn: (question: string) => {
+    mutationFn: (vars: { question: string; ctx: RangeCtx }) => {
       if (agencyId == null) {
         return Promise.reject(new Error("事業者が選択されていません"));
       }
-      return apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
+      return apiPost<AskResponse>(`/api/${agencyId}/ask`, {
+        question: vars.question,
+        ctx: {
+          from: vars.ctx.from,
+          to: vars.ctx.to,
+          dow: vars.ctx.dow,
+          time_band: vars.ctx.time_band,
+        },
+      });
     },
   });
 }

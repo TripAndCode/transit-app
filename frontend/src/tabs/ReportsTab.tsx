@@ -1,6 +1,8 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useReport, useReports } from "../api/hooks";
+import { useRangeContext } from "../api/rangeContext";
 import { relativeTime } from "../utils/relativeTime";
+import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
@@ -20,11 +22,14 @@ export function ReportsTab() {
   const { agencyId, reportType } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
+  const [ctx] = useRangeContext();
   const list = useReports(id);
-  const detail = useReport(id, reportType ?? null);
+  const detail = useReport(id, reportType ?? null, ctx);
 
   return (
-    <div style={{ display: "flex", gap: 16, height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <TabFilterBar />
+      <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)" }}>レポート一覧</h3>
         {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
@@ -90,11 +95,12 @@ export function ReportsTab() {
                 <summary style={{ cursor: "pointer", color: "var(--text-secondary)" }}>
                   ライブ再実行 ({detail.data.rows.length}件)
                 </summary>
-                <RowsTable rows={detail.data.rows} />
+                <RowsTable rows={detail.data.rows as Record<string, unknown>[]} />
               </details>
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
