@@ -16,6 +16,7 @@ ported to asyncpg-style ``$N`` placeholders + an injected WHERE fragment.
 from __future__ import annotations
 
 from api.range import RangeCtx, build_updates_filter
+from pipeline.cache import async_lru_cache
 
 
 def _dedup_cte(where_frag: str) -> str:
@@ -38,6 +39,7 @@ def _dedup_cte(where_frag: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -70,6 +72,7 @@ async def compute_ranking(
     return [tuple(r) for r in rows]
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_on_time(
     agency_id: int,
     ctx: RangeCtx,
@@ -97,6 +100,7 @@ async def compute_on_time(
     return [tuple(r) for r in rows]
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_worst_5min(
     agency_id: int,
     ctx: RangeCtx,
@@ -121,6 +125,7 @@ async def compute_worst_5min(
     return [tuple(r) for r in rows]
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_dow_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -154,6 +159,7 @@ async def compute_dow_ranking(
     return [tuple(r) for r in rows]
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_compare_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -218,6 +224,7 @@ async def compute_compare_ranking(
 # ---------------------------------------------------------------------------
 
 
+@async_lru_cache(maxsize=32, ttl_seconds=300)
 async def compute_trend_series(
     agency_id: int,
     ctx: RangeCtx,
