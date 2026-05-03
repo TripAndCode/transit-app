@@ -60,36 +60,36 @@ async def test_query_endpoint_unknown_agency(ask_client):
 
 @pytest.mark.asyncio
 async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
+    """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
-    from pipeline.query import intent as intent_mod
 
-    async def mock_classify(question, model="llama3.2"):
+    async def mock_chat(question, ctx, conn, agency_id, model="x"):
         return {
-            "query_type": "ranking",
-            "unknown": False,
-            "route": None,
-            "route_name": None,
-            "service": None,
-            "dow": None,
-            "dow_group": None,
-            "date": None,
-            "stop_name": None,
-            "time_band": None,
-            "trend_direction": "any",
-            "compare_polarity": "any",
-            "sort_order": "desc",
-            "limit": 5,
+            "answer": "テスト回答",
+            "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
+            "result": {
+                "kind": "table",
+                "summary_jp": "テスト",
+                "rows": [],
+                "columns": ["route_code", "service_type"],
+                "series": [],
+                "pairs": [],
+            },
         }
 
-    monkeypatch.setattr(intent_mod, "classify_intent", mock_classify)
+    # Patch the symbol in the module that imports it (api.routers.ask)
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", mock_chat)
     resp = await client.post(
         f"/api/{agency_id}/ask",
         json={"question": "一番遅れている路線は？"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert "answer" in data
-    assert "intent" in data
+    assert data["answer"] == "テスト回答"
+    assert data["tool_call"]["name"] == "top_n"
+    assert data["result"]["kind"] == "table"
+    assert data["ctx"]["from"]
+    assert data["ctx"]["to"]
 
 
 @pytest.mark.asyncio
