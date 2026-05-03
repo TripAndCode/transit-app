@@ -111,7 +111,10 @@ export function MapTab() {
         },
       });
 
-      if (snapshot.features.length > 0) {
+      if (snapshot.features.length === 1) {
+        const [lon, lat] = snapshot.features[0].geometry.coordinates;
+        m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
+      } else if (snapshot.features.length > 1) {
         let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
         for (const f of snapshot.features) {
           const [lon, lat] = f.geometry.coordinates;

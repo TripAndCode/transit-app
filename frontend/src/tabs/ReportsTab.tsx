@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useReport, useReports } from "../api/hooks";
+import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
@@ -48,7 +49,7 @@ export function ReportsTab() {
             >
               <div style={{ fontWeight: 500 }}>{REPORT_LABEL[r.report_type] ?? r.report_type}</div>
               <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-                {relative(r.rendered_at)}
+                {relativeTime(r.rendered_at)}
               </div>
             </div>
           );
@@ -67,7 +68,7 @@ export function ReportsTab() {
           <div>
             <h2 style={{ marginTop: 0 }}>{REPORT_LABEL[detail.data.report_type] ?? detail.data.report_type}</h2>
             <div style={{ color: "var(--text-tertiary)", fontSize: 13, marginBottom: 16 }}>
-              生成: {relative(detail.data.rendered_at)}
+              生成: {relativeTime(detail.data.rendered_at)}
             </div>
             <pre
               style={{
@@ -128,13 +129,4 @@ function formatCell(v: unknown): string {
   if (v == null) return "—";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
   return String(v);
-}
-
-function relative(iso: string): string {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (!isFinite(diff) || diff < 0) return "—";
-  if (diff < 60) return `${Math.floor(diff)}秒前`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
-  return `${Math.floor(diff / 86400)}日前`;
 }
