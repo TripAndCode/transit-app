@@ -8,6 +8,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
+import { ReportTable } from "../components/ReportTable";
 
 const REPORT_LABEL: Record<string, string> = {
   ranking: "遅延ランキング",
@@ -84,29 +85,35 @@ export function ReportsTab() {
             </div>
             {detail.data.report_type === "trend" ? (
               <DailyChart days={detail.data.rows as unknown as TrendDay[]} />
+            ) : detail.data.rows.length > 0 ? (
+              <ReportTable
+                reportType={detail.data.report_type}
+                rows={detail.data.rows as unknown[][]}
+              />
             ) : (
-              <pre
-                style={{
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border-soft)",
-                  borderRadius: "var(--radius)",
-                  padding: 16,
-                  whiteSpace: "pre-wrap",
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13,
-                  lineHeight: 1.7,
-                  maxWidth: 920,
-                }}
-              >
-                {detail.data.text}
-              </pre>
+              <EmptyState title="該当データがありません" hint="期間や条件を変更してください" />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
-              <details style={{ marginTop: 16 }}>
-                <summary style={{ cursor: "pointer", color: "var(--text-secondary)" }}>
-                  ライブ再実行 ({detail.data.rows.length}件)
+              <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
+                <summary style={{ cursor: "pointer", fontSize: 12 }}>
+                  原文 ({detail.data.rows.length}件)
                 </summary>
-                <RowsTable rows={detail.data.rows as Record<string, unknown>[]} />
+                <pre
+                  style={{
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border-soft)",
+                    borderRadius: "var(--radius)",
+                    padding: 12,
+                    marginTop: 8,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    maxWidth: 920,
+                  }}
+                >
+                  {detail.data.text}
+                </pre>
               </details>
             )}
           </div>
@@ -117,33 +124,3 @@ export function ReportsTab() {
   );
 }
 
-function RowsTable({ rows }: { rows: Record<string, unknown>[] }) {
-  if (rows.length === 0) return null;
-  const keys = Object.keys(rows[0]);
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 13 }}>
-      <thead>
-        <tr style={{ background: "var(--bg-soft)" }}>
-          {keys.map((k) => (
-            <th key={k} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-secondary)", fontWeight: 500 }}>{k}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-            {keys.map((k) => (
-              <td key={k} style={{ padding: "6px 10px" }}>{formatCell(r[k])}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function formatCell(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
-  return String(v);
-}
