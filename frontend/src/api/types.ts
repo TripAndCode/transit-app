@@ -5,24 +5,18 @@ export type Agency = {
   static_url: string | null;
 };
 
-export type Intent = {
-  query_type: string;
-  unknown?: boolean;
-  [key: string]: unknown;
-};
-
-export type AskResponse = {
-  answer: string;
-  intent: Intent;
-};
-
 export type LiveDelay = {
   trip_id: string;
   route_code: string | null;
   service_type: string | null;
   scheduled_time: string | null;
-  dep_delay: number;          // seconds
-  captured_at: string;        // ISO timestamp
+  dep_delay: number; // seconds
+  captured_at: string; // ISO timestamp
+};
+
+export type LiveResponse = {
+  latest_captured_at: string | null;
+  rows: LiveDelay[];
 };
 
 export type HeatmapProps = {
@@ -33,7 +27,16 @@ export type HeatmapProps = {
 };
 
 export type HeatmapFeature = GeoJSON.Feature<GeoJSON.Point, HeatmapProps>;
-export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps>;
+export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps> & {
+  ctx?: ResponseCtx;
+};
+
+export type ResponseCtx = {
+  from: string;
+  to: string;
+  dow: string;
+  time_band: string;
+};
 
 export type ReportMeta = {
   report_type: string;
@@ -42,7 +45,36 @@ export type ReportMeta = {
 
 export type ReportResponse = ReportMeta & {
   text: string;
-  rows: Record<string, unknown>[];
+  rows: unknown[];
+  ctx?: ResponseCtx;
+};
+
+export type TrendDay = {
+  date: string;
+  avg_min: number;
+  samples: number;
+  top_offenders: { route_code: string; service_type: string; avg_min: number; samples: number }[];
+};
+
+export type TrendResponse = {
+  days: TrendDay[];
+  ctx: ResponseCtx;
+};
+
+export type ToolResult = {
+  kind: "table" | "series" | "kv" | "empty" | "text";
+  summary_jp: string;
+  rows?: unknown[][];
+  columns?: string[];
+  series?: TrendDay[];
+  pairs?: [string, unknown][];
+};
+
+export type AskResponse = {
+  answer: string;
+  tool_call: { name: string; arguments: Record<string, unknown> } | null;
+  result: ToolResult | null;
+  ctx: ResponseCtx;
 };
 
 export type Route = { route_id: string; route_short_name: string | null };

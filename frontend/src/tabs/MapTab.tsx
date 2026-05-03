@@ -2,12 +2,14 @@ import { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap } from "../api/hooks";
+import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { getMapStyle } from "../styles/mapStyle";
 import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
+import { TabFilterBar } from "../components/TabFilterBar";
 
 const SOURCE = "delays";
 const LAYER = "delay-circles";
@@ -15,7 +17,8 @@ const LAYER = "delay-circles";
 export function MapTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
-  const { data, isLoading, error, refetch } = useHeatmap(id);
+  const [ctx] = useRangeContext();
+  const { data, isLoading, error, refetch } = useHeatmap(id, ctx);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -134,7 +137,9 @@ export function MapTab() {
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
 
   return (
-    <div style={{ position: "relative", height: "100%", minHeight: 400 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
+      <TabFilterBar />
+      <div style={{ position: "relative", flex: 1, minHeight: 400 }}>
       {isLoading && (
         <div style={{ position: "absolute", inset: 0, padding: 24, zIndex: 1 }}>
           <Skeleton height="100%" />
@@ -153,6 +158,7 @@ export function MapTab() {
           />
         </div>
       )}
+      </div>
     </div>
   );
 }

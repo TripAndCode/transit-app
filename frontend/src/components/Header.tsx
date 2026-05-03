@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { AgencyPicker } from "./AgencyPicker";
+import { RangeBadge } from "./RangeBadge";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { AgencyForm } from "../admin/AgencyForm";
 
@@ -28,6 +29,7 @@ export function Header() {
       <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
         <AgencyPicker />
       </div>
+      <RangeBadge />
       <div style={{ display: "flex", gap: 8 }}>
         {isAdmin && (
           <button
