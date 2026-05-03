@@ -222,14 +222,21 @@ def _route_name_lookup(route: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _validate_route_exists(route: str | None, conn, agency_id: int) -> bool:
-    """Cheap existence check: does this route_code actually appear in updates?"""
+async def _validate_route_exists(route: str | None, conn, agency_id: int, ctx: RangeCtx) -> bool:
+    """Cheap existence check scoped to the request window.
+
+    A route last seen six months ago should NOT validate as live — otherwise
+    the friendly 'no observations in selected period' branch is unreachable
+    and the user gets a misleading empty table instead of guidance.
+    """
     if not route or not str(route).isdigit():
         return False
     row = await conn.fetchrow(
-        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
+        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2   AND captured_at::date BETWEEN $3 AND $4 LIMIT 1",
         agency_id,
         str(route),
+        ctx.from_date,
+        ctx.to_date,
     )
     return row is not None
 
@@ -238,7 +245,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
-    if not await _validate_route_exists(route, conn, agency_id):
+    if not await _validate_route_exists(route, conn, agency_id, ctx):
         return ToolResult(
             kind="empty",
             summary_jp=f"'{route}' は登録されている系統コードではありません。例: 16071, 22171。",
@@ -352,7 +359,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int) ->
         return ToolResult(kind="empty", summary_jp="定時率を計算できるデータがありません。")
     return ToolResult(
         kind="table",
-        summary_jp=f"定時率 (閾値 ±{threshold_min}分以内) 上位{len(rows)}系統",
+        summary_jp=f"定時率 (遅延 {threshold_min} 分以内) 上位{len(rows)}系統",
         rows=[list(r) for r in rows],
         columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples"],
     )

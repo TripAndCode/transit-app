@@ -22,6 +22,7 @@ export function MapTab() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
+  const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
 
@@ -121,19 +122,25 @@ export function MapTab() {
         },
       });
 
-      if (snapshot.features.length === 1) {
-        const [lon, lat] = snapshot.features[0].geometry.coordinates;
-        m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
-      } else if (snapshot.features.length > 1) {
-        let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-        for (const f of snapshot.features) {
-          const [lon, lat] = f.geometry.coordinates;
-          if (lon < minLon) minLon = lon;
-          if (lon > maxLon) maxLon = lon;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
+      // Fit bounds only on the first data load — subsequent filter changes
+      // keep the user's current pan/zoom so the camera doesn't fight them.
+      if (!fittedRef.current) {
+        if (snapshot.features.length === 1) {
+          const [lon, lat] = snapshot.features[0].geometry.coordinates;
+          m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
+          fittedRef.current = true;
+        } else if (snapshot.features.length > 1) {
+          let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+          for (const f of snapshot.features) {
+            const [lon, lat] = f.geometry.coordinates;
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
+          m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
+          fittedRef.current = true;
         }
-        m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
       }
     }
 

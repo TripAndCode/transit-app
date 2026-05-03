@@ -155,19 +155,3 @@ async def get_report(
         rows=rows,
         ctx=_ctx_payload(ctx),
     )
-
-
-@router.get("/trend")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def trend(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ctx: RangeCtx = Depends(get_range_ctx),
-):
-    """Daily delay series for the chart, scoped to ctx.
-
-    Returns ``{ days: [{ date, avg_min, samples, top_offenders[] }], ctx }``.
-    """
-    series = await compute_trend_series(agency_id, ctx, conn)
-    return {"days": series["days"], "ctx": _ctx_payload(ctx).model_dump(by_alias=True)}

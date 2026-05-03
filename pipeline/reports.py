@@ -133,14 +133,20 @@ async def compute_dow_ranking(
     dow_group: str,  # 'weekday' or 'weekend'
     limit: int = 100,
 ) -> list[tuple]:
-    """Worst-delay routes restricted to weekday or weekend observations."""
-    # Override ctx.dow with the report-specific group; user's global dow is
-    # ignored here on purpose — the report's identity IS its DOW filter.
+    """Worst-delay routes restricted to weekday or weekend observations.
+
+    Drops the user's ``service`` filter on purpose — pairing 'weekend' DOW
+    with service_type='平日' yields zero rows in the Aomori dataset because
+    weekday-schedule trips don't run on weekends. ``routes`` is preserved
+    so a user filtering to specific routes keeps that filter.
+    """
     overridden = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
         dow=dow_group,  # type: ignore[arg-type]
         time_band=ctx.time_band,
+        service="all",
+        routes=ctx.routes,
     )
     where, params, n = build_updates_filter(overridden, next_param=2)
     label = "週末" if dow_group == "weekend" else "平日"
@@ -166,18 +172,26 @@ async def compute_compare_ranking(
     conn,
     limit: int = 100,
 ) -> list[tuple]:
-    """Per-route weekday-vs-weekend delay difference, sorted by absolute delta."""
+    """Per-route weekday-vs-weekend delay difference, sorted by absolute delta.
+
+    Drops the user's ``service`` filter (same reason as compute_dow_ranking)
+    but preserves ``routes`` so route-restricted comparisons work.
+    """
     weekday_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
         dow="weekday",
         time_band=ctx.time_band,
+        service="all",
+        routes=ctx.routes,
     )
     weekend_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
         dow="weekend",
         time_band=ctx.time_band,
+        service="all",
+        routes=ctx.routes,
     )
     wd_where, wd_params, n_after_wd = build_updates_filter(weekday_ctx, next_param=2)
     we_where, we_params, n = build_updates_filter(weekend_ctx, next_param=n_after_wd)
@@ -236,33 +250,45 @@ async def compute_trend_series(
     Returns ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``.
     """
     where, params, _ = build_updates_filter(ctx, next_param=2)
-    daily_sql = (
-        f"WITH {_dedup_cte(where)}\n"
-        "SELECT date, ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min, COUNT(*) AS samples\n"
-        "FROM deduped GROUP BY date ORDER BY date"
+    # Single SQL: build dedup + per_day in one CTE chain, then derive the
+    # daily aggregate from per_day so we touch ``updates`` exactly once.
+    sql = (
+        f"WITH {_dedup_cte(where)},\n"
+        "per_day AS (\n"
+        "    SELECT date, route_code, service_type,\n"
+        "           ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+        "           COUNT(*) AS samples\n"
+        "    FROM deduped GROUP BY date, route_code, service_type\n"
+        "    HAVING COUNT(*) > 5\n"
+        ")\n"
+        "SELECT * FROM per_day"
     )
-    daily = await conn.fetch(daily_sql, agency_id, *params)
+    per_day = await conn.fetch(sql, agency_id, *params)
 
-    per_day_sql = (
-        f"WITH {_dedup_cte(where)}\n"
-        "SELECT date, route_code, service_type,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       COUNT(*) AS samples\n"
-        "FROM deduped GROUP BY date, route_code, service_type\n"
-        "HAVING COUNT(*) > 5"
-    )
-    per_day = await conn.fetch(per_day_sql, agency_id, *params)
-
+    by_date_samples: dict = {}
+    by_date_weighted: dict = {}
     by_date: dict = {}
     for r in per_day:
-        by_date.setdefault(r["date"], []).append(
+        d = r["date"]
+        avg = float(r["avg_min"]) if r["avg_min"] is not None else None
+        n = r["samples"]
+        by_date_samples[d] = by_date_samples.get(d, 0) + n
+        if avg is not None:
+            by_date_weighted[d] = by_date_weighted.get(d, 0.0) + avg * n
+        by_date.setdefault(d, []).append(
             {
                 "route_code": r["route_code"],
                 "service_type": r["service_type"],
-                "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,
-                "samples": r["samples"],
+                "avg_min": avg,
+                "samples": n,
             }
         )
+
+    daily = []
+    for d in sorted(by_date.keys()):
+        n = by_date_samples[d]
+        avg = round(by_date_weighted.get(d, 0.0) / n, 2) if n else None
+        daily.append({"date": d, "avg_min": avg, "samples": n})
 
     days = []
     for r in daily:
@@ -273,7 +299,7 @@ async def compute_trend_series(
         days.append(
             {
                 "date": r["date"].isoformat(),
-                "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,
+                "avg_min": r["avg_min"],
                 "samples": r["samples"],
                 "top_offenders": offenders,
             }
