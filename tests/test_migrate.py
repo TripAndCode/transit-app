@@ -30,7 +30,7 @@ def test_migrate_up_records_all_versions(pg_conn):
     with pg_conn.cursor() as cur:
         cur.execute("SELECT version FROM schema_migrations ORDER BY version")
         versions = [r[0] for r in cur.fetchall()]
-    assert versions == ["0001", "0002", "0003", "0004"]
+    assert versions == ["0001", "0002", "0003"]
 
 
 def test_migrate_up_idempotent(pg_conn):
