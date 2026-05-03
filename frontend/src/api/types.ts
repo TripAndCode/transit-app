@@ -77,7 +77,11 @@ export type AskResponse = {
   ctx: ResponseCtx;
 };
 
-export type Route = { route_id: string; route_short_name: string | null };
+export type Route = {
+  route_id: string;
+  route_short_name: string | null;
+  route_code: string | null;
+};
 export type Stop = {
   stop_id: string;
   stop_name: string;

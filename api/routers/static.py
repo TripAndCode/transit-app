@@ -10,8 +10,17 @@ async def list_routes(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
+    """List of static routes plus the numeric ``route_code`` used by updates.
+
+    The trip-id-derived ``route_code`` (e.g. '1021') is extracted from the
+    parenthesised tail of ``route_id`` (e.g. '国道・古川線(1021)') so the
+    frontend can decorate ranking rows with the human-readable
+    ``route_short_name``.
+    """
     rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id=$1 ORDER BY route_id",
+        "SELECT route_id, route_short_name, "
+        "  regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code "
+        "FROM static_routes WHERE agency_id=$1 ORDER BY route_id",
         agency_id,
     )
     return [dict(r) for r in rows]
