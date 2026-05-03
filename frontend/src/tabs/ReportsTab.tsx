@@ -74,8 +74,35 @@ export function ReportsTab() {
         {reportType && detail.isLoading && <Skeleton height={400} />}
         {detail.data && (
           <div>
-            <h2 style={{ marginTop: 0 }}>{REPORT_LABEL[detail.data.report_type] ?? detail.data.report_type}</h2>
-            <div style={{ color: "var(--text-tertiary)", fontSize: 13, marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+              <h2 style={{ margin: 0 }}>{REPORT_LABEL[detail.data.report_type] ?? detail.data.report_type}</h2>
+              {detail.data.report_type !== "trend" && (
+                <a
+                  href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
+                    from: ctx.from,
+                    to: ctx.to,
+                    ...(ctx.dow !== "all" ? { dow: ctx.dow } : {}),
+                    ...(ctx.time_band !== "all" ? { time_band: ctx.time_band } : {}),
+                    ...(ctx.service !== "all" ? { service: ctx.service } : {}),
+                    ...(ctx.routes.length > 0 ? { routes: ctx.routes.join(",") } : {}),
+                    format: "csv",
+                  }).toString()}`}
+                  download
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 12px",
+                    background: "transparent",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: 4,
+                    color: "var(--text-secondary)",
+                    textDecoration: "none",
+                  }}
+                >
+                  ⬇ CSV
+                </a>
+              )}
+            </div>
+            <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 16px" }}>
               生成: {relativeTime(detail.data.rendered_at)}
               {detail.data.ctx && (
                 <>
