@@ -8,7 +8,7 @@ moment the request was served. The ``snapshots`` table from v1 is gone.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -44,8 +44,10 @@ class ReportMeta(BaseModel):
 
 
 class ReportCtx(BaseModel):
-    from_date: str
-    to_date: str
+    """Echoed back to clients with the frontend's preferred ``from``/``to`` keys."""
+
+    from_: str = Field(serialization_alias="from")
+    to: str
     dow: str
     time_band: str
 
@@ -60,8 +62,8 @@ class ReportResponse(BaseModel):
 
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     return ReportCtx(
-        from_date=ctx.from_date.isoformat(),
-        to_date=ctx.to_date.isoformat(),
+        from_=ctx.from_date.isoformat(),
+        to=ctx.to_date.isoformat(),
         dow=ctx.dow,
         time_band=ctx.time_band,
     )
@@ -164,4 +166,4 @@ async def trend(
     Returns ``{ days: [{ date, avg_min, samples, top_offenders[] }], ctx }``.
     """
     series = await compute_trend_series(agency_id, ctx, conn)
-    return {"days": series["days"], "ctx": _ctx_payload(ctx).model_dump()}
+    return {"days": series["days"], "ctx": _ctx_payload(ctx).model_dump(by_alias=True)}
