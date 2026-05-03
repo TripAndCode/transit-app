@@ -90,17 +90,17 @@ async def list_reports(
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
 
 
-# Column headers used when emitting CSV. Must match the row tuple shape
-# produced by each compute_* function.
+# Column headers used when emitting CSV. Japanese labels for operator-facing
+# downloads. Must match the row tuple shape produced by each compute_*.
 _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
-    "ranking": ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"],
-    "ranking_best": ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"],
-    "on_time": ["route_code", "service_type", "on_time_pct", "avg_min", "samples"],
-    "worst_5min": ["route_code", "service_type", "late5_count", "avg_min", "samples"],
-    "compare_ranking": ["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
-    "dow_weekend": ["route_code", "service_type", "dow", "avg_min", "samples"],
-    "dow_weekday": ["route_code", "service_type", "dow", "avg_min", "samples"],
-    "trend": ["date", "avg_min", "samples", "top_offender_routes"],
+    "ranking": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
+    "ranking_best": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
+    "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数"],
+    "worst_5min": ["系統コード", "種別", "5分超回数", "平均遅延(分)", "観測数"],
+    "compare_ranking": ["系統コード", "平日(分)", "土日祝(分)", "差(絶対値)", "差(符号付き)"],
+    "dow_weekend": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
+    "dow_weekday": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
+    "trend": ["日付", "平均遅延(分)", "観測数", "悪化系統トップ3"],
 }
 
 
