@@ -34,12 +34,29 @@ const TIME_BAND_OPTIONS: { value: TimeBand; label: string }[] = [
 const pill = (active: boolean): CSSProperties => ({
   background: active ? "var(--accent-soft)" : "var(--bg-surface)",
   color: active ? "var(--accent)" : "var(--text-secondary)",
-  border: `1px solid ${active ? "var(--accent)" : "var(--border-subtle)"}`,
+  border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
   borderRadius: 999,
-  padding: "4px 12px",
+  padding: "5px 12px",
   fontSize: 12,
+  fontWeight: active ? 600 : 400,
   cursor: "pointer",
+  transition: "all var(--transition)",
+  letterSpacing: "0.01em",
 });
+
+const groupLabel: CSSProperties = {
+  fontSize: 11,
+  color: "var(--text-tertiary)",
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+};
+
+const sectionDivider: CSSProperties = {
+  width: 1,
+  height: 18,
+  background: "var(--border-soft)",
+  margin: "0 4px",
+};
 
 type Draft = {
   dow: DowFilter;
@@ -92,14 +109,17 @@ export function TabFilterBar() {
       style={{
         display: "flex",
         flexWrap: "wrap",
-        gap: 12,
+        gap: 10,
         alignItems: "center",
-        padding: "8px 0 16px",
-        borderBottom: "1px solid var(--border-soft)",
+        padding: "10px 14px",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-soft)",
+        borderRadius: "var(--radius-lg)",
         marginBottom: 16,
+        boxShadow: "0 1px 0 rgba(0,0,0,0.02)",
       }}
     >
-      <PillGroup label="曜日">
+      <PillGroup label="曜日" icon="📅">
         {DOW_OPTIONS.map((o) => (
           <button
             key={o.value}
@@ -112,7 +132,9 @@ export function TabFilterBar() {
         ))}
       </PillGroup>
 
-      <PillGroup label="種別">
+      <span style={sectionDivider} />
+
+      <PillGroup label="種別" icon="🚌">
         {SERVICE_OPTIONS.map((o) => (
           <button
             key={o.value}
@@ -125,7 +147,9 @@ export function TabFilterBar() {
         ))}
       </PillGroup>
 
-      <PillGroup label="時間帯">
+      <span style={sectionDivider} />
+
+      <PillGroup label="時間帯" icon="🕒">
         {TIME_BAND_OPTIONS.map((o) => (
           <button
             key={o.value}
@@ -138,23 +162,33 @@ export function TabFilterBar() {
         ))}
       </PillGroup>
 
+      <span style={sectionDivider} />
+
       <RoutesPicker selected={draft.routes} onChange={(routes) => setDraft((d) => ({ ...d, routes }))} />
 
-      <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+      <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+        {dirty && (
+          <span style={{ fontSize: 11, color: "var(--accent)" }}>
+            未適用
+          </span>
+        )}
         {filtered && (
           <button
             type="button"
             onClick={reset}
+            title="フィルタを全てクリア"
             style={{
               background: "transparent",
-              border: "1px solid var(--border-subtle)",
+              border: "1px solid var(--border-soft)",
               borderRadius: 4,
-              padding: "4px 12px",
+              padding: "5px 12px",
               fontSize: 12,
               color: "var(--text-secondary)",
+              cursor: "pointer",
+              transition: "all var(--transition)",
             }}
           >
-            リセット
+            ↺ リセット
           </button>
         )}
         <button
@@ -166,23 +200,29 @@ export function TabFilterBar() {
             border: "none",
             color: dirty ? "#fff" : "var(--text-tertiary)",
             borderRadius: 4,
-            padding: "4px 14px",
+            padding: "5px 16px",
             fontSize: 12,
+            fontWeight: 500,
             cursor: dirty ? "pointer" : "not-allowed",
+            transition: "all var(--transition)",
+            boxShadow: dirty ? "0 1px 2px rgba(91, 108, 173, 0.2)" : "none",
           }}
         >
-          適用
+          ✓ 適用
         </button>
       </div>
     </div>
   );
 }
 
-function PillGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function PillGroup({ label, icon, children }: { label: string; icon?: string; children: React.ReactNode }) {
   return (
     <>
-      <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{label}</span>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{children}</div>
+      <span style={{ ...groupLabel, display: "inline-flex", alignItems: "center", gap: 4 }}>
+        {icon && <span aria-hidden style={{ fontSize: 13 }}>{icon}</span>}
+        {label}
+      </span>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{children}</div>
     </>
   );
 }
@@ -234,7 +274,10 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
 
   return (
     <>
-      <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>系統</span>
+      <span style={{ ...groupLabel, display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <span aria-hidden style={{ fontSize: 13 }}>🚏</span>
+        系統
+      </span>
       <div ref={ref} style={{ position: "relative" }}>
         <button type="button" onClick={() => setOpen((v) => !v)} style={pill(selected.length > 0)}>
           {summary} ▾
