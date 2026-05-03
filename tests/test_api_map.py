@@ -43,7 +43,9 @@ async def test_live_delays_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/delays/live")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    payload = resp.json()
+    # v2 shape: dict with latest_captured_at + rows[]
+    assert payload == {"latest_captured_at": None, "rows": []}
 
 
 @pytest.mark.asyncio
