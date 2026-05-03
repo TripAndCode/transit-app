@@ -171,17 +171,17 @@ AGENCY_ID=1
 Then:
 
 ```bash
-make db                                              # 1. start Postgres
-poetry run python gtfs_pipeline.py add_agency \      # 2. create agencies row
-  --name "青森市バス" --feed-url "https://example.com/feed.pb"
-bash scripts/fetch_and_ingest.sh                     # 3. rsync + ingest + analyze
-make serve                                           # 4. backend  (terminal A)
-make frontend-dev                                    # 5. frontend (terminal B)
+make db                            # 1. start Postgres
+make seed-agencies                 # 2. upsert all rows from agencies.csv
+bash scripts/fetch_and_ingest.sh   # 3. rsync + ingest + analyze
+make serve                         # 4. backend  (terminal A)
+make frontend-dev                  # 5. frontend (terminal B)
 ```
 
-`feed_url` on the agency row is just metadata for Path B — the .pb files
-are pre-fetched, so any URL works. Open <http://localhost:5173> when both
-servers are up.
+`make seed-agencies` reads `agencies.csv` (committed, edit it to add more
+operators) and upserts on `feed_url` — re-runnable safely. The `feed_url`
+column on Path B is just metadata; the .pb files are pre-fetched. Open
+<http://localhost:5173> when both servers are up.
 
 > First `fetch_archives.sh` run can take a while (full rsync of every
 > archive in the Oracle VM). Subsequent runs only pull deltas.

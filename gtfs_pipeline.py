@@ -45,6 +45,52 @@ def cmd_add_agency(args):
     conn.close()
 
 
+def cmd_seed_agencies(args):
+    """Idempotently upsert every row of a CSV into the agencies table.
+
+    Columns: agency_name, feed_url, static_url, trip_id_pattern
+    Empty strings become NULL for static_url and trip_id_pattern.
+    Uniqueness is by feed_url; existing rows are updated, not duplicated.
+    """
+    import csv
+
+    path = args.csv
+    conn = _get_conn()
+    inserted = updated = 0
+    with open(path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        with conn.cursor() as cur:
+            for row in reader:
+                name = row["agency_name"].strip()
+                feed = row["feed_url"].strip()
+                static = (row.get("static_url") or "").strip() or None
+                pattern = (row.get("trip_id_pattern") or "").strip() or None
+                if not name or not feed:
+                    continue  # skip blank/comment lines
+                cur.execute(
+                    """
+                    INSERT INTO agencies (agency_name, feed_url, static_url, trip_id_pattern)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (feed_url) DO UPDATE SET
+                        agency_name = EXCLUDED.agency_name,
+                        static_url = EXCLUDED.static_url,
+                        trip_id_pattern = EXCLUDED.trip_id_pattern
+                    RETURNING agency_id, (xmax = 0) AS inserted
+                    """,
+                    (name, feed, static, pattern),
+                )
+                aid, was_inserted = cur.fetchone()
+                if was_inserted:
+                    inserted += 1
+                    print(f"  + agency {aid}: {name}")
+                else:
+                    updated += 1
+                    print(f"  ~ agency {aid}: {name} (updated)")
+    conn.commit()
+    conn.close()
+    print(f"Seeded {inserted} new + {updated} updated from {path}")
+
+
 def cmd_ingest(args):
     from pipeline.ingest import ingest
 
@@ -112,6 +158,9 @@ def main():
     p_add.add_argument("--feed-url", required=True)
     p_add.add_argument("--static-url", default=None)
 
+    p_seed = sub.add_parser("seed_agencies", help="Upsert agencies from a CSV (idempotent)")
+    p_seed.add_argument("csv", help="Path to agencies CSV (default: ./agencies.csv)", nargs="?", default="agencies.csv")
+
     p_ingest = sub.add_parser("ingest")
     p_ingest.add_argument("folder")
     p_ingest.add_argument("--agency-id", default=None)
@@ -137,6 +186,8 @@ def main():
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
+    elif args.command == "seed_agencies":
+        cmd_seed_agencies(args)
     elif args.command == "ingest":
         cmd_ingest(args)
     elif args.command == "load_static":
