@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useAsk } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import { useRouteNames } from "../api/useRouteNames";
 import type { ToolResult } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
 
@@ -9,13 +10,14 @@ type Msg =
   | { role: "user"; text: string }
   | { role: "assistant"; text: string; tool_call: { name: string; arguments: Record<string, unknown> } | null; result: ToolResult | null };
 
-const SUGGESTIONS = ["今日の遅延ランキング", "系統5の遅延傾向", "雨天時の比較"];
+const SUGGESTIONS = ["今日の遅延ランキング", "雨天時の比較", "最近の傾向"];
 
 export function AskTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
   const ask = useAsk(id);
+  const routeNames = useRouteNames(id);
 
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -61,7 +63,7 @@ export function AskTab() {
           </div>
         )}
         {msgs.map((m, i) => (
-          <Bubble key={i} msg={m} />
+          <Bubble key={i} msg={m} formatRoute={routeNames.format} />
         ))}
         {ask.isPending && (
           <div role="status" aria-live="polite" style={{ padding: 12, color: "var(--text-tertiary)" }}>
@@ -123,21 +125,25 @@ export function AskTab() {
   );
 }
 
-function Bubble({ msg }: { msg: Msg }) {
+function Bubble({ msg, formatRoute }: { msg: Msg; formatRoute: (rc: string | null | undefined) => string }) {
   const isUser = msg.role === "user";
+  const result = !isUser && "result" in msg ? msg.result : null;
+  const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
+
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", margin: "12px 0" }}>
       <div
         style={{
-          maxWidth: "85%",
+          maxWidth: wide ? "100%" : "85%",
+          width: wide ? "100%" : undefined,
           padding: "10px 14px",
           background: isUser ? "var(--accent-soft)" : "var(--bg-surface)",
           border: isUser ? "none" : "1px solid var(--border-soft)",
           borderRadius: "var(--radius-lg)",
-          whiteSpace: "pre-wrap",
+          whiteSpace: isUser ? "pre-wrap" : undefined,
         }}
       >
-        {msg.text}
+        {result ? <RichResult result={result} fallbackText={msg.text} formatRoute={formatRoute} /> : <span style={{ whiteSpace: "pre-wrap" }}>{msg.text}</span>}
         {!isUser && "result" in msg && (msg.tool_call || msg.result) && (
           <details style={{ marginTop: 8, color: "var(--text-tertiary)", fontSize: 12 }}>
             <summary style={{ cursor: "pointer" }}>詳細</summary>
@@ -149,4 +155,78 @@ function Bubble({ msg }: { msg: Msg }) {
       </div>
     </div>
   );
+}
+
+function RichResult({
+  result,
+  fallbackText,
+  formatRoute,
+}: {
+  result: ToolResult;
+  fallbackText: string;
+  formatRoute: (rc: string | null | undefined) => string;
+}) {
+  if (result.kind === "table" && result.rows && result.columns) {
+    const cols = result.columns;
+    const routeIdx = cols.findIndex((c) => c === "route_code");
+    return (
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "var(--bg-soft)" }}>
+                {cols.map((c) => (
+                  <th key={c} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-secondary)", fontWeight: 500 }}>
+                    {c === "route_code" ? "系統" : c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.rows.slice(0, 50).map((row, i) => (
+                <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                  {row.map((cell, j) => (
+                    <td key={j} style={{ padding: "6px 10px" }}>
+                      {j === routeIdx
+                        ? formatRoute(cell as string)
+                        : cell == null
+                          ? "—"
+                          : typeof cell === "number"
+                            ? cell.toLocaleString()
+                            : String(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {result.rows.length > 50 && (
+          <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 6 }}>
+            …他{result.rows.length - 50}件
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (result.kind === "kv" && result.pairs) {
+    return (
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
+          <tbody>
+            {result.pairs.map(([k, v], i) => (
+              <tr key={i}>
+                <td style={{ padding: "4px 12px 4px 0", color: "var(--text-secondary)" }}>{k}</td>
+                <td style={{ padding: "4px 0" }}>{String(v)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  // series, empty, text → plain text rendering
+  return <span style={{ whiteSpace: "pre-wrap" }}>{fallbackText}</span>;
 }
