@@ -177,6 +177,41 @@ Query types understood: `ranking`, `by_hour`, `by_dow`, `by_stop`, `by_date`, `t
 
 ---
 
+## Frontend
+
+Single-page React app at `frontend/`. Default tab is the map; tabs cover ask (NL questions), live delays, and pre-rendered reports. UI chrome is Japanese.
+
+### Local dev
+
+```bash
+make frontend-install     # one-time: install npm deps
+make serve                # in one shell — FastAPI on :8000
+make frontend-dev         # in another  — Vite dev server on :5173
+```
+
+The dev server proxies `/api`, `/agencies`, and `/health` to FastAPI, so set `CORS_ORIGINS=http://localhost:5173` in `.env`.
+
+Open http://localhost:5173. Append `?admin=1` to any URL to expose the agency-creation form.
+
+### Build (also runs in CI / Docker)
+
+```bash
+make frontend-build       # outputs to frontend/dist
+```
+
+### Production
+
+The Dockerfile uses a multistage build that compiles `frontend/` and copies `dist/` into `api/static/`. FastAPI mounts it at `/`, so the same Railway service serves both the API and the SPA — no CORS, one URL.
+
+### Frontend env vars
+
+| Var | Purpose | Default |
+|---|---|---|
+| `VITE_API_BASE_URL` | Override API origin (split-deploy only) | `""` (same-origin) |
+| `VITE_MAP_STYLE_URL` | Override map style URL | (in-code OSM raster) |
+
+---
+
 ## Architecture
 
 ```
