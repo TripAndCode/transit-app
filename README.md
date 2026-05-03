@@ -77,6 +77,28 @@ make serve PORT=9000
 
 Interactive docs: `http://localhost:8000/docs`
 
+### 7. Install frontend deps (one-time)
+
+```bash
+make frontend-install
+```
+
+### 8. Start the frontend dev server
+
+In a second terminal (leave `make serve` running):
+
+```bash
+make frontend-dev   # Vite on http://localhost:5173
+```
+
+Open <http://localhost:5173>. With no data ingested yet, all tabs show empty
+states. Once you've completed step 5 (load + analyze) and have at least one
+agency, the Map / Live / Reports tabs render real content. The Ask tab works
+as soon as your `GROQ_API_KEY` is valid.
+
+> No agencies yet? Append `?admin=1` to the URL to expose the in-browser
+> "+ 新規事業者" form, or use the CLI in step 4.
+
 ---
 
 ## Database
