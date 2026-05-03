@@ -1,11 +1,13 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useReport, useReports } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import type { TrendDay } from "../api/types";
 import { relativeTime } from "../utils/relativeTime";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
+import { DailyChart } from "../components/charts/DailyChart";
 
 const REPORT_LABEL: Record<string, string> = {
   ranking: "遅延ランキング",
@@ -74,23 +76,32 @@ export function ReportsTab() {
             <h2 style={{ marginTop: 0 }}>{REPORT_LABEL[detail.data.report_type] ?? detail.data.report_type}</h2>
             <div style={{ color: "var(--text-tertiary)", fontSize: 13, marginBottom: 16 }}>
               生成: {relativeTime(detail.data.rendered_at)}
+              {detail.data.ctx && (
+                <>
+                  {" "}・ 期間: {detail.data.ctx.from} 〜 {detail.data.ctx.to}
+                </>
+              )}
             </div>
-            <pre
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-soft)",
-                borderRadius: "var(--radius)",
-                padding: 16,
-                whiteSpace: "pre-wrap",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                fontSize: 13,
-                lineHeight: 1.7,
-                maxWidth: 920,
-              }}
-            >
-              {detail.data.text}
-            </pre>
-            {detail.data.rows.length > 0 && (
+            {detail.data.report_type === "trend" ? (
+              <DailyChart days={detail.data.rows as unknown as TrendDay[]} />
+            ) : (
+              <pre
+                style={{
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-soft)",
+                  borderRadius: "var(--radius)",
+                  padding: 16,
+                  whiteSpace: "pre-wrap",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  maxWidth: 920,
+                }}
+              >
+                {detail.data.text}
+              </pre>
+            )}
+            {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16 }}>
                 <summary style={{ cursor: "pointer", color: "var(--text-secondary)" }}>
                   ライブ再実行 ({detail.data.rows.length}件)
