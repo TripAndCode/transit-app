@@ -319,7 +319,12 @@ export function MapTab() {
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       />
       <MapLegend />
-      {data && data.features.length === 0 && (
+      {/* Empty state covers the map only when there's nothing to show.
+          In single-route mode the route overlay (line + numbered stops)
+          is the primary visual and may be present even if the heatmap
+          aggregation returned 0 stops with geom — so we suppress the
+          empty banner whenever the route overlay has data. */}
+      {data && data.features.length === 0 && !(shape && shape.stops.length >= 2) && (
         <div style={{ position: "absolute", inset: 0, background: "var(--bg-page)" }}>
           <EmptyState
             title="ヒートマップデータがありません"
