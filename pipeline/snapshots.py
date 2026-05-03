@@ -115,7 +115,7 @@ _SNAPSHOT_DEFS = [
         {"dow_group": "weekend", "limit": 100},
         """
         SELECT route_code, service_type, '週末' AS dow,
-            ROUND(SUM(avg_min * samples) / NULLIF(SUM(samples), 0)::numeric, 2) AS avg_min,
+            ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,
             SUM(samples) AS samples
         FROM agg_route_dow WHERE agency_id=%(agency_id)s AND dow IN ('土', '日')
         GROUP BY route_code, service_type
@@ -128,7 +128,7 @@ _SNAPSHOT_DEFS = [
         {"dow_group": "weekday", "limit": 100},
         """
         SELECT route_code, service_type, '平日' AS dow,
-            ROUND(SUM(avg_min * samples) / NULLIF(SUM(samples), 0)::numeric, 2) AS avg_min,
+            ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,
             SUM(samples) AS samples
         FROM agg_route_dow WHERE agency_id=%(agency_id)s AND dow IN ('月', '火', '水', '木', '金')
         GROUP BY route_code, service_type
