@@ -26,7 +26,7 @@ make frontend-install                   # npm deps
 # every run
 make db                                 # start Postgres on :5433
 make seed-agencies                      # upsert agencies.csv (Aomori included)
-bash scripts/fetch_and_ingest.sh        # rsync from Oracle VM + ingest + analyze
+make fetch-ingest                       # rsync from Oracle VM + ingest + analyze
 make serve                              # terminal A — FastAPI on :8000
 make frontend-dev                       # terminal B — Vite on :5173
 ```
@@ -97,8 +97,13 @@ If your agency uses a non-standard `trip_id` format, set the
 **Path B — pull archives from Oracle Cloud (rsync + ingest + analyze):**
 
 ```bash
-bash scripts/fetch_and_ingest.sh
+make fetch-ingest
 ```
+
+> Run via `make` — the Makefile's `-include .env` + `export` makes the
+> `ORACLE_HOST` / `ORACLE_USER` / `ORACLE_SSH_KEY_PATH` vars visible to
+> the script. Calling `bash scripts/fetch_and_ingest.sh` directly will
+> fail because raw shells don't auto-source `.env`.
 
 **Path A — live fetch each agency's GTFS-RT URL:**
 
