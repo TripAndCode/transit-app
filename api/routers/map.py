@@ -103,5 +103,7 @@ async def delay_heatmap(
             "to": ctx.to_date.isoformat(),
             "dow": ctx.dow,
             "time_band": ctx.time_band,
+            "service": ctx.service,
+            "routes": list(ctx.routes),
         },
     }
