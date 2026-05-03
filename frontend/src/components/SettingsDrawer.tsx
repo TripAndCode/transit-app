@@ -52,15 +52,18 @@ export function SettingsDrawer({ open, onClose }: Props) {
         <h3 style={{ marginTop: 0 }}>設定</h3>
         <label style={{ display: "block", marginTop: 16 }}>
           <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: 13 }}>
-            API キー (Pro 利用時)
+            API キー <span style={{ color: "var(--text-tertiary)" }}>(オプション)</span>
           </div>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="未設定"
+            placeholder="未設定でも全機能が使えます"
             style={{ width: "100%" }}
           />
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+            通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。
+          </div>
         </label>
         <div style={{ display: "flex", gap: 8, marginTop: 24, justifyContent: "flex-end" }}>
           <button
