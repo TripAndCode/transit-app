@@ -66,15 +66,18 @@ async def route_shape(
     frontend can draw a polyline directly from the result. Stops without
     coordinates are dropped so the polyline never includes (NaN, NaN).
     """
+    # Honor full ctx (DOW / time_band / service / dates) so the polyline
+    # colors match what compute_ranking et al. show for the same filters.
+    where_frag, params, _ = build_updates_filter(ctx, next_param=3)
     rows = await conn.fetch(
-        """
+        f"""
         WITH dedup AS (
             SELECT DISTINCT ON (trip_id, stop_sequence)
                 trip_id, stop_sequence, dep_delay
             FROM updates
             WHERE agency_id=$1 AND route_code=$2
               AND dep_delay IS NOT NULL
-              AND captured_at::date BETWEEN $3 AND $4
+              AND {where_frag}
             ORDER BY trip_id, stop_sequence, captured_at DESC
         )
         SELECT
@@ -95,8 +98,7 @@ async def route_shape(
         """,
         agency_id,
         route,
-        ctx.from_date,
-        ctx.to_date,
+        *params,
     )
     return {
         "route": route,

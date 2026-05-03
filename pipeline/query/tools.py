@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from api.range import RangeCtx
+from api.range import MAX_RANGE_DAYS, RangeCtx
 from pipeline.query.executor import execute as _legacy_execute
 from pipeline.reports import (
     compute_compare_ranking,
@@ -281,6 +281,8 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
 
     if new_from > new_to:
         new_from, new_to = new_to, new_from
+    if (new_to - new_from).days >= MAX_RANGE_DAYS:
+        new_from = new_to - timedelta(days=MAX_RANGE_DAYS - 1)
     return replace(ctx, from_date=new_from, to_date=new_to)
 
 
@@ -291,7 +293,7 @@ async def _validate_route_exists(route: str | None, conn, agency_id: int, ctx: R
     the friendly 'no observations in selected period' branch is unreachable
     and the user gets a misleading empty table instead of guidance.
     """
-    if not route or not str(route).isdigit():
+    if not route:
         return False
     row = await conn.fetchrow(
         "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2   AND captured_at::date BETWEEN $3 AND $4 LIMIT 1",
@@ -364,9 +366,11 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
     route = args.get("route")
 
     if dimension == "dow":
-        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=50)
-        if route:
-            rows = [r for r in rows if str(r[0]) == str(route)]
+        # When the LLM scopes to a single route, push it into ctx so the
+        # compute function actually narrows the query (the post-filter on a
+        # top-50 result was missing routes outside the top).
+        cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
+        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50)
         if not rows:
             return ToolResult(
                 kind="empty",

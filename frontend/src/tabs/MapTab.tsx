@@ -63,10 +63,35 @@ export function MapTab() {
     const onEnter = () => { m.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { m.getCanvas().style.cursor = ""; };
 
+    // Route-stop click handler — registered once at init so it never
+    // accumulates on filter / shape changes. The layer it targets
+    // (ROUTE_STOPS_LAYER) may not exist yet; MapLibre's delegated
+    // listener silently no-ops until the layer is added.
+    const onRouteStopClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
+      popupRef.current?.remove();
+      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div style="font: 13px sans-serif; min-width: 160px">
+             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}</div>
+             <strong>${escapeHtml(p.stop_name)}</strong><br/>
+             平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
+             サンプル: ${p.samples}件
+           </div>`,
+        )
+        .addTo(m);
+    };
+
     m.on("load", () => { styleLoadedRef.current = true; });
     m.on("click", LAYER, onClick);
     m.on("mouseenter", LAYER, onEnter);
     m.on("mouseleave", LAYER, onLeave);
+    m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
+    m.on("mouseenter", ROUTE_STOPS_LAYER, onEnter);
+    m.on("mouseleave", ROUTE_STOPS_LAYER, onLeave);
 
     mapRef.current = m;
     return () => {
@@ -75,6 +100,9 @@ export function MapTab() {
       m.off("click", LAYER, onClick);
       m.off("mouseenter", LAYER, onEnter);
       m.off("mouseleave", LAYER, onLeave);
+      m.off("click", ROUTE_STOPS_LAYER, onRouteStopClick);
+      m.off("mouseenter", ROUTE_STOPS_LAYER, onEnter);
+      m.off("mouseleave", ROUTE_STOPS_LAYER, onLeave);
       m.remove();
       mapRef.current = null;
       styleLoadedRef.current = false;
@@ -157,6 +185,9 @@ export function MapTab() {
 
   // Single-route overlay: thin neutral polyline + small numbered stop markers.
   // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
+  // Stop-layer event handlers are registered ONCE on init (lower in the file
+  // they're set up alongside the heatmap layer events) so they don't accumulate
+  // on filter changes.
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
@@ -249,11 +280,6 @@ export function MapTab() {
         },
       });
 
-      // Click → popup with stop sequence + name + delay + samples.
-      m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
-      m.on("mouseenter", ROUTE_STOPS_LAYER, () => { if (m) m.getCanvas().style.cursor = "pointer"; });
-      m.on("mouseleave", ROUTE_STOPS_LAYER, () => { if (m) m.getCanvas().style.cursor = ""; });
-
       // Fit to the route on focus.
       let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
       for (const [lon, lat] of coords) {
@@ -263,25 +289,6 @@ export function MapTab() {
         if (lat > maxLat) maxLat = lat;
       }
       m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
-    }
-
-    function onRouteStopClick(e: maplibregl.MapLayerMouseEvent) {
-      if (!m) return;
-      const f = e.features?.[0];
-      if (!f) return;
-      const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
-      popupRef.current?.remove();
-      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div style="font: 13px sans-serif; min-width: 160px">
-             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}</div>
-             <strong>${escapeHtml(p.stop_name)}</strong><br/>
-             平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
-             サンプル: ${p.samples}件
-           </div>`,
-        )
-        .addTo(m);
     }
 
     if (!shape) {

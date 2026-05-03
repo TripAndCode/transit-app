@@ -60,14 +60,15 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
 
 
 def _keyable(obj: Any) -> Any:
-    """Asyncpg Connection / Pool aren't hashable and aren't part of the key.
-
-    Replace any non-hashable value with a stable placeholder so it's still
-    counted in the key tuple (kept positional) but doesn't change with
-    different connection identities.
+    """Asyncpg connection-like objects are POOLED and per-request — they hash
+    by identity, which would make every request a cache miss. Replace them
+    with a class-name token so the cache key reflects only the semantic args.
     """
+    cls = type(obj).__name__
+    if cls in {"Connection", "PoolConnectionProxy", "Pool"}:
+        return f"<conn:{cls}>"
     try:
         hash(obj)
         return obj
     except TypeError:
-        return f"<unhashable:{type(obj).__name__}>"
+        return f"<unhashable:{cls}>"
