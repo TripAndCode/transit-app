@@ -101,6 +101,93 @@ as soon as your `GROQ_API_KEY` is valid.
 
 ---
 
+## Data ingest: Path A vs Path B
+
+Two ways to get GTFS data into the local Postgres. Both end at the same
+`updates` / `static_*` / `agg_*` tables and the API/UI don't care which one
+fed them. Pick one based on what the agency exposes.
+
+### Path A — Direct live fetch (uses `agencies.feed_url`)
+
+`ingest_live` HTTP-GETs the agency's official GTFS-RT endpoint, parses the
+protobuf, and writes one row per `(trip_id, captured_at)` into `updates`.
+No external server involved.
+
+```
+agency.feed_url ──HTTP GET──▶ parse .pb ──▶ updates table
+```
+
+```bash
+poetry run python gtfs_pipeline.py ingest_live
+```
+
+Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
+row. On Railway, the cron block in `railway.toml` runs this every 15 min.
+
+Path A does **not** load static GTFS (stops, routes, timetable) — for that
+you still need `make load_static` against a local zip, or set `static_url`
+on the agency and add a fetcher (not in this repo).
+
+### Path B — Oracle Cloud collection server (current setup)
+
+A separate Oracle Cloud VM (`64.110.114.101`, user `opc`) runs an
+independent scraper that crawls the GTFS-JP website and stores both:
+
+- `archive/*.tar.gz` — historical GTFS-RT protobuf bundles
+- `archive_static/*.zip` — static GTFS bundles (stops/routes/timetable)
+
+The local box never crawls. It **pulls** those archives over SSH, then runs
+ingest + load_static + analyze locally:
+
+```
+Oracle VM (crawls GTFS-JP)
+  ├─ /home/opc/.../archive/*.tar.gz
+  └─ /home/opc/.../archive_static/*.zip
+       │
+       │   scripts/fetch_archives.sh   (rsync over SSH)
+       ▼
+   raw_archives/ + raw_archives_static/   (local)
+       │
+       │   ingest + load_static + analyze
+       ▼
+   Postgres (transit-pg, port 5433)
+```
+
+The wiring is in `scripts/fetch_archives.sh` (rsync) and
+`scripts/fetch_and_ingest.sh` (rsync → ingest → load_static → analyze, the
+script Railway runs hourly via `[[crons]]`).
+
+#### Path B local quickstart
+
+In `.env` (already set in your env from earlier):
+
+```
+ORACLE_HOST=64.110.114.101
+ORACLE_USER=opc
+ORACLE_SSH_KEY_PATH=/Users/you/transit-app/oracle_cloud/ssh-key-2026-03-28.key
+AGENCY_ID=1
+```
+
+Then:
+
+```bash
+make db                                              # 1. start Postgres
+poetry run python gtfs_pipeline.py add_agency \      # 2. create agencies row
+  --name "青森市バス" --feed-url "https://example.com/feed.pb"
+bash scripts/fetch_and_ingest.sh                     # 3. rsync + ingest + analyze
+make serve                                           # 4. backend  (terminal A)
+make frontend-dev                                    # 5. frontend (terminal B)
+```
+
+`feed_url` on the agency row is just metadata for Path B — the .pb files
+are pre-fetched, so any URL works. Open <http://localhost:5173> when both
+servers are up.
+
+> First `fetch_archives.sh` run can take a while (full rsync of every
+> archive in the Oracle VM). Subsequent runs only pull deltas.
+
+---
+
 ## Database
 
 | Command | Effect |
