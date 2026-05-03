@@ -14,6 +14,7 @@ import type {
   ReportMeta,
   ReportResponse,
   Route,
+  RouteShapeResponse,
   RouteSummaryResponse,
 } from "./types";
 
@@ -82,6 +83,22 @@ export function useLiveDelays(
     queryFn: () => apiGet<LiveResponse>(`/api/${agencyId}/delays/live`),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+export function useRouteShape(
+  agencyId: number | null,
+  route: string | null,
+  ctx: RangeCtx,
+): UseQueryResult<RouteShapeResponse> {
+  return useQuery({
+    queryKey: ["route_shape", agencyId, route, ctx.from, ctx.to],
+    queryFn: () => {
+      const u = new URLSearchParams({ route: route!, from: ctx.from, to: ctx.to });
+      return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${u.toString()}`);
+    },
+    enabled: agencyId != null && !!route,
+    staleTime: 60 * 1000,
   });
 }
 

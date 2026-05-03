@@ -51,6 +51,70 @@ async def live_delays(
     }
 
 
+@router.get("/route-shape")
+async def route_shape(
+    route: str,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ctx: RangeCtx = Depends(get_range_ctx),
+):
+    """Ordered stop sequence + per-stop avg delay for one route over ctx.
+
+    Returns ``{ stops: [{ stop_sequence, stop_name, lon, lat, avg_min, samples }], route }``.
+    Powers the Map tab's per-route overlay (polyline + numbered stops) when
+    the user filters to a single route. Sorted by ``stop_sequence`` so the
+    frontend can draw a polyline directly from the result. Stops without
+    coordinates are dropped so the polyline never includes (NaN, NaN).
+    """
+    rows = await conn.fetch(
+        """
+        WITH dedup AS (
+            SELECT DISTINCT ON (trip_id, stop_sequence)
+                trip_id, stop_sequence, dep_delay
+            FROM updates
+            WHERE agency_id=$1 AND route_code=$2
+              AND dep_delay IS NOT NULL
+              AND captured_at::date BETWEEN $3 AND $4
+            ORDER BY trip_id, stop_sequence, captured_at DESC
+        )
+        SELECT
+            d.stop_sequence,
+            COALESCE(MAX(ss.stop_name), d.stop_sequence::text || '番停留所') AS stop_name,
+            ROUND(AVG(d.dep_delay) / 60.0::numeric, 2) AS avg_min,
+            COUNT(*) AS samples,
+            AVG(ST_X(ss.geom)) AS lon,
+            AVG(ST_Y(ss.geom)) AS lat
+        FROM dedup d
+        LEFT JOIN static_stop_times sst
+          ON d.trip_id = sst.trip_id AND d.stop_sequence = sst.stop_sequence
+          AND sst.agency_id = $1
+        LEFT JOIN static_stops ss
+          ON sst.stop_id = ss.stop_id AND ss.agency_id = $1
+        GROUP BY d.stop_sequence
+        ORDER BY d.stop_sequence
+        """,
+        agency_id,
+        route,
+        ctx.from_date,
+        ctx.to_date,
+    )
+    return {
+        "route": route,
+        "stops": [
+            {
+                "stop_sequence": r["stop_sequence"],
+                "stop_name": r["stop_name"],
+                "lon": float(r["lon"]) if r["lon"] is not None else None,
+                "lat": float(r["lat"]) if r["lat"] is not None else None,
+                "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,
+                "samples": r["samples"],
+            }
+            for r in rows
+            if r["lon"] is not None and r["lat"] is not None
+        ],
+    }
+
+
 @router.get("/today/route-summary")
 async def today_route_summary(
     agency_id: int = Depends(get_agency),
