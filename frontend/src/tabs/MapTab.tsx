@@ -97,8 +97,8 @@ export function MapTab() {
             "interpolate",
             ["linear"],
             ["get", "samples"],
-            1, 4,
-            500, 20,
+            1, 3,
+            500, 12,
           ],
           "circle-color": [
             "step",
@@ -108,8 +108,15 @@ export function MapTab() {
             5, DELAY_RAMP.moderate,
             10, DELAY_RAMP.severe,
           ],
-          "circle-opacity": 0.75,
-          "circle-stroke-width": 1,
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["get", "samples"],
+            1, 0.35,
+            50, 0.7,
+            500, 0.85,
+          ],
+          "circle-stroke-width": 0.5,
           "circle-stroke-color": "#fff",
         },
       });

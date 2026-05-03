@@ -59,11 +59,16 @@ async def delay_heatmap(
 ):
     """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band."""
     where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    # Cluster by rounded lat/lon (~11 m grid at 4 dp). Paired stops on opposite
+    # sides of the same intersection collapse into one circle that aggregates
+    # observations from both — avoids the 'twin circles' artifact in the v1 view.
     rows = await conn.fetch(
         f"""
         SELECT
-            ss.stop_id, ss.stop_name,
-            ST_X(ss.geom) AS lon, ST_Y(ss.geom) AS lat,
+            ROUND(ST_X(ss.geom)::numeric, 4) AS lon,
+            ROUND(ST_Y(ss.geom)::numeric, 4) AS lat,
+            string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
+            string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
             ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
             COUNT(*) AS samples
         FROM updates u
@@ -76,7 +81,7 @@ async def delay_heatmap(
             AND u.dep_delay IS NOT NULL
             AND ss.geom IS NOT NULL
             AND {where_frag}
-        GROUP BY ss.stop_id, ss.stop_name, ss.geom
+        GROUP BY ROUND(ST_X(ss.geom)::numeric, 4), ROUND(ST_Y(ss.geom)::numeric, 4)
         """,
         agency_id,
         *params,
@@ -86,7 +91,7 @@ async def delay_heatmap(
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [float(r["lon"]), float(r["lat"])]},
             "properties": {
-                "stop_id": r["stop_id"],
+                "stop_id": r["stop_ids"],  # comma-joined list when clustered
                 "stop_name": r["stop_name"],
                 "avg_delay_min": float(r["avg_delay_min"]),
                 "samples": r["samples"],
