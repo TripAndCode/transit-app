@@ -305,7 +305,7 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             # label is injected as a literal in SELECT; params for WHERE only
             rows = await conn.fetch(
                 f"SELECT route_code, service_type, '{label}' AS dow, "
-                "ROUND(SUM(avg_min * samples) / SUM(samples)::numeric, 2) AS avg_min, "
+                "ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min, "
                 "SUM(samples) AS samples "
                 f"FROM agg_route_dow WHERE {where_sql} "
                 f"GROUP BY route_code, service_type ORDER BY avg_min {order}",
@@ -420,7 +420,7 @@ async def _exec_by_stop(intent: dict, conn, agency_id: int) -> list:
         else:
             rows = await conn.fetch(
                 "SELECT stop_sequence, stop_name, "
-                "ROUND(SUM(avg_min * samples) / SUM(samples)::numeric, 2) AS avg_min, "
+                "ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min, "
                 "SUM(samples) AS samples "
                 f"FROM agg_stop_seq WHERE {where_sql} "
                 f"GROUP BY stop_sequence, stop_name ORDER BY avg_min {order} LIMIT {limit_ph}",
@@ -950,7 +950,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             params.append(limit)
             rows = await conn.fetch(
                 f"SELECT route_code, service_type, '{label}' AS dow, "
-                "ROUND(SUM(avg_min * samples) / SUM(samples)::numeric, 2) AS avg_min, "
+                "ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min, "
                 "SUM(samples) AS samples "
                 f"FROM agg_route_dow {where_sql} GROUP BY route_code, service_type "
                 f"ORDER BY avg_min {order} LIMIT ${n}",
