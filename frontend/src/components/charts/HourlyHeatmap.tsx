@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { delayColor } from "../../styles/tokens";
+import { useRangeContext, type TimeBand } from "../../api/rangeContext";
+import { DELAY_RAMP, delayColor } from "../../styles/tokens";
 
 export type HourlyCell = {
   date: string;
@@ -10,6 +11,24 @@ export type HourlyCell = {
 
 type Props = { cells: HourlyCell[]; height?: number };
 
+// Hour ranges that map a clicked row to a time-band filter value.
+const HOUR_TO_BAND: { hours: [number, number]; band: TimeBand }[] = [
+  { hours: [0, 4], band: "late_night" },
+  { hours: [5, 8], band: "morning" },
+  { hours: [9, 11], band: "forenoon" },
+  { hours: [12, 13], band: "noon" },
+  { hours: [14, 16], band: "afternoon" },
+  { hours: [17, 19], band: "evening" },
+  { hours: [20, 23], band: "night" },
+];
+
+function bandFor(hour: number): TimeBand | null {
+  for (const b of HOUR_TO_BAND) {
+    if (hour >= b.hours[0] && hour <= b.hours[1]) return b.band;
+  }
+  return null;
+}
+
 /**
  * Date × hour-of-day heatmap. Rows = hours 0-23, columns = dates.
  * Color = delay severity (delayColor); empty cells dimmed. Hover = tooltip
@@ -18,6 +37,8 @@ type Props = { cells: HourlyCell[]; height?: number };
  */
 export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const [hover, setHover] = useState<HourlyCell | null>(null);
+  const [showLegend, setShowLegend] = useState(false);
+  const [, setCtx] = useRangeContext();
 
   const dates = useMemo(() => {
     const s = new Set(cells.map((c) => c.date));
@@ -47,13 +68,56 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const cellW = innerW / dates.length;
 
   return (
-    <div style={{ position: "relative", width: "100%", overflowX: "auto", marginTop: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+    <div style={{ position: "relative", width: "100%", marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>時間帯ヒートマップ</strong>
         <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-          縦: 時間 (0-23) ・ 横: 日付 ・ 色: 遅延の強さ
+          縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み
         </span>
+        <button
+          type="button"
+          onClick={() => setShowLegend((v) => !v)}
+          aria-label="凡例を表示"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "50%",
+            width: 18,
+            height: 18,
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >
+          ?
+        </button>
+        {showLegend && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              padding: "4px 10px",
+              background: "var(--bg-soft)",
+              borderRadius: 4,
+            }}
+          >
+            <span>遅延:</span>
+            <Swatch color={DELAY_RAMP.ok} label="<2分" />
+            <Swatch color={DELAY_RAMP.mild} label="2-5" />
+            <Swatch color={DELAY_RAMP.moderate} label="5-10" />
+            <Swatch color={DELAY_RAMP.severe} label=">10" />
+            <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>
+              ・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付
+            </span>
+          </div>
+        )}
       </div>
+      <div style={{ overflowX: "auto" }}>
       <svg width={padL + innerW + 8} height={height} role="img" aria-label="時間帯別遅延ヒートマップ">
         {Array.from({ length: 24 }, (_, h) => (
           <text
@@ -63,6 +127,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             fontSize="10"
             fill="var(--text-tertiary)"
             textAnchor="end"
+            style={{ cursor: bandFor(h) ? "pointer" : "default" }}
+            onClick={() => {
+              const b = bandFor(h);
+              if (b) setCtx({ time_band: b });
+            }}
           >
             {h}
           </text>
@@ -78,6 +147,8 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               fontSize="10"
               fill="var(--text-tertiary)"
               textAnchor="middle"
+              style={{ cursor: "pointer" }}
+              onClick={() => setCtx({ from: d, to: d })}
             >
               {d.slice(5)}
             </text>
@@ -90,6 +161,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             const y = padT + h * cellH;
             const fill = c && c.avg_min != null ? delayColor(c.avg_min) : "#f0f0ee";
             const opacity = c && c.avg_min != null ? Math.min(1, 0.35 + (c.samples / 200) * 0.5) : 0.35;
+            const handleCellClick = () => {
+              if (!c) return;
+              const b = bandFor(c.hour);
+              setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
+            };
             return (
               <rect
                 key={`${d}|${h}`}
@@ -99,18 +175,21 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 height={Math.max(1, cellH - 1)}
                 fill={fill}
                 opacity={opacity}
+                style={{ cursor: c ? "pointer" : "default" }}
                 onMouseEnter={() => c && setHover(c)}
                 onMouseLeave={() => setHover((v) => (v === c ? null : v))}
+                onClick={handleCellClick}
               />
             );
           }),
         )}
       </svg>
+      </div>
       {hover && (
         <div
           style={{
             position: "absolute",
-            top: 4,
+            top: 32,
             right: 8,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
@@ -118,6 +197,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             padding: "6px 10px",
             fontSize: 12,
             boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            pointerEvents: "none",
           }}
         >
           {hover.date} {String(hover.hour).padStart(2, "0")}時 ・ 平均
@@ -125,5 +205,14 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function Swatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />
+      {label}
+    </span>
   );
 }
