@@ -21,9 +21,15 @@ bash "$SCRIPT_DIR/fetch_archives.sh"
 echo "==> Ingesting RT archives for agency $AGENCY_ID"
 poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest "$SCRIPT_DIR/../raw_archives" --agency-id "$AGENCY_ID"
 
-# 3. Load latest static GTFS (idempotent — re-loads only if new zip appears)
-echo "==> Loading static GTFS for agency $AGENCY_ID"
-poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" load_static "$SCRIPT_DIR/../raw_archives_static" --agency-id "$AGENCY_ID"
+# 3. Load latest static GTFS (idempotent — re-loads only if new zip appears).
+#    Skip when no static zip is present locally (Oracle VM may not collect static yet).
+STATIC_DIR="$SCRIPT_DIR/../raw_archives_static"
+if compgen -G "$STATIC_DIR/*_static.zip" > /dev/null; then
+    echo "==> Loading static GTFS for agency $AGENCY_ID"
+    poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" load_static "$STATIC_DIR" --agency-id "$AGENCY_ID"
+else
+    echo "==> No *_static.zip in $STATIC_DIR — skipping load_static"
+fi
 
 # 4. Re-run aggregations
 echo "==> Running analysis for agency $AGENCY_ID"
