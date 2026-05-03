@@ -42,7 +42,10 @@ else
 fi
 
 cleanup() {
-    [ "$CLEANUP_KEY" -eq 1 ] && rm -f "$KEY_FILE"
+    if [ "$CLEANUP_KEY" -eq 1 ]; then
+        rm -f "$KEY_FILE"
+    fi
+    return 0
 }
 trap cleanup EXIT
 
