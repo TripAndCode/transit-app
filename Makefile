@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze
+.PHONY: install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies
 
 install:
 	poetry install
@@ -67,6 +67,10 @@ load_static:
 
 analyze:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+
+# Idempotent: re-runnable, upserts on feed_url uniqueness.
+seed-agencies:
+	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
 
 .PHONY: frontend-install frontend-dev frontend-build
 
