@@ -24,9 +24,10 @@ _DB_COLS = {
 def load_static(path: str, agency_id: int, conn) -> None:
     p = pathlib.Path(path)
     if p.is_dir():
-        zips = sorted(p.glob("*_static.zip"))
+        # Match both legacy *_static.zip and the Oracle scraper's gtfs_static_*.zip
+        zips = sorted(p.glob("*static*.zip"))
         if not zips:
-            raise FileNotFoundError(f"No *_static.zip found in {p}")
+            raise FileNotFoundError(f"No *static*.zip found in {p}")
         p = zips[-1]
         print(f"Using: {p.name}")
     if not p.exists():
