@@ -9,12 +9,14 @@ export const COLORS = {
   errorFg: "#8a6f1c",
 } as const;
 
-// Calm severity ramp for delays (minutes -> color)
+// Severity ramp for delays (minutes -> color). Calm at the low end so the
+// usual data isn't visually loud; severe (>10 min) is a true red so the
+// genuinely problematic stops pop without ambiguity.
 export const DELAY_RAMP = {
   ok: "#8fb88f",       // < 2 min   sage
   mild: "#d4b878",     // 2 – 5 min sand
-  moderate: "#c98a5e", // 5 – 10 min terracotta
-  severe: "#a85d52",   // > 10 min  brick
+  moderate: "#e07a3a", // 5 – 10 min orange
+  severe: "#d92121",   // > 10 min  red
 } as const;
 
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
