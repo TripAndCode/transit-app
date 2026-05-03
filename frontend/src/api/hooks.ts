@@ -42,17 +42,21 @@ export function useReports(agencyId: number | null): UseQueryResult<ReportMeta[]
   });
 }
 
+function ctxKey(ctx: RangeCtx) {
+  // All filter dimensions must be in the cache key — missing routes/service
+  // here would silently serve stale data when those filters change.
+  return [ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")];
+}
+
 export function useReport(
   agencyId: number | null,
   reportType: string | null,
   ctx: RangeCtx,
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType, ctx.from, ctx.to, ctx.dow, ctx.time_band],
+    queryKey: ["reports", agencyId, reportType, ...ctxKey(ctx)],
     queryFn: () =>
-      apiGet<ReportResponse>(
-        `/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`,
-      ),
+      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`),
     enabled: agencyId != null && !!reportType,
   });
 }
@@ -62,11 +66,8 @@ export function useHeatmap(
   ctx: RangeCtx,
 ): UseQueryResult<HeatmapCollection> {
   return useQuery({
-    queryKey: ["heatmap", agencyId, ctx.from, ctx.to, ctx.dow, ctx.time_band],
-    queryFn: () =>
-      apiGet<HeatmapCollection>(
-        `/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`,
-      ),
+    queryKey: ["heatmap", agencyId, ...ctxKey(ctx)],
+    queryFn: () => apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`),
     enabled: agencyId != null,
     staleTime: 60 * 1000,
   });
