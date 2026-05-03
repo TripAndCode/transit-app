@@ -1,4 +1,12 @@
-from datetime import datetime
+"""Reports endpoints — list available report types and serve live queries.
+
+The reports table layer used to be a pre-rendered ``snapshots`` table written
+by ``make analyze``. v2 replaces that with on-demand queries against the
+``agg_*`` aggregate tables so reports can honor the user's time-range filter.
+``rendered_at`` in the response is the moment the request was served.
+"""
+
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -6,9 +14,12 @@ from pydantic import BaseModel
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from pipeline.query.executor import execute
+from pipeline.query.formatter import format_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
+# Each report key maps to a base intent dict; the executor + formatter handle
+# the actual SQL and Japanese rendering. Order here is the listing order.
 _REPORT_INTENTS: dict[str, dict] = {
     "ranking": {"query_type": "ranking", "limit": 100},
     "ranking_best": {"query_type": "ranking", "limit": 100, "sort_order": "asc"},
@@ -40,11 +51,14 @@ async def list_reports(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    rows = await conn.fetch(
-        "SELECT report_type, rendered_at FROM snapshots WHERE agency_id=$1 ORDER BY report_type",
-        agency_id,
-    )
-    return [{"report_type": r["report_type"], "rendered_at": r["rendered_at"]} for r in rows]
+    """Static list of available report types. ``rendered_at`` is request time.
+
+    The ``conn`` dependency is unused here but kept for parity with
+    ``get_report`` and to ensure the agency_id check still runs.
+    """
+    del conn  # explicitly unused
+    now = datetime.now(timezone.utc)
+    return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_INTENTS]
 
 
 @router.get("/reports/{report_type}", response_model=ReportResponse)
@@ -56,30 +70,20 @@ async def get_report(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    snap = await conn.fetchrow(
-        "SELECT report_type, rendered_at, text FROM snapshots WHERE agency_id=$1 AND report_type=$2",
-        agency_id,
-        report_type,
-    )
-    if not snap:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Report '{report_type}' not found for agency {agency_id}",
-        )
+    """Run the named report live against the aggregate tables."""
+    if report_type not in _REPORT_INTENTS:
+        raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
 
-    text = snap["text"]
-    if limit is not None:
-        lines = text.split("\n")
-        text = "\n".join(lines[: limit + 1])  # header line + limit data lines
-
-    intent = {**_REPORT_INTENTS.get(report_type, {"query_type": "unknown"})}
+    intent = {**_REPORT_INTENTS[report_type]}
     if limit is not None:
         intent["limit"] = limit
-    live_rows = await execute(intent, conn, agency_id) or []
+
+    rows = await execute(intent, conn, agency_id) or []
+    text = format_result(intent["query_type"], rows, intent)
 
     return ReportResponse(
-        report_type=snap["report_type"],
-        rendered_at=snap["rendered_at"],
+        report_type=report_type,
+        rendered_at=datetime.now(timezone.utc),
         text=text,
-        rows=live_rows,
+        rows=rows,
     )

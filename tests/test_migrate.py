@@ -44,22 +44,22 @@ def test_migrate_up_idempotent(pg_conn):
 def test_migrate_down_and_up(pg_conn):
     conn = psycopg2.connect(DATABASE_URL)
     try:
-        migrate_down(None, conn)  # rolls back latest (0004 snapshots)
+        migrate_down(None, conn)  # rolls back latest (0003 api_keys)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema='public' AND table_name='snapshots'
+                WHERE table_schema='public' AND table_name='api_keys'
             """)
-            assert cur.fetchone() is None, "snapshots table should be gone after rollback"
+            assert cur.fetchone() is None, "api_keys table should be gone after rollback"
             cur.execute("SELECT version FROM schema_migrations ORDER BY version")
             versions = [r[0] for r in cur.fetchall()]
-        assert versions == ["0001", "0002", "0003"]
-        migrate_up(conn)  # restore — re-applies 0004
+        assert versions == ["0001", "0002"]
+        migrate_up(conn)  # restore — re-applies 0003
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema='public' AND table_name='snapshots'
+                WHERE table_schema='public' AND table_name='api_keys'
             """)
-            assert cur.fetchone() is not None, "snapshots table should exist after migrate_up"
+            assert cur.fetchone() is not None, "api_keys table should exist after migrate_up"
     finally:
         conn.close()
