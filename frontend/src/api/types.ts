@@ -35,6 +35,20 @@ export type RouteSummaryResponse = {
   routes: RouteSummary[];
 };
 
+export type RouteShapeStop = {
+  stop_sequence: number;
+  stop_name: string;
+  lon: number;
+  lat: number;
+  avg_min: number | null;
+  samples: number;
+};
+
+export type RouteShapeResponse = {
+  route: string;
+  stops: RouteShapeStop[];
+};
+
 export type HeatmapProps = {
   stop_id: string;
   stop_name: string;

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
-import { useHeatmap } from "../api/hooks";
+import { useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { getMapStyle } from "../styles/mapStyle";
@@ -13,12 +13,18 @@ import { TabFilterBar } from "../components/TabFilterBar";
 
 const SOURCE = "delays";
 const LAYER = "delay-circles";
+const ROUTE_SOURCE = "route-line";
+const ROUTE_LAYER = "route-line-stroke";
+const ROUTE_STOPS_LAYER = "route-stops";
 
 export function MapTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
   const { data, isLoading, error, refetch } = useHeatmap(id, ctx);
+  // Single-route overlay: only fetch when exactly one route is selected.
+  const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
+  const { data: shape } = useRouteShape(id, focusedRoute, ctx);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -147,6 +153,90 @@ export function MapTab() {
     if (styleLoadedRef.current) applyData();
     else m.once("load", applyData);
   }, [data]);
+
+  // Single-route overlay: thin neutral polyline + small numbered stop markers.
+  // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+
+    function clearOverlay() {
+      if (!m) return;
+      if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
+      if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
+      if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
+      if (m.getSource(ROUTE_SOURCE + "-stops")) m.removeSource(ROUTE_SOURCE + "-stops");
+    }
+
+    function drawOverlay() {
+      if (!m || !shape || shape.stops.length < 2) {
+        clearOverlay();
+        return;
+      }
+      clearOverlay();
+      const coords: [number, number][] = shape.stops.map((s) => [s.lon, s.lat]);
+      m.addSource(ROUTE_SOURCE, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: coords },
+          properties: {},
+        },
+      });
+      m.addLayer({
+        id: ROUTE_LAYER,
+        type: "line",
+        source: ROUTE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#5b6cad",
+          "line-width": 3,
+          "line-opacity": 0.55,
+        },
+      });
+
+      m.addSource(ROUTE_SOURCE + "-stops", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: shape.stops.map((s) => ({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+            properties: { stop_sequence: s.stop_sequence, stop_name: s.stop_name, avg_min: s.avg_min ?? 0 },
+          })),
+        },
+      });
+      m.addLayer({
+        id: ROUTE_STOPS_LAYER,
+        type: "circle",
+        source: ROUTE_SOURCE + "-stops",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#fff",
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "#5b6cad",
+        },
+      });
+
+      // Fit to the route on focus.
+      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const [lon, lat] of coords) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
+    }
+
+    if (!shape) {
+      // No focused route — make sure no leftover overlay remains.
+      if (styleLoadedRef.current) clearOverlay();
+      return;
+    }
+    if (styleLoadedRef.current) drawOverlay();
+    else m.once("load", drawOverlay);
+  }, [shape]);
 
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
 
