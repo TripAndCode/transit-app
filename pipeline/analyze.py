@@ -1,7 +1,6 @@
 import psycopg2.extras
 
 from pipeline.db import _DEDUP_INNER, _static_loaded
-from pipeline.snapshots import write_snapshots
 
 _VALID_AGG_TABLES = frozenset(
     {
@@ -215,5 +214,3 @@ def analyze(agency_id: int, conn) -> None:
     )
     print(f"  agg_stop_seq: {len(rows)} rows")
     print("Analysis complete.")
-    print("Writing snapshots...")
-    write_snapshots(agency_id, conn)

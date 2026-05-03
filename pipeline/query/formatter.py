@@ -305,27 +305,17 @@ def format_result(query_type: str, rows, intent: dict) -> str:
 async def format_guidance_menu(conn, agency_id: int) -> str:
     ranking = "（データなし）"
     try:
-        snap = await conn.fetchrow(
-            "SELECT text FROM snapshots WHERE agency_id=$1 AND report_type='ranking'",
+        rows = await conn.fetch(
+            "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
+            "FROM agg_route_stats WHERE agency_id=$1 ORDER BY avg_min DESC LIMIT 10",
             agency_id,
         )
-        if snap:
-            lines = snap["text"].split("\n")
-            data_lines = [line for line in lines[1:] if line.strip()][:10]
-            if data_lines:
-                ranking = "\n".join(data_lines)
-        else:
-            rows = await conn.fetch(
-                "SELECT route_code, service_type, avg_min, p50_min, p90_min, samples "
-                "FROM agg_route_stats WHERE agency_id=$1 ORDER BY avg_min DESC LIMIT 10",
-                agency_id,
+        rows = [tuple(r) for r in rows]
+        if rows:
+            ranking = "\n".join(
+                f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
+                for i, r in enumerate(rows, 1)
             )
-            rows = [tuple(r) for r in rows]
-            if rows:
-                ranking = "\n".join(
-                    f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
-                    for i, r in enumerate(rows, 1)
-                )
     except Exception as exc:
         _log.warning("format_guidance_menu DB error: %s", exc)
 
@@ -352,20 +342,6 @@ async def format_guidance_menu(conn, agency_id: int) -> str:
 
 async def format_unknown(question: str, conn=None, agency_id: int = 0, model: str = "llama-3.3-70b-versatile") -> str:
     context = await format_guidance_menu(conn, agency_id) if conn is not None else ""
-
-    if conn is not None:
-        for rtype in ("trend", "compare_ranking"):
-            try:
-                row = await conn.fetchrow(
-                    "SELECT text FROM snapshots WHERE agency_id=$1 AND report_type=$2",
-                    agency_id,
-                    rtype,
-                )
-                if row and row["text"]:
-                    context += "\n\n" + row["text"]
-            except Exception:
-                pass
-
     prompt = _PROMPT.format(context=context, question=question) if context else question
 
     client = _get_groq_client()

@@ -572,17 +572,17 @@ async def _exec_trend(intent: dict, conn, agency_id: int) -> list:
         return []
 
     rows = await conn.fetch(
-        "WITH max_d AS (SELECT MAX(date) AS d FROM agg_daily_trend WHERE agency_id=$1),\n"
+        "WITH max_d AS (SELECT MAX(date::date) AS d FROM agg_daily_trend WHERE agency_id=$1),\n"
         "recent AS (\n"
         "    SELECT route_code, service_type, AVG(avg_min) AS r_avg, COUNT(*) AS n\n"
         "    FROM agg_daily_trend, max_d\n"
-        f"    WHERE agency_id=$1 AND date > max_d.d::date - '14 days'::interval{extra_cond}\n"
+        f"    WHERE agency_id=$1 AND date::date > max_d.d - 14{extra_cond}\n"
         "    GROUP BY route_code, service_type HAVING COUNT(*) >= 3\n"
         "),\n"
         "older AS (\n"
         "    SELECT route_code, service_type, AVG(avg_min) AS o_avg, COUNT(*) AS n\n"
         "    FROM agg_daily_trend, max_d\n"
-        f"    WHERE agency_id=$1 AND date BETWEEN max_d.d::date - '28 days'::interval AND max_d.d::date - '14 days'::interval{extra_cond}\n"  # noqa: E501
+        f"    WHERE agency_id=$1 AND date::date BETWEEN max_d.d - 28 AND max_d.d - 14{extra_cond}\n"
         "    GROUP BY route_code, service_type HAVING COUNT(*) >= 3\n"
         "),\n"
         "joined AS (\n"

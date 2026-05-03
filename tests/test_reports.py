@@ -1,3 +1,5 @@
+"""Tests for the v2 reports endpoints (live queries, no snapshots table)."""
+
 import os
 
 import asyncpg
@@ -26,7 +28,7 @@ async def reports_app(apply_schema):
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, "
             "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_stop_seq, rag_chunks, api_keys, snapshots CASCADE"
+            "agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE"
         )
     await pool.close()
 
@@ -39,29 +41,25 @@ async def reports_client(reports_app):
 
 
 @pytest.mark.asyncio
-async def test_reports_list_empty_before_analyze(reports_client):
+async def test_reports_list_returns_static_metadata(reports_client):
+    """The list endpoint returns the canonical 8 report types regardless of data."""
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports")
     assert resp.status_code == 200
-    assert resp.json() == []
-
-
-@pytest.mark.asyncio
-async def test_reports_list_returns_inserted_snapshot(reports_client):
-    client, agency_id, pool = reports_client
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
-            agency_id,
-            "ranking",
-            "【遅延ランキング上位100系統】\n1位: 系統44 平均4.2分（平日3.1分・土日祝6.8分、計1204件）",
-        )
-    resp = await client.get(f"/api/{agency_id}/reports")
-    assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["report_type"] == "ranking"
-    assert "rendered_at" in data[0]
+    types = {r["report_type"] for r in data}
+    assert types == {
+        "ranking",
+        "ranking_best",
+        "on_time",
+        "worst_5min",
+        "trend",
+        "compare_ranking",
+        "dow_weekend",
+        "dow_weekday",
+    }
+    for r in data:
+        assert "rendered_at" in r
 
 
 @pytest.mark.asyncio
@@ -72,51 +70,46 @@ async def test_reports_get_unknown_type_returns_404(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_get_returns_text_and_rows(reports_client):
+async def test_reports_get_ranking_with_seeded_aggregates(reports_client):
+    """A live ranking query reads agg_route_stats and renders text + rows."""
     client, agency_id, pool = reports_client
-    snapshot_text = (
-        "【遅延ランキング上位100系統】\n"
-        "1位: 系統44 平均4.2分（平日3.1分・土日祝6.8分、計1204件）\n"
-        "2位: 系統22 平均3.1分（平日2.5分・土日祝4.0分、計500件）"
-    )
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
+            "INSERT INTO agg_route_stats "
+            "(agency_id, route_code, service_type, avg_min, p50_min, p90_min, "
+            " late_5min_plus, on_time_pct, late5_pct, samples) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             agency_id,
-            "ranking",
-            snapshot_text,
+            "44",
+            "平日",
+            4.2,
+            3.1,
+            8.5,
+            100,
+            65.0,
+            12.0,
+            1200,
         )
     resp = await client.get(f"/api/{agency_id}/reports/ranking")
     assert resp.status_code == 200
     data = resp.json()
     assert data["report_type"] == "ranking"
-    assert data["text"] == snapshot_text
     assert "rendered_at" in data
-    assert data["rows"] == []  # no agg data seeded; live query returns empty
+    # rows contain the seeded route, text was rendered by the formatter
+    assert any(r.get("route_code") == "44" for r in data["rows"])
+    assert "44" in data["text"]
 
 
 @pytest.mark.asyncio
-async def test_reports_get_limit_truncates_text(reports_client):
-    client, agency_id, pool = reports_client
-    lines = ["【遅延ランキング上位100系統】"] + [
-        f"{i}位: 系統{i} 平均{i}.0分（平日{i}.0分・土日祝{i}.0分、計100件）" for i in range(1, 11)
-    ]
-    snapshot_text = "\n".join(lines)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO snapshots (agency_id, report_type, rendered_at, text) VALUES ($1, $2, NOW(), $3)",
-            agency_id,
-            "ranking",
-            snapshot_text,
-        )
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?limit=3")
+async def test_reports_get_empty_aggregates_renders_no_data(reports_client):
+    """With no agg data seeded, the report renders gracefully (text + empty rows)."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking")
     assert resp.status_code == 200
     data = resp.json()
-    returned_lines = data["text"].split("\n")
-    assert len(returned_lines) == 4  # header + 3 data lines
-    assert returned_lines[0] == "【遅延ランキング上位100系統】"
-    assert "1位" in returned_lines[1]
-    assert "3位" in returned_lines[3]
+    assert data["report_type"] == "ranking"
+    assert data["rows"] == []
+    assert isinstance(data["text"], str) and len(data["text"]) > 0
 
 
 @pytest.mark.asyncio
