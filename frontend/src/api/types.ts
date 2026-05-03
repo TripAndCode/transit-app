@@ -19,6 +19,22 @@ export type LiveResponse = {
   rows: LiveDelay[];
 };
 
+export type RouteSummary = {
+  route_code: string;
+  service_type: string | null;
+  avg_delay_sec: number;
+  worst_delay_sec: number;
+  trips_observed: number;
+  samples: number;
+  last_seen_at: string | null;
+};
+
+export type RouteSummaryResponse = {
+  latest_captured_at: string | null;
+  date: string | null;
+  routes: RouteSummary[];
+};
+
 export type HeatmapProps = {
   stop_id: string;
   stop_name: string;
