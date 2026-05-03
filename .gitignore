@@ -14,3 +14,7 @@ docs/*
 !docs/superpowers/
 .worktrees/
 .superpowers/
+oracle_cloud/
+frontend/node_modules
+frontend/dist
+api/static

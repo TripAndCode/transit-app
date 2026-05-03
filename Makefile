@@ -67,3 +67,14 @@ load_static:
 
 analyze:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+
+.PHONY: frontend-install frontend-dev frontend-build
+
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm install && npm run build
