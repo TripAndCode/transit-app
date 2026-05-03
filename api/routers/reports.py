@@ -20,6 +20,7 @@ from pipeline.query.formatter import format_result
 from pipeline.reports import (
     compute_compare_ranking,
     compute_dow_ranking,
+    compute_hourly_heatmap,
     compute_on_time,
     compute_ranking,
     compute_trend_series,
@@ -167,8 +168,9 @@ async def get_report(
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n)
         intent = {"query_type": "dow_ranking", "dow_group": "weekday", "limit": n}
     elif report_type == "trend":
-        # Daily series for the chart-driven Trend tab.
+        # Daily series + hour-of-day heatmap for the granular Trend tab.
         series = await compute_trend_series(agency_id, ctx, conn)
+        hourly = await compute_hourly_heatmap(agency_id, ctx, conn)
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx)
@@ -181,7 +183,7 @@ async def get_report(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
             text=text,
-            rows=days,
+            rows=[{"days": days, "hourly": hourly}],
             ctx=_ctx_payload(ctx),
         )
     else:
