@@ -171,10 +171,18 @@ export function MapTab() {
     function drawOverlay() {
       if (!m || !shape || shape.stops.length < 2) {
         clearOverlay();
+        // In route mode without enough data, also keep heatmap visible.
+        if (m && m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
         return;
       }
       clearOverlay();
       const coords: [number, number][] = shape.stops.map((s) => [s.lon, s.lat]);
+
+      // Route mode: hide the heatmap (it would show isolated stops without
+      // the connecting line) and use the route's stop sequence directly,
+      // colored by per-stop avg delay.
+      if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "none");
+
       m.addSource(ROUTE_SOURCE, {
         type: "geojson",
         data: {
@@ -190,8 +198,9 @@ export function MapTab() {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#5b6cad",
-          "line-width": 3,
-          "line-opacity": 0.55,
+          // Bolder when zoomed in so it stays visible at street-level.
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
+          "line-opacity": 0.7,
         },
       });
 
@@ -202,7 +211,12 @@ export function MapTab() {
           features: shape.stops.map((s) => ({
             type: "Feature",
             geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-            properties: { stop_sequence: s.stop_sequence, stop_name: s.stop_name, avg_min: s.avg_min ?? 0 },
+            properties: {
+              stop_sequence: s.stop_sequence,
+              stop_name: s.stop_name,
+              avg_min: s.avg_min ?? 0,
+              samples: s.samples,
+            },
           })),
         },
       });
@@ -211,12 +225,33 @@ export function MapTab() {
         type: "circle",
         source: ROUTE_SOURCE + "-stops",
         paint: {
-          "circle-radius": 5,
-          "circle-color": "#fff",
-          "circle-stroke-width": 2.5,
-          "circle-stroke-color": "#5b6cad",
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10, 4,
+            14, 7,
+            17, 11,
+          ],
+          // Color by avg_min using the same severity ramp as the heatmap.
+          "circle-color": [
+            "step",
+            ["get", "avg_min"],
+            DELAY_RAMP.ok,
+            2, DELAY_RAMP.mild,
+            5, DELAY_RAMP.moderate,
+            10, DELAY_RAMP.severe,
+          ],
+          "circle-opacity": 0.95,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
         },
       });
+
+      // Click → popup with stop sequence + name + delay + samples.
+      m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
+      m.on("mouseenter", ROUTE_STOPS_LAYER, () => { if (m) m.getCanvas().style.cursor = "pointer"; });
+      m.on("mouseleave", ROUTE_STOPS_LAYER, () => { if (m) m.getCanvas().style.cursor = ""; });
 
       // Fit to the route on focus.
       let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
@@ -229,9 +264,31 @@ export function MapTab() {
       m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
     }
 
+    function onRouteStopClick(e: maplibregl.MapLayerMouseEvent) {
+      if (!m) return;
+      const f = e.features?.[0];
+      if (!f) return;
+      const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
+      popupRef.current?.remove();
+      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div style="font: 13px sans-serif; min-width: 160px">
+             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}</div>
+             <strong>${escapeHtml(p.stop_name)}</strong><br/>
+             平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
+             サンプル: ${p.samples}件
+           </div>`,
+        )
+        .addTo(m);
+    }
+
     if (!shape) {
-      // No focused route — make sure no leftover overlay remains.
-      if (styleLoadedRef.current) clearOverlay();
+      // No focused route — strip overlay and bring the heatmap back.
+      if (styleLoadedRef.current) {
+        clearOverlay();
+        if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
+      }
       return;
     }
     if (styleLoadedRef.current) drawOverlay();

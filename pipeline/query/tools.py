@@ -18,7 +18,8 @@ Public surface:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from api.range import RangeCtx
@@ -55,6 +56,18 @@ class ToolResult:
 # Groq function specs (v2 tool surface)
 # ---------------------------------------------------------------------------
 
+_DATE_OVERRIDE_PROPS = {
+    "days_back": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 365,
+        "description": "Override window: from = today - days_back + 1, to = today.",
+    },
+    "from": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD start (override)."},
+    "to": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD end (override)."},
+}
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -70,6 +83,7 @@ TOOLS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "route": {"type": "string", "description": "route_code, digits only e.g. '16071'"},
+                    **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
             },
@@ -100,6 +114,7 @@ TOOLS: list[dict] = [
                             "for avg_delay/worst_5min, true for on_time_rate."
                         ),
                     },
+                    **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["metric"],
             },
@@ -118,6 +133,7 @@ TOOLS: list[dict] = [
                 "properties": {
                     "route": {"type": "string"},
                     "dimension": {"type": "string", "enum": ["dow", "service_type"]},
+                    **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["dimension"],
             },
@@ -135,6 +151,7 @@ TOOLS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "route": {"type": "string", "description": "Optional — if set, filter to this route_code."},
+                    **_DATE_OVERRIDE_PROPS,
                 },
             },
         },
@@ -152,6 +169,7 @@ TOOLS: list[dict] = [
                 "properties": {
                     "threshold_min": {"type": "integer", "minimum": 0, "maximum": 30},
                     "n": {"type": "integer", "minimum": 3, "maximum": 100},
+                    **_DATE_OVERRIDE_PROPS,
                 },
             },
         },
@@ -183,28 +201,34 @@ SYSTEM_PROMPT = """\
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
 2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')のみ。**
    ユーザーが '系統5' のような短い数字や '雨天' のような単語を route として渡してきた場合、
-   それは route_code ではない可能性が高い。その場合はツールを呼ばず、
-   日本語で「'<入力>' は系統コードではない可能性があります。実際の系統コード(例: 16071, 22171)を
-   教えてください」と返答し、類似の答えられる質問を 2〜3 件提案する。
+   ツールを呼ばず、日本語で「'<入力>' は系統コードではない可能性があります」と説明し、
+   類似の答えられる質問を 2〜3 件提案する。
 3. データの提供範囲外の質問(天気、運賃、事故、車両情報など)はツールを呼ばず、
    利用できるデータを伝え、関連する答えられる質問を 2〜3 件提案する。
-4. 期間/曜日/時間帯のフィルタは API 層で適用済み。ツール引数で重ねて指定しない。
-5. 出力は日本語のみ。
+4. **期間の上書き**: ユーザーが「直近X日/週/月」「過去N日」「先週」「先月」「昨日」など
+   特定の期間を明示した場合、`days_back` (整数日) または `from`/`to` (YYYY-MM-DD) 引数で
+   ツールに渡してUIのデフォルト範囲を上書きする。指定がなければ何も渡さない(UIの範囲が使われる)。
+   - 「直近2週間の傾向」→ time_series(days_back=14)
+   - 「先月の定時率」→ on_time_rate(days_back=30) (シンプルに30日と解釈)
+   - 「過去3日の遅延」→ top_n(metric='avg_delay', n=10, days_back=3)
+5. 曜日/時間帯フィルタはツール引数で上書きする必要はない(UIで適用済み)。
+6. 出力は日本語のみ。
 
 == 利用可能なツール ==
-- route_stats(route): 1 系統の遅延統計
-- top_n(metric, n, best_first?): 全系統ランキング (avg_delay / on_time_rate / worst_5min)
-- compare_segments(route, dimension): 平日 vs 土日祝などの比較
-- time_series(route?): 日次トレンド
-- on_time_rate(threshold_min?, n?): 定時率ランキング
+- route_stats(route, days_back?, from?, to?): 1 系統の遅延統計
+- top_n(metric, n?, best_first?, days_back?, from?, to?): 全系統ランキング
+- compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 土日祝などの比較
+- time_series(route?, days_back?, from?, to?): 日次トレンド
+- on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
 - route_meta(route): 系統の路線情報
 
 == 例 ==
 - "今日の遅延ランキング" → top_n(metric='avg_delay', n=10)
-- "系統22171の遅延" → route_stats(route='22171')
-- "雨天時の比較" → ツール呼ばず、「天気データはありません。代わりに『22171の平日と土日祝の比較』が答えられます」と返す
-- "系統5は遅い?" → ツール呼ばず、「'5' は系統コードではない可能性があります。
-  実際の系統コード(例: 16071)を教えてください」と返す
+- "直近2週間の傾向" → time_series(days_back=14)
+- "系統22171の先週の遅延" → route_stats(route='22171', days_back=7)
+- "過去3日で5分超が一番多い系統" → top_n(metric='worst_5min', n=10, days_back=3)
+- "雨天時の比較" → ツール呼ばず、「天気データはありません。
+  代わりに『22171の平日と土日祝の比較』が答えられます」と返す
 """
 
 
@@ -220,6 +244,44 @@ def _route_name_lookup(route: str | None) -> str:
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
+
+
+def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
+    """Translate days_back / from / to in tool args into a derived RangeCtx.
+
+    Precedence: explicit ``from``/``to`` win over ``days_back``; if neither is
+    present the original ctx is returned unchanged.
+    """
+    days_back = args.get("days_back")
+    raw_from = args.get("from")
+    raw_to = args.get("to")
+    if days_back is None and not raw_from and not raw_to:
+        return ctx
+
+    today = date.today()
+
+    def _parse(s: Any) -> date | None:
+        if not isinstance(s, str):
+            return None
+        try:
+            return date.fromisoformat(s)
+        except ValueError:
+            return None
+
+    if raw_from or raw_to:
+        new_to = _parse(raw_to) or today
+        new_from = _parse(raw_from) or new_to - timedelta(days=29)
+    else:
+        try:
+            n = max(1, int(days_back))
+        except (TypeError, ValueError):
+            return ctx
+        new_to = today
+        new_from = today - timedelta(days=n - 1)
+
+    if new_from > new_to:
+        new_from, new_to = new_to, new_from
+    return replace(ctx, from_date=new_from, to_date=new_to)
 
 
 async def _validate_route_exists(route: str | None, conn, agency_id: int, ctx: RangeCtx) -> bool:
@@ -405,11 +467,18 @@ async def dispatch(
     conn,
     agency_id: int,
 ) -> ToolResult:
-    """Run the named tool. Unknown tool → empty ToolResult with explanation."""
+    """Run the named tool. Unknown tool → empty ToolResult with explanation.
+
+    Tool args may include ``days_back``/``from``/``to`` to override the UI
+    range; ``_apply_date_overrides`` produces a derived ctx that all handlers
+    consume. The original UI ctx is otherwise preserved (DOW / time_band /
+    routes / service still apply).
+    """
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         return ToolResult(kind="empty", summary_jp=f"未対応のツール: {tool_name}")
-    return await handler(arguments, ctx, conn, agency_id)
+    effective_ctx = _apply_date_overrides(ctx, arguments)
+    return await handler(arguments, effective_ctx, conn, agency_id)
 
 
 # ---------------------------------------------------------------------------
