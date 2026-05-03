@@ -10,7 +10,7 @@
 #
 # Optional:
 #   ORACLE_RT_DIR    Remote RT archive directory   (default: /home/opc/app/transportation_analysis/archive)
-#   ORACLE_STATIC_DIR Remote static archive dir    (default: /home/opc/app/transportation_analysis/archive_static)
+#   ORACLE_STATIC_DIR Remote static archive dir    (default: /home/opc/app/transportation_analysis/static_archive)
 #   LOCAL_RT_DIR     Local destination for RT      (default: ./raw_archives)
 #   LOCAL_STATIC_DIR Local destination for static  (default: ./raw_archives_static)
 
@@ -19,7 +19,7 @@ set -euo pipefail
 ORACLE_HOST="${ORACLE_HOST:?ORACLE_HOST is required}"
 ORACLE_USER="${ORACLE_USER:-opc}"
 ORACLE_RT_DIR="${ORACLE_RT_DIR:-/home/opc/app/transportation_analysis/archive}"
-ORACLE_STATIC_DIR="${ORACLE_STATIC_DIR:-/home/opc/app/transportation_analysis/archive_static}"
+ORACLE_STATIC_DIR="${ORACLE_STATIC_DIR:-/home/opc/app/transportation_analysis/static_archive}"
 LOCAL_RT_DIR="${LOCAL_RT_DIR:-$(dirname "$0")/../raw_archives}"
 LOCAL_STATIC_DIR="${LOCAL_STATIC_DIR:-$(dirname "$0")/../raw_archives_static}"
 
