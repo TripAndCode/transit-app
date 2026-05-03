@@ -98,9 +98,7 @@ async def test_reports_get_ranking_with_seeded_updates(reports_client):
                 f"test/{i}.pb",
             )
     # ctx must include the seeded date — use ?from=&to=
-    resp = await client.get(
-        f"/api/{agency_id}/reports/ranking?from={today}&to={today}"
-    )
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={today}&to={today}")
     assert resp.status_code == 200
     data = resp.json()
     assert data["report_type"] == "ranking"
