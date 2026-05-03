@@ -14,6 +14,7 @@ import type {
   ReportMeta,
   ReportResponse,
   Route,
+  RouteSummaryResponse,
   TrendResponse,
 } from "./types";
 
@@ -89,6 +90,18 @@ export function useLiveDelays(
   return useQuery({
     queryKey: ["live", agencyId],
     queryFn: () => apiGet<LiveResponse>(`/api/${agencyId}/delays/live`),
+    enabled: agencyId != null,
+    refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+export function useTodayRouteSummary(
+  agencyId: number | null,
+  options: { autoRefresh: boolean } = { autoRefresh: true },
+): UseQueryResult<RouteSummaryResponse> {
+  return useQuery({
+    queryKey: ["today_route_summary", agencyId],
+    queryFn: () => apiGet<RouteSummaryResponse>(`/api/${agencyId}/today/route-summary`),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
   });
