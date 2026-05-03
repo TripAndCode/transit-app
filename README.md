@@ -15,89 +15,121 @@ Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT prot
 
 ## Quick Start
 
-### 1. Start the database
+### TL;DR — Path B (Oracle Cloud archives, current setup)
+
+```bash
+# one-time
+cp .env.example .env && $EDITOR .env   # set GROQ_API_KEY + Oracle vars
+make install                            # python deps
+make frontend-install                   # npm deps
+
+# every run
+make db                                 # start Postgres on :5433
+make seed-agencies                      # upsert agencies.csv (Aomori included)
+bash scripts/fetch_and_ingest.sh        # rsync from Oracle VM + ingest + analyze
+make serve                              # terminal A — FastAPI on :8000
+make frontend-dev                       # terminal B — Vite on :5173
+```
+
+Open <http://localhost:5173>. The Ask tab works once `GROQ_API_KEY` is valid;
+the Map / Live / Reports tabs render real content after the fetch+ingest step.
+
+For live HTTP fetch from each agency's GTFS-RT URL instead of the Oracle
+archives, see [Path A](#path-a--direct-live-fetch-uses-agenciesfeed_url).
+
+### Detailed steps
+
+#### 1. Start the database
 
 ```bash
 make db
 ```
 
-Builds a PostGIS 14 + pgvector image, starts a `transit-pg` container on port 5433, and applies the schema. Everything lives inside this project — no external setup needed.
+Builds a PostGIS 14 + pgvector image, starts a `transit-pg` container on
+port 5433, and applies the schema. Everything lives inside this project —
+no external setup needed.
 
-### 2. Install dependencies
+#### 2. Install dependencies
 
 ```bash
-make install
+make install            # python (poetry)
+make frontend-install   # npm (frontend/)
 ```
 
-### 3. Set environment
+#### 3. Set environment
 
 Create `.env` in the project root (gitignored, loaded automatically by `make`):
 
 ```
 DATABASE_URL=postgresql://transit:transit@localhost:5433/transit
 GROQ_API_KEY=your_groq_api_key_here
+# Path B (Oracle Cloud archives) only:
+ORACLE_HOST=64.110.114.101
+ORACLE_USER=opc
+ORACLE_SSH_KEY_PATH=/Users/you/transit-app/oracle_cloud/ssh-key-2026-03-28.key
+AGENCY_ID=1
 ```
 
-### 4. Register an agency
+See `.env.example` for the full list.
+
+#### 4. Register agencies
+
+Edit `agencies.csv` (committed) and run:
+
+```bash
+make seed-agencies      # idempotent upsert on feed_url
+```
+
+The CSV has columns `agency_name, feed_url, static_url, trip_id_pattern`.
+For one-off ad-hoc inserts you can still use the CLI:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
-  --name "青森市バス" \
-  --feed-url "https://example.com/TripUpdate.pb"
+  --name "My Agency" --feed-url "https://..."
 ```
 
-Any Japanese GTFS-JP operator is supported. If the agency uses a non-standard `trip_id` format, add a `trip_id_pattern` regex:
+If your agency uses a non-standard `trip_id` format, set the
+`trip_id_pattern` column to a named-group regex (e.g.
+`^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$`).
+
+#### 5. Load data
+
+**Path B — pull archives from Oracle Cloud (rsync + ingest + analyze):**
 
 ```bash
-poetry run python gtfs_pipeline.py add_agency \
-  --name "My Agency" \
-  --feed-url "https://..." \
-  --trip-id-pattern "^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$"
+bash scripts/fetch_and_ingest.sh
 ```
 
-### 5. Load data
+**Path A — live fetch each agency's GTFS-RT URL:**
 
 ```bash
-# Ingest GTFS-RT archives (historical .pb files)
-make ingest FOLDER=./raw_archives
-
-# Load static GTFS (stops, routes, timetable)
-make load_static PATH=./raw_archives_static
-
-# Run aggregations
-make analyze
+poetry run python gtfs_pipeline.py ingest_live
 ```
 
-### 6. Start the server
+Path A skips static GTFS — for stop coordinates / heatmap, also run
+`make load_static PATH=./raw_archives_static` against a downloaded zip.
+
+Both paths end at `make analyze` to refresh aggregates (Path B's script
+does this for you).
+
+#### 6. Start the backend
 
 ```bash
-make serve          # port 8000
-make serve PORT=9000
+make serve          # :8000 (override with PORT=9000)
 ```
 
-Interactive docs: `http://localhost:8000/docs`
+Interactive docs: <http://localhost:8000/docs>.
 
-### 7. Install frontend deps (one-time)
+#### 7. Start the frontend (in a second terminal)
 
 ```bash
-make frontend-install
+make frontend-dev   # Vite on :5173
 ```
 
-### 8. Start the frontend dev server
-
-In a second terminal (leave `make serve` running):
-
-```bash
-make frontend-dev   # Vite on http://localhost:5173
-```
-
-Open <http://localhost:5173>. With no data ingested yet, all tabs show empty
-states. Once you've completed step 5 (load + analyze) and have at least one
-agency, the Map / Live / Reports tabs render real content. The Ask tab works
-as soon as your `GROQ_API_KEY` is valid.
+Open <http://localhost:5173>. With no data, all tabs show empty states.
 
 > No agencies yet? Append `?admin=1` to the URL to expose the in-browser
-> "+ 新規事業者" form, or use the CLI in step 4.
+> "+ 新規事業者" form, or edit `agencies.csv` and re-run `make seed-agencies`.
 
 ---
 
@@ -157,31 +189,7 @@ The wiring is in `scripts/fetch_archives.sh` (rsync) and
 `scripts/fetch_and_ingest.sh` (rsync → ingest → load_static → analyze, the
 script Railway runs hourly via `[[crons]]`).
 
-#### Path B local quickstart
-
-In `.env` (already set in your env from earlier):
-
-```
-ORACLE_HOST=64.110.114.101
-ORACLE_USER=opc
-ORACLE_SSH_KEY_PATH=/Users/you/transit-app/oracle_cloud/ssh-key-2026-03-28.key
-AGENCY_ID=1
-```
-
-Then:
-
-```bash
-make db                            # 1. start Postgres
-make seed-agencies                 # 2. upsert all rows from agencies.csv
-bash scripts/fetch_and_ingest.sh   # 3. rsync + ingest + analyze
-make serve                         # 4. backend  (terminal A)
-make frontend-dev                  # 5. frontend (terminal B)
-```
-
-`make seed-agencies` reads `agencies.csv` (committed, edit it to add more
-operators) and upserts on `feed_url` — re-runnable safely. The `feed_url`
-column on Path B is just metadata; the .pb files are pre-fetched. Open
-<http://localhost:5173> when both servers are up.
+For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b-oracle-cloud-archives-current-setup) above. `feed_url` on the agency row is metadata only for Path B — the .pb files are pre-fetched.
 
 > First `fetch_archives.sh` run can take a while (full rsync of every
 > archive in the Oracle VM). Subsequent runs only pull deltas.
