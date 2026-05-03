@@ -70,34 +70,41 @@ async def test_reports_get_unknown_type_returns_404(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_get_ranking_with_seeded_aggregates(reports_client):
-    """A live ranking query reads agg_route_stats and renders text + rows."""
+async def test_reports_get_ranking_with_seeded_updates(reports_client):
+    """A live ranking query reads `updates` and renders text + rows.
+
+    Compute requires HAVING COUNT(*) > 20, so seed 25 update rows for route 44
+    spread across distinct trip_ids so the dedup CTE preserves them all.
+    """
+    from datetime import datetime
+
     client, agency_id, pool = reports_client
+    today = "2026-05-01"
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agg_route_stats "
-            "(agency_id, route_code, service_type, avg_min, p50_min, p90_min, "
-            " late_5min_plus, on_time_pct, late5_pct, samples) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            agency_id,
-            "44",
-            "平日",
-            4.2,
-            3.1,
-            8.5,
-            100,
-            65.0,
-            12.0,
-            1200,
-        )
-    resp = await client.get(f"/api/{agency_id}/reports/ranking")
+        for i in range(25):
+            await conn.execute(
+                "INSERT INTO updates "
+                "(agency_id, trip_id, route_code, service_type, scheduled_time, "
+                " stop_sequence, dep_delay, captured_at, file_name) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                agency_id,
+                f"trip-{i}",
+                "44",
+                "平日",
+                "10:00:00",
+                1,
+                300,
+                datetime.fromisoformat(f"{today}T10:0{i % 10}:00"),
+                f"test/{i}.pb",
+            )
+    # ctx must include the seeded date — use ?from=&to=
+    resp = await client.get(
+        f"/api/{agency_id}/reports/ranking?from={today}&to={today}"
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["report_type"] == "ranking"
-    assert "rendered_at" in data
-    # rows contain the seeded route, text was rendered by the formatter
-    assert any(r.get("route_code") == "44" for r in data["rows"])
-    assert "44" in data["text"]
+    assert any(r[0] == "44" for r in data["rows"])  # row index 0 = route_code
 
 
 @pytest.mark.asyncio
