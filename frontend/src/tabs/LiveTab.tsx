@@ -21,9 +21,11 @@ export function LiveTab() {
     dir: "desc",
   });
 
+  const rawRows = data?.rows ?? [];
+  const latestCapturedAt = data?.latest_captured_at ?? null;
   const rows = useMemo(() => {
-    if (!data) return [];
-    const sorted = [...data].sort((a, b) => {
+    if (!rawRows.length) return [];
+    const sorted = [...rawRows].sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
       if (av == null && bv == null) return 0;
@@ -34,7 +36,7 @@ export function LiveTab() {
       return 0;
     });
     return sorted;
-  }, [data, sort]);
+  }, [rawRows, sort]);
 
   function toggleSort(key: SortKey) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
@@ -74,9 +76,18 @@ export function LiveTab() {
           {[...Array(6)].map((_, i) => <Skeleton key={i} height={32} style={{ margin: "6px 0" }} />)}
         </div>
       )}
-      {data && data.length === 0 && <EmptyState title="リアルタイムデータがありません" />}
+      {data && rawRows.length === 0 && (
+        <EmptyState
+          title={
+            latestCapturedAt
+              ? `最新観測: ${formatLatest(latestCapturedAt)} — このタブはこの観測日の便を表示します`
+              : "観測データがありません"
+          }
+          hint={!latestCapturedAt ? "make fetch-ingest を実行してください" : undefined}
+        />
+      )}
 
-      {data && data.length > 0 && (
+      {data && rawRows.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--bg-surface)", borderRadius: "var(--radius)", overflow: "hidden", border: "1px solid var(--border-soft)" }}>
           <thead>
             <tr style={{ background: "var(--bg-soft)", textAlign: "left" }}>
@@ -145,4 +156,15 @@ function formatDelay(seconds: number): string {
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatLatest(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
