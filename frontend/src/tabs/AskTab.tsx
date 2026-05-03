@@ -3,8 +3,9 @@ import { useParams } from "react-router-dom";
 import { useAsk } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
-import type { ToolResult } from "../api/types";
+import type { ToolResult, TrendDay } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { DailyChart } from "../components/charts/DailyChart";
 
 type Msg =
   | { role: "user"; text: string }
@@ -227,6 +228,14 @@ function RichResult({
       </div>
     );
   }
-  // series, empty, text → plain text rendering
+  if (result.kind === "series" && result.series && result.series.length > 0) {
+    return (
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <DailyChart days={result.series as TrendDay[]} height={200} />
+      </div>
+    );
+  }
+  // empty, text, or series with no points → plain text rendering
   return <span style={{ whiteSpace: "pre-wrap" }}>{fallbackText}</span>;
 }
