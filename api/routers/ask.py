@@ -30,6 +30,8 @@ class AskCtx(BaseModel):
     to_date: str | None = Field(default=None, alias="to")
     dow: str = "all"
     time_band: str = "all"
+    service: str = "all"
+    routes: list[str] = []
 
     model_config = {"populate_by_name": True}
 
@@ -70,8 +72,17 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
     dow = body_ctx.dow if body_ctx.dow in ("all", "weekday", "weekend") else "all"
     valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
     tb = body_ctx.time_band if body_ctx.time_band in valid_bands else "all"
+    svc = body_ctx.service if body_ctx.service in ("all", "平日", "土日祝") else "all"
+    routes = tuple(r for r in (body_ctx.routes or []) if r)[:100]
 
-    return RangeCtx(from_date=from_date, to_date=to_date, dow=dow, time_band=tb)  # type: ignore[arg-type]
+    return RangeCtx(  # type: ignore[arg-type]
+        from_date=from_date,
+        to_date=to_date,
+        dow=dow,
+        time_band=tb,
+        service=svc,
+        routes=routes,
+    )
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -93,5 +104,7 @@ async def ask(
             "to": ctx.to_date.isoformat(),
             "dow": ctx.dow,
             "time_band": ctx.time_band,
+            "service": ctx.service,
+            "routes": list(ctx.routes),
         },
     )

@@ -92,10 +92,11 @@ export function useRouteShape(
   ctx: RangeCtx,
 ): UseQueryResult<RouteShapeResponse> {
   return useQuery({
-    queryKey: ["route_shape", agencyId, route, ctx.from, ctx.to],
+    queryKey: ["route_shape", agencyId, route, ...ctxKey(ctx)],
     queryFn: () => {
-      const u = new URLSearchParams({ route: route!, from: ctx.from, to: ctx.to });
-      return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${u.toString()}`);
+      const qs = new URLSearchParams(ctxToQueryString(ctx));
+      qs.set("route", route!);
+      return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`);
     },
     enabled: agencyId != null && !!route,
     staleTime: 60 * 1000,
@@ -127,6 +128,8 @@ export function useAsk(agencyId: number | null) {
           to: vars.ctx.to,
           dow: vars.ctx.dow,
           time_band: vars.ctx.time_band,
+          service: vars.ctx.service,
+          routes: vars.ctx.routes,
         },
       });
     },
