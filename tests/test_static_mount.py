@@ -1,3 +1,18 @@
+"""Tests for the SPA static mount in ``api.main``.
+
+Verifies that with a built ``api/static/`` directory present:
+
+* ``/`` and unknown SPA paths return ``index.html``
+* ``/assets/*`` is served from the static assets dir
+* ``/health`` is still routed to the FastAPI handler (not swallowed by the SPA)
+* Unknown paths under API prefixes (``/api/...``, ``/agencies``, etc.) return a
+  structured JSON 404 so frontend fetches see real errors, not HTML
+
+The fixture writes a tiny fake build into a tmp dir, monkeypatches
+``api.main.STATIC_DIR``, re-runs ``_maybe_mount_static``, and cleans up the
+mutated ``app.routes`` list on teardown so other test modules see a clean app.
+"""
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,15 +24,16 @@ from api.main import app
 # touch the DB, so we skip it (avoids needing the Postgres container running).
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
+    """No-op override of conftest.apply_schema; this module needs no database."""
     return
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    """TestClient using a temp static dir populated like a real Vite build.
+    """TestClient backed by a temp static dir that mimics a real Vite build.
 
-    Avoids using `with TestClient(app)` so the lifespan (which needs
-    DATABASE_URL + GROQ_API_KEY) is not triggered.
+    Avoids ``with TestClient(app)`` so the lifespan (which needs ``DATABASE_URL``
+    and ``GROQ_API_KEY``) is not triggered. Cleans up SPA routes on teardown.
     """
     static_dir = tmp_path / "static"
     (static_dir / "assets").mkdir(parents=True)
@@ -26,37 +42,54 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr("api.main.STATIC_DIR", str(static_dir))
     from api.main import _maybe_mount_static
+
     _maybe_mount_static(app)
 
     yield TestClient(app)
 
-    # Teardown: strip the SPA routes so other test modules start with a clean app.
-    # monkeypatch restores STATIC_DIR but not the mutated app.routes list.
-    app.routes[:] = [
-        r for r in app.routes
-        if getattr(r, "name", None) not in ("spa_fallback", "assets")
-    ]
+    app.routes[:] = [r for r in app.routes if getattr(r, "name", None) not in ("spa_fallback", "assets")]
 
 
 def test_root_returns_spa_index(client):
+    """``/`` falls back to ``index.html``."""
     r = client.get("/")
     assert r.status_code == 200
     assert "SPA" in r.text
 
 
 def test_unknown_path_falls_back_to_index(client):
+    """Unknown SPA paths (e.g. ``/agencies/1/map``) return the SPA shell."""
     r = client.get("/agencies/1/map")
     assert r.status_code == 200
     assert "SPA" in r.text
 
 
 def test_assets_served(client):
+    """``/assets/*`` serves files from the built static asset directory."""
     r = client.get("/assets/app.js")
     assert r.status_code == 200
     assert "console.log" in r.text
 
 
 def test_health_still_routed_to_api(client):
+    """The ``/health`` API route is not shadowed by the SPA fallback."""
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+def test_unknown_api_path_returns_json_404(client):
+    """Unknown ``/api/*`` paths return JSON 404, not the SPA HTML.
+
+    Without the API-prefix guard, frontend fetches against a typo'd or removed
+    endpoint would get HTTP 200 + ``index.html``, then fail downstream when
+    ``r.json()`` chokes on HTML — masking the real 404 as a parse error.
+
+    Use a path that does not match any registered router pattern (extra
+    segment under ``/api/{agency_id}``) so route resolution falls through to
+    the SPA fallback rather than hitting a real handler.
+    """
+    r = client.get("/api/1/no_such_endpoint")
+    assert r.status_code == 404
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json() == {"detail": "Not Found"}
