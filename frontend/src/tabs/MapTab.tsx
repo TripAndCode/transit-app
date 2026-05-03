@@ -8,6 +8,7 @@ import { getMapStyle } from "../styles/mapStyle";
 import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { MapLegend } from "../components/MapLegend";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
@@ -310,6 +311,7 @@ export function MapTab() {
         ref={containerRef}
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       />
+      <MapLegend />
       {data && data.features.length === 0 && (
         <div style={{ position: "absolute", inset: 0, background: "var(--bg-page)" }}>
           <EmptyState
