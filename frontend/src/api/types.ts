@@ -52,8 +52,17 @@ export type RouteShapeResponse = {
 export type HeatmapProps = {
   stop_id: string;
   stop_name: string;
+  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's
+   *  static feed includes it; clustered stops yield a "/-joined" set. */
+  stop_code?: string;
+  /** Optional GTFS platform_code (pole number, e.g. "2"). */
+  platform_code?: string;
   avg_delay_min: number;
   samples: number;
+  /** Comma-joined list of route_codes contributing to this stop's avg.
+   *  Optional because clients with cached responses from before the
+   *  field was added will still parse correctly. */
+  route_codes?: string;
 };
 
 export type HeatmapFeature = GeoJSON.Feature<GeoJSON.Point, HeatmapProps>;

@@ -32,6 +32,10 @@ export function MapTab() {
   const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
+  // ctx changes on filter/range edits; click handlers are registered once at
+  // init, so we read through this ref to always see the current period.
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
 
   // init map once; register layer handlers once after style load
   useEffect(() => {
@@ -48,14 +52,37 @@ export function MapTab() {
       const f = e.features?.[0];
       if (!f) return;
       const p = f.properties as HeatmapProps;
+      const routes = (p.route_codes || "").split(",").filter(Boolean);
+      const routesLabel = routes.length === 0
+        ? ""
+        : routes.length <= 4
+          ? routes.join(", ")
+          : `${routes.slice(0, 4).join(", ")} +${routes.length - 4}`;
+      // Pole / stop_code badge near the title — Aomori's GTFS uses
+      // platform_code "2" + stop_code "②のりば". Show whichever is
+      // present; clustered stops may have multiple, separated by "/".
+      const poles = (p.platform_code || "").split(",").filter(Boolean);
+      const poleBadge = poles.length === 0
+        ? ""
+        : `<span style="display:inline-block;background:#eef0fa;color:#5b6cad;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;vertical-align:middle">のりば ${escapeHtml(poles.join("/"))}</span>`;
+      const stopCode = p.stop_code && p.stop_code !== p.stop_name ? p.stop_code : "";
+      const stopIds = (p.stop_id || "").split(",").filter(Boolean);
+      const stopIdLine = stopIds.length === 0
+        ? ""
+        : `<div style="font-size:11px;color:#888;margin-top:2px">stop_id: <span style="font-family:ui-monospace,monospace">${escapeHtml(stopIds.length <= 3 ? stopIds.join(", ") : `${stopIds.slice(0, 3).join(", ")} +${stopIds.length - 3}`)}</span></div>`;
+      const c = ctxRef.current;
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
         .setHTML(
-          `<div style="font: 13px sans-serif">
-             <strong>${escapeHtml(p.stop_name)}</strong><br/>
-             平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
+          `<div style="font: 13px sans-serif; min-width:220px">
+             <div><strong>${escapeHtml(p.stop_name)}</strong>${poleBadge}</div>
+             ${stopCode ? `<div style="font-size:12px;color:#666;margin-top:1px">${escapeHtml(stopCode)}</div>` : ""}
+             ${stopIdLine}
+             <div style="margin-top:6px">平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
              サンプル: ${p.samples}件
+             ${routesLabel ? `<br/>系統: <span style="color:#555">${escapeHtml(routesLabel)}</span>` : ""}</div>
+             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
            </div>`,
         )
         .addTo(m);
@@ -71,15 +98,18 @@ export function MapTab() {
       const f = e.features?.[0];
       if (!f) return;
       const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
+      const c = ctxRef.current;
+      const route = c.routes[0];
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
         .setHTML(
-          `<div style="font: 13px sans-serif; min-width: 160px">
-             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}</div>
+          `<div style="font: 13px sans-serif; min-width: 200px">
+             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}${route ? ` ・ 系統 ${escapeHtml(route)}` : ""}</div>
              <strong>${escapeHtml(p.stop_name)}</strong><br/>
              平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
              サンプル: ${p.samples}件
+             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
            </div>`,
         )
         .addTo(m);

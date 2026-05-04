@@ -198,6 +198,11 @@ async def delay_heatmap(
             ROUND(ST_Y(ss.geom)::numeric, 4) AS lat,
             string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
             string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
+            string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
+                AS platform_codes,
+            string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
+                AS stop_codes,
+            string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code) AS route_codes,
             ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
             COUNT(*) AS samples
         FROM updates u
@@ -222,8 +227,11 @@ async def delay_heatmap(
             "properties": {
                 "stop_id": r["stop_ids"],  # comma-joined list when clustered
                 "stop_name": r["stop_name"],
+                "stop_code": r["stop_codes"] or "",
+                "platform_code": r["platform_codes"] or "",
                 "avg_delay_min": float(r["avg_delay_min"]),
                 "samples": r["samples"],
+                "route_codes": r["route_codes"] or "",
             },
         }
         for r in rows
