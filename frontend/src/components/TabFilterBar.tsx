@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useParams } from "react-router-dom";
 import { useRoutes } from "../api/hooks";
 import {
+  DEFAULT_RANGE_DAYS,
+  isoDaysAgo,
+  todayISO,
   useRangeContext,
   type DowFilter,
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { RangeBadge } from "./RangeBadge";
 
 const DOW_OPTIONS: { value: DowFilter; label: string }[] = [
   { value: "all", label: "全曜日" },
@@ -118,9 +122,19 @@ export function TabFilterBar() {
   }
 
   function reset() {
+    // Reset includes the date range — drilldowns from the trend heatmap set
+    // from=to=<single day>; without resetting the dates here, "全てクリア"
+    // leaves the user stuck on a one-day window.
     const cleared: Draft = { dow: "all", time_band: "all", service: "all", routes: [] };
     setDraft(cleared);
-    setCtx({ dow: "all", time_band: "all", service: "all", routes: null });
+    setCtx({
+      from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1),
+      to: todayISO(),
+      dow: "all",
+      time_band: "all",
+      service: "all",
+      routes: null,
+    });
   }
 
   function clearChip(kind: "dow" | "time_band" | "service" | "route", value?: string) {
@@ -145,40 +159,45 @@ export function TabFilterBar() {
         position: "relative",
       }}
     >
+      <RangeBadge />
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{
-          background: activeCount > 0 ? "var(--accent-soft)" : "var(--bg-surface)",
-          color: activeCount > 0 ? "var(--accent)" : "var(--text-secondary)",
+          background: activeCount > 0 ? "var(--accent)" : "var(--bg-surface)",
+          color: activeCount > 0 ? "#fff" : "var(--text-primary)",
           border: `1px solid ${activeCount > 0 ? "var(--accent)" : "var(--border-subtle)"}`,
-          borderRadius: 6,
-          padding: "6px 12px",
-          fontSize: 13,
-          fontWeight: 500,
+          borderRadius: 8,
+          padding: "8px 16px",
+          fontSize: 14,
+          fontWeight: 600,
           display: "inline-flex",
           alignItems: "center",
-          gap: 6,
+          gap: 8,
           cursor: "pointer",
+          boxShadow: activeCount > 0 ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          transition: "all var(--transition)",
         }}
       >
-        <span aria-hidden>⚙</span>
+        <span aria-hidden style={{ fontSize: 16 }}>⚙</span>
         フィルタ
         {activeCount > 0 && (
           <span
             style={{
-              background: "var(--accent)",
+              background: "rgba(255,255,255,0.25)",
               color: "#fff",
-              fontSize: 11,
+              fontSize: 12,
               borderRadius: 999,
-              padding: "1px 7px",
-              fontWeight: 600,
+              padding: "1px 8px",
+              fontWeight: 700,
+              minWidth: 18,
+              textAlign: "center",
             }}
           >
             {activeCount}
           </span>
         )}
-        <span style={{ color: "var(--text-tertiary)" }}>▾</span>
+        <span style={{ opacity: 0.7 }}>▾</span>
       </button>
 
       {/* Inline chips of active filters with × to clear individually */}
