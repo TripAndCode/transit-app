@@ -33,10 +33,15 @@ function presetLabel(ctx: RangeCtx): string {
   return `${ctx.from} 〜 ${ctx.to}`;
 }
 
+function isDefault(ctx: RangeCtx): boolean {
+  return ctx.from === isoDaysAgo(29) && ctx.to === todayISO();
+}
+
 export function RangeBadge() {
   const [ctx, setCtx] = useRangeContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const active = !isDefault(ctx);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -57,65 +62,80 @@ export function RangeBadge() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
-          padding: "6px 12px",
-          fontSize: 13,
-          minWidth: 160,
-          textAlign: "left",
+          background: active ? "var(--accent)" : "var(--bg-surface)",
+          color: active ? "#fff" : "var(--text-primary)",
+          border: `1px solid ${active ? "var(--accent)" : "var(--border-subtle)"}`,
+          borderRadius: 8,
+          padding: "8px 16px",
+          fontSize: 14,
+          fontWeight: 600,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          cursor: "pointer",
+          boxShadow: active ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          transition: "all var(--transition)",
         }}
       >
-        📅 {presetLabel(ctx)} <span style={{ float: "right", color: "var(--text-tertiary)" }}>▾</span>
+        <span aria-hidden style={{ fontSize: 16 }}>📅</span>
+        {presetLabel(ctx)}
+        <span style={{ opacity: 0.7 }}>▾</span>
       </button>
       {open && (
         <div
           style={{
             position: "absolute",
-            top: "calc(100% + 4px)",
-            right: 0,
-            minWidth: 260,
+            top: "calc(100% + 6px)",
+            left: 0,
+            zIndex: 50,
+            minWidth: 280,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 20,
+            borderRadius: "var(--radius-lg)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
             padding: 8,
+            color: "var(--text-primary)",
           }}
         >
-          {PRESETS.map((p) => (
-            <div
-              key={p.label}
-              onClick={() => applyPreset(p)}
-              style={{
-                padding: "8px 12px",
-                cursor: "pointer",
-                borderRadius: 4,
-                fontSize: 13,
-              }}
-            >
-              {p.label}
-            </div>
-          ))}
+          {PRESETS.map((p) => {
+            const selected = ctx.from === p.from() && ctx.to === p.to();
+            return (
+              <div
+                key={p.label}
+                onClick={() => applyPreset(p)}
+                style={{
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  borderRadius: 4,
+                  fontSize: 13,
+                  background: selected ? "var(--accent-soft)" : "transparent",
+                  color: selected ? "var(--accent)" : "var(--text-primary)",
+                  fontWeight: selected ? 500 : 400,
+                }}
+              >
+                {p.label}
+              </div>
+            );
+          })}
           <div style={{ borderTop: "1px solid var(--border-soft)", margin: "6px 0" }} />
-          <div style={{ padding: "0 8px", fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
+          <div style={{ padding: "0 8px", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
             カスタム
           </div>
-          <div style={{ display: "flex", gap: 6, padding: "0 8px 8px" }}>
+          <div style={{ display: "flex", gap: 6, padding: "0 8px 8px", alignItems: "center" }}>
             <input
               type="date"
               value={ctx.from}
               max={ctx.to}
               onChange={(e) => setCtx({ from: e.target.value })}
-              style={{ flex: 1, fontSize: 13 }}
+              style={{ flex: 1, fontSize: 13, padding: "4px 6px" }}
             />
-            <span style={{ alignSelf: "center", color: "var(--text-tertiary)" }}>〜</span>
+            <span style={{ color: "var(--text-tertiary)" }}>〜</span>
             <input
               type="date"
               value={ctx.to}
               min={ctx.from}
               onChange={(e) => setCtx({ to: e.target.value })}
-              style={{ flex: 1, fontSize: 13 }}
+              style={{ flex: 1, fontSize: 13, padding: "4px 6px" }}
             />
           </div>
         </div>
