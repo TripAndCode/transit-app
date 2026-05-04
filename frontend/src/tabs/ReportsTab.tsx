@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useReport, useReports } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
@@ -26,6 +26,8 @@ export function ReportsTab() {
   const { agencyId, reportType } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
+  // Preserve filter state when switching between reports.
+  const { search } = useLocation();
   const [ctx] = useRangeContext();
   const list = useReports(id);
   const detail = useReport(id, reportType ?? null, ctx);
@@ -46,7 +48,7 @@ export function ReportsTab() {
           return (
             <div
               key={r.report_type}
-              onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}`)}
+              onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}${search}`)}
               style={{
                 padding: "10px 12px",
                 marginBottom: 4,
