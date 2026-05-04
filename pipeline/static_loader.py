@@ -6,7 +6,7 @@ import zipfile
 from psycopg2.extras import execute_values
 
 _STATIC_FILE_MAP = [
-    ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon"]),
+    ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),
     ("stop_times.txt", "static_stop_times", ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
     ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id"]),
     ("routes.txt", "static_routes", ["route_id", "route_short_name"]),
@@ -53,14 +53,19 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         lat, lon = float(row[2]), float(row[3])
                     except (TypeError, ValueError):
                         lat, lon = None, None
+                    # Optional GTFS fields — present in Aomori's feed
+                    # ("②のりば", platform "2"), absent in some others.
+                    stop_code = (row[4] or None) if len(row) > 4 else None
+                    platform_code = (row[5] or None) if len(row) > 5 else None
                     cur.execute(
                         "INSERT INTO static_stops "
-                        "(agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
-                        "VALUES (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)) "
+                        "(agency_id, stop_id, stop_name, stop_lat, stop_lon, geom, stop_code, platform_code) "
+                        "VALUES (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s) "
                         "ON CONFLICT (agency_id, stop_id) DO UPDATE SET "
                         "stop_name=EXCLUDED.stop_name, stop_lat=EXCLUDED.stop_lat, "
-                        "stop_lon=EXCLUDED.stop_lon, geom=EXCLUDED.geom",
-                        [agency_id, stop_id, stop_name, lat, lon, lon, lat],
+                        "stop_lon=EXCLUDED.stop_lon, geom=EXCLUDED.geom, "
+                        "stop_code=EXCLUDED.stop_code, platform_code=EXCLUDED.platform_code",
+                        [agency_id, stop_id, stop_name, lat, lon, lon, lat, stop_code, platform_code],
                     )
             else:
                 db_cols = _DB_COLS[table]

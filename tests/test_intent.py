@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.query.intent import classify_intent, validate_intent
+from pipeline.query.intent import validate_intent
 
 
 # Override the session-scoped DB fixture so intent tests run without PostgreSQL
@@ -74,36 +74,10 @@ def test_validate_intent_time_band_japanese():
     assert result["time_band"] == "morning"
 
 
-@pytest.mark.asyncio
-async def test_classify_intent_returns_dict(monkeypatch):
-    import json
-
-    class FakeMessage:
-        content = json.dumps({"query_type": "ranking", "unknown": False})
-
-    class FakeResponse:
-        message = FakeMessage()
-
-    import ollama as ollama_mod
-
-    monkeypatch.setattr(ollama_mod, "chat", lambda **kwargs: FakeResponse())
-    result = await classify_intent("一番遅い路線は？")
-    assert result["query_type"] == "ranking"
-    assert result["unknown"] is False
-
-
-@pytest.mark.asyncio
-async def test_classify_intent_fallback_on_error(monkeypatch):
-    import ollama as ollama_mod
-
-    def _raise(**kwargs):
-        raise RuntimeError("Ollama down")
-
-    monkeypatch.setattr(ollama_mod, "chat", _raise)
-    result = await classify_intent("テスト")
-    assert result["unknown"] is True
-    assert result["query_type"] == "unknown"
-    assert "limit" in result
+# NOTE: the ollama-based classify_intent path was retired during v2 in
+# favor of the Groq tool-use chat (pipeline/query/chat.py). The Groq path
+# is covered by tests/test_intent_groq.py. The two ollama tests that
+# lived here are gone with the dependency.
 
 
 def test_validate_intent_routes_at_stop_requires_stop_name():
