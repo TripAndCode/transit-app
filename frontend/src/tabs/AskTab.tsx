@@ -8,9 +8,24 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { DailyChart } from "../components/charts/DailyChart";
 
+type AskCtxLite = {
+  from: string;
+  to: string;
+  dow: string;
+  time_band: string;
+  service: string;
+  routes?: string[];
+};
+
 type Msg =
   | { role: "user"; text: string }
-  | { role: "assistant"; text: string; tool_call: { name: string; arguments: Record<string, unknown> } | null; result: ToolResult | null };
+  | {
+      role: "assistant";
+      text: string;
+      tool_call: { name: string; arguments: Record<string, unknown> } | null;
+      result: ToolResult | null;
+      ctx: AskCtxLite;
+    };
 
 const SUGGESTIONS = ["今日の遅延ランキング", "雨天時の比較", "最近の傾向"];
 
@@ -35,7 +50,13 @@ export function AskTab() {
       const r = await ask.mutateAsync({ question, ctx });
       setMsgs((m) => [
         ...m,
-        { role: "assistant", text: r.answer, tool_call: r.tool_call, result: r.result },
+        {
+          role: "assistant",
+          text: r.answer,
+          tool_call: r.tool_call,
+          result: r.result,
+          ctx: r.ctx as unknown as AskCtxLite,
+        },
       ]);
     } catch {
       // error renders via ask.error below
@@ -131,6 +152,7 @@ export function AskTab() {
 function Bubble({ msg, formatRoute }: { msg: Msg; formatRoute: (rc: string | null | undefined) => string }) {
   const isUser = msg.role === "user";
   const result = !isUser && "result" in msg ? msg.result : null;
+  const ctx = !isUser && "ctx" in msg ? msg.ctx : null;
   const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
 
   return (
@@ -146,7 +168,11 @@ function Bubble({ msg, formatRoute }: { msg: Msg; formatRoute: (rc: string | nul
           whiteSpace: isUser ? "pre-wrap" : undefined,
         }}
       >
-        {result ? <RichResult result={result} fallbackText={msg.text} formatRoute={formatRoute} /> : <span style={{ whiteSpace: "pre-wrap" }}>{msg.text}</span>}
+        {result ? (
+          <RichResult result={result} fallbackText={msg.text} formatRoute={formatRoute} ctx={ctx} />
+        ) : (
+          <span style={{ whiteSpace: "pre-wrap" }}>{msg.text}</span>
+        )}
         {!isUser && "result" in msg && (msg.tool_call || msg.result) && (
           <details style={{ marginTop: 8, color: "var(--text-tertiary)", fontSize: 12 }}>
             <summary style={{ cursor: "pointer" }}>詳細</summary>
@@ -160,21 +186,38 @@ function Bubble({ msg, formatRoute }: { msg: Msg; formatRoute: (rc: string | nul
   );
 }
 
+function CtxLine({ ctx }: { ctx: AskCtxLite | null }) {
+  if (!ctx) return null;
+  const bits: string[] = [`期間 ${ctx.from} 〜 ${ctx.to}`];
+  if (ctx.dow && ctx.dow !== "all") bits.push(`曜日: ${ctx.dow}`);
+  if (ctx.time_band && ctx.time_band !== "all") bits.push(`時間帯: ${ctx.time_band}`);
+  if (ctx.service && ctx.service !== "all") bits.push(`種別: ${ctx.service}`);
+  if (ctx.routes && ctx.routes.length > 0) bits.push(`系統: ${ctx.routes.join(", ")}`);
+  return (
+    <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: -4, marginBottom: 8 }}>
+      {bits.join(" ・ ")}
+    </div>
+  );
+}
+
 function RichResult({
   result,
   fallbackText,
   formatRoute,
+  ctx,
 }: {
   result: ToolResult;
   fallbackText: string;
   formatRoute: (rc: string | null | undefined) => string;
+  ctx: AskCtxLite | null;
 }) {
   if (result.kind === "table" && result.rows && result.columns) {
     const cols = result.columns;
     const routeIdx = cols.findIndex((c) => c === "route_code");
     return (
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        <CtxLine ctx={ctx} />
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
@@ -216,7 +259,8 @@ function RichResult({
   if (result.kind === "kv" && result.pairs) {
     return (
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        <CtxLine ctx={ctx} />
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
             {result.pairs.map(([k, v], i) => (
@@ -233,7 +277,8 @@ function RichResult({
   if (result.kind === "series" && result.series && result.series.length > 0) {
     return (
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>{result.summary_jp}</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        <CtxLine ctx={ctx} />
         <DailyChart days={result.series as TrendDay[]} height={200} />
       </div>
     );
