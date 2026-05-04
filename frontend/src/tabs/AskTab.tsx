@@ -5,6 +5,7 @@ import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
 import type { ToolResult, TrendDay } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { TabFilterBar } from "../components/TabFilterBar";
 import { DailyChart } from "../components/charts/DailyChart";
 
 type Msg =
@@ -57,6 +58,7 @@ export function AskTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", maxWidth: 760, margin: "0 auto" }}>
+      <TabFilterBar />
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 4px" }}>
         {msgs.length === 0 && (
           <div style={{ color: "var(--text-tertiary)", textAlign: "center", marginTop: 48 }}>

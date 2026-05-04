@@ -1,4 +1,4 @@
-import { NavLink, useParams } from "react-router-dom";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 
 type Item = { to: string; label: string; icon: string };
 
@@ -11,6 +11,9 @@ const ITEMS: Item[] = [
 
 export function Sidebar() {
   const { agencyId } = useParams();
+  // Preserve filter state (?from=...&routes=...&dow=...) across tab switches.
+  // Without this, every tab click reset the user's filters to defaults.
+  const { search } = useLocation();
   if (!agencyId) return <aside style={{ width: 180 }} />;
 
   return (
@@ -27,7 +30,7 @@ export function Sidebar() {
         {ITEMS.map((item) => (
           <NavLink
             key={item.to}
-            to={`/agencies/${agencyId}/${item.to}`}
+            to={`/agencies/${agencyId}/${item.to}${search}`}
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",
