@@ -63,10 +63,7 @@ def test_migrate_down_and_up(pg_conn):
     try:
         migrate_down("0002", conn)  # roll back everything above 0002
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema='public' AND table_name='api_keys'"
-            )
+            cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='api_keys'")
             assert cur.fetchone() is None, "api_keys (0003) should be gone after rollback"
             cur.execute("SELECT version FROM schema_migrations ORDER BY version")
             versions = [r[0] for r in cur.fetchall()]
@@ -76,9 +73,6 @@ def test_migrate_down_and_up(pg_conn):
         # so downstream tests in the session see a fully-migrated DB.
         migrate_up(conn)
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema='public' AND table_name='api_keys'"
-            )
+            cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='api_keys'")
             assert cur.fetchone() is not None, "api_keys table should exist after migrate_up"
         conn.close()
