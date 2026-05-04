@@ -32,6 +32,10 @@ export function MapTab() {
   const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
+  // ctx changes on filter/range edits; click handlers are registered once at
+  // init, so we read through this ref to always see the current period.
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
 
   // init map once; register layer handlers once after style load
   useEffect(() => {
@@ -48,14 +52,23 @@ export function MapTab() {
       const f = e.features?.[0];
       if (!f) return;
       const p = f.properties as HeatmapProps;
+      const routes = (p.route_codes || "").split(",").filter(Boolean);
+      const routesLabel = routes.length === 0
+        ? ""
+        : routes.length <= 4
+          ? routes.join(", ")
+          : `${routes.slice(0, 4).join(", ")} +${routes.length - 4}`;
+      const c = ctxRef.current;
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
         .setHTML(
-          `<div style="font: 13px sans-serif">
+          `<div style="font: 13px sans-serif; min-width:200px">
              <strong>${escapeHtml(p.stop_name)}</strong><br/>
              平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
              サンプル: ${p.samples}件
+             ${routesLabel ? `<br/>系統: <span style="color:#555">${escapeHtml(routesLabel)}</span>` : ""}
+             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
            </div>`,
         )
         .addTo(m);
@@ -71,15 +84,18 @@ export function MapTab() {
       const f = e.features?.[0];
       if (!f) return;
       const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
+      const c = ctxRef.current;
+      const route = c.routes[0];
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
         .setHTML(
-          `<div style="font: 13px sans-serif; min-width: 160px">
-             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}</div>
+          `<div style="font: 13px sans-serif; min-width: 200px">
+             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}${route ? ` ・ 系統 ${escapeHtml(route)}` : ""}</div>
              <strong>${escapeHtml(p.stop_name)}</strong><br/>
              平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
              サンプル: ${p.samples}件
+             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
            </div>`,
         )
         .addTo(m);
