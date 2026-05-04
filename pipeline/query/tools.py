@@ -286,21 +286,36 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     return replace(ctx, from_date=new_from, to_date=new_to)
 
 
-async def _validate_route_exists(route: str | None, conn, agency_id: int, ctx: RangeCtx) -> bool:
-    """Cheap existence check scoped to the request window.
+async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
+    """Is the route_code listed in the agency's static GTFS at all?
 
-    A route last seen six months ago should NOT validate as live — otherwise
-    the friendly 'no observations in selected period' branch is unreachable
-    and the user gets a misleading empty table instead of guidance.
+    This is the long-lived registry check: it asks "does the agency operate
+    this route?" and is true regardless of whether the requested time window
+    contains observations. The previous implementation conflated registry
+    membership with same-period data presence — so a perfectly valid route
+    surfaced "登録されていない" whenever the chosen window happened to be
+    empty (e.g. right after a TRUNCATE). Keep registry separate from period
+    data so the user sees the correct guidance.
     """
     if not route:
         return False
     row = await conn.fetchrow(
-        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2   AND captured_at::date BETWEEN $3 AND $4 LIMIT 1",
+        "SELECT 1 FROM static_routes "
+        "WHERE agency_id=$1 "
+        "  AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = $2 "
+        "LIMIT 1",
         agency_id,
         str(route),
-        ctx.from_date,
-        ctx.to_date,
+    )
+    if row is not None:
+        return True
+    # Fallback: some agencies may not have static_routes loaded yet but do
+    # have observations. Treat any historical observation as proof the route
+    # exists, even outside the selected window.
+    row = await conn.fetchrow(
+        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
+        agency_id,
+        str(route),
     )
     return row is not None
 
@@ -309,17 +324,23 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
-    if not await _validate_route_exists(route, conn, agency_id, ctx):
+    if not await _is_route_registered(route, conn, agency_id):
         return ToolResult(
             kind="empty",
-            summary_jp=f"'{route}' は登録されている系統コードではありません。例: 16071, 22171。",
+            summary_jp=(
+                f"'{route}' は登録されている系統コードではありません。"
+                f"/api/{agency_id}/routes で一覧を確認してください。"
+            ),
         )
     intent = {"query_type": "by_dow", "route": str(route), "limit": 50}
     rows = await _legacy_execute(intent, conn, agency_id) or []
     if not rows:
         return ToolResult(
             kind="empty",
-            summary_jp=f"系統{route} の集計データが選択期間にありません。",
+            summary_jp=(
+                f"系統{route} の集計データが選択期間 ({ctx.from_date}〜{ctx.to_date}) にありません。"
+                "期間を広げるか、フィルタを解除して試してください。"
+            ),
         )
     return ToolResult(
         kind="table",

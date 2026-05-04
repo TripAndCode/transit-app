@@ -54,8 +54,10 @@ export type HeatmapProps = {
   stop_name: string;
   avg_delay_min: number;
   samples: number;
-  /** Comma-joined list of route_codes contributing to this stop's avg. */
-  route_codes: string;
+  /** Comma-joined list of route_codes contributing to this stop's avg.
+   *  Optional because clients with cached responses from before the
+   *  field was added will still parse correctly. */
+  route_codes?: string;
 };
 
 export type HeatmapFeature = GeoJSON.Feature<GeoJSON.Point, HeatmapProps>;

@@ -1,4 +1,5 @@
-import { NavLink, useLocation, useParams } from "react-router-dom";
+import { NavLink, useParams } from "react-router-dom";
+import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
 type Item = { to: string; label: string; icon: string };
 
@@ -11,9 +12,12 @@ const ITEMS: Item[] = [
 
 export function Sidebar() {
   const { agencyId } = useParams();
-  // Preserve filter state (?from=...&routes=...&dow=...) across tab switches.
-  // Without this, every tab click reset the user's filters to defaults.
-  const { search } = useLocation();
+  // Carry only the filter dimensions across tab switches — building from
+  // ctx (not raw location.search) avoids dragging unrelated query keys
+  // like ?admin=1 or report-specific params into every other tab.
+  const [ctx] = useRangeContext();
+  const filterQS = ctxToQueryString(ctx);
+  const suffix = filterQS ? `?${filterQS}` : "";
   if (!agencyId) return <aside style={{ width: 180 }} />;
 
   return (
@@ -30,7 +34,7 @@ export function Sidebar() {
         {ITEMS.map((item) => (
           <NavLink
             key={item.to}
-            to={`/agencies/${agencyId}/${item.to}${search}`}
+            to={`/agencies/${agencyId}/${item.to}${suffix}`}
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",
