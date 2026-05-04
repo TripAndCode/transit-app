@@ -38,6 +38,14 @@ jobs:
       - name: Install dependencies
         run: poetry install
 
+      # postgis/postgis:14-3.2 doesn't ship pgvector; the schema's
+      # `CREATE EXTENSION vector` then errors with UndefinedFile. Install
+      # the apt package into the running service container before migrate.
+      - name: Install pgvector in Postgres service
+        run: |
+          CID=$(docker ps -q --filter ancestor=postgis/postgis:14-3.2 | head -n1)
+          docker exec "$CID" sh -c "apt-get update && apt-get install -y --no-install-recommends postgresql-14-pgvector"
+
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
         env:

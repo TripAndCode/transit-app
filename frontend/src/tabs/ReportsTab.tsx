@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useReport, useReports } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
 import { relativeTime } from "../utils/relativeTime";
 import { TabFilterBar } from "../components/TabFilterBar";
@@ -27,6 +27,10 @@ export function ReportsTab() {
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
   const [ctx] = useRangeContext();
+  // Build the filter querystring from ctx so navigating between reports
+  // carries only the filter dimensions — not unrelated keys like ?admin=1.
+  const filterQS = ctxToQueryString(ctx);
+  const filterSuffix = filterQS ? `?${filterQS}` : "";
   const list = useReports(id);
   const detail = useReport(id, reportType ?? null, ctx);
 
@@ -46,7 +50,7 @@ export function ReportsTab() {
           return (
             <div
               key={r.report_type}
-              onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}`)}
+              onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}${filterSuffix}`)}
               style={{
                 padding: "10px 12px",
                 marginBottom: 4,
