@@ -1,6 +1,6 @@
 # Transit Delay App
 
-Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST + WebSocket API. Natural-language queries in Japanese are classified by Groq (llama-3.2-11b) and answered with deterministic SQL.
+Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST API plus a React SPA (map heatmap, hourly heatmap, daily trend chart, route polyline overlay, CSV export). Natural-language Japanese questions go through Groq (llama-3.3-70b-versatile) tool-use against six deterministic SQL tools.
 
 ---
 
@@ -159,7 +159,8 @@ poetry run python gtfs_pipeline.py ingest_live
 ```
 
 Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
-row. On Railway, the cron block in `railway.toml` runs this every 15 min.
+row. On Railway, the cron block in `railway.toml` runs `fetch_and_ingest.sh`
+hourly (`0 * * * *`).
 
 Path A does **not** load static GTFS (stops, routes, timetable) — for that
 you still need `make load_static` against a local zip, or set `static_url`
@@ -171,7 +172,7 @@ A separate Oracle Cloud VM (`64.110.114.101`, user `opc`) runs an
 independent scraper that crawls the GTFS-JP website and stores both:
 
 - `archive/*.tar.gz` — historical GTFS-RT protobuf bundles
-- `archive_static/*.zip` — static GTFS bundles (stops/routes/timetable)
+- `static_archive/gtfs_static_*.zip` — static GTFS bundles (stops/routes/timetable)
 
 The local box never crawls. It **pulls** those archives over SSH, then runs
 ingest + load_static + analyze locally:
@@ -179,7 +180,7 @@ ingest + load_static + analyze locally:
 ```
 Oracle VM (crawls GTFS-JP)
   ├─ /home/opc/.../archive/*.tar.gz
-  └─ /home/opc/.../archive_static/*.zip
+  └─ /home/opc/.../static_archive/gtfs_static_*.zip
        │
        │   scripts/fetch_archives.sh   (rsync over SSH)
        ▼
@@ -207,10 +208,22 @@ For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b
 |---|---|
 | `make db` | Build image, start container, apply schema |
 | `make db-down` | Stop container (data volume preserved) |
-| `make schema` | Re-apply schema to a running container |
+| `make migrate` | Apply pending migrations (`db/migrations/*.up.sql`) |
+| `make migrate-down` | Roll back the latest migration |
 | `docker compose down -v` | Stop and delete data volume |
 
 Data is stored in a named Docker volume (`prod-backend_transit_pgdata`) — it survives container restarts.
+
+### Migrations
+
+Each schema change ships as a numbered up/down pair under `db/migrations/`. The startCommand in `railway.toml` runs `migrate up` on every deploy; `db.migrate` records applied versions in `schema_migrations`.
+
+| File | Adds |
+|---|---|
+| `0001_initial` | core tables + PostGIS / pgvector extensions |
+| `0002_trip_id_pattern` | `agencies.trip_id_pattern` for per-agency parsing |
+| `0003_api_keys` | API-key registry for the optional Pro tier |
+| `0004_stop_codes` | `static_stops.stop_code` + `platform_code` (surfaced in map tooltip) |
 
 ---
 
@@ -272,13 +285,20 @@ Computes five aggregation tables used by all API queries:
 | `GET` | `/agencies` | List agencies |
 | `POST` | `/agencies` | Register agency |
 | `GET` | `/agencies/{id}` | Get agency |
-| `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer |
-| `POST` | `/api/{agency_id}/query` | Structured intent → rows + answer |
-| `WS` | `/api/{agency_id}/chat` | WebSocket chat session |
+| `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer (Groq tool-use) |
+| `POST` | `/api/{agency_id}/query` | Structured intent dict → rows + Japanese answer |
+| `GET` | `/api/{agency_id}/reports` | List pre-computed reports |
+| `GET` | `/api/{agency_id}/reports/{type}` | Report payload (`format=json` default, `csv` for download) |
 | `GET` | `/api/{agency_id}/delays/live` | Latest delay per trip |
-| `GET` | `/api/{agency_id}/delays/heatmap` | GeoJSON delay heatmap by stop |
-| `GET` | `/api/{agency_id}/routes` | Static route list |
+| `GET` | `/api/{agency_id}/delays/heatmap` | GeoJSON delay heatmap by stop (range/DOW/time-band/route filtered) |
+| `GET` | `/api/{agency_id}/route-shape` | Stop sequence + per-stop avg delay for one route (powers the map polyline) |
+| `GET` | `/api/{agency_id}/today/route-summary` | Per-route operational summary for the most recent observation date |
+| `GET` | `/api/{agency_id}/routes` | Static route list (with derived `route_code`) |
 | `GET` | `/api/{agency_id}/stops` | Static stop list |
+
+All `/api/*` endpoints accept the global filter context as query params:
+`from`, `to`, `dow`, `time_band`, `service`, `routes` (comma-joined).
+The frontend persists these in the URL via `useRangeContext`.
 
 ### Rate limits
 
@@ -301,7 +321,16 @@ Query types understood: `ranking`, `by_hour`, `by_dow`, `by_stop`, `by_date`, `t
 
 ## Frontend
 
-Single-page React app at `frontend/`. Default tab is the map; tabs cover ask (NL questions), live delays, and pre-rendered reports. UI chrome is Japanese.
+Single-page React app at `frontend/` (Vite + TypeScript strict + TanStack Query + react-router-dom + MapLibre GL). Default tab is the map; tabs cover ask (NL questions), live delays (most-recent-observation cards), and pre-rendered reports (with hourly heatmap and daily-trend chart). UI chrome is Japanese.
+
+Key v2 components (all under `frontend/src/components/`):
+
+- `RangeBadge` + `TabFilterBar` — unified date-range / DOW / time-band / service / route filter strip; state lives in URL params and persists across tab switches.
+- `MapLegend` — draggable, position-persisted overlay explaining the delay-severity color ramp.
+- `charts/DailyChart` — sample-weighted line chart for trend reports.
+- `charts/HourlyHeatmap` — date × hour-of-day heatmap; click a row label / column / cell to drill the global filter into that time-band / day / both.
+- `ReportTable` — inline horizontal bars colored by severity for ranking/compare reports; CSV export with Japanese headers.
+- Map tooltips show stop name, GTFS `platform_code` (のりば badge), `stop_code`, contributing route_codes, and the active filter period.
 
 ### Local dev
 
@@ -345,23 +374,27 @@ pipeline/static_loader.py   GTFS Static zip → static_* tables
 pipeline/analyze.py         SQL aggregations → agg_* tables
     │
     ▼
-api/main.py                 FastAPI app (asyncpg pool, auth + rate-limit middleware)
+api/main.py                 FastAPI app (asyncpg pool, Asia/Tokyo session, SPA static fallback)
 api/middleware/
-  auth.py                   X-API-Key validation → request.state.tier
+  auth.py                   X-API-Key validation → request.state.tier (free / pro)
   ratelimit.py              slowapi 60/min free, 600/min pro
 api/routers/
   agencies.py               agency CRUD
-  ask.py                    NL question → intent → execute → format
-  query.py                  structured intent → execute → format
-  ws.py                     WebSocket chat
-  map.py                    live delays + GeoJSON heatmap
+  ask.py                    NL question → Groq tool-use → answer (pipeline/query/chat)
+  query.py                  structured intent dict → execute → format
+  reports.py                pre-computed report payloads (json + csv)
+  map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
     │
     ▼
+api/range.py                shared RangeCtx (from/to/dow/time_band/service/routes) + SQL filter builder
 pipeline/query/
-  intent.py                 classify_intent() via Groq JSON mode
-  executor.py               16 async SQL executors (asyncpg, $N params)
+  chat.py                   Groq tool-use chat (six tools, system prompt, date overrides)
+  tools.py                  the six tool implementations + route validation
+  executor.py               legacy SQL executors used by /query and tools
   formatter.py              Python templates → Japanese text
+pipeline/reports.py         compute_* aggregations (cached via async_lru_cache)
+pipeline/cache.py           bounded async LRU + TTL decorator
 ```
 
 **Trip ID format (default):** `{service_type}_{HH}時{MM}分_系統{route_code}`  
