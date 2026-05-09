@@ -162,7 +162,7 @@ Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
 row. **This is what production uses** — a GitHub Actions workflow hits
 `POST /internal/cron/ingest` hourly, and the FastAPI app runs `ingest_live`
 + `analyze` for every agency in a background task. See
-[Deployment](#deployment-flyio-tokyo-region) below.
+[Deployment](#deployment-linode-vps-tokyo) below.
 
 Path A does **not** load static GTFS (stops, routes, timetable) — for that
 you still need `make load_static` against a local zip, or set `static_url`
@@ -220,7 +220,7 @@ Data is stored in a named Docker volume (`prod-backend_transit_pgdata`) — it s
 
 ### Migrations
 
-Each schema change ships as a numbered up/down pair under `db/migrations/`. The startCommand in `railway.toml` runs `migrate up` on every deploy; `db.migrate` records applied versions in `schema_migrations`.
+Each schema change ships as a numbered up/down pair under `db/migrations/`. Run `make migrate` (dev) or `docker compose exec app python gtfs_pipeline.py migrate up` (prod) after pulling new migrations; `db.migrate` records applied versions in `schema_migrations`.
 
 | File | Adds |
 |---|---|
@@ -426,73 +426,33 @@ DATABASE_URL=postgresql://transit:transit@localhost:5433/transit \
 
 ---
 
-## Deployment (Fly.io, Tokyo region)
+## Deployment (Linode VPS, Tokyo)
 
-Single Fly Machine in `nrt` runs the multistage Dockerfile (built SPA + FastAPI). Postgres is a separate Fly app attached via `fly pg attach`. Cron is a GitHub Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no always-on cron worker.
+Single 2 GB Linode runs `docker compose --profile prod` — FastAPI + bundled SPA, Caddy (auto-HTTPS), and PostGIS+pgvector together on one box. ~$12/mo. Cron is a GitHub Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no always-on cron worker.
 
-### One-time bring-up
+Full step-by-step (provision → harden → docker → DNS → backups): [`docs/deploy-linode.md`](docs/deploy-linode.md).
 
-```bash
-# 0. Install flyctl + log in
-brew install flyctl
-fly auth login
+Domain ideas (portfolio): `transit-delay.app`, `gtfs-jp.dev`, `chien-map.app` (遅延 = delay), `jptransit.app`. Cheapest registrars for `.app`/`.dev` are Cloudflare Registrar (~$12–14/yr, no markup, free WHOIS privacy).
 
-# 1. Create the apps (ours: API + Postgres)
-fly launch --no-deploy --copy-config --name transit-app-tokyo --region nrt
-fly pg create --region nrt --name transit-app-pg --vm-size shared-cpu-1x --volume-size 3
-fly pg attach transit-app-pg --app transit-app-tokyo
+### Required env (read by `compose.yml` prod profile)
 
-# 2. Generate + plant the cron secret in two places (Fly + GitHub)
-SECRET="$(openssl rand -hex 32)"
-fly secrets set --app transit-app-tokyo CRON_SECRET="$SECRET"
-gh secret set CRON_SECRET --body "$SECRET"
-gh secret set APP_BASE_URL --body "https://transit-app-tokyo.fly.dev"
-
-# 3. The other app secrets
-fly secrets set --app transit-app-tokyo \
-    GROQ_API_KEY=gsk_... \
-    CORS_ORIGINS=https://transit-app-tokyo.fly.dev
-
-# 4. First deploy (release_command runs migrate up before machines roll)
-fly deploy
-
-# 5. Seed agencies + initial data so the SPA isn't empty for first visitors
-fly ssh console --app transit-app-tokyo -C "python gtfs_pipeline.py seed_agencies agencies.csv"
-# Static GTFS is loaded once per quarter — copy a zip in and run load_static:
-fly ssh sftp shell --app transit-app-tokyo
-# (sftp> put raw_archives_static/gtfs_static_YYYYMMDD.zip /tmp/gtfs.zip)
-fly ssh console --app transit-app-tokyo -C "python gtfs_pipeline.py load_static /tmp"
-# RT data flows in via the cron from step 2 above.
-```
-
-### Required env
-
-| Variable | Source | Notes |
-|---|---|---|
-| `DATABASE_URL` | `fly pg attach` | injected automatically |
-| `GROQ_API_KEY` | `fly secrets set` | from console.groq.com |
-| `CORS_ORIGINS` | `fly secrets set` | your fly.dev URL or custom domain |
-| `CRON_SECRET` | `fly secrets set` | matches the GH Actions repo secret of the same name |
+| Variable | Notes |
+|---|---|
+| `GROQ_API_KEY` | from console.groq.com |
+| `CRON_SECRET` | `openssl rand -hex 32`; must match the GH Actions repo secret of the same name |
+| `POSTGRES_PASSWORD` | `openssl rand -hex 24`; used by db + injected into app's `DATABASE_URL` |
+| `CADDY_SITE_ADDRESS` | `:80` for IP-only first boot; your domain (e.g. `transit-delay.app`) once DNS is wired |
+| `CORS_ORIGINS` | leave empty — SPA + API are same-origin behind Caddy |
 
 ### Required GitHub repo secrets
 
 | Name | Notes |
 |---|---|
-| `CRON_SECRET` | random 32 bytes; same value as the Fly secret above |
-| `APP_BASE_URL` | e.g. `https://transit-app-tokyo.fly.dev` (the GH workflow `curl`s this/internal/cron/ingest) |
-
-### Custom domain
-
-```bash
-fly ips list --app transit-app-tokyo                                # get IPv4 + IPv6
-fly certs add --app transit-app-tokyo your-domain.example
-# Add A + AAAA records at your DNS provider pointing to the Fly IPs.
-```
-
-Then update `CORS_ORIGINS` to the new origin and redeploy.
+| `CRON_SECRET` | random 32 bytes; same value as `CRON_SECRET` in the server's `.env` |
+| `APP_BASE_URL` | e.g. `https://transit-delay.app` (the GH workflow `curl`s `${APP_BASE_URL}/internal/cron/ingest`) |
 
 ### Operational notes
 
-- Migrations run automatically on every deploy via `[deploy] release_command` in `fly.toml`.
-- The hourly cron is observable in the GitHub Actions tab — failures surface there, not in Fly logs. Manual replay via `gh workflow run cron.yml`.
+- Migrations: not auto-run. After `git pull && docker compose --profile prod up -d --build`, run `docker compose exec app python gtfs_pipeline.py migrate up` if the pull included new migrations.
+- The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run cron.yml`.
 - `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.
