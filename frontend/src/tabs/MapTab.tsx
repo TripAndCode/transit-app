@@ -9,6 +9,7 @@ import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { MapLegend } from "../components/MapLegend";
+import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
@@ -37,7 +38,10 @@ export function MapTab() {
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
 
-  // init map once; register layer handlers once after style load
+  // Init the map once. Click / hover handlers are registered here too —
+  // MapLibre's delegated listeners no-op until the named layer exists,
+  // so handlers can safely target layers that are added later by the
+  // data effects below.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const m = new maplibregl.Map({
@@ -52,39 +56,23 @@ export function MapTab() {
       const f = e.features?.[0];
       if (!f) return;
       const p = f.properties as HeatmapProps;
-      const routes = (p.route_codes || "").split(",").filter(Boolean);
-      const routesLabel = routes.length === 0
-        ? ""
-        : routes.length <= 4
-          ? routes.join(", ")
-          : `${routes.slice(0, 4).join(", ")} +${routes.length - 4}`;
-      // Pole / stop_code badge near the title — Aomori's GTFS uses
-      // platform_code "2" + stop_code "②のりば". Show whichever is
-      // present; clustered stops may have multiple, separated by "/".
-      const poles = (p.platform_code || "").split(",").filter(Boolean);
-      const poleBadge = poles.length === 0
-        ? ""
-        : `<span style="display:inline-block;background:#eef0fa;color:#5b6cad;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;vertical-align:middle">のりば ${escapeHtml(poles.join("/"))}</span>`;
-      const stopCode = p.stop_code && p.stop_code !== p.stop_name ? p.stop_code : "";
-      const stopIds = (p.stop_id || "").split(",").filter(Boolean);
-      const stopIdLine = stopIds.length === 0
-        ? ""
-        : `<div style="font-size:11px;color:#888;margin-top:2px">stop_id: <span style="font-family:ui-monospace,monospace">${escapeHtml(stopIds.length <= 3 ? stopIds.join(", ") : `${stopIds.slice(0, 3).join(", ")} +${stopIds.length - 3}`)}</span></div>`;
       const c = ctxRef.current;
+      const html = renderStopPopupHTML(
+        {
+          stop_name: p.stop_name,
+          stop_code: p.stop_code,
+          platform_code: p.platform_code,
+          stop_id: p.stop_id,
+          avg_min: Number(p.avg_delay_min),
+          samples: p.samples,
+          contributing_routes: (p.route_codes || "").split(",").filter(Boolean),
+        },
+        { from: c.from, to: c.to },
+      );
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
-        .setHTML(
-          `<div style="font: 13px sans-serif; min-width:220px">
-             <div><strong>${escapeHtml(p.stop_name)}</strong>${poleBadge}</div>
-             ${stopCode ? `<div style="font-size:12px;color:#666;margin-top:1px">${escapeHtml(stopCode)}</div>` : ""}
-             ${stopIdLine}
-             <div style="margin-top:6px">平均遅延: ${Number(p.avg_delay_min).toFixed(1)}分<br/>
-             サンプル: ${p.samples}件
-             ${routesLabel ? `<br/>系統: <span style="color:#555">${escapeHtml(routesLabel)}</span>` : ""}</div>
-             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
-           </div>`,
-        )
+        .setHTML(html)
         .addTo(m);
     };
     const onEnter = () => { m.getCanvas().style.cursor = "pointer"; };
@@ -97,21 +85,33 @@ export function MapTab() {
     const onRouteStopClick = (e: maplibregl.MapLayerMouseEvent) => {
       const f = e.features?.[0];
       if (!f) return;
-      const p = f.properties as { stop_sequence: number; stop_name: string; avg_min: number; samples: number };
+      const p = f.properties as {
+        stop_sequence: number;
+        stop_name: string;
+        stop_id?: string | null;
+        stop_code?: string | null;
+        platform_code?: string | null;
+        avg_min: number;
+        samples: number;
+      };
       const c = ctxRef.current;
-      const route = c.routes[0];
+      const html = renderStopPopupHTML(
+        {
+          stop_name: p.stop_name,
+          stop_code: p.stop_code,
+          platform_code: p.platform_code,
+          stop_id: p.stop_id,
+          stop_sequence: p.stop_sequence,
+          avg_min: Number(p.avg_min),
+          samples: p.samples,
+          active_route: c.routes[0] ?? null,
+        },
+        { from: c.from, to: c.to },
+      );
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
         .setLngLat(e.lngLat)
-        .setHTML(
-          `<div style="font: 13px sans-serif; min-width: 200px">
-             <div style="color:#888;font-size:11px;margin-bottom:2px">停留所 #${p.stop_sequence}${route ? ` ・ 系統 ${escapeHtml(route)}` : ""}</div>
-             <strong>${escapeHtml(p.stop_name)}</strong><br/>
-             平均遅延: ${Number(p.avg_min).toFixed(1)}分<br/>
-             サンプル: ${p.samples}件
-             <div style="font-size:11px;color:#888;margin-top:6px">期間: ${escapeHtml(c.from)} 〜 ${escapeHtml(c.to)}</div>
-           </div>`,
-        )
+        .setHTML(html)
         .addTo(m);
     };
 
@@ -215,9 +215,8 @@ export function MapTab() {
 
   // Single-route overlay: thin neutral polyline + small numbered stop markers.
   // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
-  // Stop-layer event handlers are registered ONCE on init (lower in the file
-  // they're set up alongside the heatmap layer events) so they don't accumulate
-  // on filter changes.
+  // (Click handlers for both layers are registered once in the init effect
+  // above so they don't accumulate on filter changes.)
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
@@ -276,6 +275,9 @@ export function MapTab() {
             properties: {
               stop_sequence: s.stop_sequence,
               stop_name: s.stop_name,
+              stop_id: s.stop_id ?? null,
+              stop_code: s.stop_code ?? null,
+              platform_code: s.platform_code ?? null,
               avg_min: s.avg_min ?? 0,
               samples: s.samples,
             },
@@ -365,11 +367,5 @@ export function MapTab() {
       )}
       </div>
     </div>
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!),
   );
 }

@@ -48,9 +48,16 @@ def cmd_add_agency(args):
 def cmd_seed_agencies(args):
     """Idempotently upsert every row of a CSV into the agencies table.
 
-    Columns: agency_name, feed_url, static_url, trip_id_pattern
+    Columns: agency_id (optional), agency_name, feed_url, static_url, trip_id_pattern
     Empty strings become NULL for static_url and trip_id_pattern.
     Uniqueness is by feed_url; existing rows are updated, not duplicated.
+
+    When ``agency_id`` is set in the CSV the INSERT uses it explicitly,
+    so re-seeding after a TRUNCATE always produces the same id (avoids
+    the sequence-drift bug where dev DBs accumulated agency_id=97 after
+    repeated test truncations and broke fetch_and_ingest.sh's default
+    ``AGENCY_ID=1``). The sequence is bumped to ``MAX(agency_id) + 1``
+    afterwards so future inserts without an explicit id don't collide.
     """
     import csv
 
@@ -67,18 +74,35 @@ def cmd_seed_agencies(args):
                 pattern = (row.get("trip_id_pattern") or "").strip() or None
                 if not name or not feed:
                     continue  # skip blank/comment lines
-                cur.execute(
-                    """
-                    INSERT INTO agencies (agency_name, feed_url, static_url, trip_id_pattern)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (feed_url) DO UPDATE SET
-                        agency_name = EXCLUDED.agency_name,
-                        static_url = EXCLUDED.static_url,
-                        trip_id_pattern = EXCLUDED.trip_id_pattern
-                    RETURNING agency_id, (xmax = 0) AS inserted
-                    """,
-                    (name, feed, static, pattern),
-                )
+                aid_raw = (row.get("agency_id") or "").strip()
+                explicit_id = int(aid_raw) if aid_raw.isdigit() else None
+                if explicit_id is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO agencies (agency_id, agency_name, feed_url, static_url, trip_id_pattern)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (feed_url) DO UPDATE SET
+                            agency_id = EXCLUDED.agency_id,
+                            agency_name = EXCLUDED.agency_name,
+                            static_url = EXCLUDED.static_url,
+                            trip_id_pattern = EXCLUDED.trip_id_pattern
+                        RETURNING agency_id, (xmax = 0) AS inserted
+                        """,
+                        (explicit_id, name, feed, static, pattern),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO agencies (agency_name, feed_url, static_url, trip_id_pattern)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (feed_url) DO UPDATE SET
+                            agency_name = EXCLUDED.agency_name,
+                            static_url = EXCLUDED.static_url,
+                            trip_id_pattern = EXCLUDED.trip_id_pattern
+                        RETURNING agency_id, (xmax = 0) AS inserted
+                        """,
+                        (name, feed, static, pattern),
+                    )
                 aid, was_inserted = cur.fetchone()
                 if was_inserted:
                     inserted += 1
@@ -86,6 +110,12 @@ def cmd_seed_agencies(args):
                 else:
                     updated += 1
                     print(f"  ~ agency {aid}: {name} (updated)")
+            # Realign the sequence so future inserts without an explicit
+            # id don't collide with the explicit ones we just wrote.
+            cur.execute(
+                "SELECT setval('agencies_agency_id_seq', "
+                "GREATEST((SELECT COALESCE(MAX(agency_id), 0) FROM agencies), 1))"
+            )
     conn.commit()
     conn.close()
     print(f"Seeded {inserted} new + {updated} updated from {path}")

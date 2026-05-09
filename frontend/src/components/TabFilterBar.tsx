@@ -111,6 +111,44 @@ export function TabFilterBar() {
     return m;
   }, [routes]);
 
+  // route_short_name → list of route_codes that share it.
+  // A single display name like "K37 観光通り線" maps to several codes
+  // (different operating variants); the picker can collapse-select all
+  // of them, and the chips below merge accordingly.
+  const groupCodesByName = useMemo(() => {
+    const m = new Map<string, string[]>();
+    if (routes) for (const r of routes) {
+      if (!r.route_code || !r.route_short_name) continue;
+      const arr = m.get(r.route_short_name) || [];
+      arr.push(r.route_code);
+      m.set(r.route_short_name, arr);
+    }
+    return m;
+  }, [routes]);
+
+  // Decide which selected route codes collapse into a single "by-name" chip
+  // and which stand alone. A group collapses only when *all* its codes are
+  // selected — partial selection still shows per-code chips so the user
+  // doesn't lose visibility of what's actually filtered.
+  type ChipSpec =
+    | { kind: "name"; name: string; codes: string[] }
+    | { kind: "code"; code: string };
+  const routeChips = useMemo<ChipSpec[]>(() => {
+    const sel = new Set(ctx.routes);
+    const used = new Set<string>();
+    const chips: ChipSpec[] = [];
+    for (const [name, codes] of groupCodesByName) {
+      if (codes.length > 1 && codes.every((c) => sel.has(c))) {
+        chips.push({ kind: "name", name, codes });
+        for (const c of codes) used.add(c);
+      }
+    }
+    for (const code of ctx.routes) {
+      if (!used.has(code)) chips.push({ kind: "code", code });
+    }
+    return chips;
+  }, [ctx.routes, groupCodesByName]);
+
   function apply() {
     setCtx({
       dow: draft.dow,
@@ -145,6 +183,12 @@ export function TabFilterBar() {
       const remaining = ctx.routes.filter((r) => r !== value);
       setCtx({ routes: remaining.length > 0 ? remaining : null });
     }
+  }
+
+  function clearNameChip(codes: string[]) {
+    const drop = new Set(codes);
+    const remaining = ctx.routes.filter((r) => !drop.has(r));
+    setCtx({ routes: remaining.length > 0 ? remaining : null });
   }
 
   return (
@@ -210,13 +254,21 @@ export function TabFilterBar() {
       {ctx.time_band !== "all" && (
         <Chip label={`時間帯: ${TIME_BAND_LABEL[ctx.time_band]}`} onClear={() => clearChip("time_band")} />
       )}
-      {ctx.routes.map((rc) => (
-        <Chip
-          key={rc}
-          label={routeNameMap.get(rc) ? `${routeNameMap.get(rc)} (${rc})` : `系統${rc}`}
-          onClear={() => clearChip("route", rc)}
-        />
-      ))}
+      {routeChips.map((c) =>
+        c.kind === "name" ? (
+          <Chip
+            key={`name:${c.name}`}
+            label={`${c.name} (${c.codes.length}系統)`}
+            onClear={() => clearNameChip(c.codes)}
+          />
+        ) : (
+          <Chip
+            key={c.code}
+            label={routeNameMap.get(c.code) ? `${routeNameMap.get(c.code)} (${c.code})` : `系統${c.code}`}
+            onClear={() => clearChip("route", c.code)}
+          />
+        ),
+      )}
       {activeCount > 0 && (
         <button
           type="button"
@@ -394,31 +446,66 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   );
 }
 
+type RouteGroup = { name: string; codes: string[] };
+
 function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
   const id = useAgencyId();
-  const { data } = useRoutes(id);
+  const { data, isPending, refetch } = useRoutes(id);
   const [filter, setFilter] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
-  const options = useMemo(() => {
+  // Group routes by display name. A name like "K37 観光通り線" maps to
+  // multiple codes (operating variants); the picker renders the name as a
+  // single row that selects all of its codes at once. Single-code names
+  // collapse to one row that behaves like the old per-code picker.
+  const groups = useMemo<RouteGroup[]>(() => {
     if (!data) return [];
-    const seen = new Set<string>();
-    const out: { code: string; label: string }[] = [];
+    const m = new Map<string, string[]>();
     for (const r of data) {
-      if (!r.route_code || seen.has(r.route_code)) continue;
-      seen.add(r.route_code);
-      out.push({ code: r.route_code, label: r.route_short_name || r.route_id });
+      if (!r.route_code) continue;
+      const name = r.route_short_name || r.route_id || r.route_code;
+      const arr = m.get(name) || [];
+      if (!arr.includes(r.route_code)) arr.push(r.route_code);
+      m.set(name, arr);
     }
-    return out.sort((a, b) => a.label.localeCompare(b.label));
+    return Array.from(m, ([name, codes]) => ({ name, codes: codes.sort() }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [data]);
 
-  const filtered = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.label.toLowerCase().includes(q) || o.code.includes(q));
-  }, [options, filter]);
+    if (!q) return groups;
+    return groups
+      .map((g) => ({
+        ...g,
+        codes: g.codes.filter((c) => g.name.toLowerCase().includes(q) || c.includes(q)),
+      }))
+      .filter((g) => g.codes.length > 0 || g.name.toLowerCase().includes(q));
+  }, [groups, filter]);
 
-  function toggle(code: string) {
+  function toggleCode(code: string) {
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
+  }
+
+  function toggleGroup(g: RouteGroup) {
+    const sel = new Set(selected);
+    const allOn = g.codes.every((c) => sel.has(c));
+    if (allOn) {
+      onChange(selected.filter((c) => !g.codes.includes(c)));
+    } else {
+      const next = new Set(selected);
+      for (const c of g.codes) next.add(c);
+      onChange(Array.from(next));
+    }
+  }
+
+  function toggleExpanded(name: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   }
 
   return (
@@ -429,58 +516,132 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
         placeholder="検索 (名前 / コード)"
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
-      {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
-          {selected.map((c) => {
-            const o = options.find((x) => x.code === c);
-            return (
-              <button
-                key={c}
-                type="button"
-                onClick={() => toggle(c)}
-                style={pill(true)}
-                title="クリックで解除"
-              >
-                {o?.label || c} ×
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div
         style={{
-          maxHeight: 180,
+          maxHeight: 220,
           overflowY: "auto",
           border: "1px solid var(--border-soft)",
           borderRadius: 4,
         }}
       >
-        {filtered.slice(0, 200).map((o) => {
-          const on = selected.includes(o.code);
+        {filteredGroups.slice(0, 200).map((g) => {
+          const allOn = g.codes.every((c) => selected.includes(c));
+          const someOn = !allOn && g.codes.some((c) => selected.includes(c));
+          const isOpen = expanded.has(g.name);
+          const multi = g.codes.length > 1;
           return (
-            <div
-              key={o.code}
-              onClick={() => toggle(o.code)}
-              style={{
-                padding: "6px 10px",
-                cursor: "pointer",
-                background: on ? "var(--accent-soft)" : "transparent",
-                fontSize: 13,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                borderBottom: "1px solid var(--border-soft)",
-              }}
-            >
-              <input type="checkbox" checked={on} readOnly />
-              <span style={{ flex: 1 }}>
-                {o.label} <span style={{ color: "var(--text-tertiary)" }}>({o.code})</span>
-              </span>
+            <div key={g.name} style={{ borderBottom: "1px solid var(--border-soft)" }}>
+              <div
+                style={{
+                  padding: "6px 10px",
+                  background: allOn
+                    ? "var(--accent-soft)"
+                    : someOn
+                      ? "rgba(91,108,173,0.06)"
+                      : "transparent",
+                  fontSize: 13,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allOn}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someOn;
+                  }}
+                  onChange={() => toggleGroup(g)}
+                />
+                <span
+                  style={{ flex: 1, cursor: "pointer" }}
+                  onClick={() => toggleGroup(g)}
+                >
+                  {g.name}{" "}
+                  {multi ? (
+                    <span style={{ color: "var(--text-tertiary)" }}>({g.codes.length}系統)</span>
+                  ) : (
+                    <span style={{ color: "var(--text-tertiary)" }}>({g.codes[0]})</span>
+                  )}
+                </span>
+                {multi && (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(g.name)}
+                    aria-label={isOpen ? "閉じる" : "展開"}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: "2px 6px",
+                      cursor: "pointer",
+                      color: "var(--text-tertiary)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </button>
+                )}
+              </div>
+              {multi && isOpen && (
+                <div style={{ paddingLeft: 26, background: "var(--bg-soft)" }}>
+                  {g.codes.map((c) => {
+                    const on = selected.includes(c);
+                    return (
+                      <div
+                        key={c}
+                        onClick={() => toggleCode(c)}
+                        style={{
+                          padding: "5px 10px",
+                          cursor: "pointer",
+                          background: on ? "var(--accent-soft)" : "transparent",
+                          fontSize: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          borderTop: "1px dashed var(--border-soft)",
+                        }}
+                      >
+                        <input type="checkbox" checked={on} readOnly />
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "ui-monospace, monospace" }}>
+                          {c}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
-        {filtered.length === 0 && (
+        {filteredGroups.length === 0 && isPending && (
+          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
+            読み込み中...
+          </div>
+        )}
+        {filteredGroups.length === 0 && !isPending && filter.trim() !== "" && (
           <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>該当なし</div>
+        )}
+        {filteredGroups.length === 0 && !isPending && filter.trim() === "" && (
+          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
+            ルートが登録されていません。
+            初回ingest中の場合は数分後に再度お試しください。
+            <button
+              type="button"
+              onClick={() => refetch()}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--accent)",
+                padding: "2px 6px",
+                fontSize: 12,
+                cursor: "pointer",
+                textDecoration: "underline",
+                marginLeft: 6,
+              }}
+            >
+              再読み込み
+            </button>
+          </div>
         )}
       </div>
     </div>
