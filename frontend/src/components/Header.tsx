@@ -22,8 +22,38 @@ export function Header() {
         gap: 24,
       }}
     >
-      <Link to="/" style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-        遅延ダッシュボード
+      <Link
+        to="/"
+        style={{
+          textDecoration: "none",
+          color: "var(--text-primary)",
+          display: "flex",
+          flexDirection: "column",
+          lineHeight: 1.1,
+        }}
+      >
+        <h1
+          style={{
+            fontFamily: "var(--font-display)",
+            fontWeight: 600,
+            fontSize: 20,
+            margin: 0,
+            letterSpacing: "0.01em",
+          }}
+        >
+          遅延ダッシュボード
+        </h1>
+        <span
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginTop: 2,
+            letterSpacing: "0.04em",
+          }}
+        >
+          リアルタイム × 時刻表
+        </span>
       </Link>
       <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
         <AgencyPicker />
