@@ -6,6 +6,8 @@ rows from the most recent ``captured_at`` date in the table — adapts to
 whatever ingest path the operator runs.
 """
 
+import json
+
 from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_agency, get_conn
@@ -72,6 +74,39 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
+    # Resolve road geometry from static_shapes via the trip_id bridge.
+    # We find the most-frequent shape_id among trips whose route_code matches,
+    # then fetch the GeoJSON from static_shapes.  Returns None if no shape loaded.
+    geom_row = await conn.fetchrow(
+        """
+        WITH ranked AS (
+            SELECT t.shape_id, COUNT(*) AS n
+            FROM static_trips t
+            JOIN updates u
+              ON u.agency_id = t.agency_id
+             AND u.trip_id = t.trip_id
+            WHERE t.agency_id = $1
+              AND u.route_code = $2
+              AND t.shape_id IS NOT NULL
+              AND t.shape_id <> ''
+            GROUP BY t.shape_id
+            ORDER BY n DESC
+            LIMIT 1
+        )
+        SELECT ST_AsGeoJSON(s.geom)::json AS geom_json
+        FROM ranked r
+        JOIN static_shapes s
+          ON s.agency_id = $1 AND s.shape_id = r.shape_id
+        """,
+        agency_id,
+        route,
+    )
+    if geom_row and geom_row["geom_json"] is not None:
+        raw = geom_row["geom_json"]
+        geometry = json.loads(raw) if isinstance(raw, str) else raw
+    else:
+        geometry = None
+
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
     # colors match what compute_ranking et al. show for the same filters.
     where_frag, params, _ = build_updates_filter(ctx, next_param=3)
@@ -111,6 +146,7 @@ async def route_shape(
     )
     return {
         "route": route,
+        "geometry": geometry,  # GeoJSON LineString or None
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
