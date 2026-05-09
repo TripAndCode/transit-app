@@ -32,22 +32,27 @@ async def agencies_client(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    truncate_sql = (
+        "TRUNCATE agencies, updates, static_stops, static_stop_times, "
+        "static_trips, static_routes, static_calendar_dates, "
+        "agg_route_stats, agg_route_hour, agg_route_dow, "
+        "agg_daily_trend, agg_stop_seq, rag_chunks CASCADE"
+    )
+    # Pre-truncate so each test starts from a known-empty state — otherwise
+    # data left over from `make seed-agencies` (or a parallel session) would
+    # break test_list_agencies_empty's `[] == response` assertion.
+    async with pool.acquire() as conn:
+        await conn.execute(truncate_sql)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # clean up agencies between tests
         yield client
         async with pool.acquire() as conn:
-            await conn.execute(
-                "TRUNCATE agencies, updates, static_stops, static_stop_times, "
-                "static_trips, static_routes, static_calendar_dates, "
-                "agg_route_stats, agg_route_hour, agg_route_dow, "
-                "agg_daily_trend, agg_stop_seq, rag_chunks CASCADE"
-            )
+            await conn.execute(truncate_sql)
     await pool.close()
 
 
 @pytest.mark.asyncio
 async def test_list_agencies_empty(agencies_client):
-    resp = await agencies_client.get("/agencies")
+    resp = await agencies_client.get("/api/agencies")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -55,7 +60,7 @@ async def test_list_agencies_empty(agencies_client):
 @pytest.mark.asyncio
 async def test_create_agency(agencies_client):
     payload = {"agency_name": "Aomori Bus", "feed_url": "http://aomori.example.com"}
-    resp = await agencies_client.post("/agencies", json=payload)
+    resp = await agencies_client.post("/api/agencies", json=payload)
     assert resp.status_code == 201
     data = resp.json()
     assert "agency_id" in data
@@ -66,23 +71,23 @@ async def test_create_agency(agencies_client):
 @pytest.mark.asyncio
 async def test_get_agency(agencies_client):
     payload = {"agency_name": "Test Agency", "feed_url": "http://test2.example.com"}
-    create_resp = await agencies_client.post("/agencies", json=payload)
+    create_resp = await agencies_client.post("/api/agencies", json=payload)
     aid = create_resp.json()["agency_id"]
-    resp = await agencies_client.get(f"/agencies/{aid}")
+    resp = await agencies_client.get(f"/api/agencies/{aid}")
     assert resp.status_code == 200
     assert resp.json()["agency_id"] == aid
 
 
 @pytest.mark.asyncio
 async def test_get_agency_not_found(agencies_client):
-    resp = await agencies_client.get("/agencies/99999")
+    resp = await agencies_client.get("/api/agencies/99999")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_list_agencies_returns_multiple(agencies_client):
-    await agencies_client.post("/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"})
-    await agencies_client.post("/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"})
-    resp = await agencies_client.get("/agencies")
+    await agencies_client.post("/api/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"})
+    await agencies_client.post("/api/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"})
+    resp = await agencies_client.get("/api/agencies")
     assert resp.status_code == 200
     assert len(resp.json()) >= 2

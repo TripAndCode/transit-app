@@ -7,13 +7,13 @@ type Props = {
 
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 429) return "リクエストが多すぎます。しばらくお待ちください。";
-    if (err.status === 404) return "データが見つかりませんでした。";
-    if (err.status >= 500) return "サーバーエラーが発生しました。";
-    return `エラー (${err.status})`;
+    if (err.status === 429) return "アクセスが集中しています。少し待って再試行してください。";
+    if (err.status === 404) return "対象のデータがまだありません。";
+    if (err.status >= 500) return "一時的に取得できませんでした。再試行してください。";
+    return `読み込みに失敗しました (${err.status})`;
   }
-  if (err instanceof Error) return "接続エラー — ネットワークをご確認ください。";
-  return "エラーが発生しました。";
+  if (err instanceof Error) return "通信が一時的に途切れました。再試行してください。";
+  return "読み込みに失敗しました。";
 }
 
 export function ErrorBanner({ error, onRetry }: Props) {
