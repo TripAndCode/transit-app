@@ -105,3 +105,43 @@ def test_load_static_agency_isolated(pg_conn, tmp_path):
             (aid_b,),
         )
         assert cur.fetchone()[0] == "駅B"
+
+
+def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
+    from pipeline.static_loader import load_static
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
+
+    cur = pg_conn.cursor()
+    cur.execute(
+        "SELECT shape_id, ST_AsText(geom), ST_NumPoints(geom) "
+        "FROM static_shapes WHERE agency_id = %s ORDER BY shape_id",
+        (agency_id,),
+    )
+    rows = cur.fetchall()
+
+    assert [r[0] for r in rows] == ["S1", "S2", "S3"]
+    assert [r[2] for r in rows] == [3, 3, 2]
+    # First point of S1 = (lon=140.7400, lat=40.8200)
+    assert rows[0][1].startswith("LINESTRING(140.74 40.82,")
+
+
+def test_load_static_shapes_idempotent(pg_conn, agency_id):
+    from pipeline.static_loader import load_static
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
+
+    cur = pg_conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
+    assert cur.fetchone()[0] == 3, "second load must replace, not duplicate"
+
+
+def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
+    """A static zip lacking shapes.txt must still load other tables and log a skip."""
+    from pipeline.static_loader import load_static
+    load_static("tests/fixtures/static_no_shapes.zip", agency_id, pg_conn)
+    out = capsys.readouterr().out
+    assert "shapes.txt not in zip — skipped" in out
+
+    cur = pg_conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
+    assert cur.fetchone()[0] == 0

@@ -11,6 +11,7 @@ _STATIC_FILE_MAP = [
     ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id"]),
     ("routes.txt", "static_routes", ["route_id", "route_short_name"]),
     ("calendar_dates.txt", "static_calendar_dates", ["service_id", "date", "exception_type"]),
+    ("shapes.txt", "static_shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]),
 ]
 
 _DB_COLS = {
@@ -66,6 +67,40 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         "stop_lon=EXCLUDED.stop_lon, geom=EXCLUDED.geom, "
                         "stop_code=EXCLUDED.stop_code, platform_code=EXCLUDED.platform_code",
                         [agency_id, stop_id, stop_name, lat, lon, lon, lat, stop_code, platform_code],
+                    )
+            elif table == "static_shapes":
+                # Group raw_rows by shape_id, keep ordering by pt_sequence (int).
+                # Build a LineString per shape via ST_MakeLine over ordered points.
+                from collections import defaultdict
+                by_shape: dict[str, list[tuple[int, float, float]]] = defaultdict(list)
+                for row in raw_rows:
+                    shape_id = row[0]
+                    try:
+                        lat = float(row[1])
+                        lon = float(row[2])
+                        seq = int(row[3])
+                    except (TypeError, ValueError):
+                        continue  # skip malformed
+                    if shape_id:
+                        by_shape[shape_id].append((seq, lon, lat))
+
+                for shape_id, pts in by_shape.items():
+                    pts.sort(key=lambda t: t[0])
+                    if len(pts) < 2:
+                        # LineString needs >= 2 points; skip degenerate shapes.
+                        continue
+                    # Emit an SQL array of points; let PostGIS build the LineString.
+                    flat: list[float] = []
+                    for _, lon, lat in pts:
+                        flat.extend([lon, lat])
+                    placeholders = ",".join(
+                        "ST_MakePoint(%s, %s)" for _ in range(len(pts))
+                    )
+                    cur.execute(
+                        f"INSERT INTO static_shapes (agency_id, shape_id, geom) "
+                        f"VALUES (%s, %s, ST_SetSRID(ST_MakeLine(ARRAY[{placeholders}]), 4326)) "
+                        f"ON CONFLICT (agency_id, shape_id) DO UPDATE SET geom = EXCLUDED.geom",
+                        [agency_id, shape_id, *flat],
                     )
             else:
                 db_cols = _DB_COLS[table]
