@@ -1,0 +1,34 @@
+# Hourly ingest trigger.
+#
+# We run the actual ingest + analyze on the Fly Machine via a background
+# task — this workflow just fires the trigger. The Fly app stays a single
+# Machine; no always-on cron worker.
+#
+# Required repository secrets:
+#   APP_BASE_URL   e.g. https://transit-app-tokyo.fly.dev
+#   CRON_SECRET    must match the same env var on Fly (`fly secrets set`)
+#
+# Manual run: Actions tab → "Hourly Ingest" → "Run workflow".
+
+name: Hourly Ingest
+
+on:
+  schedule:
+    - cron: "0 * * * *" # top of every hour UTC
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST /internal/cron/ingest
+        run: |
+          if [ -z "${{ secrets.APP_BASE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "::error::APP_BASE_URL or CRON_SECRET secret not configured" >&2
+            exit 1
+          fi
+          curl --fail --show-error --silent --max-time 30 \
+            -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_BASE_URL }}/internal/cron/ingest"

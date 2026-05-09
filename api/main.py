@@ -23,6 +23,7 @@ from api.middleware.auth import APIKeyMiddleware
 from api.middleware.ratelimit import limiter
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
+from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
 from api.routers.query import router as query_router
 from api.routers.reports import router as reports_router
@@ -38,7 +39,7 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 # like ``/agencies/1/map`` for client-side routing. The backend's actual
 # ``/agencies`` and ``/agencies/{id}`` routes are matched by the router
 # before the fallback ever runs, so legitimate API requests are unaffected.
-_API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json")
+_API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json", "internal/")
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
@@ -78,6 +79,7 @@ app.include_router(query_router)
 app.include_router(reports_router)
 app.include_router(map_router)
 app.include_router(static_router)
+app.include_router(internal_router)
 
 
 @app.get("/health")
