@@ -53,9 +53,9 @@
 Open `tests/test_schema.py` and add (place near existing static-table assertions):
 
 ```python
-def test_static_shapes_table_exists(db_conn):
+def test_static_shapes_table_exists(pg_conn):
     """0005 migration should create static_shapes with a GIST index."""
-    cur = db_conn.cursor()
+    cur = pg_conn.cursor()
     cur.execute(
         """
         SELECT 1 FROM information_schema.tables
@@ -105,6 +105,17 @@ Create `db/migrations/0005_static_shapes.down.sql`:
 ```sql
 DROP INDEX IF EXISTS idx_static_shapes_geom;
 DROP TABLE IF EXISTS static_shapes;
+```
+
+- [ ] **Step 4b: Add `static_shapes` to the conftest TRUNCATE list**
+
+Open `tests/conftest.py`. Locate the `TRUNCATE agencies, updates, static_stops, ...` statement inside both the `pg_conn` and `aconn` fixtures (lines ~96–101 and ~127–132). Add `static_shapes` to each TRUNCATE list, e.g.:
+
+```python
+TRUNCATE agencies, updates, static_stops, static_stop_times,
+static_trips, static_routes, static_calendar_dates, static_shapes,
+agg_route_stats, agg_route_hour, agg_route_dow,
+agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
 ```
 
 - [ ] **Step 5: Apply the migration to the test database**
@@ -179,15 +190,15 @@ Expected: `wrote tests/fixtures/static_with_shapes.zip`.
 Add to `tests/test_static_loader.py` (after existing tests):
 
 ```python
-def test_load_static_shapes_builds_linestrings(db_conn, tmp_agency):
+def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
     from pipeline.static_loader import load_static
-    load_static("tests/fixtures/static_with_shapes.zip", tmp_agency, db_conn)
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
 
-    cur = db_conn.cursor()
+    cur = pg_conn.cursor()
     cur.execute(
         "SELECT shape_id, ST_AsText(geom), ST_NumPoints(geom) "
         "FROM static_shapes WHERE agency_id = %s ORDER BY shape_id",
-        (tmp_agency,),
+        (agency_id,),
     )
     rows = cur.fetchall()
 
@@ -197,28 +208,28 @@ def test_load_static_shapes_builds_linestrings(db_conn, tmp_agency):
     assert rows[0][1].startswith("LINESTRING(140.74 40.82,")
 
 
-def test_load_static_shapes_idempotent(db_conn, tmp_agency):
+def test_load_static_shapes_idempotent(pg_conn, agency_id):
     from pipeline.static_loader import load_static
-    load_static("tests/fixtures/static_with_shapes.zip", tmp_agency, db_conn)
-    load_static("tests/fixtures/static_with_shapes.zip", tmp_agency, db_conn)  # second run
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
+    load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)  # second run
 
-    cur = db_conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (tmp_agency,))
+    cur = pg_conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
     assert cur.fetchone()[0] == 3, "second load must replace, not duplicate"
 
 
-def test_load_static_zip_without_shapes_succeeds(db_conn, tmp_agency, capsys):
+def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
     """A static zip lacking shapes.txt must still load other tables and log a skip."""
     # Re-use any existing static fixture in the repo that DOESN'T contain shapes.txt.
     # If the only fixture you find DOES contain shapes, build a temporary zip in this
     # test that wraps just stops.txt + trips.txt.
     from pipeline.static_loader import load_static
-    load_static("tests/fixtures/static_no_shapes.zip", tmp_agency, db_conn)
+    load_static("tests/fixtures/static_no_shapes.zip", agency_id, pg_conn)
     out = capsys.readouterr().out
     assert "shapes.txt not in zip — skipped" in out
 
-    cur = db_conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (tmp_agency,))
+    cur = pg_conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
     assert cur.fetchone()[0] == 0
 ```
 
@@ -240,7 +251,7 @@ print(f"wrote {zip_path}")
 PY
 ```
 
-If `tmp_agency` is not already defined in `tests/conftest.py`, add a session-scoped fixture that inserts a temp `agencies` row (use a high id like `99001` to avoid colliding with seeded agencies), yields the id, and deletes the row on teardown. Pattern to copy: any existing fixture in `tests/conftest.py` that creates a temp DB row.
+If `agency_id` is not already defined in `tests/conftest.py`, add a session-scoped fixture that inserts a temp `agencies` row (use a high id like `99001` to avoid colliding with seeded agencies), yields the id, and deletes the row on teardown. Pattern to copy: any existing fixture in `tests/conftest.py` that creates a temp DB row.
 
 - [ ] **Step 4: Run tests to verify they fail**
 
