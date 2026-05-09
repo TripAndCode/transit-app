@@ -44,7 +44,12 @@ export function ReportsTab() {
         {list.isLoading && [...Array(6)].map((_, i) => (
           <Skeleton key={i} height={48} style={{ marginBottom: 6 }} />
         ))}
-        {list.data && list.data.length === 0 && <EmptyState title="レポートがありません" />}
+        {list.data && list.data.length === 0 && (
+          <EmptyState
+            title="まだレポートがありません"
+            hint="集計を準備しています。次の更新までお待ちください。"
+          />
+        )}
         {list.data?.map((r) => {
           const active = r.report_type === reportType;
           return (
