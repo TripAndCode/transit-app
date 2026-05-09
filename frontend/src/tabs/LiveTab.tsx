@@ -228,9 +228,9 @@ function Stat({
 }
 
 function formatDelayMinutesRounded(seconds: number): string {
-  if (seconds === 0) return "定刻";
-  const sign = seconds < 0 ? "-" : "+";
   const minutes = Math.round(Math.abs(seconds) / 60);
+  if (minutes === 0) return "定刻";
+  const sign = seconds < 0 ? "-" : "+";
   return `${sign}${minutes}分`;
 }
 
