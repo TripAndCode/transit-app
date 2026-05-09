@@ -23,7 +23,12 @@ export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
     queryKey: ["routes", agencyId],
     queryFn: () => apiGet<Route[]>(`/api/${agencyId}/routes`),
     enabled: agencyId != null,
-    staleTime: 60 * 60 * 1000, // 1 hour: static data
+    // Routes are quarterly-static, but a 1-hour staleTime froze empty
+    // arrays (returned during a fresh deploy's initial ingest) for an
+    // hour; users opened the filter picker and saw "該当なし" until
+    // they reloaded. 5 minutes keeps caching meaningful while letting
+    // the picker recover on its own once load_static finishes.
+    staleTime: 5 * 60 * 1000,
   });
 }
 
