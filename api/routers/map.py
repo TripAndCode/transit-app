@@ -60,11 +60,17 @@ async def route_shape(
 ):
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
 
-    Returns ``{ stops: [{ stop_sequence, stop_name, lon, lat, avg_min, samples }], route }``.
-    Powers the Map tab's per-route overlay (polyline + numbered stops) when
-    the user filters to a single route. Sorted by ``stop_sequence`` so the
-    frontend can draw a polyline directly from the result. Stops without
-    coordinates are dropped so the polyline never includes (NaN, NaN).
+    Returns ``{ stops: [{ stop_sequence, stop_name, stop_id, stop_code,
+    platform_code, lon, lat, avg_min, samples }], route }``. Powers the
+    Map tab's per-route overlay (polyline + numbered stops) when the user
+    filters to a single route. Sorted by ``stop_sequence`` so the frontend
+    can draw a polyline directly from the result. Stops without coordinates
+    are dropped so the polyline never includes (NaN, NaN).
+
+    The optional GTFS identifiers (``stop_id`` / ``stop_code`` /
+    ``platform_code``) are included so the unified popup template renders
+    the same fields it shows for the heatmap layer — without them route
+    mode would silently drop the pole badge and stop_id footer.
     """
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
     # colors match what compute_ranking et al. show for the same filters.
@@ -83,6 +89,9 @@ async def route_shape(
         SELECT
             d.stop_sequence,
             COALESCE(MAX(ss.stop_name), d.stop_sequence::text || '番停留所') AS stop_name,
+            MAX(ss.stop_id)       AS stop_id,
+            MAX(ss.stop_code)     AS stop_code,
+            MAX(ss.platform_code) AS platform_code,
             ROUND(AVG(d.dep_delay) / 60.0::numeric, 2) AS avg_min,
             COUNT(*) AS samples,
             AVG(ST_X(ss.geom)) AS lon,
@@ -106,6 +115,9 @@ async def route_shape(
             {
                 "stop_sequence": r["stop_sequence"],
                 "stop_name": r["stop_name"],
+                "stop_id": r["stop_id"],
+                "stop_code": r["stop_code"],
+                "platform_code": r["platform_code"],
                 "lon": float(r["lon"]) if r["lon"] is not None else None,
                 "lat": float(r["lat"]) if r["lat"] is not None else None,
                 "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,

@@ -450,7 +450,7 @@ type RouteGroup = { name: string; codes: string[] };
 
 function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
   const id = useAgencyId();
-  const { data } = useRoutes(id);
+  const { data, isPending, refetch } = useRoutes(id);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
@@ -613,8 +613,35 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
             </div>
           );
         })}
-        {filteredGroups.length === 0 && (
+        {filteredGroups.length === 0 && isPending && (
+          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
+            読み込み中...
+          </div>
+        )}
+        {filteredGroups.length === 0 && !isPending && filter.trim() !== "" && (
           <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>該当なし</div>
+        )}
+        {filteredGroups.length === 0 && !isPending && filter.trim() === "" && (
+          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
+            ルートが登録されていません。
+            初回ingest中の場合は数分後に再度お試しください。
+            <button
+              type="button"
+              onClick={() => refetch()}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--accent)",
+                padding: "2px 6px",
+                fontSize: 12,
+                cursor: "pointer",
+                textDecoration: "underline",
+                marginLeft: 6,
+              }}
+            >
+              再読み込み
+            </button>
+          </div>
         )}
       </div>
     </div>
