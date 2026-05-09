@@ -32,13 +32,11 @@ from api.routers.static import router as static_router
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-# Path prefixes the SPA fallback must NOT swallow. An unknown URL under one of
-# these prefixes should still return a structured JSON 404, not the index.html,
-# so frontend fetches surface real errors instead of choking on HTML bodies.
-# NOTE: ``agencies`` is intentionally NOT in this list — the SPA uses paths
-# like ``/agencies/1/map`` for client-side routing. The backend's actual
-# ``/agencies`` and ``/agencies/{id}`` routes are matched by the router
-# before the fallback ever runs, so legitimate API requests are unaffected.
+# Path prefixes the SPA fallback must NOT swallow. An unknown URL under one
+# of these prefixes returns a structured JSON 404 instead of the SPA's
+# index.html, so frontend fetches surface real errors instead of choking on
+# HTML bodies. The SPA owns everything else — including ``/agencies/:id/map``
+# (a client-side route, not the agency CRUD which lives under ``/api/agencies``).
 _API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json", "internal/")
 
 
