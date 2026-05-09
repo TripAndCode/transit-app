@@ -51,6 +51,7 @@ export type RouteShapeStop = {
 
 export type RouteShapeResponse = {
   route: string;
+  geometry: { type: "LineString"; coordinates: [number, number][] } | null;
   stops: RouteShapeStop[];
 };
 

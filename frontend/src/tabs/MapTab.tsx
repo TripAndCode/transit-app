@@ -237,7 +237,8 @@ export function MapTab() {
         return;
       }
       clearOverlay();
-      const coords: [number, number][] = shape.stops.map((s) => [s.lon, s.lat]);
+      const coords: [number, number][] =
+        shape.geometry?.coordinates ?? shape.stops.map((s) => [s.lon, s.lat]);
 
       // Route mode: hide the heatmap (it would show isolated stops without
       // the connecting line) and use the route's stop sequence directly,
