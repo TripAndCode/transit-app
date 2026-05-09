@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from api.deps import get_conn
 
-router = APIRouter(prefix="/agencies", tags=["agencies"])
+router = APIRouter(prefix="/api/agencies", tags=["agencies"])
 
 
 class AgencyCreate(BaseModel):
