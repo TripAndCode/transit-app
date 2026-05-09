@@ -129,6 +129,7 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
 
     assert resp.status_code == 200
     body = resp.json()
+    assert body["route"] == "R1"
     assert body["geometry"] is not None, body
     assert body["geometry"]["type"] == "LineString"
     assert isinstance(body["geometry"]["coordinates"], list)

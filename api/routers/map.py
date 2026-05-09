@@ -77,6 +77,10 @@ async def route_shape(
     # Resolve road geometry from static_shapes via the trip_id bridge.
     # We find the most-frequent shape_id among trips whose route_code matches,
     # then fetch the GeoJSON from static_shapes.  Returns None if no shape loaded.
+    # Bridge via updates.trip_id, not static_trips.route_id, because
+    # route_code (regex-extracted from trip_id) is not guaranteed equal
+    # to GTFS route_id across feeds. Joining on trip_id keeps geometry
+    # tied to the trips actually observed for this route_code.
     geom_row = await conn.fetchrow(
         """
         WITH ranked AS (
@@ -93,7 +97,7 @@ async def route_shape(
             ORDER BY n DESC
             LIMIT 1
         )
-        SELECT ST_AsGeoJSON(s.geom)::json AS geom_json
+        SELECT ST_AsGeoJSON(s.geom)::jsonb AS geom_json
         FROM ranked r
         JOIN static_shapes s
           ON s.agency_id = $1 AND s.shape_id = r.shape_id
@@ -101,11 +105,8 @@ async def route_shape(
         agency_id,
         route,
     )
-    if geom_row and geom_row["geom_json"] is not None:
-        raw = geom_row["geom_json"]
-        geometry = json.loads(raw) if isinstance(raw, str) else raw
-    else:
-        geometry = None
+    raw = geom_row["geom_json"] if geom_row else None
+    geometry = json.loads(raw) if raw is not None else None  # asyncpg returns jsonb as str; parse to dict
 
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
     # colors match what compute_ranking et al. show for the same filters.
