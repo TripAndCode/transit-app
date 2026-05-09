@@ -95,7 +95,7 @@ def pg_conn(apply_schema):
         with conn.cursor() as cur:
             cur.execute("""
                 TRUNCATE agencies, updates, static_stops, static_stop_times,
-                static_trips, static_routes, static_calendar_dates,
+                static_trips, static_routes, static_calendar_dates, static_shapes,
                 agg_route_stats, agg_route_hour, agg_route_dow,
                 agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
             """)
@@ -126,7 +126,7 @@ async def aconn(apply_schema):
     try:
         await conn.execute("""
             TRUNCATE agencies, updates, static_stops, static_stop_times,
-            static_trips, static_routes, static_calendar_dates,
+            static_trips, static_routes, static_calendar_dates, static_shapes,
             agg_route_stats, agg_route_hour, agg_route_dow,
             agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
         """)

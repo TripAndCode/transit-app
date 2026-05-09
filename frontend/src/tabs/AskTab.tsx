@@ -5,6 +5,7 @@ import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
 import type { ToolResult, TrendDay } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { InsightHint } from "../components/InsightHint";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { DailyChart } from "../components/charts/DailyChart";
 
@@ -80,6 +81,25 @@ export function AskTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", maxWidth: 760, margin: "0 auto" }}>
       <TabFilterBar />
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 12, color: "var(--text-tertiary)",
+        margin: "4px 0 8px",
+      }}>
+        質問
+        <InsightHint
+          title="使い方とできること"
+          body={
+            <>
+              日本語で自由に質問できます。Groq の関数呼び出しで、6 つの SQL ツール（ランキング・時間帯比較・トレンド集計など）を使い分けて回答を生成します。
+              <br /><br />
+              例：「今日のワースト 3 系統は？」「朝のピーク時に最も遅れる停留所は？」「先週と今週の比較」
+              <br /><br />
+              現在の<strong>期間 / 曜日 / 時間帯フィルタ</strong>が回答にも反映されるので、画面上のフィルタを変えてから質問すると分析の切り口を変えられます。
+            </>
+          }
+        />
+      </div>
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 4px" }}>
         {msgs.length === 0 && (
           <div style={{ color: "var(--text-tertiary)", textAlign: "center", marginTop: 48 }}>

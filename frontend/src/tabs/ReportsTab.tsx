@@ -6,6 +6,7 @@ import { relativeTime } from "../utils/relativeTime";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { InsightHint } from "../components/InsightHint";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
@@ -39,7 +40,25 @@ export function ReportsTab() {
       <TabFilterBar />
       <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div style={{ width: 280, flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)" }}>レポート一覧</h3>
+        <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          レポート一覧
+          <InsightHint
+            title="レポートの読み分け"
+            body={
+              <>
+                <strong>ランキング系</strong>：慢性的に遅い／定時運行が良い系統を特定。
+                <br /><br />
+                <strong>トレンド</strong>：時間経過で改善・悪化しているか。右肩上がりなら遅延が拡大中。
+                <br /><br />
+                <strong>時間帯ヒートマップ</strong>：1 日のうちのピーク時間。朝夕の通勤帯と昼間の差を比較。
+                <br /><br />
+                <strong>平日 / 週末傾向</strong>：曜日特性。週末便の方が定時率が高い／低いといった傾向を抽出。
+                <br /><br />
+                CSV エクスポートで Excel / BI ツールに渡せます。
+              </>
+            }
+          />
+        </h3>
         {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
         {list.isLoading && [...Array(6)].map((_, i) => (
           <Skeleton key={i} height={48} style={{ marginBottom: 6 }} />

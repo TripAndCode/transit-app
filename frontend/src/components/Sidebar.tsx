@@ -1,13 +1,14 @@
 import { NavLink, useParams } from "react-router-dom";
+import { Map as MapIcon, MessageSquare, Activity, BarChart3, type LucideIcon } from "lucide-react";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
-type Item = { to: string; label: string; icon: string };
+type Item = { to: string; label: string; Icon: LucideIcon };
 
 const ITEMS: Item[] = [
-  { to: "map", label: "地図", icon: "🗺" },
-  { to: "ask", label: "質問", icon: "💬" },
-  { to: "live", label: "リアルタイム", icon: "📊" },
-  { to: "reports", label: "レポート", icon: "📋" },
+  { to: "map", label: "地図", Icon: MapIcon },
+  { to: "ask", label: "質問", Icon: MessageSquare },
+  { to: "live", label: "リアルタイム", Icon: Activity },
+  { to: "reports", label: "レポート", Icon: BarChart3 },
 ];
 
 export function Sidebar() {
@@ -47,7 +48,7 @@ export function Sidebar() {
               transition: "background var(--transition)",
             })}
           >
-            <span style={{ fontSize: 18 }} aria-hidden>{item.icon}</span>
+            <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" />
             <span>{item.label}</span>
           </NavLink>
         ))}
