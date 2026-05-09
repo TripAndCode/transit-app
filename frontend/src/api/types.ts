@@ -51,7 +51,13 @@ export type RouteShapeStop = {
 
 export type RouteShapeResponse = {
   route: string;
-  geometry: { type: "LineString"; coordinates: [number, number][] } | null;
+  /**
+   * Real road geometry from GTFS shapes when loaded; null otherwise.
+   * Always LineString for now (backend emits a single most-frequent shape per route).
+   * If the backend grows MultiLineString support, widen this to GeoJSON.LineString | GeoJSON.MultiLineString
+   * and flatten coords in MapTab before passing to MapLibre.
+   */
+  geometry: GeoJSON.LineString | null;
   stops: RouteShapeStop[];
 };
 
