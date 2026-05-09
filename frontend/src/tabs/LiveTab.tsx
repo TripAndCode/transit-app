@@ -172,8 +172,18 @@ function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc
         )}
       </div>
       <div style={{ display: "flex", gap: 12 }}>
-        <Stat label="平均" value={formatDelay(card.avg_delay_sec)} color={delayColor(avgMin)} />
-        <Stat label="最大" value={formatDelay(card.worst_delay_sec)} color={delayColor(worstMin)} />
+        <Stat
+          label="平均"
+          value={formatDelayMinutesRounded(card.avg_delay_sec)}
+          fullPrecision={formatDelay(card.avg_delay_sec)}
+          dotColor={delayColor(avgMin)}
+        />
+        <Stat
+          label="最大"
+          value={formatDelayMinutesRounded(card.worst_delay_sec)}
+          fullPrecision={formatDelay(card.worst_delay_sec)}
+          dotColor={delayColor(worstMin)}
+        />
       </div>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
         {card.trips_observed} 便 / {card.samples.toLocaleString()} 観測
@@ -182,13 +192,46 @@ function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+function Stat({
+  label,
+  value,
+  fullPrecision,
+  dotColor,
+}: {
+  label: string;
+  value: string;
+  fullPrecision: string;
+  dotColor: string;
+}) {
   return (
-    <div>
-      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 600, color }}>{value}</div>
+    <div title={fullPrecision}>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span aria-hidden="true" style={{ color: dotColor, fontSize: 10, lineHeight: 1 }}>
+          ●
+        </span>
+        <span>{value}</span>
+      </div>
     </div>
   );
+}
+
+function formatDelayMinutesRounded(seconds: number): string {
+  if (seconds === 0) return "定刻";
+  const sign = seconds < 0 ? "-" : "+";
+  const minutes = Math.round(Math.abs(seconds) / 60);
+  return `${sign}${minutes}分`;
 }
 
 function formatDelay(seconds: number): string {
