@@ -5,6 +5,7 @@ EXPECTED_TABLES = [
     "static_stop_times",
     "static_trips",
     "static_routes",
+    "static_shapes",
     "static_calendar_dates",
     "agg_route_stats",
     "agg_route_hour",
@@ -74,3 +75,24 @@ def test_api_keys_columns(pg_conn):
         """)
         cols = {r[0] for r in cur.fetchall()}
     assert {"key", "owner_email", "tier", "created_at"} <= cols
+
+
+def test_static_shapes_table_exists(pg_conn):
+    """0005 migration should create static_shapes with a GIST index."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'static_shapes'
+            """
+        )
+        assert cur.fetchone() is not None, "static_shapes table missing"
+
+        cur.execute(
+            """
+            SELECT indexdef FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'static_shapes'
+              AND indexdef ILIKE '%USING gist%'
+            """
+        )
+        assert cur.fetchone() is not None, "GIST index on static_shapes missing"
