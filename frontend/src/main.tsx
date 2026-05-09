@@ -21,7 +21,10 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <Navigate to="map" replace /> },
+      // Index has no static target — AgencyPicker (in Header) auto-redirects
+      // to /agencies/<first>/map once agencies load. Sending Navigate to="map"
+      // here loops with the catch-all because /map is not a registered route.
+      { index: true, element: <div style={{ padding: 24, color: "var(--text-tertiary)" }}>事業者を読み込み中...</div> },
       { path: "agencies/:agencyId", element: <Navigate to="map" replace /> },
       { path: "agencies/:agencyId/map", element: <MapTab /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },

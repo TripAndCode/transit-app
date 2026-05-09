@@ -26,11 +26,16 @@ function lastOfMonth(offset: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function jpDate(iso: string): string {
+  // yyyy-mm-dd → yyyy/mm/dd (Japan-conventional written form).
+  return iso.replaceAll("-", "/");
+}
+
 function presetLabel(ctx: RangeCtx): string {
   for (const p of PRESETS) {
     if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
   }
-  return `${ctx.from} 〜 ${ctx.to}`;
+  return `${jpDate(ctx.from)} 〜 ${jpDate(ctx.to)}`;
 }
 
 function isDefault(ctx: RangeCtx): boolean {
@@ -124,6 +129,7 @@ export function RangeBadge() {
           <div style={{ display: "flex", gap: 6, padding: "0 8px 8px", alignItems: "center" }}>
             <input
               type="date"
+              lang="ja"
               value={ctx.from}
               max={ctx.to}
               onChange={(e) => setCtx({ from: e.target.value })}
@@ -132,6 +138,7 @@ export function RangeBadge() {
             <span style={{ color: "var(--text-tertiary)" }}>〜</span>
             <input
               type="date"
+              lang="ja"
               value={ctx.to}
               min={ctx.from}
               onChange={(e) => setCtx({ to: e.target.value })}
