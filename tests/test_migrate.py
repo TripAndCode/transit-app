@@ -76,3 +76,32 @@ def test_migrate_down_and_up(pg_conn):
             cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='api_keys'")
             assert cur.fetchone() is not None, "api_keys table should exist after migrate_up"
         conn.close()
+
+
+def test_migration_0006_adds_strategy_columns(pg_conn):
+    """0006 adds ingest_strategy + static_strategy on agencies; loosens updates NOT NULL."""
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'agencies'
+              AND column_name IN ('ingest_strategy', 'static_strategy')
+            ORDER BY column_name
+        """)
+        rows = cur.fetchall()
+    assert rows == [
+        ("ingest_strategy", "YES"),
+        ("static_strategy", "YES"),
+    ]
+
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'updates'
+              AND column_name IN ('service_type', 'scheduled_time', 'route_code')
+            ORDER BY column_name
+        """)
+        rows = cur.fetchall()
+    # all three must be nullable after 0006
+    assert all(is_nullable == "YES" for _, is_nullable in rows), rows
