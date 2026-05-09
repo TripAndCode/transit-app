@@ -35,7 +35,7 @@ export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
 export function useAgencies(): UseQueryResult<Agency[]> {
   return useQuery({
     queryKey: ["agencies"],
-    queryFn: () => apiGet<Agency[]>("/agencies"),
+    queryFn: () => apiGet<Agency[]>("/api/agencies"),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -146,7 +146,7 @@ export type CreateAgencyBody = Omit<Agency, "agency_id">;
 export function useCreateAgency() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/agencies", body),
+    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/api/agencies", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agencies"] });
     },
