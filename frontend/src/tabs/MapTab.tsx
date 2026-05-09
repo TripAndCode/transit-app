@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap, useRouteShape } from "../api/hooks";
@@ -33,6 +33,8 @@ export function MapTab() {
   const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
+  const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
+
   // ctx changes on filter/range edits; click handlers are registered once at
   // init, so we read through this ref to always see the current period.
   const ctxRef = useRef(ctx);
@@ -143,7 +145,9 @@ export function MapTab() {
   useEffect(() => {
     const m = mapRef.current;
     if (!m || !data) return;
-    const snapshot = data;
+    const filteredSnapshot = showSingleSampleStops
+      ? data
+      : { ...data, features: data.features.filter((f: any) => (f.properties?.samples ?? 0) >= 2) };
 
     function applyData() {
       if (!m) return;
@@ -153,7 +157,7 @@ export function MapTab() {
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
-      m.addSource(SOURCE, { type: "geojson", data: snapshot });
+      m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot });
       m.addLayer({
         id: LAYER,
         type: "circle",
@@ -175,12 +179,19 @@ export function MapTab() {
             10, DELAY_RAMP.severe,
           ],
           "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["get", "samples"],
-            1, 0.35,
-            50, 0.7,
-            500, 0.85,
+            "max",
+            [
+              "case",
+              [">=", ["get", "avg_delay_min"], 10], 0.7,
+              [">=", ["get", "avg_delay_min"], 5], 0.55,
+              0.0,
+            ],
+            [
+              "interpolate", ["linear"], ["get", "samples"],
+              1, 0.35,
+              50, 0.7,
+              500, 0.85,
+            ],
           ],
           "circle-stroke-width": 0.5,
           "circle-stroke-color": "#fff",
@@ -190,13 +201,13 @@ export function MapTab() {
       // Fit bounds only on the first data load — subsequent filter changes
       // keep the user's current pan/zoom so the camera doesn't fight them.
       if (!fittedRef.current) {
-        if (snapshot.features.length === 1) {
-          const [lon, lat] = snapshot.features[0].geometry.coordinates;
+        if (filteredSnapshot.features.length === 1) {
+          const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
           m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
           fittedRef.current = true;
-        } else if (snapshot.features.length > 1) {
+        } else if (filteredSnapshot.features.length > 1) {
           let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-          for (const f of snapshot.features) {
+          for (const f of filteredSnapshot.features) {
             const [lon, lat] = f.geometry.coordinates;
             if (lon < minLon) minLon = lon;
             if (lon > maxLon) maxLon = lon;
@@ -211,7 +222,7 @@ export function MapTab() {
 
     if (styleLoadedRef.current) applyData();
     else m.once("load", applyData);
-  }, [data]);
+  }, [data, showSingleSampleStops]);
 
   // Single-route overlay: thin neutral polyline + small numbered stop markers.
   // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
@@ -358,7 +369,10 @@ export function MapTab() {
         ref={containerRef}
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       />
-      <MapLegend />
+      <MapLegend
+        showSingleSampleStops={showSingleSampleStops}
+        onShowSingleSampleStopsChange={setShowSingleSampleStops}
+      />
       {/* Empty state covers the map only when there's nothing to show.
           In single-route mode the route overlay (line + numbered stops)
           is the primary visual and may be present even if the heatmap
