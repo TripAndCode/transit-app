@@ -111,13 +111,13 @@ def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
     from pipeline.static_loader import load_static
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
 
-    cur = pg_conn.cursor()
-    cur.execute(
-        "SELECT shape_id, ST_AsText(geom), ST_NumPoints(geom) "
-        "FROM static_shapes WHERE agency_id = %s ORDER BY shape_id",
-        (agency_id,),
-    )
-    rows = cur.fetchall()
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT shape_id, ST_AsText(geom), ST_NumPoints(geom) "
+            "FROM static_shapes WHERE agency_id = %s ORDER BY shape_id",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
 
     assert [r[0] for r in rows] == ["S1", "S2", "S3"]
     assert [r[2] for r in rows] == [3, 3, 2]
@@ -125,14 +125,14 @@ def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
     assert rows[0][1].startswith("LINESTRING(140.74 40.82,")
 
 
-def test_load_static_shapes_idempotent(pg_conn, agency_id):
+def test_load_static_shapes_two_loads_no_duplicates(pg_conn, agency_id):
     from pipeline.static_loader import load_static
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
 
-    cur = pg_conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
-    assert cur.fetchone()[0] == 3, "second load must replace, not duplicate"
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 3, "second load must not produce duplicate rows"
 
 
 def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
@@ -142,6 +142,6 @@ def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
     out = capsys.readouterr().out
     assert "shapes.txt not in zip — skipped" in out
 
-    cur = pg_conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
-    assert cur.fetchone()[0] == 0
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone()[0] == 0

@@ -2,6 +2,7 @@ import csv
 import io
 import pathlib
 import zipfile
+from collections import defaultdict
 
 from psycopg2.extras import execute_values
 
@@ -71,8 +72,8 @@ def load_static(path: str, agency_id: int, conn) -> None:
             elif table == "static_shapes":
                 # Group raw_rows by shape_id, keep ordering by pt_sequence (int).
                 # Build a LineString per shape via ST_MakeLine over ordered points.
-                from collections import defaultdict
                 by_shape: dict[str, list[tuple[int, float, float]]] = defaultdict(list)
+                skipped = 0
                 for row in raw_rows:
                     shape_id = row[0]
                     try:
@@ -80,9 +81,13 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         lon = float(row[2])
                         seq = int(row[3])
                     except (TypeError, ValueError):
+                        skipped += 1
                         continue  # skip malformed
                     if shape_id:
                         by_shape[shape_id].append((seq, lon, lat))
+
+                if skipped:
+                    print(f"  shapes.txt: skipped {skipped} malformed row(s)")
 
                 for shape_id, pts in by_shape.items():
                     pts.sort(key=lambda t: t[0])
