@@ -22,21 +22,19 @@ def test_parse_trip_id_invalid():
 
 def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
     """Ingest a fake tarball and verify rows land in updates with correct agency_id."""
+    # 8-tuple shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
+    #                 route_code, stop_sequence, dep_delay)
     fake_row = (
         "20260401/TripUpdate_113700.pb",  # file_name
-        "2026-04-01T11:37:00",  # captured_at
-        "平日_11時37分_系統44372",  # trip_id
-        "平日",  # service_type
-        "11:37",  # scheduled_time
-        "44372",  # route_code
-        1,  # stop_sequence
-        None,  # stop_id
-        None,
-        None,  # arr_delay, arr_time
-        120,  # dep_delay (seconds)
-        None,  # dep_time
+        "2026-04-01T11:37:00",            # captured_at
+        "平日_11時37分_系統44372",          # trip_id
+        "平日",                             # service_type
+        "11:37",                           # scheduled_time
+        "44372",                           # route_code
+        1,                                 # stop_sequence
+        120,                               # dep_delay (seconds)
     )
-    with patch("pipeline.ingest.parse_pb", return_value=[fake_row]):
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row]):
         pb_data = b"\x00"
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tf:
@@ -71,13 +69,9 @@ def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
         "11:37",
         "44372",
         1,
-        None,
-        None,
-        None,
         120,
-        None,
     )
-    with patch("pipeline.ingest.parse_pb", return_value=[fake_row]):
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row]):
         pb_data = b"\x00"
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tf:
@@ -117,11 +111,7 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
         "11:37",
         "44372",
         1,
-        None,
-        None,
-        None,
         60,
-        None,
     )
     fake_row_b = (
         "20260401/TripUpdate_113700.pb",
@@ -131,11 +121,7 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
         "11:37",
         "44372",
         1,
-        None,
-        None,
-        None,
         90,
-        None,
     )
     pb_data = b"\x00"
 
@@ -154,9 +140,9 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
     make_tgz(dir_a / "20260401.tar.gz")
     make_tgz(dir_b / "20260401.tar.gz")
 
-    with patch("pipeline.ingest.parse_pb", return_value=[fake_row_a]):
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row_a]):
         ingest(str(dir_a), aid_a, pg_conn)
-    with patch("pipeline.ingest.parse_pb", return_value=[fake_row_b]):
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row_b]):
         ingest(str(dir_b), aid_b, pg_conn)
 
     with pg_conn.cursor() as cur:
