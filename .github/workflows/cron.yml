@@ -1,12 +1,12 @@
 # Hourly ingest trigger.
 #
-# We run the actual ingest + analyze on the Fly Machine via a background
-# task — this workflow just fires the trigger. The Fly app stays a single
-# Machine; no always-on cron worker.
+# The actual ingest + analyze runs on the deployed app (Linode VPS) as a
+# background task — this workflow just fires the trigger. No always-on cron
+# worker on the box.
 #
 # Required repository secrets:
-#   APP_BASE_URL   e.g. https://transit-app-tokyo.fly.dev
-#   CRON_SECRET    must match the same env var on Fly (`fly secrets set`)
+#   APP_BASE_URL   e.g. https://transit-delay.app  (or http://<linode-ip> pre-domain)
+#   CRON_SECRET    must match CRON_SECRET in the server's .env
 #
 # Manual run: Actions tab → "Hourly Ingest" → "Run workflow".
 
