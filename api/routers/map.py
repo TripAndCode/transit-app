@@ -1,9 +1,20 @@
-"""Map-tab endpoints: live (= latest observation) delays and the heatmap.
+"""Map-tab endpoints.
 
-The heatmap honors the global :class:`~api.range.RangeCtx` so the user's
-chosen time / DOW / time-band filter applies. The "live" endpoint serves
-rows from the most recent ``captured_at`` date in the table — adapts to
-whatever ingest path the operator runs.
+Three resources back the Map tab:
+
+- ``GET /delays/live``: rows from the most recent ``captured_at`` date.
+- ``GET /route-shape``: ordered stop sequence for one route plus, when
+  the agency has loaded GTFS ``shapes.txt``, a real road-shape
+  ``geometry`` field. Falls back to ``geometry: null`` so the frontend
+  can draw a stop-coordinate polyline as a graceful degrade.
+- ``GET /delays/heatmap``: per-stop average delay GeoJSON, scoped by
+  the user's range / DOW / time-band filter. Stops are clustered by
+  ``stop_name`` plus a spatial bucket so inbound/outbound platforms of
+  the same logical stop merge into one circle.
+
+The heatmap and route-shape endpoints honor :class:`~api.range.RangeCtx`
+so the displayed colors match what compute_ranking et al. show under
+the same filter.
 """
 
 import json
@@ -74,13 +85,10 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
-    # Resolve road geometry from static_shapes via the trip_id bridge.
-    # We find the most-frequent shape_id among trips whose route_code matches,
-    # then fetch the GeoJSON from static_shapes.  Returns None if no shape loaded.
-    # Bridge via updates.trip_id, not static_trips.route_id, because
-    # route_code (regex-extracted from trip_id) is not guaranteed equal
-    # to GTFS route_id across feeds. Joining on trip_id keeps geometry
-    # tied to the trips actually observed for this route_code.
+    # Most-frequent shape_id for this route, bridged via updates.trip_id
+    # (route_code is regex-extracted and is not guaranteed equal to GTFS
+    # route_id across feeds, so joining on trip_id keeps geometry tied
+    # to trips actually observed for this route_code).
     geom_row = await conn.fetchrow(
         """
         WITH ranked AS (
@@ -97,7 +105,7 @@ async def route_shape(
             ORDER BY n DESC
             LIMIT 1
         )
-        SELECT ST_AsGeoJSON(s.geom)::jsonb AS geom_json
+        SELECT ST_AsGeoJSON(s.geom) AS geom_json
         FROM ranked r
         JOIN static_shapes s
           ON s.agency_id = $1 AND s.shape_id = r.shape_id
@@ -106,7 +114,7 @@ async def route_shape(
         route,
     )
     raw = geom_row["geom_json"] if geom_row else None
-    geometry = json.loads(raw) if raw is not None else None  # asyncpg returns jsonb as str; parse to dict
+    geometry = json.loads(raw) if raw is not None else None
 
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
     # colors match what compute_ranking et al. show for the same filters.
@@ -147,7 +155,7 @@ async def route_shape(
     )
     return {
         "route": route,
-        "geometry": geometry,  # GeoJSON LineString or None
+        "geometry": geometry,
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
@@ -235,16 +243,24 @@ async def delay_heatmap(
     conn=Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
 ):
-    """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band."""
+    """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band.
+
+    Clustering: two physical platforms with the same ``stop_name`` within a
+    ~5 km grid (``ST_SnapToGrid(geom, 0.05)`` ≈ 5.5 km lat × 4.2 km lon at
+    lat 40°) collapse into one circle. Same name far apart stays separate
+    because the spatial bucket changes. Stops without a ``stop_name`` fall
+    back to spatial-only bucketing using ``stop_id`` as the synthetic key
+    and a tighter ~1 km grid.
+
+    Output coordinates are the centroid of the merged poles so the dot sits
+    between paired platforms rather than on one of them.
+    """
     where_frag, params, _ = build_updates_filter(ctx, next_param=2)
-    # Cluster by rounded lat/lon (~11 m grid at 4 dp). Paired stops on opposite
-    # sides of the same intersection collapse into one circle that aggregates
-    # observations from both — avoids the 'twin circles' artifact in the v1 view.
     rows = await conn.fetch(
         f"""
         SELECT
-            ROUND(ST_X(ss.geom)::numeric, 4) AS lon,
-            ROUND(ST_Y(ss.geom)::numeric, 4) AS lat,
+            AVG(ST_X(ss.geom))::numeric AS lon,
+            AVG(ST_Y(ss.geom))::numeric AS lat,
             string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
             string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
             string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
@@ -264,7 +280,17 @@ async def delay_heatmap(
             AND u.dep_delay IS NOT NULL
             AND ss.geom IS NOT NULL
             AND {where_frag}
-        GROUP BY ROUND(ST_X(ss.geom)::numeric, 4), ROUND(ST_Y(ss.geom)::numeric, 4)
+        GROUP BY
+            CASE
+                WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                    THEN ss.stop_name
+                ELSE 'unnamed:' || ss.stop_id
+            END,
+            CASE
+                WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                    THEN ST_SnapToGrid(ss.geom, 0.05)
+                ELSE ST_SnapToGrid(ss.geom, 0.01)
+            END
         """,
         agency_id,
         *params,
@@ -272,7 +298,7 @@ async def delay_heatmap(
     features = [
         {
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [float(r["lon"]), float(r["lat"])]},
+            "geometry": {"type": "Point", "coordinates": [round(float(r["lon"]), 6), round(float(r["lat"]), 6)]},
             "properties": {
                 "stop_id": r["stop_ids"],  # comma-joined list when clustered
                 "stop_name": r["stop_name"],
