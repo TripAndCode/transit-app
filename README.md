@@ -344,7 +344,7 @@ make serve                # in one shell — FastAPI on :8000
 make frontend-dev         # in another  — Vite dev server on :5173
 ```
 
-The dev server proxies `/api`, `/agencies`, and `/health` to FastAPI, so set `CORS_ORIGINS=http://localhost:5173` in `.env`.
+The dev server proxies `/api` and `/health` to FastAPI; everything else is owned by the SPA, so direct reloads on `/agencies/:id/map` etc. work in dev. Set `CORS_ORIGINS=http://localhost:5173` in `.env`.
 
 Open http://localhost:5173. Append `?admin=1` to any URL to expose the agency-creation form.
 
