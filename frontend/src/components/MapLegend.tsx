@@ -18,17 +18,31 @@ function loadPos(): Pos {
   return DEFAULT_POS;
 }
 
+export type SeverityKey = "ok" | "mild" | "moderate" | "severe";
+
 type MapLegendProps = {
   showSingleSampleStops: boolean;
   onShowSingleSampleStopsChange: (v: boolean) => void;
+  focusedSeverity: SeverityKey | null;
+  onFocusedSeverityChange: (s: SeverityKey | null) => void;
 };
 
 /**
  * Floating, draggable legend for the map. Lives over the MapLibre canvas as a
  * fixed-position child of the map container. Position persists in localStorage
  * across reloads. Header strip is the drag handle.
+ *
+ * Clicking a delay-ramp swatch focuses that severity band: matching circles
+ * keep their full severity-floored opacity; circles outside the band go to
+ * opacity 0 (fully invisible). Click the same band again, or 選択を解除,
+ * to clear focus.
  */
-export function MapLegend({ showSingleSampleStops, onShowSingleSampleStopsChange }: MapLegendProps) {
+export function MapLegend({
+  showSingleSampleStops,
+  onShowSingleSampleStopsChange,
+  focusedSeverity,
+  onFocusedSeverityChange,
+}: MapLegendProps) {
   const [pos, setPos] = useState<Pos>(loadPos);
   const [collapsed, setCollapsed] = useState(false);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -130,10 +144,44 @@ export function MapLegend({ showSingleSampleStops, onShowSingleSampleStopsChange
           <div style={{ marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
             遅延 (平均)
           </div>
-          <Row color={DELAY_RAMP.ok} label="< 2分" />
-          <Row color={DELAY_RAMP.mild} label="2 – 5分" />
-          <Row color={DELAY_RAMP.moderate} label="5 – 10分" />
-          <Row color={DELAY_RAMP.severe} label="> 10分" />
+          <Row
+            color={DELAY_RAMP.ok}
+            label="< 2分"
+            selected={focusedSeverity === "ok"}
+            onClick={() => onFocusedSeverityChange(focusedSeverity === "ok" ? null : "ok")}
+          />
+          <Row
+            color={DELAY_RAMP.mild}
+            label="2 – 5分"
+            selected={focusedSeverity === "mild"}
+            onClick={() => onFocusedSeverityChange(focusedSeverity === "mild" ? null : "mild")}
+          />
+          <Row
+            color={DELAY_RAMP.moderate}
+            label="5 – 10分"
+            selected={focusedSeverity === "moderate"}
+            onClick={() => onFocusedSeverityChange(focusedSeverity === "moderate" ? null : "moderate")}
+          />
+          <Row
+            color={DELAY_RAMP.severe}
+            label="> 10分"
+            selected={focusedSeverity === "severe"}
+            onClick={() => onFocusedSeverityChange(focusedSeverity === "severe" ? null : "severe")}
+          />
+          {focusedSeverity && (
+            <div
+              onClick={() => onFocusedSeverityChange(null)}
+              style={{
+                cursor: "pointer",
+                fontSize: 10,
+                color: "var(--text-tertiary)",
+                marginTop: 4,
+                paddingLeft: 20,
+              }}
+            >
+              選択を解除
+            </div>
+          )}
           <div style={{ marginTop: 8, marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
             サイズ・濃度
           </div>
@@ -153,10 +201,45 @@ export function MapLegend({ showSingleSampleStops, onShowSingleSampleStopsChange
   );
 }
 
-function Row({ color, label }: { color: string; label: string }) {
+function Row({
+  color,
+  label,
+  selected,
+  onClick,
+}: {
+  color: string;
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-      <span style={{ width: 12, height: 12, background: color, borderRadius: "50%", flexShrink: 0 }} />
+    <div
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 3,
+        padding: "2px 4px",
+        borderRadius: 4,
+        cursor: "pointer",
+        background: selected ? "var(--accent-soft)" : "transparent",
+        color: selected ? "var(--accent)" : "inherit",
+        fontWeight: selected ? 600 : 400,
+        transition: "background var(--transition)",
+      }}
+    >
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          background: color,
+          borderRadius: "50%",
+          flexShrink: 0,
+          outline: selected ? "2px solid var(--accent)" : "none",
+          outlineOffset: 1,
+        }}
+      />
       <span>{label}</span>
     </div>
   );

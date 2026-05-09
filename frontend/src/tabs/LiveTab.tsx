@@ -7,6 +7,7 @@ import { delayColor } from "../styles/tokens";
 import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { InsightHint } from "../components/InsightHint";
 import { Skeleton } from "../components/Skeleton";
 
 type SortKey = "worst" | "avg" | "trips" | "name";
@@ -46,8 +47,19 @@ export function LiveTab() {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>
+        <h2 style={{ margin: 0, fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
           最新観測 {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
+          <InsightHint
+            title="このタブで分かること"
+            body={
+              <>
+                最新観測日の系統別サマリー。<strong>平均</strong>はその日の全便平均、
+                <strong>最大</strong>は最も遅れた便。色付きの ● で深刻度が一目で分かります。
+                サンプル数（便数 / 観測数）が多い系統ほど数字の信頼性が高い。
+                並び替えで「最大遅延が大きい順」にすると、その日のホットスポット系統を即座に把握できます。
+              </>
+            }
+          />
         </h2>
         {latest && (
           <span
