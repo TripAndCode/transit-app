@@ -7,6 +7,7 @@ import { delayColor } from "../styles/tokens";
 import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { InsightHint } from "../components/InsightHint";
 import { Skeleton } from "../components/Skeleton";
 
 type SortKey = "worst" | "avg" | "trips" | "name";
@@ -46,8 +47,19 @@ export function LiveTab() {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>
+        <h2 style={{ margin: 0, fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
           最新観測 {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
+          <InsightHint
+            title="このタブで分かること"
+            body={
+              <>
+                最新観測日の系統別サマリー。<strong>平均</strong>はその日の全便平均、
+                <strong>最大</strong>は最も遅れた便。色付きの ● で深刻度が一目で分かります。
+                サンプル数（便数 / 観測数）が多い系統ほど数字の信頼性が高い。
+                並び替えで「最大遅延が大きい順」にすると、その日のホットスポット系統を即座に把握できます。
+              </>
+            }
+          />
         </h2>
         {latest && (
           <span
@@ -172,8 +184,18 @@ function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc
         )}
       </div>
       <div style={{ display: "flex", gap: 12 }}>
-        <Stat label="平均" value={formatDelay(card.avg_delay_sec)} color={delayColor(avgMin)} />
-        <Stat label="最大" value={formatDelay(card.worst_delay_sec)} color={delayColor(worstMin)} />
+        <Stat
+          label="平均"
+          value={formatDelayMinutesRounded(card.avg_delay_sec)}
+          fullPrecision={formatDelay(card.avg_delay_sec)}
+          dotColor={delayColor(avgMin)}
+        />
+        <Stat
+          label="最大"
+          value={formatDelayMinutesRounded(card.worst_delay_sec)}
+          fullPrecision={formatDelay(card.worst_delay_sec)}
+          dotColor={delayColor(worstMin)}
+        />
       </div>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
         {card.trips_observed} 便 / {card.samples.toLocaleString()} 観測
@@ -182,13 +204,46 @@ function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+function Stat({
+  label,
+  value,
+  fullPrecision,
+  dotColor,
+}: {
+  label: string;
+  value: string;
+  fullPrecision: string;
+  dotColor: string;
+}) {
   return (
-    <div>
-      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 600, color }}>{value}</div>
+    <div title={fullPrecision}>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span aria-hidden="true" style={{ color: dotColor, fontSize: 10, lineHeight: 1 }}>
+          ●
+        </span>
+        <span>{value}</span>
+      </div>
     </div>
   );
+}
+
+function formatDelayMinutesRounded(seconds: number): string {
+  const minutes = Math.round(Math.abs(seconds) / 60);
+  if (minutes === 0) return "定刻";
+  const sign = seconds < 0 ? "-" : "+";
+  return `${sign}${minutes}分`;
 }
 
 function formatDelay(seconds: number): string {

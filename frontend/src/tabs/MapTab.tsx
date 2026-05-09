@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap, useRouteShape } from "../api/hooks";
@@ -8,16 +8,87 @@ import { getMapStyle } from "../styles/mapStyle";
 import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { MapLegend } from "../components/MapLegend";
+import { InsightHint } from "../components/InsightHint";
+import { MapLegend, type SeverityKey } from "../components/MapLegend";
 import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
 const SOURCE = "delays";
-const LAYER = "delay-circles";
+const LAYER = "delay-circles";       // crisp inner dot
+const HALO_LAYER = "delay-halos";    // soft outer glow, drawn beneath the dot
 const ROUTE_SOURCE = "route-line";
 const ROUTE_LAYER = "route-line-stroke";
 const ROUTE_STOPS_LAYER = "route-stops";
+
+/**
+ * Build the MapLibre filter expression that selects circles falling into a
+ * single severity band. Used by both the dot and halo opacity helpers so
+ * adding or moving a band means editing one place.
+ */
+function severityMatchExpr(focused: SeverityKey): maplibregl.ExpressionSpecification {
+  switch (focused) {
+    case "ok":
+      return ["<", ["get", "avg_delay_min"], 2];
+    case "mild":
+      return ["all", [">=", ["get", "avg_delay_min"], 2], ["<", ["get", "avg_delay_min"], 5]];
+    case "moderate":
+      return ["all", [">=", ["get", "avg_delay_min"], 5], ["<", ["get", "avg_delay_min"], 10]];
+    case "severe":
+      return [">=", ["get", "avg_delay_min"], 10];
+  }
+}
+
+/**
+ * Severity-floored opacity for the inner crisp dot. When a legend swatch is
+ * focused, circles outside that band go to 0 (fully invisible) so the
+ * remaining ones stand alone.
+ */
+function buildCircleOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
+    "max",
+    [
+      "case",
+      [">=", ["get", "avg_delay_min"], 10], 0.7,
+      [">=", ["get", "avg_delay_min"], 5], 0.55,
+      0.0,
+    ],
+    [
+      "interpolate", ["linear"], ["get", "samples"],
+      1, 0.35,
+      50, 0.7,
+      500, 0.85,
+    ],
+  ];
+  if (focused === null) return base;
+  return ["case", severityMatchExpr(focused), base, 0];
+}
+
+/**
+ * Halo opacity: lower base values than the dot so the halo accents rather
+ * than dominates. Severe stops keep a slightly stronger glow so they read
+ * as priority; everything else stays around 0.10 to avoid overlapping
+ * halos forming one solid color across dense city blocks.
+ */
+function buildHaloOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
+    "max",
+    [
+      "case",
+      [">=", ["get", "avg_delay_min"], 10], 0.20,
+      [">=", ["get", "avg_delay_min"], 5], 0.14,
+      0.0,
+    ],
+    [
+      "interpolate", ["exponential", 1.4], ["get", "samples"],
+      10, 0.06,
+      1000, 0.10,
+      50000, 0.16,
+    ],
+  ];
+  if (focused === null) return base;
+  return ["case", severityMatchExpr(focused), base, 0];
+}
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -33,6 +104,9 @@ export function MapTab() {
   const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
+  const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
+  const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
+
   // ctx changes on filter/range edits; click handlers are registered once at
   // init, so we read through this ref to always see the current period.
   const ctxRef = useRef(ctx);
@@ -74,9 +148,29 @@ export function MapTab() {
         .setLngLat(e.lngLat)
         .setHTML(html)
         .addTo(m);
+      // Focus the clicked stop: gentle camera move, zoom only if currently zoomed out.
+      const targetZoom = Math.max(m.getZoom(), 14);
+      m.easeTo({ center: e.lngLat, zoom: targetZoom, duration: 600 });
     };
-    const onEnter = () => { m.getCanvas().style.cursor = "pointer"; };
-    const onLeave = () => { m.getCanvas().style.cursor = ""; };
+    let hoveredId: number | string | undefined;
+    const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
+      m.getCanvas().style.cursor = "pointer";
+      const f = e.features?.[0];
+      if (f && f.id !== undefined && f.source === SOURCE) {
+        if (hoveredId !== undefined) {
+          m.setFeatureState({ source: SOURCE, id: hoveredId }, { hover: false });
+        }
+        hoveredId = f.id;
+        m.setFeatureState({ source: SOURCE, id: hoveredId }, { hover: true });
+      }
+    };
+    const onLeave = () => {
+      m.getCanvas().style.cursor = "";
+      if (hoveredId !== undefined) {
+        m.setFeatureState({ source: SOURCE, id: hoveredId }, { hover: false });
+        hoveredId = undefined;
+      }
+    };
 
     // Route-stop click handler — registered once at init so it never
     // accumulates on filter / shape changes. The layer it targets
@@ -143,7 +237,9 @@ export function MapTab() {
   useEffect(() => {
     const m = mapRef.current;
     if (!m || !data) return;
-    const snapshot = data;
+    const filteredSnapshot = showSingleSampleStops
+      ? data
+      : { ...data, features: data.features.filter((f: any) => (f.properties?.samples ?? 0) >= 2) };
 
     function applyData() {
       if (!m) return;
@@ -151,52 +247,82 @@ export function MapTab() {
       popupRef.current = null;
 
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
+      if (m.getLayer(HALO_LAYER)) m.removeLayer(HALO_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
-      m.addSource(SOURCE, { type: "geojson", data: snapshot });
+      // generateId lets the hover feature-state attach to each circle by index.
+      m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
+
+      const colorExpr: maplibregl.ExpressionSpecification = [
+        "step",
+        ["get", "avg_delay_min"],
+        DELAY_RAMP.ok,
+        2, DELAY_RAMP.mild,
+        5, DELAY_RAMP.moderate,
+        10, DELAY_RAMP.severe,
+      ];
+
+      // Sample-count distribution spans 4 orders of magnitude (10..50k+),
+      // so radii use exponential-base interpolation: small terminals shrink
+      // visibly while major hubs grow without flooring everything mid-range.
+      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
+        "interpolate", ["exponential", 1.4], ["get", "samples"],
+        10, 6,
+        100, 10,
+        1000, 16,
+        10000, 26,
+        50000, 36,
+      ];
+      const DOT_RADIUS: maplibregl.ExpressionSpecification = [
+        "interpolate", ["exponential", 1.4], ["get", "samples"],
+        10, 2.5,
+        100, 4,
+        1000, 7,
+        10000, 12,
+        50000, 18,
+      ];
+
+      // Soft outer halo — accent only, not flood. Low opacity so overlapping
+      // halos in dense areas don't form one solid color blanket.
+      m.addLayer({
+        id: HALO_LAYER,
+        type: "circle",
+        source: SOURCE,
+        paint: {
+          "circle-radius": HALO_RADIUS,
+          "circle-color": colorExpr,
+          "circle-blur": 0.7,
+          "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
+          "circle-pitch-alignment": "map",
+        },
+      });
+
+      // Crisp inner dot — no stroke (hover only), severity color.
       m.addLayer({
         id: LAYER,
         type: "circle",
         source: SOURCE,
         paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["get", "samples"],
-            1, 3,
-            500, 12,
+          "circle-radius": DOT_RADIUS,
+          "circle-color": colorExpr,
+          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
+          "circle-stroke-width": [
+            "case", ["boolean", ["feature-state", "hover"], false], 1.5, 0,
           ],
-          "circle-color": [
-            "step",
-            ["get", "avg_delay_min"],
-            DELAY_RAMP.ok,
-            2, DELAY_RAMP.mild,
-            5, DELAY_RAMP.moderate,
-            10, DELAY_RAMP.severe,
-          ],
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["get", "samples"],
-            1, 0.35,
-            50, 0.7,
-            500, 0.85,
-          ],
-          "circle-stroke-width": 0.5,
-          "circle-stroke-color": "#fff",
+          "circle-stroke-color": "#ffffff",
         },
       });
 
       // Fit bounds only on the first data load — subsequent filter changes
       // keep the user's current pan/zoom so the camera doesn't fight them.
       if (!fittedRef.current) {
-        if (snapshot.features.length === 1) {
-          const [lon, lat] = snapshot.features[0].geometry.coordinates;
+        if (filteredSnapshot.features.length === 1) {
+          const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
           m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
           fittedRef.current = true;
-        } else if (snapshot.features.length > 1) {
+        } else if (filteredSnapshot.features.length > 1) {
           let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-          for (const f of snapshot.features) {
+          for (const f of filteredSnapshot.features) {
             const [lon, lat] = f.geometry.coordinates;
             if (lon < minLon) minLon = lon;
             if (lon > maxLon) maxLon = lon;
@@ -211,7 +337,7 @@ export function MapTab() {
 
     if (styleLoadedRef.current) applyData();
     else m.once("load", applyData);
-  }, [data]);
+  }, [data, showSingleSampleStops, focusedSeverity]);
 
   // Single-route overlay: thin neutral polyline + small numbered stop markers.
   // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
@@ -237,7 +363,11 @@ export function MapTab() {
         return;
       }
       clearOverlay();
-      const coords: [number, number][] = shape.stops.map((s) => [s.lon, s.lat]);
+      const geomCoords = shape.geometry?.coordinates;
+      const coords: [number, number][] =
+        geomCoords && geomCoords.length >= 2
+          ? (geomCoords as [number, number][])
+          : shape.stops.map((s) => [s.lon, s.lat]);
 
       // Route mode: hide the heatmap (it would show isolated stops without
       // the connecting line) and use the route's stop sequence directly,
@@ -338,6 +468,26 @@ export function MapTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
       <TabFilterBar />
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 12, color: "var(--text-tertiary)",
+        margin: "4px 0 8px",
+      }}>
+        地図
+        <InsightHint
+          title="地図の読み方"
+          body={
+            <>
+              <strong>色</strong>は平均遅延の段階、<strong>大きさ</strong>はサンプル数（観測の多さ）。
+              凡例の色をクリックすると該当の遅延帯のみ表示。停留所をクリックで詳細と拡大。
+              経路を 1 つに絞ると、実際の道路形状で系統が描画されます。
+              <br /><br />
+              ホットスポット（赤・大きい円）は<em>慢性的に遅れる</em>停留所。
+              小さい緑の円は<em>定刻運行</em>。期間・曜日・時間帯フィルタで「いつ」遅れるかを掘り下げられます。
+            </>
+          }
+        />
+      </div>
       {/* Render the error inline above the map instead of replacing the
           whole tab — losing the filter bar and tab nav on a transient
           5xx is jarring. The map container below stays mounted so the
@@ -354,7 +504,12 @@ export function MapTab() {
         ref={containerRef}
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       />
-      <MapLegend />
+      <MapLegend
+        showSingleSampleStops={showSingleSampleStops}
+        onShowSingleSampleStopsChange={setShowSingleSampleStops}
+        focusedSeverity={focusedSeverity}
+        onFocusedSeverityChange={setFocusedSeverity}
+      />
       {/* Empty state covers the map only when there's nothing to show.
           In single-route mode the route overlay (line + numbered stops)
           is the primary visual and may be present even if the heatmap
