@@ -286,9 +286,9 @@ Computes five aggregation tables used by all API queries:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
-| `GET` | `/agencies` | List agencies |
-| `POST` | `/agencies` | Register agency |
-| `GET` | `/agencies/{id}` | Get agency |
+| `GET` | `/api/agencies` | List agencies |
+| `POST` | `/api/agencies` | Register agency |
+| `GET` | `/api/agencies/{id}` | Get agency |
 | `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer (Groq tool-use) |
 | `POST` | `/api/{agency_id}/query` | Structured intent dict → rows + Japanese answer |
 | `GET` | `/api/{agency_id}/reports` | List pre-computed reports |
