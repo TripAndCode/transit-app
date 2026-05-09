@@ -109,6 +109,7 @@ def test_load_static_agency_isolated(pg_conn, tmp_path):
 
 def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
     from pipeline.static_loader import load_static
+
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
 
     with pg_conn.cursor() as cur:
@@ -127,6 +128,7 @@ def test_load_static_shapes_builds_linestrings(pg_conn, agency_id):
 
 def test_load_static_shapes_two_loads_no_duplicates(pg_conn, agency_id):
     from pipeline.static_loader import load_static
+
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
     load_static("tests/fixtures/static_with_shapes.zip", agency_id, pg_conn)
 
@@ -138,6 +140,7 @@ def test_load_static_shapes_two_loads_no_duplicates(pg_conn, agency_id):
 def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
     """A static zip lacking shapes.txt must still load other tables and log a skip."""
     from pipeline.static_loader import load_static
+
     load_static("tests/fixtures/static_no_shapes.zip", agency_id, pg_conn)
     out = capsys.readouterr().out
     assert "shapes.txt not in zip — skipped" in out
