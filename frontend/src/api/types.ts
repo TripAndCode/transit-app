@@ -38,6 +38,11 @@ export type RouteSummaryResponse = {
 export type RouteShapeStop = {
   stop_sequence: number;
   stop_name: string;
+  /** Optional GTFS identifiers — surfaced in the unified map tooltip
+   *  (when present) so route mode shows the same fields as heatmap mode. */
+  stop_id?: string | null;
+  stop_code?: string | null;
+  platform_code?: string | null;
   lon: number;
   lat: number;
   avg_min: number | null;
