@@ -110,10 +110,10 @@ export function LiveTab() {
         <EmptyState
           title={
             data.latest_captured_at
-              ? `観測データがありません (最終: ${relativeTime(data.latest_captured_at)})`
-              : "観測データがありません"
+              ? `まだ表示できる観測がありません (最終受信: ${relativeTime(data.latest_captured_at)})`
+              : "まだ表示できる観測がありません"
           }
-          hint="make fetch-ingest を実行してください"
+          hint="次の取り込みを待っています。数分後に自動で更新されます。"
         />
       )}
 
