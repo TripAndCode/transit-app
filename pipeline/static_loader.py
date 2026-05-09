@@ -1,3 +1,18 @@
+"""GTFS static loader.
+
+Reads a GTFS static zip (``stops.txt``, ``stop_times.txt``, ``trips.txt``,
+``routes.txt``, ``calendar_dates.txt``, ``shapes.txt``) and writes each file
+into its corresponding ``static_*`` table for one agency. The loader is
+idempotent: a per-table ``DELETE WHERE agency_id = ...`` runs before each
+file's rows are inserted, so re-running on the same agency replaces rather
+than duplicates.
+
+Two tables get geometry-aware handling: ``static_stops`` builds a
+``geometry(Point)`` per row, and ``static_shapes`` groups points by
+``shape_id`` and builds a ``geometry(LineString)`` per shape via PostGIS
+``ST_MakeLine``. Other tables use a plain ``execute_values`` bulk insert.
+"""
+
 import csv
 import io
 import pathlib
@@ -24,6 +39,24 @@ _DB_COLS = {
 
 
 def load_static(path: str, agency_id: int, conn) -> None:
+    """Load a GTFS static zip into the ``static_*`` tables for ``agency_id``.
+
+    Args:
+        path: Either a zip file path or a directory containing one.
+            When a directory is given, the most recently named
+            ``*static*.zip`` inside it is picked.
+        agency_id: The agency id rows are scoped to.
+        conn: A psycopg2 connection. The caller commits.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not resolve to a zip file
+            (or no matching zip is found inside a directory).
+
+    Files missing from the zip are skipped with a logged ``not in zip``
+    line; this lets agencies without ``shapes.txt`` (or any other optional
+    file) load successfully. Each loaded table is cleared for this
+    agency before insert, so the function is safe to re-run.
+    """
     p = pathlib.Path(path)
     if p.is_dir():
         # Match both legacy *_static.zip and the Oracle scraper's gtfs_static_*.zip
@@ -70,8 +103,6 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         [agency_id, stop_id, stop_name, lat, lon, lon, lat, stop_code, platform_code],
                     )
             elif table == "static_shapes":
-                # Group raw_rows by shape_id, keep ordering by pt_sequence (int).
-                # Build a LineString per shape via ST_MakeLine over ordered points.
                 by_shape: dict[str, list[tuple[int, float, float]]] = defaultdict(list)
                 skipped = 0
                 for row in raw_rows:
@@ -82,7 +113,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         seq = int(row[3])
                     except (TypeError, ValueError):
                         skipped += 1
-                        continue  # skip malformed
+                        continue
                     if shape_id:
                         by_shape[shape_id].append((seq, lon, lat))
 
@@ -92,15 +123,12 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 for shape_id, pts in by_shape.items():
                     pts.sort(key=lambda t: t[0])
                     if len(pts) < 2:
-                        # LineString needs >= 2 points; skip degenerate shapes.
+                        # PostGIS LineString needs >= 2 points
                         continue
-                    # Emit an SQL array of points; let PostGIS build the LineString.
                     flat: list[float] = []
                     for _, lon, lat in pts:
                         flat.extend([lon, lat])
-                    placeholders = ",".join(
-                        "ST_MakePoint(%s, %s)" for _ in range(len(pts))
-                    )
+                    placeholders = ",".join("ST_MakePoint(%s, %s)" for _ in range(len(pts)))
                     cur.execute(
                         f"INSERT INTO static_shapes (agency_id, shape_id, geom) "
                         f"VALUES (%s, %s, ST_SetSRID(ST_MakeLine(ARRAY[{placeholders}]), 4326)) "
