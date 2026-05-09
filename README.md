@@ -159,14 +159,16 @@ poetry run python gtfs_pipeline.py ingest_live
 ```
 
 Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
-row. On Railway, the cron block in `railway.toml` runs `fetch_and_ingest.sh`
-hourly (`0 * * * *`).
+row. **This is what production uses** — a GitHub Actions workflow hits
+`POST /internal/cron/ingest` hourly, and the FastAPI app runs `ingest_live`
++ `analyze` for every agency in a background task. See
+[Deployment](#deployment-flyio-tokyo-region) below.
 
 Path A does **not** load static GTFS (stops, routes, timetable) — for that
 you still need `make load_static` against a local zip, or set `static_url`
 on the agency and add a fetcher (not in this repo).
 
-### Path B — Oracle Cloud collection server (current setup)
+### Path B — Oracle Cloud archive replay (local dev only)
 
 A separate Oracle Cloud VM (`64.110.114.101`, user `opc`) runs an
 independent scraper that crawls the GTFS-JP website and stores both:
@@ -192,8 +194,10 @@ Oracle VM (crawls GTFS-JP)
 ```
 
 The wiring is in `scripts/fetch_archives.sh` (rsync) and
-`scripts/fetch_and_ingest.sh` (rsync → ingest → load_static → analyze, the
-script Railway runs hourly via `[[crons]]`).
+`scripts/fetch_and_ingest.sh` (rsync → ingest → load_static → analyze).
+This is **only useful for local development** — production deploys do
+not have SSH access to the Oracle VM, and the cron path runs `ingest_live`
+against each agency's `feed_url` instead.
 
 For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b-oracle-cloud-archives-current-setup) above. `feed_url` on the agency row is metadata only for Path B — the .pb files are pre-fetched.
 
@@ -385,6 +389,7 @@ api/routers/
   reports.py                pre-computed report payloads (json + csv)
   map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
+  internal.py               POST /internal/cron/ingest (CRON_SECRET-gated)
     │
     ▼
 api/range.py                shared RangeCtx (from/to/dow/time_band/service/routes) + SQL filter builder
@@ -421,12 +426,73 @@ DATABASE_URL=postgresql://transit:transit@localhost:5433/transit \
 
 ---
 
-## Deployment (Railway)
+## Deployment (Fly.io, Tokyo region)
 
-The app is configured for Railway via `railway.toml` and `Dockerfile`. Set these environment variables in your Railway service:
+Single Fly Machine in `nrt` runs the multistage Dockerfile (built SPA + FastAPI). Postgres is a separate Fly app attached via `fly pg attach`. Cron is a GitHub Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no always-on cron worker.
 
-| Variable | Description |
+### One-time bring-up
+
+```bash
+# 0. Install flyctl + log in
+brew install flyctl
+fly auth login
+
+# 1. Create the apps (ours: API + Postgres)
+fly launch --no-deploy --copy-config --name transit-app-tokyo --region nrt
+fly pg create --region nrt --name transit-app-pg --vm-size shared-cpu-1x --volume-size 3
+fly pg attach transit-app-pg --app transit-app-tokyo
+
+# 2. Generate + plant the cron secret in two places (Fly + GitHub)
+SECRET="$(openssl rand -hex 32)"
+fly secrets set --app transit-app-tokyo CRON_SECRET="$SECRET"
+gh secret set CRON_SECRET --body "$SECRET"
+gh secret set APP_BASE_URL --body "https://transit-app-tokyo.fly.dev"
+
+# 3. The other app secrets
+fly secrets set --app transit-app-tokyo \
+    GROQ_API_KEY=gsk_... \
+    CORS_ORIGINS=https://transit-app-tokyo.fly.dev
+
+# 4. First deploy (release_command runs migrate up before machines roll)
+fly deploy
+
+# 5. Seed agencies + initial data so the SPA isn't empty for first visitors
+fly ssh console --app transit-app-tokyo -C "python gtfs_pipeline.py seed_agencies agencies.csv"
+# Static GTFS is loaded once per quarter — copy a zip in and run load_static:
+fly ssh sftp shell --app transit-app-tokyo
+# (sftp> put raw_archives_static/gtfs_static_YYYYMMDD.zip /tmp/gtfs.zip)
+fly ssh console --app transit-app-tokyo -C "python gtfs_pipeline.py load_static /tmp"
+# RT data flows in via the cron from step 2 above.
+```
+
+### Required env
+
+| Variable | Source | Notes |
+|---|---|---|
+| `DATABASE_URL` | `fly pg attach` | injected automatically |
+| `GROQ_API_KEY` | `fly secrets set` | from console.groq.com |
+| `CORS_ORIGINS` | `fly secrets set` | your fly.dev URL or custom domain |
+| `CRON_SECRET` | `fly secrets set` | matches the GH Actions repo secret of the same name |
+
+### Required GitHub repo secrets
+
+| Name | Notes |
 |---|---|
-| `DATABASE_URL` | Railway Postgres connection string (injected automatically) |
-| `GROQ_API_KEY` | Your Groq API key |
-| `CORS_ORIGINS` | Comma-separated allowed origins (e.g. `https://your-frontend.up.railway.app`) |
+| `CRON_SECRET` | random 32 bytes; same value as the Fly secret above |
+| `APP_BASE_URL` | e.g. `https://transit-app-tokyo.fly.dev` (the GH workflow `curl`s this/internal/cron/ingest) |
+
+### Custom domain
+
+```bash
+fly ips list --app transit-app-tokyo                                # get IPv4 + IPv6
+fly certs add --app transit-app-tokyo your-domain.example
+# Add A + AAAA records at your DNS provider pointing to the Fly IPs.
+```
+
+Then update `CORS_ORIGINS` to the new origin and redeploy.
+
+### Operational notes
+
+- Migrations run automatically on every deploy via `[deploy] release_command` in `fly.toml`.
+- The hourly cron is observable in the GitHub Actions tab — failures surface there, not in Fly logs. Manual replay via `gh workflow run cron.yml`.
+- `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.

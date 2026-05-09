@@ -1,0 +1,56 @@
+# Fly.io app config — single Machine in Tokyo serving FastAPI + bundled SPA.
+# Postgres is a separate Fly app (`fly pg create`) attached via `fly pg attach`,
+# which injects DATABASE_URL into this app's env.
+#
+# Cron: a GitHub Actions workflow hits POST /internal/cron/ingest hourly,
+# guarded by CRON_SECRET. No always-on cron worker — keeps spend at one
+# Machine + Postgres.
+
+app = "transit-app-tokyo"  # rename in `fly launch` or via `fly apps rename`
+primary_region = "nrt"
+
+[build]
+dockerfile = "Dockerfile"
+
+[env]
+PORT = "8080"
+
+[deploy]
+# Migrations run as a release task before Machines roll forward.
+release_command = "python gtfs_pipeline.py migrate up"
+strategy = "rolling"
+
+[[services]]
+internal_port = 8080
+protocol = "tcp"
+auto_stop_machines = false  # cron + heatmap latency hate cold starts
+auto_start_machines = true
+min_machines_running = 1
+processes = ["app"]
+
+[[services.ports]]
+port = 80
+handlers = ["http"]
+force_https = true
+
+[[services.ports]]
+port = 443
+handlers = ["tls", "http"]
+
+[services.concurrency]
+type = "connections"
+hard_limit = 50
+soft_limit = 25
+
+[[services.http_checks]]
+path = "/health"
+interval = "30s"
+timeout = "5s"
+grace_period = "10s"
+method = "GET"
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "512mb"
+cpu_kind = "shared"
+cpus = 1
