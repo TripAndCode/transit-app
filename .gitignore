@@ -18,3 +18,7 @@ oracle_cloud/
 frontend/node_modules
 frontend/dist
 api/static
+# Stale tsc emit of vite.config.ts — kept biting the dev proxy because Vite
+# prefers .js over .ts when both are present.
+frontend/vite.config.js
+frontend/vite.config.d.ts

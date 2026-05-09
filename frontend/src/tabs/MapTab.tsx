@@ -335,11 +335,15 @@ export function MapTab() {
     else m.once("load", drawOverlay);
   }, [shape]);
 
-  if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
       <TabFilterBar />
+      {/* Render the error inline above the map instead of replacing the
+          whole tab — losing the filter bar and tab nav on a transient
+          5xx is jarring. The map container below stays mounted so the
+          user keeps their context (zoom / pan / open popup) and just
+          sees a calm "再試行" pill. */}
+      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       <div style={{ position: "relative", flex: 1, minHeight: 400 }}>
       {isLoading && (
         <div style={{ position: "absolute", inset: 0, padding: 24, zIndex: 1 }}>
@@ -359,9 +363,8 @@ export function MapTab() {
       {data && data.features.length === 0 && !(shape && shape.stops.length >= 2) && (
         <div style={{ position: "absolute", inset: 0, background: "var(--bg-page)" }}>
           <EmptyState
-            title="ヒートマップデータがありません"
-            hint="集計を実行してください"
-            hintMono="make analyze"
+            title="まだ表示できるデータがありません"
+            hint="初回データ取得中の可能性があります。数分後に自動で表示されます。"
           />
         </div>
       )}
