@@ -148,8 +148,7 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
     async with pool.acquire() as conn:
         # Same setup as the positive test, but DO NOT insert into static_shapes
         await conn.execute(
-            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
-            "VALUES ($1, 'T1', 'R1', 'S1')",
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
             agency_id,
         )
         await conn.execute(
