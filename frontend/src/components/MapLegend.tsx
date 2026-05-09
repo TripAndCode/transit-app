@@ -18,12 +18,17 @@ function loadPos(): Pos {
   return DEFAULT_POS;
 }
 
+type MapLegendProps = {
+  showSingleSampleStops: boolean;
+  onShowSingleSampleStopsChange: (v: boolean) => void;
+};
+
 /**
  * Floating, draggable legend for the map. Lives over the MapLibre canvas as a
  * fixed-position child of the map container. Position persists in localStorage
  * across reloads. Header strip is the drag handle.
  */
-export function MapLegend() {
+export function MapLegend({ showSingleSampleStops, onShowSingleSampleStopsChange }: MapLegendProps) {
   const [pos, setPos] = useState<Pos>(loadPos);
   const [collapsed, setCollapsed] = useState(false);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -104,6 +109,24 @@ export function MapLegend() {
       </div>
       {!collapsed && (
         <div style={{ padding: "8px 10px" }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              marginBottom: 8,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showSingleSampleStops}
+              onChange={(e) => onShowSingleSampleStopsChange(e.target.checked)}
+            />
+            1観測のみも表示
+          </label>
           <div style={{ marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
             遅延 (平均)
           </div>
