@@ -1,5 +1,7 @@
 """Bug-regression test for the temp-table collision."""
 
+import pytest
+
 from pipeline.strategies import static_join
 
 
@@ -119,10 +121,18 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     assert cov_sched >= 0.99, f"scheduled_time JOIN coverage {cov_sched:.2%}"
 
 
-def test_static_join_hiroden(pg_conn):
-    aid = _make_agency(
-        pg_conn, "広島電鉄_test",
-        "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin",
-    )
-    load_static(str(FIX / "hiroden_static.zip"), aid, pg_conn)
-    _run_and_assert(pg_conn, aid, FIX / "hiroden_tu.bin")
+@pytest.mark.parametrize(
+    "feed_url, pb_name, zip_name, agency_label",
+    [
+        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin",
+         "hiroden_tu.bin", "hiroden_static.zip", "広島電鉄_test"),
+        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin",
+         "hirobus_tu.bin", "hirobus_static.zip", "広島バス_test"),
+        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin",
+         "hirokoh_tu.bin", "hirokoh_static.zip", "広島交通_test"),
+    ],
+)
+def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
+    aid = _make_agency(pg_conn, agency_label, feed_url)
+    load_static(str(FIX / zip_name), aid, pg_conn)
+    _run_and_assert(pg_conn, aid, FIX / pb_name)
