@@ -24,7 +24,7 @@ from psycopg2.extras import execute_values
 _STATIC_FILE_MAP = [
     ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),
     ("stop_times.txt", "static_stop_times", ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
-    ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id"]),
+    ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id", "service_id"]),
     ("routes.txt", "static_routes", ["route_id", "route_short_name"]),
     ("calendar_dates.txt", "static_calendar_dates", ["service_id", "date", "exception_type"]),
     ("shapes.txt", "static_shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]),
@@ -32,7 +32,7 @@ _STATIC_FILE_MAP = [
 
 _DB_COLS = {
     "static_stop_times": ["agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
-    "static_trips": ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id"],
+    "static_trips": ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id", "service_id"],
     "static_routes": ["agency_id", "route_id", "route_short_name"],
     "static_calendar_dates": ["agency_id", "service_id", "date", "exception_type"],
 }
