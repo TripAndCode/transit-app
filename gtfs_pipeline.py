@@ -11,10 +11,15 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 def _get_conn():
+    """Open and return a psycopg2 connection using DATABASE_URL."""
     return psycopg2.connect(DATABASE_URL)
 
 
 def _require_agency(args, conn) -> int:
+    """Return agency_id from args or infer it when there is exactly one agency.
+
+    Exits with a helpful message if no agencies exist or the choice is ambiguous.
+    """
     if args.agency_id:
         return int(args.agency_id)
     with conn.cursor() as cur:
@@ -33,6 +38,7 @@ def _require_agency(args, conn) -> int:
 
 
 def cmd_add_agency(args):
+    """Insert a new agency row and print the assigned agency_id."""
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
@@ -134,6 +140,7 @@ def cmd_seed_agencies(args):
 
 
 def cmd_ingest(args):
+    """Run the archive ingest pipeline for one agency."""
     from pipeline.ingest import ingest
 
     conn = _get_conn()
@@ -143,6 +150,7 @@ def cmd_ingest(args):
 
 
 def cmd_load_static(args):
+    """Load a GTFS static zip into the database for one agency."""
     from pipeline.static_loader import load_static
 
     conn = _get_conn()
@@ -152,7 +160,9 @@ def cmd_load_static(args):
 
 
 def cmd_refresh_static(args):
+    """Conditionally fetch and load static GTFS via each agency's static_strategy."""
     import pathlib
+
     from pipeline.static_fetcher import refresh_all, refresh_static
 
     conn = _get_conn()
@@ -168,6 +178,7 @@ def cmd_refresh_static(args):
 
 
 def cmd_analyze(args):
+    """Run the analysis pass for one agency."""
     from pipeline.analyze import analyze
 
     conn = _get_conn()
@@ -177,6 +188,7 @@ def cmd_analyze(args):
 
 
 def cmd_ingest_live(args):
+    """Fetch and ingest the live GTFS-RT feed for one or all agencies."""
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
@@ -197,6 +209,7 @@ def cmd_ingest_live(args):
 
 
 def cmd_migrate(args):
+    """Apply or roll back schema migrations."""
     from db.migrate import migrate_down, migrate_up
 
     conn = _get_conn()
@@ -208,6 +221,7 @@ def cmd_migrate(args):
 
 
 def main():
+    """Parse CLI arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
@@ -231,10 +245,8 @@ def main():
         "refresh-static",
         help="Conditionally fetch + load static GTFS via the agency's static_strategy",
     )
-    p_refresh.add_argument("--agency-id", default=None,
-                           help="Specific agency (default: all configured)")
-    p_refresh.add_argument("--dest", default="raw_archives_static",
-                           help="Local destination directory for fetched zips")
+    p_refresh.add_argument("--agency-id", default=None, help="Specific agency (default: all configured)")
+    p_refresh.add_argument("--dest", default="raw_archives_static", help="Local destination directory for fetched zips")
 
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)

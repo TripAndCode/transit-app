@@ -13,11 +13,11 @@ import urllib.request
 from datetime import datetime
 from typing import Optional
 
-
 _HREF_RE = re.compile(r'href="([^"]*gtfs-aomoricitybus[^"]*\.zip)"')
 
 
 def _sha256(path: pathlib.Path) -> str:
+    """Return the hex SHA-256 digest of the file at path."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -26,6 +26,7 @@ def _sha256(path: pathlib.Path) -> str:
 
 
 def _resolve(href: str, index_url: str) -> str:
+    """Resolve a potentially-relative href against the index page URL."""
     if href.startswith(("http://", "https://")):
         return href
     parsed = urllib.parse.urlparse(index_url)

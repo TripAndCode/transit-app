@@ -26,13 +26,13 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
     #                 route_code, stop_sequence, dep_delay)
     fake_row = (
         "20260401/TripUpdate_113700.pb",  # file_name
-        "2026-04-01T11:37:00",            # captured_at
-        "平日_11時37分_系統44372",          # trip_id
-        "平日",                             # service_type
-        "11:37",                           # scheduled_time
-        "44372",                           # route_code
-        1,                                 # stop_sequence
-        120,                               # dep_delay (seconds)
+        "2026-04-01T11:37:00",  # captured_at
+        "平日_11時37分_系統44372",  # trip_id
+        "平日",  # service_type
+        "11:37",  # scheduled_time
+        "44372",  # route_code
+        1,  # stop_sequence
+        120,  # dep_delay (seconds)
     )
     with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row]):
         pb_data = b"\x00"

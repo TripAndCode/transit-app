@@ -14,11 +14,9 @@ from datetime import datetime, timezone
 import psycopg2.extras
 
 from pipeline.strategies import get_ingest_strategy
-from pipeline.strategies._pb import UPDATE_INSERT_SQL, _ts
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
-from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint  # noqa: F401
-from pipeline.strategies._pb import _ts  # noqa: F401 (re-export for regression test)
+from pipeline.strategies._pb import UPDATE_INSERT_SQL, _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
 from pipeline.strategies.aomori_regex import (  # noqa: F401
     _TRIP_RE_DEFAULT,
     parse_trip_id,
@@ -26,6 +24,7 @@ from pipeline.strategies.aomori_regex import (  # noqa: F401
 
 
 def _resolve_strategy_name(agency_id: int, conn) -> str:
+    """Return the ingest strategy name for an agency, falling back to aomori_regex."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT ingest_strategy FROM agencies WHERE agency_id = %s",
@@ -52,8 +51,8 @@ def parse_pb(
     Note: the live ingest path no longer calls this function. New code should
     call the strategy module directly.
     """
-    from pipeline.strategies._pb import _dec as _d, _fields as _f
-    from pipeline.strategies.aomori_regex import _TRIP_RE_DEFAULT, parse_trip_id
+    from pipeline.strategies._pb import _dec as _d
+    from pipeline.strategies._pb import _fields as _f
 
     pat = pattern or _TRIP_RE_DEFAULT
     rows = []
@@ -98,8 +97,18 @@ def parse_pb(
                 dep_time = dep.get(2, [None])[0]
             rows.append(
                 (
-                    file_name, captured_at, trip_id, service, sched, route,
-                    stop_seq, stop_id, arr_delay, arr_time, dep_delay, dep_time,
+                    file_name,
+                    captured_at,
+                    trip_id,
+                    service,
+                    sched,
+                    route,
+                    stop_seq,
+                    stop_id,
+                    arr_delay,
+                    arr_time,
+                    dep_delay,
+                    dep_time,
                 )
             )
     return rows
@@ -165,8 +174,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
         new_pb = [
             p
             for p in pb_loose
-            if f"{p.parent.name if re.fullmatch(r'\d{8}', p.parent.name) else ''}/{p.name}"
-            not in done
+            if f"{p.parent.name if re.fullmatch(r'\d{8}', p.parent.name) else ''}/{p.name}" not in done
         ]
         if new_pb:
             print(f"\n{len(new_pb)} loose .pb files")
