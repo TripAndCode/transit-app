@@ -1,6 +1,9 @@
 # tests/test_static_loader.py
 import io
+import pathlib
 import zipfile
+
+import pytest
 
 from pipeline.static_loader import load_static
 
@@ -148,3 +151,32 @@ def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
     with pg_conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))
         assert cur.fetchone()[0] == 0
+
+
+def test_load_static_populates_service_id_for_hiroden(pg_conn, tmp_path):
+    """Hiroden's trips.txt has service_id; loader must populate the new column."""
+    zip_path = pathlib.Path(__file__).parent / "fixtures" / "hiroden_static.zip"
+    if not zip_path.exists():
+        pytest.skip("Hiroden static fixture not present")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+            ("広島電鉄_loader_test", "http://hiroden-loader-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+    load_static(str(zip_path), aid, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM static_trips WHERE agency_id = %s AND service_id IS NOT NULL",
+            (aid,),
+        )
+        with_sid = cur.fetchone()[0]
+        cur.execute(
+            "SELECT COUNT(*) FROM static_trips WHERE agency_id = %s",
+            (aid,),
+        )
+        total = cur.fetchone()[0]
+    assert total > 0, "no trips loaded"
+    # Hiroden has service_id on every trip
+    assert with_sid == total, f"only {with_sid}/{total} trips have service_id"
