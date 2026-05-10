@@ -105,3 +105,15 @@ def test_migration_0006_adds_strategy_columns(pg_conn):
         rows = cur.fetchall()
     # all three must be nullable after 0006
     assert all(is_nullable == "YES" for _, is_nullable in rows), rows
+
+
+def test_migration_0007_adds_service_id_to_static_trips(pg_conn):
+    """0007 adds service_id TEXT (nullable) to static_trips."""
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, is_nullable, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'static_trips' AND column_name = 'service_id'
+        """)
+        rows = cur.fetchall()
+    assert rows == [("service_id", "YES", "text")]
