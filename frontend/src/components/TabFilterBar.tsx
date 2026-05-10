@@ -446,7 +446,24 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   );
 }
 
-type RouteGroup = { name: string; codes: string[] };
+type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
+type RouteGroup = {
+  name: string; // keito (route_short_name) — drives grouping
+  variants: RouteVariant[];
+  shared_long_name: string | null; // non-null when all variants have the same long_name
+};
+
+function variantLabel(v: RouteVariant): string {
+  // Sub-option label: prefer the long line name, then the head-sign(s) in
+  // parens (e.g. "五日市駅北口発着 (岡の下経由)"). Falls back to the
+  // route_id only when no human metadata exists.
+  const long = v.long_name?.trim();
+  const heads = v.headsigns.filter((h) => h.trim() !== "");
+  const headsuffix = heads.length > 0 ? ` (${heads.join(" / ")})` : "";
+  if (long) return long + headsuffix;
+  if (heads.length > 0) return heads.join(" / ");
+  return v.code;
+}
 
 function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
   const id = useAgencyId();
@@ -454,33 +471,45 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
-  // Group routes by display name. A name like "K37 観光通り線" maps to
-  // multiple codes (operating variants); the picker renders the name as a
-  // single row that selects all of its codes at once. Single-code names
-  // collapse to one row that behaves like the old per-code picker.
+  // Group routes by keito (route_short_name). Each variant carries the
+  // long line name and any non-empty trip head-signs so the expanded
+  // sub-options can show direction-aware labels rather than bare ids.
   const groups = useMemo<RouteGroup[]>(() => {
     if (!data) return [];
-    const m = new Map<string, string[]>();
+    const m = new Map<string, RouteVariant[]>();
     for (const r of data) {
       if (!r.route_code) continue;
-      const name = r.route_short_name || r.route_id || r.route_code;
+      const name = r.route_short_name || r.route_long_name || r.route_id || r.route_code;
       const arr = m.get(name) || [];
-      if (!arr.includes(r.route_code)) arr.push(r.route_code);
+      if (!arr.some((v) => v.code === r.route_code)) {
+        arr.push({
+          code: r.route_code,
+          long_name: r.route_long_name,
+          headsigns: r.trip_headsigns ?? [],
+        });
+      }
       m.set(name, arr);
     }
-    return Array.from(m, ([name, codes]) => ({ name, codes: codes.sort() }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([name, variants]) => {
+      variants.sort((a, b) => a.code.localeCompare(b.code));
+      const longs = new Set(variants.map((v) => v.long_name?.trim() || ""));
+      const shared = longs.size === 1 ? variants[0].long_name : null;
+      return { name, variants, shared_long_name: shared };
+    }).sort((a, b) => a.name.localeCompare(b.name));
   }, [data]);
 
   const filteredGroups = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return groups;
     return groups
-      .map((g) => ({
-        ...g,
-        codes: g.codes.filter((c) => g.name.toLowerCase().includes(q) || c.includes(q)),
-      }))
-      .filter((g) => g.codes.length > 0 || g.name.toLowerCase().includes(q));
+      .map((g) => {
+        const variants = g.variants.filter((v) => {
+          const blob = (g.name + " " + (v.long_name || "") + " " + v.headsigns.join(" ") + " " + v.code).toLowerCase();
+          return blob.includes(q);
+        });
+        return { ...g, variants };
+      })
+      .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(q));
   }, [groups, filter]);
 
   function toggleCode(code: string) {
@@ -488,13 +517,14 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
   }
 
   function toggleGroup(g: RouteGroup) {
+    const codes = g.variants.map((v) => v.code);
     const sel = new Set(selected);
-    const allOn = g.codes.every((c) => sel.has(c));
+    const allOn = codes.every((c) => sel.has(c));
     if (allOn) {
-      onChange(selected.filter((c) => !g.codes.includes(c)));
+      onChange(selected.filter((c) => !codes.includes(c)));
     } else {
       const next = new Set(selected);
-      for (const c of g.codes) next.add(c);
+      for (const c of codes) next.add(c);
       onChange(Array.from(next));
     }
   }
@@ -525,10 +555,17 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
         }}
       >
         {filteredGroups.slice(0, 200).map((g) => {
-          const allOn = g.codes.every((c) => selected.includes(c));
-          const someOn = !allOn && g.codes.some((c) => selected.includes(c));
+          const codes = g.variants.map((v) => v.code);
+          const allOn = codes.every((c) => selected.includes(c));
+          const someOn = !allOn && codes.some((c) => selected.includes(c));
           const isOpen = expanded.has(g.name);
-          const multi = g.codes.length > 1;
+          const multi = g.variants.length > 1;
+          // Top-line label: keito + the line name when all variants share one
+          // (e.g. "5-2 5号線"); otherwise just the keito and let expansion
+          // surface the per-variant long names.
+          const topSuffix = !multi
+            ? g.variants[0].long_name?.trim() || ""
+            : g.shared_long_name?.trim() || "";
           return (
             <div key={g.name} style={{ borderBottom: "1px solid var(--border-soft)" }}>
               <div
@@ -557,11 +594,12 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
                   style={{ flex: 1, cursor: "pointer" }}
                   onClick={() => toggleGroup(g)}
                 >
-                  {g.name}{" "}
-                  {multi ? (
-                    <span style={{ color: "var(--text-tertiary)" }}>({g.codes.length}系統)</span>
-                  ) : (
-                    <span style={{ color: "var(--text-tertiary)" }}>({g.codes[0]})</span>
+                  <span style={{ fontWeight: 600 }}>{g.name}</span>
+                  {topSuffix && (
+                    <span style={{ color: "var(--text-secondary)" }}> {topSuffix}</span>
+                  )}
+                  {multi && (
+                    <span style={{ color: "var(--text-tertiary)" }}> ({g.variants.length}系統)</span>
                   )}
                 </span>
                 {multi && (
@@ -584,12 +622,12 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
               </div>
               {multi && isOpen && (
                 <div style={{ paddingLeft: 26, background: "var(--bg-soft)" }}>
-                  {g.codes.map((c) => {
-                    const on = selected.includes(c);
+                  {g.variants.map((v) => {
+                    const on = selected.includes(v.code);
                     return (
                       <div
-                        key={c}
-                        onClick={() => toggleCode(c)}
+                        key={v.code}
+                        onClick={() => toggleCode(v.code)}
                         style={{
                           padding: "5px 10px",
                           cursor: "pointer",
@@ -602,8 +640,15 @@ function RoutesPicker({ selected, onChange }: { selected: string[]; onChange: (v
                         }}
                       >
                         <input type="checkbox" checked={on} readOnly />
-                        <span style={{ color: "var(--text-secondary)", fontFamily: "ui-monospace, monospace" }}>
-                          {c}
+                        <span style={{ color: "var(--text-secondary)", flex: 1 }}>{variantLabel(v)}</span>
+                        <span
+                          style={{
+                            color: "var(--text-tertiary)",
+                            fontFamily: "ui-monospace, monospace",
+                            fontSize: 11,
+                          }}
+                        >
+                          {v.code}
                         </span>
                       </div>
                     );
