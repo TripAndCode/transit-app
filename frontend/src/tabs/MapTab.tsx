@@ -20,6 +20,8 @@ const HALO_LAYER = "delay-halos";    // soft outer glow, drawn beneath the dot
 const ROUTE_SOURCE = "route-line";
 const ROUTE_LAYER = "route-line-stroke";
 const ROUTE_STOPS_LAYER = "route-stops";
+const ROUTE_UNOBS_SOURCE = "route-unobserved";
+const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
 
 /**
  * Build the MapLibre filter expression that selects circles falling into a
@@ -275,8 +277,8 @@ export function MapTab() {
       ];
       const DOT_RADIUS: maplibregl.ExpressionSpecification = [
         "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 2.5,
-        100, 4,
+        10, 4,
+        100, 6,
         1000, 7,
         10000, 12,
         50000, 18,
@@ -291,7 +293,7 @@ export function MapTab() {
         paint: {
           "circle-radius": HALO_RADIUS,
           "circle-color": colorExpr,
-          "circle-blur": 0.7,
+          "circle-blur": 0.5,
           "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
           "circle-pitch-alignment": "map",
         },
@@ -307,9 +309,12 @@ export function MapTab() {
           "circle-color": colorExpr,
           "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
           "circle-stroke-width": [
-            "case", ["boolean", ["feature-state", "hover"], false], 1.5, 0,
+            "case", ["boolean", ["feature-state", "hover"], false], 2, 1,
           ],
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-color": [
+            "case", ["boolean", ["feature-state", "hover"], false],
+            "#ffffff", "rgba(0,0,0,0.35)",
+          ],
         },
       });
 
@@ -349,10 +354,12 @@ export function MapTab() {
 
     function clearOverlay() {
       if (!m) return;
+      if (m.getLayer(ROUTE_UNOBS_LAYER)) m.removeLayer(ROUTE_UNOBS_LAYER);
       if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
       if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
       if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
       if (m.getSource(ROUTE_SOURCE + "-stops")) m.removeSource(ROUTE_SOURCE + "-stops");
+      if (m.getSource(ROUTE_UNOBS_SOURCE)) m.removeSource(ROUTE_UNOBS_SOURCE);
     }
 
     function drawOverlay() {
@@ -441,6 +448,40 @@ export function MapTab() {
           "circle-stroke-color": "#ffffff",
         },
       });
+
+      // Unobserved stops on the chosen shape — hollow grey rings so the
+      // route topology is visible even where no delay data has accrued.
+      const unobserved = shape.unobserved_stops ?? [];
+      if (unobserved.length > 0) {
+        m.addSource(ROUTE_UNOBS_SOURCE, {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: unobserved.map((s) => ({
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+              properties: {
+                stop_sequence: s.stop_sequence,
+                stop_name: s.stop_name,
+                stop_id: s.stop_id ?? null,
+                stop_code: s.stop_code ?? null,
+                platform_code: s.platform_code ?? null,
+              },
+            })),
+          },
+        });
+        m.addLayer({
+          id: ROUTE_UNOBS_LAYER,
+          type: "circle",
+          source: ROUTE_UNOBS_SOURCE,
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
+            "circle-color": "rgba(255,255,255,0.0)",
+            "circle-stroke-width": 1,
+            "circle-stroke-color": "rgba(0,0,0,0.35)",
+          },
+        });
+      }
 
       // Fit to the route on focus.
       let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
