@@ -65,8 +65,10 @@ def parse_feed(
 
     with conn.cursor() as cur:
         cur.execute(
-            "CREATE TEMP TABLE _sj_keys (trip_id TEXT, stop_sequence INT) ON COMMIT DROP"
+            "CREATE TEMP TABLE IF NOT EXISTS _sj_keys "
+            "(trip_id TEXT, stop_sequence INT) ON COMMIT DROP"
         )
+        cur.execute("TRUNCATE _sj_keys")
         execute_values(cur, "INSERT INTO _sj_keys VALUES %s", keys)
         cur.execute(
             """
