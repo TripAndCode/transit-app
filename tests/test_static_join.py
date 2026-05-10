@@ -1,8 +1,13 @@
-"""Bug-regression test for the temp-table collision."""
+"""static_join strategy tests: repeated-call regression + per-op fixture integration."""
+
+import pathlib
 
 import pytest
 
+from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
+
+FIX = pathlib.Path(__file__).parent / "fixtures"
 
 
 def _hex_pb_with_one_trip(trip_id: str, route_id: str = "R1") -> bytes:
@@ -11,6 +16,7 @@ def _hex_pb_with_one_trip(trip_id: str, route_id: str = "R1") -> bytes:
 
     This avoids needing a real fixture for this regression test.
     """
+
     # Use the existing varint helpers — but we need to encode, so do it inline.
     def varint(n):
         out = bytearray()
@@ -80,12 +86,6 @@ def test_static_join_handles_repeated_calls_same_transaction(pg_conn):
 # Integration tests against captured fixtures
 # ---------------------------------------------------------------------------
 
-import pathlib
-
-from pipeline.static_loader import load_static
-
-FIX = pathlib.Path(__file__).parent / "fixtures"
-
 
 def _make_agency(conn, name: str, feed_url: str) -> int:
     with conn.cursor() as cur:
@@ -101,9 +101,7 @@ def _make_agency(conn, name: str, feed_url: str) -> int:
 
 def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     raw = pb_path.read_bytes()
-    rows = static_join.parse_feed(
-        raw, "2026-05-09T12:00:00", "test/sample.bin", aid, conn
-    )
+    rows = static_join.parse_feed(raw, "2026-05-09T12:00:00", "test/sample.bin", aid, conn)
     assert rows, "static_join returned zero rows; pb may be empty or malformed"
 
     with_route = [r for r in rows if r[5] is not None]
@@ -111,9 +109,7 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     with_sched = [r for r in rows if r[4] is not None]
 
     # route_code is from RT.route_id and must always be present
-    assert len(with_route) == len(rows), (
-        f"route_code missing on {len(rows) - len(with_route)} rows"
-    )
+    assert len(with_route) == len(rows), f"route_code missing on {len(rows) - len(with_route)} rows"
     # JOIN coverage budget: >=99% of rows have service_type and scheduled_time
     cov_svc = len(with_svc) / len(rows)
     cov_sched = len(with_sched) / len(rows)
@@ -124,12 +120,24 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
 @pytest.mark.parametrize(
     "feed_url, pb_name, zip_name, agency_label",
     [
-        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin",
-         "hiroden_tu.bin", "hiroden_static.zip", "広島電鉄_test"),
-        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin",
-         "hirobus_tu.bin", "hirobus_static.zip", "広島バス_test"),
-        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin",
-         "hirokoh_tu.bin", "hirokoh_static.zip", "広島交通_test"),
+        (
+            "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin",
+            "hiroden_tu.bin",
+            "hiroden_static.zip",
+            "広島電鉄_test",
+        ),
+        (
+            "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin",
+            "hirobus_tu.bin",
+            "hirobus_static.zip",
+            "広島バス_test",
+        ),
+        (
+            "https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin",
+            "hirokoh_tu.bin",
+            "hirokoh_static.zip",
+            "広島交通_test",
+        ),
     ],
 )
 def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):

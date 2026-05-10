@@ -64,10 +64,7 @@ def parse_feed(
     from psycopg2.extras import execute_values
 
     with conn.cursor() as cur:
-        cur.execute(
-            "CREATE TEMP TABLE IF NOT EXISTS _sj_keys "
-            "(trip_id TEXT, stop_sequence INT) ON COMMIT DROP"
-        )
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS _sj_keys (trip_id TEXT, stop_sequence INT) ON COMMIT DROP")
         cur.execute("TRUNCATE _sj_keys")
         execute_values(cur, "INSERT INTO _sj_keys VALUES %s", keys)
         cur.execute(
@@ -94,8 +91,14 @@ def parse_feed(
             miss += 1
         rows.append(
             (
-                file_name, captured_at, trip_id,
-                svc, sched, rt_route_id, stop_seq, dep_delay,
+                file_name,
+                captured_at,
+                trip_id,
+                svc,
+                sched,
+                rt_route_id,
+                stop_seq,
+                dep_delay,
             )
         )
 

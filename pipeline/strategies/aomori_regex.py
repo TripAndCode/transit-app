@@ -12,12 +12,11 @@ import re
 
 from pipeline.strategies._pb import _dec, _fields
 
-_TRIP_RE_DEFAULT = re.compile(
-    r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$"
-)
+_TRIP_RE_DEFAULT = re.compile(r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$")
 
 
 def _resolve_pattern(agency_id: int, conn) -> re.Pattern:
+    """Fetch the agency's trip_id_pattern from DB, falling back to the Aomori default."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT trip_id_pattern FROM agencies WHERE agency_id = %s",
@@ -30,6 +29,7 @@ def _resolve_pattern(agency_id: int, conn) -> re.Pattern:
 
 
 def parse_trip_id(trip_id: str, pattern: re.Pattern = _TRIP_RE_DEFAULT) -> dict | None:
+    """Match trip_id against pattern and return its named groups, or None on no match."""
     m = pattern.match(trip_id)
     return m.groupdict() if m else None
 
@@ -80,7 +80,5 @@ def parse_feed(
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = dep.get(1, [None])[0]
-            rows.append(
-                (file_name, captured_at, trip_id, service, sched, route, stop_seq, dep_delay)
-            )
+            rows.append((file_name, captured_at, trip_id, service, sched, route, stop_seq, dep_delay))
     return rows

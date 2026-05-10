@@ -9,11 +9,14 @@ import re
 import struct
 from datetime import datetime
 
-
 # ── varint protobuf decoder (no external dependencies) ────────────────────────
 
 
 def _read_varint(data, pos):
+    """Decode a protobuf base-128 varint from data starting at pos.
+
+    Returns (value, new_pos).
+    """
     result, shift = 0, 0
     while True:
         b = data[pos]
@@ -26,11 +29,17 @@ def _read_varint(data, pos):
 
 
 def _read_ld(data, pos):
+    """Read a length-delimited protobuf field. Returns (bytes_value, new_pos)."""
     length, pos = _read_varint(data, pos)
     return data[pos : pos + length], pos + length
 
 
 def _fields(data):
+    """Parse a protobuf message into a dict of field_number → [value, ...].
+
+    Handles wire types 0 (varint), 1 (64-bit), 2 (length-delimited), and
+    5 (32-bit). Unknown wire types terminate parsing early.
+    """
     pos = 0
     f = {}
     while pos < len(data):
@@ -59,6 +68,7 @@ def _fields(data):
 
 
 def _dec(b):
+    """Decode bytes to str, passing through non-bytes values unchanged."""
     return b.decode("utf-8") if isinstance(b, bytes) else b
 
 
