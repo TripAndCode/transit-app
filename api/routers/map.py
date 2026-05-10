@@ -88,37 +88,54 @@ async def route_shape(
     # Most-frequent shape_id for this route, bridged via updates.trip_id
     # (route_code is regex-extracted and is not guaranteed equal to GTFS
     # route_id across feeds, so joining on trip_id keeps geometry tied
-    # to trips actually observed for this route_code).
-    geom_row = await conn.fetchrow(
+    # to trips actually observed for this route_code). The chosen shape
+    # also pins the stops query below so the polyline and circles share
+    # one variant — without this pin, multi-shape routes (e.g. Hiroshima
+    # express bus with several variants) showed stops off the line.
+    shape_row = await conn.fetchrow(
         """
-        WITH ranked AS (
-            SELECT t.shape_id, COUNT(*) AS n
-            FROM static_trips t
-            JOIN updates u
-              ON u.agency_id = t.agency_id
-             AND u.trip_id = t.trip_id
-            WHERE t.agency_id = $1
-              AND u.route_code = $2
-              AND t.shape_id IS NOT NULL
-              AND t.shape_id <> ''
-            GROUP BY t.shape_id
-            ORDER BY n DESC
-            LIMIT 1
-        )
-        SELECT ST_AsGeoJSON(s.geom) AS geom_json
-        FROM ranked r
-        JOIN static_shapes s
-          ON s.agency_id = $1 AND s.shape_id = r.shape_id
+        SELECT t.shape_id, COUNT(*) AS n
+        FROM static_trips t
+        JOIN updates u
+          ON u.agency_id = t.agency_id
+         AND u.trip_id = t.trip_id
+        WHERE t.agency_id = $1
+          AND u.route_code = $2
+          AND t.shape_id IS NOT NULL
+          AND t.shape_id <> ''
+        GROUP BY t.shape_id
+        ORDER BY n DESC
+        LIMIT 1
         """,
         agency_id,
         route,
     )
-    raw = geom_row["geom_json"] if geom_row else None
-    geometry = json.loads(raw) if raw is not None else None
+    chosen_shape_id = shape_row["shape_id"] if shape_row else None
+
+    geometry = None
+    if chosen_shape_id is not None:
+        geom_row = await conn.fetchrow(
+            "SELECT ST_AsGeoJSON(geom) AS geom_json FROM static_shapes WHERE agency_id = $1 AND shape_id = $2",
+            agency_id,
+            chosen_shape_id,
+        )
+        raw = geom_row["geom_json"] if geom_row else None
+        geometry = json.loads(raw) if raw is not None else None
 
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
     # colors match what compute_ranking et al. show for the same filters.
-    where_frag, params, _ = build_updates_filter(ctx, next_param=3)
+    # When a shape is chosen, restrict to trips on that shape so the stops
+    # rendered align with the polyline; falls back to all-trips when the
+    # route has no shape data at all.
+    where_frag, params, next_param = build_updates_filter(ctx, next_param=3)
+    if chosen_shape_id is not None:
+        shape_filter = (
+            f" AND trip_id IN (SELECT trip_id FROM static_trips "
+            f"                  WHERE agency_id = $1 AND shape_id = ${next_param})"
+        )
+        params = (*params, chosen_shape_id)
+    else:
+        shape_filter = ""
     rows = await conn.fetch(
         f"""
         WITH dedup AS (
@@ -128,6 +145,7 @@ async def route_shape(
             WHERE agency_id=$1 AND route_code=$2
               AND dep_delay IS NOT NULL
               AND {where_frag}
+              {shape_filter}
             ORDER BY trip_id, stop_sequence, captured_at DESC
         )
         SELECT
@@ -153,6 +171,51 @@ async def route_shape(
         route,
         *params,
     )
+    observed_seqs = {r["stop_sequence"] for r in rows}
+
+    # Unobserved stops on the chosen shape: every (stop_sequence, stop)
+    # tuple from static_stop_times for trips on the chosen shape, minus
+    # the sequences already returned with delay data. Hollow markers in
+    # the frontend so the user can see the full route topology and the
+    # observation gap (typical for Hiroshima-style incremental feeds
+    # where early-trip sequences are rarely caught by 30s polling).
+    unobserved = []
+    if chosen_shape_id is not None:
+        unobs_rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (sst.stop_sequence)
+                sst.stop_sequence,
+                ss.stop_name,
+                ss.stop_id,
+                ss.stop_code,
+                ss.platform_code,
+                ST_X(ss.geom) AS lon,
+                ST_Y(ss.geom) AS lat
+            FROM static_trips t
+            JOIN static_stop_times sst
+              ON sst.agency_id = t.agency_id AND sst.trip_id = t.trip_id
+            JOIN static_stops ss
+              ON ss.agency_id = sst.agency_id AND ss.stop_id = sst.stop_id
+            WHERE t.agency_id = $1 AND t.shape_id = $2
+            ORDER BY sst.stop_sequence, sst.trip_id
+            """,
+            agency_id,
+            chosen_shape_id,
+        )
+        unobserved = [
+            {
+                "stop_sequence": r["stop_sequence"],
+                "stop_name": r["stop_name"],
+                "stop_id": r["stop_id"],
+                "stop_code": r["stop_code"],
+                "platform_code": r["platform_code"],
+                "lon": float(r["lon"]) if r["lon"] is not None else None,
+                "lat": float(r["lat"]) if r["lat"] is not None else None,
+            }
+            for r in unobs_rows
+            if r["stop_sequence"] not in observed_seqs and r["lon"] is not None and r["lat"] is not None
+        ]
+
     return {
         "route": route,
         "geometry": geometry,
@@ -171,6 +234,7 @@ async def route_shape(
             for r in rows
             if r["lon"] is not None and r["lat"] is not None
         ],
+        "unobserved_stops": unobserved,
     }
 
 

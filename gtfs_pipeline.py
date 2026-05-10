@@ -11,10 +11,15 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 def _get_conn():
+    """Open and return a psycopg2 connection using DATABASE_URL."""
     return psycopg2.connect(DATABASE_URL)
 
 
 def _require_agency(args, conn) -> int:
+    """Return agency_id from args or infer it when there is exactly one agency.
+
+    Exits with a helpful message if no agencies exist or the choice is ambiguous.
+    """
     if args.agency_id:
         return int(args.agency_id)
     with conn.cursor() as cur:
@@ -33,6 +38,7 @@ def _require_agency(args, conn) -> int:
 
 
 def cmd_add_agency(args):
+    """Insert a new agency row and print the assigned agency_id."""
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
@@ -72,6 +78,8 @@ def cmd_seed_agencies(args):
                 feed = row["feed_url"].strip()
                 static = (row.get("static_url") or "").strip() or None
                 pattern = (row.get("trip_id_pattern") or "").strip() or None
+                ingest_strategy = (row.get("ingest_strategy") or "").strip() or None
+                static_strategy = (row.get("static_strategy") or "").strip() or None
                 if not name or not feed:
                     continue  # skip blank/comment lines
                 aid_raw = (row.get("agency_id") or "").strip()
@@ -79,29 +87,39 @@ def cmd_seed_agencies(args):
                 if explicit_id is not None:
                     cur.execute(
                         """
-                        INSERT INTO agencies (agency_id, agency_name, feed_url, static_url, trip_id_pattern)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO agencies (
+                            agency_id, agency_name, feed_url, static_url,
+                            trip_id_pattern, ingest_strategy, static_strategy
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (feed_url) DO UPDATE SET
                             agency_id = EXCLUDED.agency_id,
                             agency_name = EXCLUDED.agency_name,
                             static_url = EXCLUDED.static_url,
-                            trip_id_pattern = EXCLUDED.trip_id_pattern
+                            trip_id_pattern = EXCLUDED.trip_id_pattern,
+                            ingest_strategy = EXCLUDED.ingest_strategy,
+                            static_strategy = EXCLUDED.static_strategy
                         RETURNING agency_id, (xmax = 0) AS inserted
                         """,
-                        (explicit_id, name, feed, static, pattern),
+                        (explicit_id, name, feed, static, pattern, ingest_strategy, static_strategy),
                     )
                 else:
                     cur.execute(
                         """
-                        INSERT INTO agencies (agency_name, feed_url, static_url, trip_id_pattern)
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO agencies (
+                            agency_name, feed_url, static_url,
+                            trip_id_pattern, ingest_strategy, static_strategy
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (feed_url) DO UPDATE SET
                             agency_name = EXCLUDED.agency_name,
                             static_url = EXCLUDED.static_url,
-                            trip_id_pattern = EXCLUDED.trip_id_pattern
+                            trip_id_pattern = EXCLUDED.trip_id_pattern,
+                            ingest_strategy = EXCLUDED.ingest_strategy,
+                            static_strategy = EXCLUDED.static_strategy
                         RETURNING agency_id, (xmax = 0) AS inserted
                         """,
-                        (name, feed, static, pattern),
+                        (name, feed, static, pattern, ingest_strategy, static_strategy),
                     )
                 aid, was_inserted = cur.fetchone()
                 if was_inserted:
@@ -122,6 +140,7 @@ def cmd_seed_agencies(args):
 
 
 def cmd_ingest(args):
+    """Run the archive ingest pipeline for one agency."""
     from pipeline.ingest import ingest
 
     conn = _get_conn()
@@ -131,6 +150,7 @@ def cmd_ingest(args):
 
 
 def cmd_load_static(args):
+    """Load a GTFS static zip into the database for one agency."""
     from pipeline.static_loader import load_static
 
     conn = _get_conn()
@@ -139,7 +159,26 @@ def cmd_load_static(args):
     conn.close()
 
 
+def cmd_refresh_static(args):
+    """Conditionally fetch and load static GTFS via each agency's static_strategy."""
+    import pathlib
+
+    from pipeline.static_fetcher import refresh_all, refresh_static
+
+    conn = _get_conn()
+    dest = pathlib.Path(args.dest)
+    if args.agency_id:
+        result = refresh_static(int(args.agency_id), conn, dest)
+        if result is None:
+            print("No change.")
+    else:
+        n = refresh_all(conn, dest)
+        print(f"Refreshed {n} agencies.")
+    conn.close()
+
+
 def cmd_analyze(args):
+    """Run the analysis pass for one agency."""
     from pipeline.analyze import analyze
 
     conn = _get_conn()
@@ -149,6 +188,7 @@ def cmd_analyze(args):
 
 
 def cmd_ingest_live(args):
+    """Fetch and ingest the live GTFS-RT feed for one or all agencies."""
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
@@ -169,6 +209,7 @@ def cmd_ingest_live(args):
 
 
 def cmd_migrate(args):
+    """Apply or roll back schema migrations."""
     from db.migrate import migrate_down, migrate_up
 
     conn = _get_conn()
@@ -180,6 +221,7 @@ def cmd_migrate(args):
 
 
 def main():
+    """Parse CLI arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
@@ -198,6 +240,13 @@ def main():
     p_static = sub.add_parser("load_static")
     p_static.add_argument("path")
     p_static.add_argument("--agency-id", default=None)
+
+    p_refresh = sub.add_parser(
+        "refresh-static",
+        help="Conditionally fetch + load static GTFS via the agency's static_strategy",
+    )
+    p_refresh.add_argument("--agency-id", default=None, help="Specific agency (default: all configured)")
+    p_refresh.add_argument("--dest", default="raw_archives_static", help="Local destination directory for fetched zips")
 
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)
@@ -226,6 +275,8 @@ def main():
         cmd_analyze(args)
     elif args.command == "ingest_live":
         cmd_ingest_live(args)
+    elif args.command == "refresh-static":
+        cmd_refresh_static(args)
     elif args.command == "migrate":
         cmd_migrate(args)
     else:
