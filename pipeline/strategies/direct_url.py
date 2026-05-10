@@ -19,6 +19,7 @@ from typing import Optional
 
 
 def _sha256(path: pathlib.Path) -> str:
+    """Return the hex SHA-256 digest of the file at path."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -81,11 +82,9 @@ def fetch(
     cur_sha = _sha256(tmp_current) if tmp_current.exists() else manifest.get("current", {}).get("sha256")
     lat_sha = _sha256(tmp_latest) if tmp_latest.exists() else manifest.get("latest", {}).get("sha256")
 
-    nothing_changed = (
-        cur_lm is None and lat_lm is None
-        and cur_sha == manifest.get("current", {}).get("sha256")
-        and lat_sha == manifest.get("latest", {}).get("sha256")
-    )
+    prev_cur_sha = manifest.get("current", {}).get("sha256")
+    prev_lat_sha = manifest.get("latest", {}).get("sha256")
+    nothing_changed = (cur_sha is None or cur_sha == prev_cur_sha) and (lat_sha is None or lat_sha == prev_lat_sha)
     if nothing_changed:
         for tmp in (tmp_current, tmp_latest):
             tmp.unlink(missing_ok=True)
