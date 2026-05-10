@@ -151,6 +151,22 @@ def cmd_load_static(args):
     conn.close()
 
 
+def cmd_refresh_static(args):
+    import pathlib
+    from pipeline.static_fetcher import refresh_all, refresh_static
+
+    conn = _get_conn()
+    dest = pathlib.Path(args.dest)
+    if args.agency_id:
+        result = refresh_static(int(args.agency_id), conn, dest)
+        if result is None:
+            print("No change.")
+    else:
+        n = refresh_all(conn, dest)
+        print(f"Refreshed {n} agencies.")
+    conn.close()
+
+
 def cmd_analyze(args):
     from pipeline.analyze import analyze
 
@@ -211,6 +227,15 @@ def main():
     p_static.add_argument("path")
     p_static.add_argument("--agency-id", default=None)
 
+    p_refresh = sub.add_parser(
+        "refresh-static",
+        help="Conditionally fetch + load static GTFS via the agency's static_strategy",
+    )
+    p_refresh.add_argument("--agency-id", default=None,
+                           help="Specific agency (default: all configured)")
+    p_refresh.add_argument("--dest", default="raw_archives_static",
+                           help="Local destination directory for fetched zips")
+
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)
 
@@ -238,6 +263,8 @@ def main():
         cmd_analyze(args)
     elif args.command == "ingest_live":
         cmd_ingest_live(args)
+    elif args.command == "refresh-static":
+        cmd_refresh_static(args)
     elif args.command == "migrate":
         cmd_migrate(args)
     else:
