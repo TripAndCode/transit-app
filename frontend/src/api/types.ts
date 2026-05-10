@@ -49,6 +49,18 @@ export type RouteShapeStop = {
   samples: number;
 };
 
+/** Stop on the chosen shape with no observations in the current window —
+ *  rendered as a hollow marker so the route topology stays visible. */
+export type UnobservedStop = {
+  stop_sequence: number;
+  stop_name: string;
+  stop_id?: string | null;
+  stop_code?: string | null;
+  platform_code?: string | null;
+  lon: number;
+  lat: number;
+};
+
 export type RouteShapeResponse = {
   route: string;
   /**
@@ -59,6 +71,9 @@ export type RouteShapeResponse = {
    */
   geometry: GeoJSON.LineString | null;
   stops: RouteShapeStop[];
+  /** Stops on the chosen shape with no delay observations yet. Optional
+   *  for back-compat with cached responses. */
+  unobserved_stops?: UnobservedStop[];
 };
 
 export type HeatmapProps = {
