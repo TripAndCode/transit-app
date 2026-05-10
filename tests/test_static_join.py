@@ -72,3 +72,57 @@ def test_static_join_handles_repeated_calls_same_transaction(pg_conn):
     assert rows1[0][3] is None  # service_type NULL
     assert rows1[0][4] is None  # scheduled_time NULL
     assert rows1[0][5] == "R1"  # route_code from RT
+
+
+# ---------------------------------------------------------------------------
+# Integration tests against captured fixtures
+# ---------------------------------------------------------------------------
+
+import pathlib
+
+from pipeline.static_loader import load_static
+
+FIX = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _make_agency(conn, name: str, feed_url: str) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            (name, feed_url),
+        )
+        aid = cur.fetchone()[0]
+    conn.commit()
+    return aid
+
+
+def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
+    raw = pb_path.read_bytes()
+    rows = static_join.parse_feed(
+        raw, "2026-05-09T12:00:00", "test/sample.bin", aid, conn
+    )
+    assert rows, "static_join returned zero rows; pb may be empty or malformed"
+
+    with_route = [r for r in rows if r[5] is not None]
+    with_svc = [r for r in rows if r[3] is not None]
+    with_sched = [r for r in rows if r[4] is not None]
+
+    # route_code is from RT.route_id and must always be present
+    assert len(with_route) == len(rows), (
+        f"route_code missing on {len(rows) - len(with_route)} rows"
+    )
+    # JOIN coverage budget: >=99% of rows have service_type and scheduled_time
+    cov_svc = len(with_svc) / len(rows)
+    cov_sched = len(with_sched) / len(rows)
+    assert cov_svc >= 0.99, f"service_type JOIN coverage {cov_svc:.2%}"
+    assert cov_sched >= 0.99, f"scheduled_time JOIN coverage {cov_sched:.2%}"
+
+
+def test_static_join_hiroden(pg_conn):
+    aid = _make_agency(
+        pg_conn, "広島電鉄_test",
+        "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin",
+    )
+    load_static(str(FIX / "hiroden_static.zip"), aid, pg_conn)
+    _run_and_assert(pg_conn, aid, FIX / "hiroden_tu.bin")
