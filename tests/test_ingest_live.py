@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -7,12 +7,8 @@ from pipeline.ingest import ingest_live
 
 def test_ingest_live_raises_when_no_feed_url():
     mock_conn = MagicMock()
-    # First fetchone: feed_url SELECT returns empty string
-    # Second fetchone (inside _resolve_strategy_name): returns None → falls back to aomori_regex
-    mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
-        ("",),
-        None,
-    ]
+    # feed_url SELECT returns empty string; ValueError is raised before strategy lookup
+    mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [("",)]
     with pytest.raises(ValueError, match="No feed_url"):
         ingest_live(1, mock_conn)
 

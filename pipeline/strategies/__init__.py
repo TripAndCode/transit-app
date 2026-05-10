@@ -17,6 +17,11 @@ import importlib
 
 
 def get_ingest_strategy(name: str):
+    """Return the ingest strategy module for the given strategy name.
+
+    Falls back to aomori_regex for empty/NULL names (back-compat for the
+    single existing production agency that predates the strategy column).
+    """
     if not name:
         # back-compat: empty / NULL falls back to Aomori for the single
         # existing production agency.
@@ -25,6 +30,7 @@ def get_ingest_strategy(name: str):
 
 
 def get_static_strategy(name: str):
+    """Return the static strategy module for the given strategy name, or None if not set."""
     if not name:
         return None  # caller treats "no static strategy" as a skip
     return importlib.import_module(f"pipeline.strategies.{name}")
