@@ -131,7 +131,9 @@ export type AskResponse = {
 export type Route = {
   route_id: string;
   route_short_name: string | null;
+  route_long_name: string | null;
   route_code: string | null;
+  trip_headsigns: string[];
 };
 export type Stop = {
   stop_id: string;
