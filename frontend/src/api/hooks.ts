@@ -10,7 +10,6 @@ import type {
   Agency,
   AskResponse,
   HeatmapCollection,
-  LiveResponse,
   ReportMeta,
   ReportResponse,
   Route,
@@ -76,18 +75,6 @@ export function useHeatmap(
     queryFn: () => apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`),
     enabled: agencyId != null,
     staleTime: 60 * 1000,
-  });
-}
-
-export function useLiveDelays(
-  agencyId: number | null,
-  options: { autoRefresh: boolean } = { autoRefresh: true },
-): UseQueryResult<LiveResponse> {
-  return useQuery({
-    queryKey: ["live", agencyId],
-    queryFn: () => apiGet<LiveResponse>(`/api/${agencyId}/delays/live`),
-    enabled: agencyId != null,
-    refetchInterval: options.autoRefresh ? 30_000 : false,
   });
 }
 
