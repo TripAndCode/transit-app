@@ -10,6 +10,10 @@ from psycopg2 import sql
 def _redirect_to_test_db() -> None:
     """Auto-redirect pytest to a sibling ``<dbname>_test`` database.
 
+    Also enables the ``http://test`` CSRF allowance via ``ALLOW_TEST_ORIGIN=1``
+    so tests using ASGITransport (base_url=http://test) can pass csrf_guard
+    without that origin being trusted in production.
+
     Every test fixture in this suite TRUNCATEs the schema between tests.
     Sharing the dev DB meant every ``make test`` run nuked the operator's
     map heatmap data — a constant source of "the page is empty" bug
@@ -31,6 +35,7 @@ def _redirect_to_test_db() -> None:
       auth/connection failure isn't silently swallowed by the same
       ``except`` that handles "another xdist worker already created it".
     """
+    os.environ.setdefault("ALLOW_TEST_ORIGIN", "1")
     explicit = os.environ.get("TEST_DATABASE_URL")
     if explicit:
         os.environ["DATABASE_URL"] = explicit
@@ -97,7 +102,8 @@ def pg_conn(apply_schema):
                 TRUNCATE agencies, updates, static_stops, static_stop_times,
                 static_trips, static_routes, static_calendar_dates, static_shapes,
                 agg_route_stats, agg_route_hour, agg_route_dow,
-                agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
+                agg_daily_trend, agg_stop_seq, rag_chunks, api_keys,
+                filter_presets, login_events, sessions, oauth_identities, users CASCADE
             """)
         conn.commit()
     finally:
@@ -128,7 +134,8 @@ async def aconn(apply_schema):
             TRUNCATE agencies, updates, static_stops, static_stop_times,
             static_trips, static_routes, static_calendar_dates, static_shapes,
             agg_route_stats, agg_route_hour, agg_route_dow,
-            agg_daily_trend, agg_stop_seq, rag_chunks, api_keys CASCADE
+            agg_daily_trend, agg_stop_seq, rag_chunks, api_keys,
+            filter_presets, login_events, sessions, oauth_identities, users CASCADE
         """)
     except Exception:
         pass

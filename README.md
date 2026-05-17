@@ -321,6 +321,35 @@ curl -X POST http://localhost:8000/api/1/ask \
 
 Query types understood: `ranking`, `by_hour`, `by_dow`, `by_stop`, `by_date`, `trend`, `on_time`, `compare`, `worst_5min`, `stop_ranking`, `dow_ranking`, `compare_ranking`, `stop_list`, `routes_at_stop`, `route_info`, `timetable`.
 
+## Authentication & user management
+
+Anonymous browsing is unchanged. Logging in (Google or GitHub) unlocks
+saved filter presets; admins (set via `ADMIN_EMAILS`) can manage users
+at `/admin/users`.
+
+### OAuth setup
+
+Google: create an OAuth 2.0 Client at console.cloud.google.com (type =
+Web). Authorized redirect URIs:
+- `http://localhost:8000/api/auth/google/callback` (dev)
+- `https://<DOMAIN>/api/auth/google/callback` (prod)
+
+GitHub: github.com/settings/developers → New OAuth App. Callback URLs:
+- `http://localhost:8000/api/auth/github/callback` (dev)
+- `https://<DOMAIN>/api/auth/github/callback` (prod)
+
+Set `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`,
+`SESSION_SIGNING_KEY` (`openssl rand -hex 32`), and
+`PUBLIC_BASE_URL` in `.env`.
+
+### First admin
+
+Add your email to `ADMIN_EMAILS` (comma-separated). On your first
+login, that user row is promoted to `role='admin'` and an audit
+event is recorded. Subsequent admins are promoted via the console
+at `/admin/users`. Removing an email from `ADMIN_EMAILS` does not
+auto-demote — use the console.
+
 ---
 
 ## Frontend
