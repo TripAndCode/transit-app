@@ -1,5 +1,6 @@
 """Self-service endpoints for logged-in users."""
 
+import json
 from typing import Any
 
 import asyncpg
@@ -96,7 +97,11 @@ async def revoke_session(
         raise HTTPException(404, "session not found")
     if len(rows) > 1:
         raise HTTPException(409, "prefix matches multiple sessions")
-    await conn.execute("DELETE FROM sessions WHERE sid=$1", rows[0]["sid"])
+    await conn.execute(
+        "DELETE FROM sessions WHERE sid=$1 AND user_id=$2",
+        rows[0]["sid"],
+        user.user_id,
+    )
     return Response(status_code=204)
 
 
@@ -122,8 +127,6 @@ async def list_presets(agency_id: int, user: User = Depends(require_user), conn=
         user.user_id,
         agency_id,
     )
-    import json
-
     return [
         PresetOut(
             preset_id=r["preset_id"],
@@ -144,8 +147,6 @@ async def create_preset(
 ):
     """Save a filter preset; 409 if the name is already in use."""
     csrf_guard(request)
-    import json
-
     try:
         row = await conn.fetchrow(
             """

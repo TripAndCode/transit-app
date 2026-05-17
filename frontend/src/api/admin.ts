@@ -47,7 +47,7 @@ async function deleteUser(uid: number) {
     method: "DELETE",
     credentials: "include",
   });
-  if (!r.ok && r.status !== 204) {
+  if (!r.ok) {
     const detail = await r.json().catch(() => ({}));
     throw new Error(detail.detail || `DELETE ${r.status}`);
   }
