@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request
 
 _PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 _ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
+_CORS_ORIGINS = tuple(o.strip() for o in _os.environ.get("CORS_ORIGINS", "").split(",") if o.strip())
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,10 @@ def csrf_guard(request: Request) -> None:
         raise HTTPException(status_code=403, detail="origin required")
     if origin == base or origin.startswith(base + "/"):
         return
+    for allowed in _CORS_ORIGINS:
+        a = allowed.rstrip("/")
+        if origin == a or origin.startswith(a + "/"):
+            return
     if _ALLOW_TEST_ORIGIN and (origin == "http://test" or origin.startswith("http://test/")):
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")

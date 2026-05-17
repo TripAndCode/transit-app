@@ -33,7 +33,7 @@ export function useLogout() {
         method: "POST",
         credentials: "include",
       });
-      if (!r.ok && r.status !== 204) throw new Error("logout failed");
+      if (!r.ok) throw new Error("logout failed");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
