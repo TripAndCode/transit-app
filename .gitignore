@@ -10,8 +10,7 @@ raw_archives/
 raw_archives_static/
 .env
 .claude/
-docs/*
-!docs/deploy-linode.md
+docs/
 specs/
 .worktrees/
 .superpowers/
