@@ -11,8 +11,8 @@ raw_archives_static/
 .env
 .claude/
 docs/*
-!docs/superpowers/
 !docs/deploy-linode.md
+specs/
 .worktrees/
 .superpowers/
 oracle_cloud/
