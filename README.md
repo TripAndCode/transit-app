@@ -228,6 +228,10 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0002_trip_id_pattern` | `agencies.trip_id_pattern` for per-agency parsing |
 | `0003_api_keys` | API-key registry for the optional Pro tier |
 | `0004_stop_codes` | `static_stops.stop_code` + `platform_code` (surfaced in map tooltip) |
+| `0005_static_shapes` | `static_shapes` table for route polyline geometry |
+| `0006_strategy_columns` | `agencies.ingest_strategy` + `static_strategy` |
+| `0007_static_trips_service_id` | `static_trips.service_id` for calendar joins |
+| `0008_static_routes_long_name` | `static_routes.route_long_name` for richer filters |
 
 ---
 
@@ -251,7 +255,7 @@ poetry run python gtfs_pipeline.py ingest_live
 poetry run python gtfs_pipeline.py ingest_live --agency-id 1
 ```
 
-Fetches the current GTFS-RT protobuf from each agency's `feed_url`. Runs automatically on Railway every 15 minutes via cron.
+Fetches the current GTFS-RT protobuf from each agency's `feed_url`. In production it is invoked hourly by a GitHub Actions workflow that hits the guarded `POST /internal/cron/ingest` endpoint — see [Deployment](#deployment-linode-vps-tokyo).
 
 ### Load static GTFS
 
@@ -356,7 +360,7 @@ make frontend-build       # outputs to frontend/dist
 
 ### Production
 
-The Dockerfile uses a multistage build that compiles `frontend/` and copies `dist/` into `api/static/`. FastAPI mounts it at `/`, so the same Railway service serves both the API and the SPA — no CORS, one URL.
+The Dockerfile uses a multistage build that compiles `frontend/` and copies `dist/` into `api/static/`. FastAPI mounts it at `/`, so a single container serves both the API and the SPA — no CORS, one URL.
 
 ### Frontend env vars
 
@@ -454,5 +458,5 @@ Domain ideas (portfolio): `transit-delay.app`, `gtfs-jp.dev`, `chien-map.app` (�
 ### Operational notes
 
 - Migrations: not auto-run. After `git pull && docker compose --profile prod up -d --build`, run `docker compose exec app python gtfs_pipeline.py migrate up` if the pull included new migrations.
-- The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run cron.yml`.
+- The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run "Hourly Ingest"`.
 - `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.

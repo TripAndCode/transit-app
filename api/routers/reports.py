@@ -133,7 +133,7 @@ async def get_report(
     request: Request,
     report_type: str,
     limit: int | None = Query(default=None, ge=1),
-    format: str | None = Query(default=None, regex="^(json|csv)$"),
+    format: str | None = Query(default=None, pattern="^(json|csv)$"),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
