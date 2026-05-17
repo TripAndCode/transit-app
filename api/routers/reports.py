@@ -43,6 +43,8 @@ _REPORT_TYPES = (
 
 
 class ReportMeta(BaseModel):
+    """Listing entry returned by ``GET /reports``."""
+
     report_type: str
     rendered_at: datetime
 
@@ -59,6 +61,8 @@ class ReportCtx(BaseModel):
 
 
 class ReportResponse(BaseModel):
+    """Payload returned by ``GET /reports/{report_type}`` in JSON mode."""
+
     report_type: str
     rendered_at: datetime
     text: str
@@ -67,6 +71,7 @@ class ReportResponse(BaseModel):
 
 
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
+    """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),
@@ -133,7 +138,7 @@ async def get_report(
     request: Request,
     report_type: str,
     limit: int | None = Query(default=None, ge=1),
-    format: str | None = Query(default=None, regex="^(json|csv)$"),
+    format: str | None = Query(default=None, pattern="^(json|csv)$"),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
