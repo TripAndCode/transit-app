@@ -6,8 +6,8 @@ with :func:`async_lru_cache` so identical (agency, ctx, kwargs) requests
 served within ``ttl_seconds`` reuse the previous result. Bounded so the
 cache never grows beyond ``maxsize`` entries.
 
-The cache is in-process — fine for the single Railway service. Switch to
-a distributed cache only when we run multiple replicas.
+The cache is in-process — fine for the single-container deploy. Switch
+to a distributed cache only when we run multiple replicas.
 """
 
 from __future__ import annotations

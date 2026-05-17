@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fetch archives from Oracle Cloud server then ingest into Postgres.
-# Designed to run as a Railway cron job (or any remote host with DATABASE_URL set).
+# Local-dev replay path: requires SSH access to the Oracle VM. The deployed
+# cron uses `ingest_live` against each agency's feed_url instead.
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
 #
 # Env vars: everything from fetch_archives.sh plus:

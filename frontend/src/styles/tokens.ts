@@ -1,14 +1,3 @@
-export const COLORS = {
-  bgPage: "#fafaf8",
-  bgSurface: "#ffffff",
-  borderSoft: "#eeeeee",
-  textPrimary: "#2a2a2a",
-  textSecondary: "#6a6a6a",
-  accent: "#5b6cad",
-  errorBg: "#fdf6e3",
-  errorFg: "#8a6f1c",
-} as const;
-
 // Severity ramp for delays (minutes -> color). Calm at the low end so the
 // usual data isn't visually loud; severe (>10 min) is a true red so the
 // genuinely problematic stops pop without ambiguity.

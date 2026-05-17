@@ -25,7 +25,7 @@ LOCAL_STATIC_DIR="${LOCAL_STATIC_DIR:-$(dirname "$0")/../raw_archives_static}"
 
 mkdir -p "$LOCAL_RT_DIR" "$LOCAL_STATIC_DIR"
 
-# Resolve SSH key: prefer base64 env var (for Railway secrets), fall back to file path
+# Resolve SSH key: prefer base64 env var (for CI/secret stores), fall back to file path
 KEY_FILE=""
 CLEANUP_KEY=0
 
