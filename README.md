@@ -356,51 +356,49 @@ auto-demote — use the console.
 
 ### Flow
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant B as Browser
-    participant API as FastAPI
-    participant P as OAuth provider
-    participant DB as Postgres
+```
+                                           ┌──────────────┐
+   Browser  ──── GET /api/auth/{p}/login ─►│  FastAPI     │
+                                           │              │  mint state + PKCE
+                                           │              │  sign oauth_tx cookie
+   Browser  ◄─── 302 to provider auth ─────│              │
+                ✓ sets oauth_tx (5 min, signed, httponly)
+        │
+        ▼
+   Provider consent screen (Google / GitHub)
+        │
+        ▼
+   Browser  ──── /api/auth/{p}/callback?code&state ───►  FastAPI
+                                                            │
+                                                            ▼
+                                          ┌─── verify signature, state, provider ───┐
+                                          │ FAIL                                    │ OK
+                                          ▼                                         ▼
+                              insert login_failed(reason)              exchange code w/ PKCE
+                              302 → /login?error=...                          │
+                                                                              ▼
+                                                                      fetch userinfo
+                                                                              │
+                                                            ┌─ email missing / unverified ─┐
+                                                            ▼                              ▼
+                                              insert login_failed(reason)            BEGIN txn
+                                              302 → /login?error=...                       │
+                                                                                   match by (provider, sub)
+                                                                                   else upsert by email
+                                                                                   ├─ new user? → account_created
+                                                                                   ├─ ADMIN_EMAILS? → role_changed
+                                                                                   ├─ insert session
+                                                                                   └─ insert login
+                                                                                          │
+                                                                                  COMMIT; set sid cookie
+                                                                                  302 → <next>
 
-    B->>API: GET /api/auth/{provider}/login?next=/
-    API->>API: mint state + PKCE; sign `oauth_tx` cookie
-    API-->>B: 302 → provider auth URL (sets oauth_tx)
-    B->>P: consent screen
-    P-->>B: 302 → /api/auth/{provider}/callback?code&state
-    B->>API: callback (carries oauth_tx)
-    API->>API: verify signature + state + provider match
-    alt validation fails
-        API->>DB: insert login_failed(reason)
-        API-->>B: 302 → /login?error=<reason>
-    else success
-        API->>P: exchange code (PKCE)
-        API->>P: fetch userinfo
-        alt email missing / unverified
-            API->>DB: insert login_failed(reason)
-            API-->>B: 302 → /login?error=<reason>
-        else
-            API->>DB: BEGIN; upsert users / oauth_identities
-            opt new user row
-                API->>DB: insert account_created
-            end
-            opt email in ADMIN_EMAILS
-                API->>DB: promote role; insert role_changed
-            end
-            API->>DB: insert session; insert login; COMMIT
-            API-->>B: 302 → <next> (sets `sid` cookie)
-        end
-    end
+   Subsequent requests:  Browser sends sid cookie → middleware does SELECT session JOIN users
+                         touches last_seen_at at most 1/min/sid
 
-    Note over B,API: subsequent requests
-    B->>API: any request (sid cookie)
-    API->>DB: SELECT session JOIN users
-    API-->>B: response (server stores last_seen_at ≤ 1/min/sid)
-
-    B->>API: POST /api/auth/logout (Origin checked)
-    API->>DB: delete session; insert logout
-    API-->>B: 204 (clears sid)
+   Logout:               POST /api/auth/logout (Origin checked)
+                         → delete session, insert logout
+                         → 204 + clear sid cookie
 ```
 
 **Audit kinds emitted** (table `login_events`):
