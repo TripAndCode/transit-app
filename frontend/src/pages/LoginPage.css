@@ -1,0 +1,171 @@
+/* LoginPage — full-viewport centered card with subtle grid backdrop. */
+
+html:has(.login-shell),
+body:has(.login-shell),
+#root:has(.login-shell) {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.login-shell {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  background: #fafaf7;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Faint Vercel/Linear-style grid. Stays at low opacity so it doesn't compete. */
+.login-shell__grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+          mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+/* Absolutely centered card — transform-translate keeps it locked to viewport
+   center regardless of parent flex/grid quirks. */
+.login-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100vw - 48px);
+  max-width: 380px;
+  padding: 36px 32px 28px;
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px -16px rgba(15, 23, 42, 0.12);
+}
+
+.login-card__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+  margin-bottom: 24px;
+}
+.login-card__brand-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+.login-card__brand-tag {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.login-card__h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  text-align: center;
+  color: var(--text-primary);
+}
+.login-card__sub {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.login-card__error {
+  margin-top: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-card__buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.login-card__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: box-shadow var(--transition), background var(--transition), border-color var(--transition);
+  cursor: pointer;
+  user-select: none;
+}
+.login-card__btn[aria-disabled="true"] { pointer-events: none; opacity: 0.7; }
+.login-card__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.login-card__btn--google {
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+}
+.login-card__btn--google:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+
+.login-card__btn--github {
+  background: #111827;
+  color: #ffffff;
+  border: 1px solid #111827;
+}
+.login-card__btn--github:hover {
+  background: #0b1220;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
+}
+.login-card__btn--github:focus-visible {
+  outline-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(91, 108, 173, 0.55);
+}
+
+.login-card__spinner {
+  width: 18px;
+  height: 18px;
+  animation: login-spin 0.8s linear infinite;
+}
+@keyframes login-spin {
+  to { transform: rotate(360deg); }
+}
+
+.login-card__footer {
+  margin: 20px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+.login-card__footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.login-card__footer a:hover { color: var(--text-secondary); }
