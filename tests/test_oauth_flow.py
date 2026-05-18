@@ -185,6 +185,105 @@ async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_first_login_emits_account_created(auth_client, aconn, monkeypatch):
+    """Brand-new user: account_created fires once, alongside the login event."""
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "new-sub", "email": "new@x", "email_verified": True, "name": "N", "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='new@x'")
+    kinds = [
+        r["kind"] for r in await aconn.fetch("SELECT kind FROM login_events WHERE user_id=$1 ORDER BY event_id", uid)
+    ]
+    assert kinds == ["account_created", "login"]
+
+
+@pytest.mark.asyncio
+async def test_repeat_login_skips_account_created(auth_client, aconn, monkeypatch):
+    """Second login from the same provider only emits ``login``, not account_created."""
+    uid = (await aconn.fetchrow("INSERT INTO users (email) VALUES ('repeat@x') RETURNING user_id"))["user_id"]
+    await aconn.execute(
+        "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link) "
+        "VALUES ('google', 'r-sub', $1, 'repeat@x')",
+        uid,
+    )
+
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "r-sub", "email": "repeat@x", "email_verified": True, "name": None, "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    kinds = [
+        r["kind"] for r in await aconn.fetch("SELECT kind FROM login_events WHERE user_id=$1 ORDER BY event_id", uid)
+    ]
+    assert "account_created" not in kinds
+    assert "login" in kinds
+
+
+@pytest.mark.asyncio
+async def test_bad_state_records_login_failed(auth_client, aconn):
+    """Missing tx cookie + mismatched state → login_failed audit row."""
+    resp = await auth_client.get(
+        "/api/auth/google/callback?code=abc&state=mismatch",
+        cookies={"oauth_tx": "garbage"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    row = await aconn.fetchrow(
+        "SELECT kind, provider, meta::text AS meta FROM login_events "
+        "WHERE kind='login_failed' ORDER BY event_id DESC LIMIT 1"
+    )
+    assert row is not None
+    assert row["provider"] == "google"
+    assert '"state"' in row["meta"]
+
+
+@pytest.mark.asyncio
+async def test_unverified_email_records_login_failed(auth_client, aconn, monkeypatch):
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "u", "email": "u@x", "email_verified": False, "name": None, "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    row = await aconn.fetchrow(
+        "SELECT meta::text AS meta FROM login_events WHERE kind='login_failed' ORDER BY event_id DESC LIMIT 1"
+    )
+    assert row is not None
+    assert '"unverified_email"' in row["meta"]
+
+
+@pytest.mark.asyncio
 async def test_logout_when_anonymous_still_204(auth_client):
     """A user whose cookie already expired/cleared should not see a 401
     on POST /api/auth/logout — the endpoint is idempotent."""

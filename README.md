@@ -354,6 +354,66 @@ event is recorded. Subsequent admins are promoted via the console
 at `/admin/users`. Removing an email from `ADMIN_EMAILS` does not
 auto-demote — use the console.
 
+### Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant API as FastAPI
+    participant P as OAuth provider
+    participant DB as Postgres
+
+    B->>API: GET /api/auth/{provider}/login?next=/
+    API->>API: mint state + PKCE; sign `oauth_tx` cookie
+    API-->>B: 302 → provider auth URL (sets oauth_tx)
+    B->>P: consent screen
+    P-->>B: 302 → /api/auth/{provider}/callback?code&state
+    B->>API: callback (carries oauth_tx)
+    API->>API: verify signature + state + provider match
+    alt validation fails
+        API->>DB: insert login_failed(reason)
+        API-->>B: 302 → /login?error=<reason>
+    else success
+        API->>P: exchange code (PKCE)
+        API->>P: fetch userinfo
+        alt email missing / unverified
+            API->>DB: insert login_failed(reason)
+            API-->>B: 302 → /login?error=<reason>
+        else
+            API->>DB: BEGIN; upsert users / oauth_identities
+            opt new user row
+                API->>DB: insert account_created
+            end
+            opt email in ADMIN_EMAILS
+                API->>DB: promote role; insert role_changed
+            end
+            API->>DB: insert session; insert login; COMMIT
+            API-->>B: 302 → <next> (sets `sid` cookie)
+        end
+    end
+
+    Note over B,API: subsequent requests
+    B->>API: any request (sid cookie)
+    API->>DB: SELECT session JOIN users
+    API-->>B: response (server stores last_seen_at ≤ 1/min/sid)
+
+    B->>API: POST /api/auth/logout (Origin checked)
+    API->>DB: delete session; insert logout
+    API-->>B: 204 (clears sid)
+```
+
+**Audit kinds emitted** (table `login_events`):
+- `account_created` — first time the user row is INSERTed
+- `login` — successful session created
+- `login_failed` — callback aborted (`state`, `provider_down`, `unverified_email`, `no_email`); `user_id` is null
+- `logout` — user-initiated session deletion
+- `role_changed` — admin promotion / demotion (via `ADMIN_EMAILS` bootstrap or console)
+- `suspended` / `unsuspended` — admin console toggles
+- `deleted` — admin console soft-delete (PII anonymized, sessions revoked)
+
+Each row carries `ip`, `user_agent`, `provider`, optional `meta` JSONB, and `actor_id` (who performed the action — same as `user_id` for self-actions, admin's uid for admin-actions).
+
 ---
 
 ## Frontend
