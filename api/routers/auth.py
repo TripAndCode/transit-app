@@ -123,8 +123,17 @@ async def _fetch_userinfo(client, token, provider: str) -> dict:
     }
 
 
-async def _upsert_user(conn, provider: str, info: dict) -> tuple[int, str]:
-    """Returns (user_id, role). Auto-links by verified email; promotes per ADMIN_EMAILS."""
+async def _upsert_user(
+    conn,
+    provider: str,
+    info: dict,
+    *,
+    ip: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[int, str]:
+    """Returns (user_id, role). Auto-links by verified email; promotes per ADMIN_EMAILS.
+    ``ip`` / ``user_agent`` are forwarded onto the account_created audit row when
+    a fresh user is created."""
     sub = info["sub"]
     email = info["email"]
 
@@ -140,18 +149,30 @@ async def _upsert_user(conn, provider: str, info: dict) -> tuple[int, str]:
         # 2. Match by verified email (auto-link). ON CONFLICT DO UPDATE is a
         # no-op write that lets us use RETURNING whether the row was new or
         # existing — race-tolerant against concurrent first-time logins for
-        # the same email.
+        # the same email. ``xmax = 0`` distinguishes a fresh INSERT (new
+        # account) from the UPDATE path so we can emit account_created
+        # exactly once per user.
         row = await conn.fetchrow(
             """
             INSERT INTO users (email, name, avatar_url) VALUES ($1, $2, $3)
             ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-            RETURNING user_id
+            RETURNING user_id, (xmax = 0) AS is_new
             """,
             email,
             info.get("name"),
             info.get("avatar_url"),
         )
         uid = row["user_id"]
+        if row["is_new"]:
+            await record_event(
+                conn,
+                user_id=uid,
+                actor_id=uid,
+                kind="account_created",
+                provider=provider,
+                ip=ip,
+                user_agent=user_agent,
+            )
         await conn.execute(
             "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link) "
             "VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
@@ -185,6 +206,21 @@ async def _upsert_user(conn, provider: str, info: dict) -> tuple[int, str]:
     return uid, role
 
 
+async def _fail_login(conn, request: Request, provider: str, reason: str) -> RedirectResponse:
+    """Audit + redirect helper for OAuth callback failure paths."""
+    await record_event(
+        conn,
+        user_id=None,
+        actor_id=None,
+        kind="login_failed",
+        provider=provider,
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        meta={"reason": reason},
+    )
+    return RedirectResponse(url=f"/login?error={reason}", status_code=302)
+
+
 @router.get("/{provider}/callback")
 async def callback(provider: str, request: Request, conn: asyncpg.Connection = Depends(get_conn)):
     """OAuth provider redirects here with ``code`` and ``state``. Validate against
@@ -195,17 +231,17 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         raise HTTPException(404, "unknown provider")
     tx_raw = request.cookies.get(TX_COOKIE)
     if not tx_raw:
-        return RedirectResponse(url="/login?error=state", status_code=302)
+        return await _fail_login(conn, request, provider, "state")
     try:
         tx = _signer.loads(tx_raw, max_age=TX_TTL_SEC)
     except BadSignature:
-        return RedirectResponse(url="/login?error=state", status_code=302)
+        return await _fail_login(conn, request, provider, "state")
     if tx.get("provider") != provider:
-        return RedirectResponse(url="/login?error=state", status_code=302)
+        return await _fail_login(conn, request, provider, "state")
 
     state_query = request.query_params.get("state")
     if state_query != tx.get("state"):
-        return RedirectResponse(url="/login?error=state", status_code=302)
+        return await _fail_login(conn, request, provider, "state")
 
     client = oauth.create_client(provider)
     try:
@@ -216,18 +252,18 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
             code_verifier=tx["verifier"],
         )
     except Exception:
-        return RedirectResponse(url="/login?error=provider_down", status_code=302)
+        return await _fail_login(conn, request, provider, "provider_down")
 
     info = await _fetch_userinfo(client, token, provider)
     if not info["email"] or not info["email_verified"]:
         code = "unverified_email" if info["email"] else "no_email"
-        return RedirectResponse(url=f"/login?error={code}", status_code=302)
+        return await _fail_login(conn, request, provider, code)
 
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
     async with conn.transaction():
-        uid, role = await _upsert_user(conn, provider, info)
+        uid, role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
         sid = secrets.token_urlsafe(32)
-        ua = request.headers.get("user-agent")
-        ip = request.client.host if request.client else None
         await conn.execute(
             "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
             sid,
