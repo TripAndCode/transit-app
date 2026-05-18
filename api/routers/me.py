@@ -88,6 +88,10 @@ async def revoke_session(
     csrf_guard(request)
     if len(sid_prefix) < 12:
         raise HTTPException(400, "prefix too short")
+    # secrets.token_urlsafe() only emits these characters; reject anything else
+    # so a path containing `%` or `_` can't become a LIKE wildcard.
+    if not all(c.isalnum() or c in "-_" for c in sid_prefix):
+        raise HTTPException(400, "invalid prefix")
     rows = await conn.fetch(
         "SELECT sid FROM sessions WHERE user_id=$1 AND sid LIKE $2",
         user.user_id,
