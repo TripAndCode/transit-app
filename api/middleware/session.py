@@ -43,7 +43,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
         """Resolve the session cookie to a User, or pass through for static/health paths."""
         request.state.user = None
         path = request.url.path
-        if path.startswith(("/assets/", "/health")) or path == "/favicon.ico":
+        if path.startswith("/assets/") or path in ("/health", "/favicon.ico"):
             return await call_next(request)
         sid = request.cookies.get(SESSION_COOKIE_NAME)
         clear_cookie = False

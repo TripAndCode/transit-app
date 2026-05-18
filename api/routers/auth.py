@@ -70,7 +70,6 @@ async def login(provider: str, request: Request, next: str = "/"):
     safe_next = sanitize_next(next)
     redirect_uri = f"{PUBLIC_BASE_URL}/api/auth/{provider}/callback"
     client = oauth.create_client(provider)
-    # Authlib generates state + PKCE; we sign and store next + state ourselves
     state = secrets.token_urlsafe(24)
     code_verifier = secrets.token_urlsafe(48)
     tx_payload = _signer.dumps({"state": state, "verifier": code_verifier, "next": safe_next, "provider": provider})
@@ -80,7 +79,6 @@ async def login(provider: str, request: Request, next: str = "/"):
         state=state,
         code_verifier=code_verifier,
     )
-    # `authorize_redirect` returns a Starlette RedirectResponse; tack on tx cookie
     auth_url_resp.set_cookie(
         TX_COOKIE,
         tx_payload,
