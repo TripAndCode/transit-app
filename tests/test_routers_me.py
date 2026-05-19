@@ -1,3 +1,5 @@
+"""Tests for self-service ``/api/me`` endpoints: profile, sessions, presets."""
+
 import os
 from datetime import datetime, timedelta, timezone
 

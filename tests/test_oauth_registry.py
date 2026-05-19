@@ -1,3 +1,6 @@
+"""Smoke test that the Authlib registry exposes both providers after env setup."""
+
+
 def test_oauth_registry_has_two_providers(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "g")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "gs")

@@ -14,11 +14,15 @@ router = APIRouter(prefix="/api", tags=["me"])
 
 
 class IdentityOut(BaseModel):
+    """One OAuth identity linked to the caller."""
+
     provider: str
     email_at_link: str | None
 
 
 class MeOut(BaseModel):
+    """Caller profile + linked identities returned by ``GET /api/me``."""
+
     user_id: int
     email: str
     name: str | None
@@ -45,6 +49,8 @@ async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = 
 
 
 class SessionOut(BaseModel):
+    """One active session row exposed to the caller (sid truncated to a prefix)."""
+
     sid_prefix: str
     user_agent: str | None
     ip: str | None
@@ -110,12 +116,16 @@ async def revoke_session(
 
 
 class PresetIn(BaseModel):
+    """Body for creating a saved filter preset."""
+
     agency_id: int
     name: str
     range_ctx: dict[str, Any]
 
 
 class PresetOut(BaseModel):
+    """Saved filter preset as returned to the caller."""
+
     preset_id: int
     agency_id: int
     name: str

@@ -1,3 +1,5 @@
+"""Unit tests for the auth FastAPI dependencies in ``api.security``."""
+
 import pytest
 from fastapi import HTTPException, Request
 

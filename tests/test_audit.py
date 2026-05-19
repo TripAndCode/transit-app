@@ -1,3 +1,5 @@
+"""Tests for ``pipeline.audit.record_event``: one INSERT into ``login_events``."""
+
 import json
 
 import pytest

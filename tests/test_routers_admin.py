@@ -1,3 +1,7 @@
+"""End-to-end tests for ``/api/admin/users`` (list, detail, patch, delete) covering
+the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonymization.
+"""
+
 import os
 from datetime import datetime, timedelta, timezone
 
