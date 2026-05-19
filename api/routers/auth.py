@@ -57,6 +57,7 @@ def sanitize_next(value: str | None) -> str:
 
 
 def _is_secure() -> bool:
+    """Return True when cookies should set ``Secure`` (deployment is on HTTPS)."""
     return PUBLIC_BASE_URL.startswith("https://")
 
 

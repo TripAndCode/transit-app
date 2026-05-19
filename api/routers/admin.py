@@ -34,6 +34,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 class UserRow(BaseModel):
+    """One user row as returned by the admin list/detail endpoints."""
+
     user_id: int
     email: str
     name: str | None
@@ -44,6 +46,8 @@ class UserRow(BaseModel):
 
 
 class UserList(BaseModel):
+    """Paginated admin user listing wrapper."""
+
     users: list[UserRow]
     total: int
 
@@ -97,6 +101,8 @@ async def list_users(
 
 
 class UserDetail(UserRow):
+    """User row + linked OAuth identities + recent audit events."""
+
     identities: list[dict]
     recent_events: list[dict]
 
@@ -145,6 +151,8 @@ async def user_detail(
 
 
 class UserPatch(BaseModel):
+    """Partial update body for an admin PATCH on a user."""
+
     role: str | None = None
     suspended: bool | None = None
 

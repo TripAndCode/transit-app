@@ -1,3 +1,5 @@
+"""Tests for ``SessionMiddleware``: anonymous, valid cookie, expired cookie, suspended user."""
+
 import os
 from datetime import datetime, timedelta, timezone
 
