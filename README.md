@@ -6,7 +6,7 @@ Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT prot
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - [Poetry](https://python-poetry.org/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - A [Groq API key](https://console.groq.com/) (free tier is sufficient)
@@ -216,7 +216,7 @@ For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b
 | `make migrate-down` | Roll back the latest migration |
 | `docker compose down -v` | Stop and delete data volume |
 
-Data is stored in a named Docker volume (`prod-backend_transit_pgdata`) — it survives container restarts.
+Data is stored in a named Docker volume (`transit-app_transit_pgdata`) — it survives container restarts.
 
 ### Migrations
 
@@ -232,6 +232,8 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0006_strategy_columns` | `agencies.ingest_strategy` + `static_strategy` |
 | `0007_static_trips_service_id` | `static_trips.service_id` for calendar joins |
 | `0008_static_routes_long_name` | `static_routes.route_long_name` for richer filters |
+| `0009_auth` | `users`, `oauth_identities`, `sessions`, `login_events`, `filter_presets` |
+| `0010_audit_kinds` | widens `login_events.kind` to include `account_created` + `login_failed` |
 
 ---
 
@@ -303,10 +305,24 @@ Computes five aggregation tables used by all API queries:
 | `GET` | `/api/{agency_id}/today/route-summary` | Per-route operational summary for the most recent observation date |
 | `GET` | `/api/{agency_id}/routes` | Static route list (with derived `route_code`) |
 | `GET` | `/api/{agency_id}/stops` | Static stop list |
+| `GET` | `/api/auth/{provider}/login` | Start OAuth (provider = `google` \| `github`); 302 to provider |
+| `GET` | `/api/auth/{provider}/callback` | OAuth callback; mints `sid` cookie, redirects to sanitized `next` |
+| `POST` | `/api/auth/logout` | Delete session row + clear `sid` cookie (Origin-checked) |
+| `GET` | `/api/me` | Caller profile + linked OAuth identities |
+| `GET` | `/api/me/sessions` | Caller's active sessions (sid truncated) |
+| `DELETE` | `/api/me/sessions/{prefix}` | Revoke a specific session by 12-char sid prefix |
+| `GET` | `/api/me/presets?agency_id=` | Caller's saved filter presets |
+| `POST` | `/api/me/presets` | Save current filter as a named preset |
+| `DELETE` | `/api/me/presets/{id}` | Delete a saved preset |
+| `GET` | `/api/admin/users` | Admin: list users (`q`, `role`, `suspended`, `limit`, `offset`) |
+| `GET` | `/api/admin/users/{uid}` | Admin: user detail + identities + last 20 audit events |
+| `PATCH` | `/api/admin/users/{uid}` | Admin: change `role` / `suspended` (self-guard + last-admin guard) |
+| `DELETE` | `/api/admin/users/{uid}` | Admin: soft-delete (anonymize PII, drop sessions + identities) |
 
-All `/api/*` endpoints accept the global filter context as query params:
-`from`, `to`, `dow`, `time_band`, `service`, `routes` (comma-joined).
-The frontend persists these in the URL via `useRangeContext`.
+The data endpoints under `/api/{agency_id}/*` accept the global filter
+context as query params: `from`, `to`, `dow`, `time_band`, `service`,
+`routes` (comma-joined). The frontend persists these in the URL via
+`useRangeContext`.
 
 ### Rate limits
 
@@ -473,6 +489,7 @@ api/main.py                 FastAPI app (asyncpg pool, Asia/Tokyo session, SPA s
 api/middleware/
   auth.py                   X-API-Key validation → request.state.tier (free / pro)
   ratelimit.py              slowapi 60/min free, 600/min pro
+  session.py                sid cookie → DB lookup → request.state.user (1/min last_seen throttle)
 api/routers/
   agencies.py               agency CRUD
   ask.py                    NL question → Groq tool-use → answer (pipeline/query/chat)
@@ -481,6 +498,11 @@ api/routers/
   map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
   internal.py               POST /internal/cron/ingest (CRON_SECRET-gated)
+  auth.py                   OAuth login / callback / logout (Authlib + signed oauth_tx cookie)
+  me.py                     self-service /api/me, sessions, filter presets
+  admin.py                  /api/admin/users CRUD with self + last-admin guards
+api/oauth.py                Authlib OAuth client registry (Google OIDC, GitHub)
+api/security.py             User dataclass + require_user / require_admin / csrf_guard deps
     │
     ▼
 api/range.py                shared RangeCtx (from/to/dow/time_band/service/routes) + SQL filter builder
@@ -489,6 +511,7 @@ pipeline/query/
   tools.py                  the six tool implementations + route validation
   executor.py               legacy SQL executors used by /query and tools
   formatter.py              Python templates → Japanese text
+pipeline/audit.py           one-row INSERT into login_events (caller owns the txn)
 pipeline/reports.py         compute_* aggregations (cached via async_lru_cache)
 pipeline/cache.py           bounded async LRU + TTL decorator
 ```
