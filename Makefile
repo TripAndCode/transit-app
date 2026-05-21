@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies verify-secrets
 
 # Default target — first-run setup.
 all: bootstrap
@@ -142,3 +142,12 @@ frontend-dev:
 
 frontend-build:
 	cd frontend && npm install && npm run build
+
+# ── Secret scanning ──────────────────────────────────────────────────────────
+# Defense-in-depth. The pre-commit hook runs gitleaks on every commit; this
+# target re-scans the entire working tree on demand. Requires `pre-commit`
+# (`pipx install pre-commit` or `brew install pre-commit`).
+
+verify-secrets:
+	@command -v pre-commit >/dev/null || { echo "ERROR: pre-commit not installed. brew install pre-commit"; exit 1; }
+	pre-commit run gitleaks --all-files

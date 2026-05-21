@@ -1,0 +1,11 @@
+# Defense-in-depth: scan every commit and push for secret patterns.
+# Run `make verify-secrets` for an on-demand full-repo scan.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: gitleaks
+        # --redact keeps any flagged value from being echoed to the
+        # terminal. The hook scans staged content only.
+        args: [--redact]
