@@ -30,6 +30,7 @@ bootstrap:
 	@echo "→ building SPA + baking into api/static/ for single-origin serve"
 	@$(MAKE) frontend-build
 	@$(MAKE) bake
+	@command -v pre-commit >/dev/null && pre-commit install >/dev/null && echo "→ installed pre-commit hooks" || echo "→ skipping pre-commit hook install (run 'brew install pre-commit' to enable)"
 	@echo ""
 	@echo "✓ bootstrap done. Next:"
 	@echo "    make doctor       # sanity check"
@@ -144,10 +145,11 @@ frontend-build:
 	cd frontend && npm install && npm run build
 
 # ── Secret scanning ──────────────────────────────────────────────────────────
-# Defense-in-depth. The pre-commit hook runs gitleaks on every commit; this
-# target re-scans the entire working tree on demand. Requires `pre-commit`
-# (`pipx install pre-commit` or `brew install pre-commit`).
+# Defense-in-depth. The pre-commit hook scans staged content on every
+# commit (see .pre-commit-config.yaml); this target re-scans the full
+# working tree on demand. Requires the gitleaks binary directly because
+# pre-commit's gitleaks hook is hard-wired to `protect --staged`.
 
 verify-secrets:
-	@command -v pre-commit >/dev/null || { echo "ERROR: pre-commit not installed. brew install pre-commit"; exit 1; }
-	pre-commit run gitleaks --all-files
+	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
+	gitleaks detect --redact --no-banner --source .

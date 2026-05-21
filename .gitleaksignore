@@ -1,4 +1,0 @@
-# .env.example carries only placeholder strings (gsk_..., empty values).
-# gitleaks pattern-matches variable names and would false-positive on the
-# placeholder shape.
-.env.example
