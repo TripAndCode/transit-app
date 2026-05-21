@@ -125,11 +125,16 @@ app.add_middleware(
     https_only=False,  # Caddy in front does TLS
     same_site="lax",
 )
+# Cross-origin SSO from the Vite dev server (:5173 → :8000) needs both
+# the sid cookie sent (credentials: 'include' on the client) and the
+# Access-Control-Allow-Credentials response header. Wildcard origins
+# are incompatible with that combo — _validate_cors_origins enforces.
+_validate_cors_origins(_CORS_ORIGINS, allow_credentials=True)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
