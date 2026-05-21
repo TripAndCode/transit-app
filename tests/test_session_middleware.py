@@ -1,14 +1,8 @@
 """Tests for ``SessionMiddleware``: anonymous, valid cookie, expired cookie, suspended user."""
 
-import os
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
-import httpx
 import pytest
-from httpx import ASGITransport
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 async def _make_session(conn, *, role="user", suspended=False, expires_in=timedelta(days=30)):
@@ -28,17 +22,6 @@ async def _make_session(conn, *, role="user", suspended=False, expires_in=timede
         datetime.now(timezone.utc) + expires_in,
     )
     return sid, uid
-
-
-@pytest.fixture
-async def client(apply_schema):
-    from api.main import app
-
-    pool = await asyncpg.create_pool(DATABASE_URL)
-    app.state.pool = pool
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
-    await pool.close()
 
 
 @pytest.mark.asyncio

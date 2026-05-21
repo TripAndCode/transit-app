@@ -6,26 +6,7 @@ echo both ``Access-Control-Allow-Origin: http://localhost:5173`` and
 the response when the fetch is sent with ``credentials: 'include'``.
 """
 
-import os
-
-import asyncpg
-import httpx
 import pytest
-from httpx import ASGITransport
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
-
-
-@pytest.fixture
-async def client(apply_schema):
-    """Boot the real app against the test DB pool, talk to it via ASGI."""
-    from api.main import app
-
-    pool = await asyncpg.create_pool(DATABASE_URL)
-    app.state.pool = pool
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
-    await pool.close()
 
 
 @pytest.mark.asyncio
@@ -51,4 +32,4 @@ async def test_cors_rejects_unlisted_origin(client):
         headers={"Origin": "https://evil.example.com"},
     )
     assert resp.status_code == 200
-    assert resp.headers.get("access-control-allow-origin") in (None, "")
+    assert resp.headers.get("access-control-allow-origin") is None

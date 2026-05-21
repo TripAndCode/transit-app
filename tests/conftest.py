@@ -150,3 +150,24 @@ async def aagency_id(aconn):
         "http://example.com/feed.pb",
     )
     return row["agency_id"]
+
+
+@pytest.fixture
+async def client(apply_schema):
+    """Boot the FastAPI app against the test DB pool and yield an
+    httpx.AsyncClient that talks to it via ASGITransport.
+
+    The pool is per-test (created + closed inside the fixture) so
+    concurrent tests can't share or step on app.state.pool.
+    """
+    import asyncpg
+    import httpx
+    from httpx import ASGITransport
+
+    from api.main import app
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    app.state.pool = pool
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    await pool.close()
