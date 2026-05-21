@@ -4,7 +4,67 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies
+
+# Default target — first-run setup.
+all: bootstrap
+
+# ── First-run bootstrap ──────────────────────────────────────────────────────
+# Idempotent: safe to re-run. Brings the project from a clean checkout to
+# "ready to `make serve`". Skips data ingest (Path A or B) — that's a separate
+# step because it needs either internet/feed_urls or Oracle SSH access.
+
+bootstrap:
+	@command -v poetry >/dev/null || { echo "ERROR: poetry not installed. https://python-poetry.org/"; exit 1; }
+	@command -v docker >/dev/null || { echo "ERROR: docker not installed. https://www.docker.com/"; exit 1; }
+	@command -v npm    >/dev/null || { echo "ERROR: npm not installed. brew install node"; exit 1; }
+	@test -f .env || { cp .env.example .env && echo "→ created .env from .env.example — edit it before \`make serve\`"; }
+	@echo "→ installing python deps"
+	@poetry install
+	@echo "→ installing npm deps"
+	@cd frontend && npm install --silent
+	@echo "→ bringing up Postgres + applying migrations"
+	@$(MAKE) db
+	@echo "→ seeding agencies from agencies.csv"
+	@$(MAKE) seed-agencies
+	@echo "→ building SPA + baking into api/static/ for single-origin serve"
+	@$(MAKE) frontend-build
+	@$(MAKE) bake
+	@echo ""
+	@echo "✓ bootstrap done. Next:"
+	@echo "    make doctor       # sanity check"
+	@echo "    make serve        # then open http://localhost:8000"
+
+# Copy the Vite build into api/static so FastAPI serves SPA + API on one origin.
+# Same layout the Dockerfile uses in prod.
+bake:
+	@rm -rf api/static
+	@cp -R frontend/dist api/static
+	@echo "→ baked frontend/dist → api/static/"
+
+# ── Sanity check ─────────────────────────────────────────────────────────────
+# Reports the state of env, DB container, port 8000, and SSO env without
+# starting anything. Exit code 0 always — informational.
+
+doctor:
+	@echo "── env ──"
+	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
+	@grep -q '^GROQ_API_KEY=..*' .env 2>/dev/null && echo "  GROQ_API_KEY set" || echo "  GROQ_API_KEY MISSING — Ask tab will 503"
+	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); \
+		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
+		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
+		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
+	@echo "── db ──"
+	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-pg' \
+		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-pg \
+		|| echo "  transit-pg NOT running — \`make db\`"
+	@echo "── port 8000 ──"
+	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
+		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \
+		else echo "  free"; fi
+	@echo "── api/static ──"
+	@test -d api/static && echo "  baked SPA present (single-origin works)" \
+		|| echo "  not baked — \`make bake\` or run Vite via \`make frontend-dev\`"
 
 install:
 	poetry install

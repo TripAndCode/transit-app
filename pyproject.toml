@@ -19,6 +19,8 @@ sentence-transformers = ">=2.7"
 asyncpg = ">=0.29"
 fastapi = ">=0.111"
 uvicorn = {version = ">=0.29", extras = ["standard"]}
+authlib = ">=1.3"
+itsdangerous = ">=2.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"

@@ -7,6 +7,11 @@ import { MapTab } from "./tabs/MapTab";
 import { AskTab } from "./tabs/AskTab";
 import { LiveTab } from "./tabs/LiveTab";
 import { ReportsTab } from "./tabs/ReportsTab";
+import { LoginPage } from "./pages/LoginPage";
+import { AccountPage } from "./pages/AccountPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { AdminUserDetailPage } from "./pages/AdminUserDetailPage";
+import { RequireAdmin } from "./components/RequireAdmin";
 import "./styles/global.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -17,6 +22,9 @@ const queryClient = new QueryClient({
 });
 
 const router = createBrowserRouter([
+  // /login renders outside <App /> so it owns the full viewport (no Header,
+  // sidebar, or guest-prompt strip wrapping the centered auth card).
+  { path: "/login", element: <LoginPage /> },
   {
     path: "/",
     element: <App />,
@@ -31,6 +39,9 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: <LiveTab /> },
       { path: "agencies/:agencyId/reports", element: <ReportsTab /> },
       { path: "agencies/:agencyId/reports/:reportType", element: <ReportsTab /> },
+      { path: "me", element: <AccountPage /> },
+      { path: "admin/users", element: <RequireAdmin><AdminUsersPage /></RequireAdmin> },
+      { path: "admin/users/:uid", element: <RequireAdmin><AdminUserDetailPage /></RequireAdmin> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },

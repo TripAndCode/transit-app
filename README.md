@@ -6,7 +6,7 @@ Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT prot
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - [Poetry](https://python-poetry.org/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - A [Groq API key](https://console.groq.com/) (free tier is sufficient)
@@ -15,126 +15,105 @@ Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT prot
 
 ## Quick Start
 
-### TL;DR — Path B (Oracle Cloud archives, current setup)
+### One-shot bootstrap
+
+From a fresh checkout — installs deps, starts the DB, applies migrations,
+seeds agencies, builds and bakes the SPA into `api/static/` for
+single-origin serve:
 
 ```bash
-# one-time
-cp .env.example .env && $EDITOR .env   # set GROQ_API_KEY + Oracle vars
-make install                            # python deps
-make frontend-install                   # npm deps
-
-# every run
-make db                                 # start Postgres on :5433
-make seed-agencies                      # upsert agencies.csv (Aomori included)
-make fetch-ingest                       # rsync from Oracle VM + ingest + analyze
-make serve                              # terminal A — FastAPI on :8000
-make frontend-dev                       # terminal B — Vite on :5173
+cp .env.example .env && $EDITOR .env   # at minimum, set GROQ_API_KEY
+make bootstrap                          # ≈ 2–4 min on a clean machine
+make doctor                             # sanity check — env, db, port, baked SPA
+make serve                              # FastAPI on :8000 (serves SPA + API)
 ```
 
-Open <http://localhost:5173>. The Ask tab works once `GROQ_API_KEY` is valid;
-the Map / Live / Reports tabs render real content after the fetch+ingest step.
+Open <http://localhost:8000>.
 
-For live HTTP fetch from each agency's GTFS-RT URL instead of the Oracle
-archives, see [Path A](#path-a--direct-live-fetch-uses-agenciesfeed_url).
+`make bootstrap` is idempotent — re-run any time the project state drifts
+(deps changed, migrations added, frontend rebuilt). `make doctor` is
+informational only; it never starts or stops anything.
 
-### Detailed steps
+### What you get out of the box
 
-#### 1. Start the database
+| Tab     | Works after bootstrap?            | Needs                                                    |
+|---------|-----------------------------------|----------------------------------------------------------|
+| Ask     | once `GROQ_API_KEY` is valid       | a real Groq key in `.env`                                |
+| Map / Live / Reports | empty until data lands             | one of the [data-load paths](#load-data) below           |
+| Login   | hidden in anonymous-only mode      | the [SSO env block](#authentication--user-management)    |
+| Admin   | `/admin/users` once you log in      | your email in `ADMIN_EMAILS`                             |
+
+### Two dev topologies
+
+`make serve` alone gives you **single-origin** dev: FastAPI on `:8000` serves
+both the API and the SPA out of `api/static/`. SSO cookies, CSRF, and
+proxying all behave the way they will in production. Recommended.
+
+For a **hot-reload SPA loop** (Vite on `:5173`, FastAPI on `:8000`), run
+`make frontend-dev` in a second terminal and open
+<http://localhost:5173>. Vite proxies `/api` and `/health` to `:8000`, and
+both CORS + CSRF defaults already allow `http://localhost:5173`, so no
+env edits are needed. Note: **OAuth callbacks land on :8000 directly**
+(the provider redirects to `PUBLIC_BASE_URL`), so SSO end-to-end still
+wants single-origin.
+
+### Load data
+
+`make bootstrap` doesn't pull any GTFS-RT data — the DB is empty until
+you choose a load path:
 
 ```bash
-make db
+# Path A — live fetch from each agency's official feed_url
+poetry run python gtfs_pipeline.py ingest_live
+make analyze
+
+# Path B — replay archives from the Oracle Cloud collection VM (local dev only)
+make fetch-ingest    # rsync + ingest + load_static + analyze in one shot
 ```
 
-Builds a PostGIS 14 + pgvector image, starts a `transit-pg` container on
-port 5433, and applies the schema. Everything lives inside this project —
-no external setup needed.
+Path A is what production uses (the hourly cron hits
+`POST /internal/cron/ingest`). Path B is local-only — see
+[Path A vs Path B](#data-ingest-path-a-vs-path-b) for the why.
 
-#### 2. Install dependencies
-
-```bash
-make install            # python (poetry)
-make frontend-install   # npm (frontend/)
-```
-
-#### 3. Set environment
-
-Create `.env` in the project root (gitignored, loaded automatically by `make`):
-
-```
-DATABASE_URL=postgresql://transit:transit@localhost:5433/transit
-GROQ_API_KEY=your_groq_api_key_here
-# Path B (Oracle Cloud archives) only:
-ORACLE_HOST=64.110.114.101
-ORACLE_USER=opc
-ORACLE_SSH_KEY_PATH=/Users/you/transit-app/oracle_cloud/ssh-key-2026-03-28.key
-AGENCY_ID=1
-```
-
-See `.env.example` for the full list.
-
-#### 4. Register agencies
-
-Edit `agencies.csv` (committed) and run:
-
-```bash
-make seed-agencies      # idempotent upsert on feed_url
-```
-
-The CSV has columns `agency_name, feed_url, static_url, trip_id_pattern`.
-For one-off ad-hoc inserts you can still use the CLI:
+For one-off ad-hoc agency inserts:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
   --name "My Agency" --feed-url "https://..."
 ```
 
-If your agency uses a non-standard `trip_id` format, set the
-`trip_id_pattern` column to a named-group regex (e.g.
-`^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$`).
+If the agency uses a non-standard `trip_id` shape, set
+`trip_id_pattern` on the row to a named-group regex like
+`^(?P<service>.+?)_(?P<hour>\d+)h(?P<minute>\d+)_route(?P<route>\d+)$`.
 
-#### 5. Load data
+> **SSO is optional.** Leaving all five auth env vars unset
+> (`SESSION_SIGNING_KEY`, `GOOGLE_CLIENT_ID/SECRET`,
+> `GITHUB_CLIENT_ID/SECRET`) boots in anonymous-only mode — the login
+> link is hidden and `/api/auth/*` is unmounted. To wire up SSO + the
+> `/admin/users` console see
+> [Authentication & user management](#authentication--user-management).
+> A *partial* set is rejected at startup since a half-wired OAuth flow
+> would leak state cookies without ever completing.
 
-**Path B — pull archives from Oracle Cloud (rsync + ingest + analyze):**
-
-```bash
-make fetch-ingest
-```
-
-> Run via `make` — the Makefile's `-include .env` + `export` makes the
-> `ORACLE_HOST` / `ORACLE_USER` / `ORACLE_SSH_KEY_PATH` vars visible to
-> the script. Calling `bash scripts/fetch_and_ingest.sh` directly will
-> fail because raw shells don't auto-source `.env`.
-
-**Path A — live fetch each agency's GTFS-RT URL:**
+### Reset / re-bootstrap
 
 ```bash
-poetry run python gtfs_pipeline.py ingest_live
+make db-down                           # stop container, KEEP volume
+docker compose down -v                  # stop and DELETE the data volume
+make bootstrap                          # bring everything back up
 ```
 
-Path A skips static GTFS — for stop coordinates / heatmap, also run
-`make load_static PATH=./raw_archives_static` against a downloaded zip.
-
-Both paths end at `make analyze` to refresh aggregates (Path B's script
-does this for you).
-
-#### 6. Start the backend
+### Quickstart cheat sheet
 
 ```bash
-make serve          # :8000 (override with PORT=9000)
+make bootstrap        # first-run setup (install + db + migrate + seed + frontend bake)
+make doctor           # sanity check env / db / port / baked SPA
+make serve            # FastAPI on :8000 (single-origin: SPA + API together)
+make frontend-dev     # optional second terminal — Vite hot reload on :5173
+make fetch-ingest     # Path B — pull archives from Oracle VM and ingest
+make analyze          # recompute the agg_* tables (after a fresh ingest)
+make db-down          # stop Postgres, keep the volume
 ```
-
-Interactive docs: <http://localhost:8000/docs>.
-
-#### 7. Start the frontend (in a second terminal)
-
-```bash
-make frontend-dev   # Vite on :5173
-```
-
-Open <http://localhost:5173>. With no data, all tabs show empty states.
-
-> No agencies yet? Append `?admin=1` to the URL to expose the in-browser
-> "+ 新規事業者" form, or edit `agencies.csv` and re-run `make seed-agencies`.
 
 ---
 
@@ -216,7 +195,7 @@ For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b
 | `make migrate-down` | Roll back the latest migration |
 | `docker compose down -v` | Stop and delete data volume |
 
-Data is stored in a named Docker volume (`prod-backend_transit_pgdata`) — it survives container restarts.
+Data is stored in a named Docker volume (`transit-app_transit_pgdata`) — it survives container restarts.
 
 ### Migrations
 
@@ -232,6 +211,8 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0006_strategy_columns` | `agencies.ingest_strategy` + `static_strategy` |
 | `0007_static_trips_service_id` | `static_trips.service_id` for calendar joins |
 | `0008_static_routes_long_name` | `static_routes.route_long_name` for richer filters |
+| `0009_auth` | `users`, `oauth_identities`, `sessions`, `login_events`, `filter_presets` |
+| `0010_audit_kinds` | widens `login_events.kind` to include `account_created` + `login_failed` |
 
 ---
 
@@ -303,10 +284,24 @@ Computes five aggregation tables used by all API queries:
 | `GET` | `/api/{agency_id}/today/route-summary` | Per-route operational summary for the most recent observation date |
 | `GET` | `/api/{agency_id}/routes` | Static route list (with derived `route_code`) |
 | `GET` | `/api/{agency_id}/stops` | Static stop list |
+| `GET` | `/api/auth/{provider}/login` | Start OAuth (provider = `google` \| `github`); 302 to provider |
+| `GET` | `/api/auth/{provider}/callback` | OAuth callback; mints `sid` cookie, redirects to sanitized `next` |
+| `POST` | `/api/auth/logout` | Delete session row + clear `sid` cookie (Origin-checked) |
+| `GET` | `/api/me` | Caller profile + linked OAuth identities |
+| `GET` | `/api/me/sessions` | Caller's active sessions (sid truncated) |
+| `DELETE` | `/api/me/sessions/{prefix}` | Revoke a specific session by 12-char sid prefix |
+| `GET` | `/api/me/presets?agency_id=` | Caller's saved filter presets |
+| `POST` | `/api/me/presets` | Save current filter as a named preset |
+| `DELETE` | `/api/me/presets/{id}` | Delete a saved preset |
+| `GET` | `/api/admin/users` | Admin: list users (`q`, `role`, `suspended`, `limit`, `offset`) |
+| `GET` | `/api/admin/users/{uid}` | Admin: user detail + identities + last 20 audit events |
+| `PATCH` | `/api/admin/users/{uid}` | Admin: change `role` / `suspended` (self-guard + last-admin guard) |
+| `DELETE` | `/api/admin/users/{uid}` | Admin: soft-delete (anonymize PII, drop sessions + identities) |
 
-All `/api/*` endpoints accept the global filter context as query params:
-`from`, `to`, `dow`, `time_band`, `service`, `routes` (comma-joined).
-The frontend persists these in the URL via `useRangeContext`.
+The data endpoints under `/api/{agency_id}/*` accept the global filter
+context as query params: `from`, `to`, `dow`, `time_band`, `service`,
+`routes` (comma-joined). The frontend persists these in the URL via
+`useRangeContext`.
 
 ### Rate limits
 
@@ -324,6 +319,93 @@ curl -X POST http://localhost:8000/api/1/ask \
 ```
 
 Query types understood: `ranking`, `by_hour`, `by_dow`, `by_stop`, `by_date`, `trend`, `on_time`, `compare`, `worst_5min`, `stop_ranking`, `dow_ranking`, `compare_ranking`, `stop_list`, `routes_at_stop`, `route_info`, `timetable`.
+
+## Authentication & user management
+
+Anonymous browsing is unchanged. Logging in (Google or GitHub) unlocks
+saved filter presets; admins (set via `ADMIN_EMAILS`) can manage users
+at `/admin/users`.
+
+### OAuth setup
+
+Google: create an OAuth 2.0 Client at console.cloud.google.com (type =
+Web). Authorized redirect URIs:
+- `http://localhost:8000/api/auth/google/callback` (dev)
+- `https://<DOMAIN>/api/auth/google/callback` (prod)
+
+GitHub: github.com/settings/developers → New OAuth App. Callback URLs:
+- `http://localhost:8000/api/auth/github/callback` (dev)
+- `https://<DOMAIN>/api/auth/github/callback` (prod)
+
+Set `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`,
+`SESSION_SIGNING_KEY` (`openssl rand -hex 32`), and
+`PUBLIC_BASE_URL` in `.env`.
+
+### First admin
+
+Add your email to `ADMIN_EMAILS` (comma-separated). On your first
+login, that user row is promoted to `role='admin'` and an audit
+event is recorded. Subsequent admins are promoted via the console
+at `/admin/users`. Removing an email from `ADMIN_EMAILS` does not
+auto-demote — use the console.
+
+### Flow
+
+```
+                                           ┌──────────────┐
+   Browser  ──── GET /api/auth/{p}/login ─►│  FastAPI     │
+                                           │              │  mint state + PKCE
+                                           │              │  sign oauth_tx cookie
+   Browser  ◄─── 302 to provider auth ─────│              │
+                ✓ sets oauth_tx (5 min, signed, httponly)
+        │
+        ▼
+   Provider consent screen (Google / GitHub)
+        │
+        ▼
+   Browser  ──── /api/auth/{p}/callback?code&state ───►  FastAPI
+                                                            │
+                                                            ▼
+                                          ┌─── verify signature, state, provider ───┐
+                                          │ FAIL                                    │ OK
+                                          ▼                                         ▼
+                              insert login_failed(reason)              exchange code w/ PKCE
+                              302 → /login?error=...                          │
+                                                                              ▼
+                                                                      fetch userinfo
+                                                                              │
+                                                            ┌─ email missing / unverified ─┐
+                                                            ▼                              ▼
+                                              insert login_failed(reason)            BEGIN txn
+                                              302 → /login?error=...                       │
+                                                                                   match by (provider, sub)
+                                                                                   else upsert by email
+                                                                                   ├─ new user? → account_created
+                                                                                   ├─ ADMIN_EMAILS? → role_changed
+                                                                                   ├─ insert session
+                                                                                   └─ insert login
+                                                                                          │
+                                                                                  COMMIT; set sid cookie
+                                                                                  302 → <next>
+
+   Subsequent requests:  Browser sends sid cookie → middleware does SELECT session JOIN users
+                         touches last_seen_at at most 1/min/sid
+
+   Logout:               POST /api/auth/logout (Origin checked)
+                         → delete session, insert logout
+                         → 204 + clear sid cookie
+```
+
+**Audit kinds emitted** (table `login_events`):
+- `account_created` — first time the user row is INSERTed
+- `login` — successful session created
+- `login_failed` — callback aborted (`state`, `provider_down`, `unverified_email`, `no_email`); `user_id` is null
+- `logout` — user-initiated session deletion
+- `role_changed` — admin promotion / demotion (via `ADMIN_EMAILS` bootstrap or console)
+- `suspended` / `unsuspended` — admin console toggles
+- `deleted` — admin console soft-delete (PII anonymized, sessions revoked)
+
+Each row carries `ip`, `user_agent`, `provider`, optional `meta` JSONB, and `actor_id` (who performed the action — same as `user_id` for self-actions, admin's uid for admin-actions).
 
 ---
 
@@ -348,7 +430,7 @@ make serve                # in one shell — FastAPI on :8000
 make frontend-dev         # in another  — Vite dev server on :5173
 ```
 
-The dev server proxies `/api` and `/health` to FastAPI; everything else is owned by the SPA, so direct reloads on `/agencies/:id/map` etc. work in dev. Set `CORS_ORIGINS=http://localhost:5173` in `.env`.
+The dev server proxies `/api` and `/health` to FastAPI; everything else is owned by the SPA, so direct reloads on `/agencies/:id/map` etc. work in dev. `http://localhost:5173` is already in the default CORS + CSRF allow lists.
 
 Open http://localhost:5173. Append `?admin=1` to any URL to expose the agency-creation form.
 
@@ -386,6 +468,7 @@ api/main.py                 FastAPI app (asyncpg pool, Asia/Tokyo session, SPA s
 api/middleware/
   auth.py                   X-API-Key validation → request.state.tier (free / pro)
   ratelimit.py              slowapi 60/min free, 600/min pro
+  session.py                sid cookie → DB lookup → request.state.user (1/min last_seen throttle)
 api/routers/
   agencies.py               agency CRUD
   ask.py                    NL question → Groq tool-use → answer (pipeline/query/chat)
@@ -394,6 +477,11 @@ api/routers/
   map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
   internal.py               POST /internal/cron/ingest (CRON_SECRET-gated)
+  auth.py                   OAuth login / callback / logout (Authlib + signed oauth_tx cookie)
+  me.py                     self-service /api/me, sessions, filter presets
+  admin.py                  /api/admin/users CRUD with self + last-admin guards
+api/oauth.py                Authlib OAuth client registry (Google OIDC, GitHub)
+api/security.py             User dataclass + require_user / require_admin / csrf_guard deps
     │
     ▼
 api/range.py                shared RangeCtx (from/to/dow/time_band/service/routes) + SQL filter builder
@@ -402,6 +490,7 @@ pipeline/query/
   tools.py                  the six tool implementations + route validation
   executor.py               legacy SQL executors used by /query and tools
   formatter.py              Python templates → Japanese text
+pipeline/audit.py           one-row INSERT into login_events (caller owns the txn)
 pipeline/reports.py         compute_* aggregations (cached via async_lru_cache)
 pipeline/cache.py           bounded async LRU + TTL decorator
 ```
