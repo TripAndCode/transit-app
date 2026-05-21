@@ -54,8 +54,12 @@ For a **hot-reload SPA loop** (Vite on `:5173`, FastAPI on `:8000`), run
 <http://localhost:5173>. Vite proxies `/api` and `/health` to `:8000`, and
 both CORS + CSRF defaults already allow `http://localhost:5173`, so no
 env edits are needed. Note: **OAuth callbacks land on :8000 directly**
-(the provider redirects to `PUBLIC_BASE_URL`), so SSO end-to-end still
-wants single-origin.
+(the provider redirects to `PUBLIC_BASE_URL`). After login the browser
+is on `:8000`; switch the tab back to `:5173` and the SPA sees the
+session because `localhost:5173` and `localhost:8000` are same-site (eTLD+1 = `localhost`)
+and the API sends `Access-Control-Allow-Credentials: true`. SSO
+end-to-end works on either origin; you just authenticate via `:8000`
+once per session.
 
 ### Load data
 
