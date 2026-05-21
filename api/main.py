@@ -68,6 +68,20 @@ def auth_status() -> tuple[bool, list[str]]:
     return (not missing, missing)
 
 
+def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
+    """Reject the spec-incompatible CORS combo: ``*`` + ``Allow-Credentials``.
+
+    Browsers silently block credentialed responses whose ``Access-Control-
+    Allow-Origin`` is ``*``. Failing at startup surfaces the misconfiguration
+    with a clear error instead of silent breakage at request time.
+    """
+    if allow_credentials and "*" in origins:
+        raise RuntimeError(
+            "CORS_ORIGINS contains '*' but allow_credentials=True. "
+            "The CORS spec forbids the combination — list explicit origins."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -111,11 +125,16 @@ app.add_middleware(
     https_only=False,  # Caddy in front does TLS
     same_site="lax",
 )
+# Cross-origin SSO from the Vite dev server (:5173 → :8000) needs both
+# the sid cookie sent (credentials: 'include' on the client) and the
+# Access-Control-Allow-Credentials response header. Wildcard origins
+# are incompatible with that combo — _validate_cors_origins enforces.
+_validate_cors_origins(_CORS_ORIGINS, allow_credentials=True)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
