@@ -1,3 +1,5 @@
+"""Schema sanity checks: required tables exist and key columns/constraints are wired."""
+
 EXPECTED_TABLES = [
     "agencies",
     "updates",
@@ -104,6 +106,7 @@ def test_static_shapes_table_exists(pg_conn):
 
 
 def test_users_role_check(pg_conn):
+    """``users.role`` CHECK constraint rejects values outside ``user`` / ``admin``."""
     import psycopg2.errors
 
     with pg_conn.cursor() as cur:
