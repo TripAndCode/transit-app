@@ -14,7 +14,9 @@ from fastapi import HTTPException, Request
 
 _PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 _ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
-_CORS_ORIGINS = tuple(o.strip() for o in _os.environ.get("CORS_ORIGINS", "").split(",") if o.strip())
+_CORS_ORIGINS = tuple(
+    o.strip() for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
+)
 
 
 @dataclass(frozen=True)

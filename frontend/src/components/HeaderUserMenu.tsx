@@ -1,10 +1,17 @@
 import { Link } from "react-router-dom";
 import { useSession } from "../api/auth";
+import { useConfig } from "../api/config";
 
-/** Header slot: login link when anonymous; avatar + name (+ admin link) when signed in. */
+/** Header slot: login link when anonymous; avatar + name (+ admin link) when signed in.
+ *  Renders nothing when the backend reports ``auth_enabled: false`` (SSO unconfigured). */
 export function HeaderUserMenu() {
-  const { data: session, isLoading } = useSession();
-  if (isLoading) return null;
+  const { data: config, isLoading: configLoading } = useConfig();
+  const { data: session, isLoading: sessionLoading } = useSession();
+  if (sessionLoading || configLoading) return null;
+  // Default-safe: hide login UI unless the backend explicitly confirms SSO is on.
+  // Avoids a flash of "ログイン" before /api/config resolves, which would lead the
+  // user to /login → SSO 未設定 dead-end.
+  if (!config?.auth_enabled) return null;
   if (!session) {
     return (
       <Link to="/login" style={{ color: "inherit", textDecoration: "none", padding: "4px 12px" }}>
