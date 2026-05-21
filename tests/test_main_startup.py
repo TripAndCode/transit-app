@@ -34,6 +34,4 @@ def test_validate_cors_origins_rejects_mixed_list_with_wildcard_and_credentials(
     future refactor that naively checks `origins == ["*"]` instead of
     `"*" in origins`."""
     with pytest.raises(RuntimeError, match="forbids"):
-        _validate_cors_origins(
-            ["http://localhost:5173", "*"], allow_credentials=True
-        )
+        _validate_cors_origins(["http://localhost:5173", "*"], allow_credentials=True)
