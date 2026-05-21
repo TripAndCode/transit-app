@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
+import { useConfig } from "../api/config";
 import "./LoginPage.css";
 
 const ERROR_COPY: Record<string, string> = {
@@ -16,11 +17,33 @@ export function LoginPage() {
   const next = params.get("next") || "/";
   const error = params.get("error");
   const [pending, setPending] = useState<"google" | "github" | null>(null);
+  const { data: config } = useConfig();
 
   const handleSubmit = (provider: "google" | "github") => () => {
     setPending(provider);
     window.location.assign(loginUrl(provider, next));
   };
+
+  if (config && !config.auth_enabled) {
+    return (
+      <div className="login-shell">
+        <div className="login-shell__grid" aria-hidden="true" />
+        <main className="login-card">
+          <div className="login-card__brand">
+            <span className="login-card__brand-title">遅延ダッシュボード</span>
+            <span className="login-card__brand-tag">リアルタイム × 時刻表</span>
+          </div>
+          <h1 className="login-card__h1">SSO 未設定</h1>
+          <p className="login-card__sub">
+            このビルドでは SSO が無効です。匿名で閲覧できます。
+          </p>
+          <p className="login-card__footer">
+            <Link to="/" style={{ color: "inherit" }}>トップへ戻る</Link>
+          </p>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="login-shell">

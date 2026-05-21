@@ -43,6 +43,21 @@ _signer = URLSafeTimedSerializer(
 )
 
 
+def _require_sso_configured() -> None:
+    """503 the request when any OAuth env var is unset. ``GET /api/config``
+    advertises this state so the SPA hides login UI; this guard catches
+    direct hits to the OAuth endpoints (curl, stale browser tabs)."""
+    required = (
+        "SESSION_SIGNING_KEY",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+    )
+    if any(not os.environ.get(k) for k in required):
+        raise HTTPException(status_code=503, detail="sso not configured")
+
+
 def sanitize_next(value: str | None) -> str:
     """Return a safe relative path for post-login redirect, defending against
     open-redirect attacks. Only same-origin absolute paths are kept.
@@ -66,6 +81,7 @@ async def login(provider: str, request: Request, next: str = "/"):
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
     + sanitized next URL in a signed short-lived cookie that the callback verifies.
     """
+    _require_sso_configured()
     if provider not in ("google", "github"):
         raise HTTPException(404, "unknown provider")
     safe_next = sanitize_next(next)
@@ -228,6 +244,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     the signed ``oauth_tx`` cookie, exchange the code, upsert user + session,
     set the ``sid`` cookie, and redirect to the sanitized next URL.
     """
+    _require_sso_configured()
     if provider not in ("google", "github"):
         raise HTTPException(404, "unknown provider")
     tx_raw = request.cookies.get(TX_COOKIE)

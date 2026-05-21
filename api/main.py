@@ -52,21 +52,38 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
 
 
+_AUTH_ENV = (
+    "SESSION_SIGNING_KEY",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+)
+
+
+def auth_status() -> tuple[bool, list[str]]:
+    """Read env every call so test monkeypatching + runtime config-flip both
+    take effect without re-importing the app. Enabled iff all five vars set."""
+    missing = [k for k in _AUTH_ENV if not os.environ.get(k)]
+    return (not missing, missing)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Validate required env, open the asyncpg pool, and tear it down on exit."""
+    """Validate required env, open the asyncpg pool, and tear it down on exit.
+
+    Auth env is optional in aggregate: all five vars present → SSO on; none
+    present → SSO off (anonymous-only mode, ``/api/auth/*`` returns 503). A
+    partial set is rejected as a misconfiguration since a half-wired OAuth
+    flow would leak state cookies without ever completing.
+    """
     if not os.environ.get("GROQ_API_KEY"):
         raise RuntimeError("GROQ_API_KEY env var is required")
-    required = (
-        "SESSION_SIGNING_KEY",
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
-        "GITHUB_CLIENT_ID",
-        "GITHUB_CLIENT_SECRET",
-    )
-    missing = [k for k in required if not os.environ.get(k)]
-    if missing:
-        raise RuntimeError(f"Missing required env: {', '.join(missing)}")
+    enabled, missing = auth_status()
+    if not enabled and len(missing) != len(_AUTH_ENV):
+        raise RuntimeError(
+            f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
+        )
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection)
     yield
     await app.state.pool.close()
@@ -118,6 +135,13 @@ app.include_router(internal_router)
 async def health():
     """Liveness probe. Returns ``{"status": "ok"}`` once the app is responding."""
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+async def config():
+    """Public client config. Lets the SPA hide login UI when SSO is unconfigured."""
+    enabled, _ = auth_status()
+    return {"auth_enabled": enabled}
 
 
 def _maybe_mount_static(app: FastAPI) -> None:
