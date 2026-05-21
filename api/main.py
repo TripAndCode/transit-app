@@ -68,6 +68,20 @@ def auth_status() -> tuple[bool, list[str]]:
     return (not missing, missing)
 
 
+def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
+    """Reject the spec-incompatible CORS combo: ``*`` + ``Allow-Credentials``.
+
+    Browsers silently block credentialed responses whose ``Access-Control-
+    Allow-Origin`` is ``*``. Failing at startup surfaces the misconfiguration
+    with a clear error instead of silent breakage at request time.
+    """
+    if allow_credentials and "*" in origins:
+        raise RuntimeError(
+            "CORS_ORIGINS contains '*' but allow_credentials=True. "
+            "The CORS spec forbids the combination — list explicit origins."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
