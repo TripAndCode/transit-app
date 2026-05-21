@@ -1,0 +1,16 @@
+# transit-app gitleaks configuration.
+#
+# Extends the bundled default ruleset (do not replace — we want the full
+# rule library). Allowlist below excludes paths that legitimately contain
+# secret-shaped strings.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-specific allowlist"
+paths = [
+    # Placeholder values only (gsk_..., empty strings). gitleaks would
+    # otherwise flag the variable names + placeholder shape.
+    '''\.env\.example$''',
+]
