@@ -28,7 +28,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
-  const r = await fetch(`${BASE}${path}`, { ...init, headers });
+  // credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends
+  // the sid cookie. Same-origin requests (single-origin prod / make serve)
+  // are unaffected — browsers always send same-origin cookies.
+  const r = await fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new ApiError(r.status, text);
