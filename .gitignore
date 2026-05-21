@@ -23,3 +23,4 @@ api/static
 # prefers .js over .ts when both are present.
 frontend/vite.config.js
 frontend/vite.config.d.ts
+client_secret_*.json

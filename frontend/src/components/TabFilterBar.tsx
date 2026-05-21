@@ -10,6 +10,7 @@ import {
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 
 const DOW_OPTIONS: { value: DowFilter; label: string }[] = [
@@ -69,6 +70,7 @@ type Draft = {
 
 export function TabFilterBar() {
   const [ctx, setCtx] = useRangeContext();
+  const agencyIdNum = useAgencyId();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<Draft>({
@@ -77,7 +79,7 @@ export function TabFilterBar() {
     service: ctx.service,
     routes: ctx.routes,
   });
-  const { data: routes } = useRoutes(useAgencyId());
+  const { data: routes } = useRoutes(agencyIdNum);
 
   useEffect(() => {
     setDraft({ dow: ctx.dow, time_band: ctx.time_band, service: ctx.service, routes: ctx.routes });
@@ -204,6 +206,13 @@ export function TabFilterBar() {
       }}
     >
       <RangeBadge />
+      {agencyIdNum !== null && (
+        <PresetMenu
+          agencyId={agencyIdNum}
+          currentRangeCtx={ctx as unknown as Record<string, unknown>}
+          onSelect={(rc) => setCtx({ ...ctx, ...rc } as typeof ctx)}
+        />
+      )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

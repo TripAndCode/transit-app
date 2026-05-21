@@ -18,13 +18,18 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.ratelimit import limiter
+from api.middleware.session import SessionMiddleware
+from api.routers.admin import router as admin_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
+from api.routers.auth import router as auth_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
+from api.routers.me import router as me_router
 from api.routers.query import router as query_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
@@ -47,11 +52,38 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
 
 
+_AUTH_ENV = (
+    "SESSION_SIGNING_KEY",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+)
+
+
+def auth_status() -> tuple[bool, list[str]]:
+    """Read env every call so test monkeypatching + runtime config-flip both
+    take effect without re-importing the app. Enabled iff all five vars set."""
+    missing = [k for k in _AUTH_ENV if not os.environ.get(k)]
+    return (not missing, missing)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Validate required env, open the asyncpg pool, and tear it down on exit."""
+    """Validate required env, open the asyncpg pool, and tear it down on exit.
+
+    Auth env is optional in aggregate: all five vars present → SSO on; none
+    present → SSO off (anonymous-only mode, ``/api/auth/*`` returns 503). A
+    partial set is rejected as a misconfiguration since a half-wired OAuth
+    flow would leak state cookies without ever completing.
+    """
     if not os.environ.get("GROQ_API_KEY"):
         raise RuntimeError("GROQ_API_KEY env var is required")
+    enabled, missing = auth_status()
+    if not enabled and len(missing) != len(_AUTH_ENV):
+        raise RuntimeError(
+            f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
+        )
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection)
     yield
     await app.state.pool.close()
@@ -62,7 +94,23 @@ _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://local
 app = FastAPI(title="Transit Delay API", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Starlette wraps middleware in reverse-add order — the LAST add_middleware
+# call runs FIRST on each request. Order today (request-side, outermost first):
+#   StarletteSessionMiddleware  (Authlib needs request.session)
+#   SessionMiddleware           (loads request.state.user from sid cookie)
+#   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
+# That means require_user/require_admin see request.state.user before any
+# router runs, which is what we want.
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(SessionMiddleware)
+app.add_middleware(
+    StarletteSessionMiddleware,
+    secret_key=os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
+    session_cookie="auth_tmp",
+    max_age=600,
+    https_only=False,  # Caddy in front does TLS
+    same_site="lax",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
@@ -71,11 +119,14 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
+app.include_router(admin_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
+app.include_router(auth_router)
 app.include_router(query_router)
 app.include_router(reports_router)
 app.include_router(map_router)
+app.include_router(me_router)
 app.include_router(static_router)
 app.include_router(internal_router)
 
@@ -84,6 +135,13 @@ app.include_router(internal_router)
 async def health():
     """Liveness probe. Returns ``{"status": "ok"}`` once the app is responding."""
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+async def config():
+    """Public client config. Lets the SPA hide login UI when SSO is unconfigured."""
+    enabled, _ = auth_status()
+    return {"auth_enabled": enabled}
 
 
 def _maybe_mount_static(app: FastAPI) -> None:

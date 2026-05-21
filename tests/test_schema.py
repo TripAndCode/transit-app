@@ -1,3 +1,5 @@
+"""Schema sanity checks: required tables exist and key columns/constraints are wired."""
+
 EXPECTED_TABLES = [
     "agencies",
     "updates",
@@ -14,6 +16,11 @@ EXPECTED_TABLES = [
     "agg_stop_seq",
     "rag_chunks",
     "api_keys",
+    "users",
+    "oauth_identities",
+    "sessions",
+    "login_events",
+    "filter_presets",
 ]
 
 
@@ -96,3 +103,23 @@ def test_static_shapes_table_exists(pg_conn):
             """
         )
         assert cur.fetchone() is not None, "GIST index on static_shapes missing"
+
+
+def test_users_role_check(pg_conn):
+    """``users.role`` CHECK constraint rejects values outside ``user`` / ``admin``."""
+    import psycopg2.errors
+
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO users (email, role) VALUES ('a@x', 'user')")
+        cur.execute("INSERT INTO users (email, role) VALUES ('b@x', 'admin')")
+    pg_conn.commit()
+    with pg_conn.cursor() as cur:
+        try:
+            cur.execute("INSERT INTO users (email, role) VALUES ('c@x', 'bogus')")
+        except psycopg2.errors.CheckViolation:
+            pg_conn.rollback()
+        else:
+            pg_conn.rollback()
+            import pytest
+
+            pytest.fail("CHECK constraint on users.role did not fire")

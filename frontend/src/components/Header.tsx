@@ -2,6 +2,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { AgencyPicker } from "./AgencyPicker";
 import { SettingsDrawer } from "./SettingsDrawer";
+import { HeaderUserMenu } from "./HeaderUserMenu";
 import { AgencyForm } from "../admin/AgencyForm";
 
 export function Header() {
@@ -59,6 +60,7 @@ export function Header() {
         <AgencyPicker />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
+        <HeaderUserMenu />
         {isAdmin && (
           <button
             type="button"
