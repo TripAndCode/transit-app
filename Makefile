@@ -30,7 +30,12 @@ bootstrap:
 	@echo "→ building SPA + baking into api/static/ for single-origin serve"
 	@$(MAKE) frontend-build
 	@$(MAKE) bake
-	@command -v pre-commit >/dev/null && pre-commit install >/dev/null && echo "→ installed pre-commit hooks" || echo "→ skipping pre-commit hook install (run 'brew install pre-commit' to enable)"
+	@if command -v pre-commit >/dev/null; then \
+		pre-commit install >/dev/null && echo "→ installed pre-commit hooks" \
+			|| echo "→ WARNING: pre-commit found but 'pre-commit install' failed — run it manually"; \
+	else \
+		echo "→ skipping pre-commit hook install (run 'brew install pre-commit' to enable)"; \
+	fi
 	@echo ""
 	@echo "✓ bootstrap done. Next:"
 	@echo "    make doctor       # sanity check"
@@ -146,9 +151,12 @@ frontend-build:
 
 # ── Secret scanning ──────────────────────────────────────────────────────────
 # Defense-in-depth. The pre-commit hook scans staged content on every
-# commit (see .pre-commit-config.yaml); this target re-scans the full
-# working tree on demand. Requires the gitleaks binary directly because
-# pre-commit's gitleaks hook is hard-wired to `protect --staged`.
+# commit (see .pre-commit-config.yaml). This target re-scans the full git
+# history reachable from HEAD on demand — broader than the commit-time
+# hook, so a secret introduced on a feature branch gets caught. Pass
+# `--no-git` to gitleaks if you want a working-tree-only scan instead.
+# Calls gitleaks directly because pre-commit's gitleaks hook is hard-wired
+# to `protect --staged`.
 
 verify-secrets:
 	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
