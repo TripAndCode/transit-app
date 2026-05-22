@@ -92,3 +92,20 @@ def test_format_guidance_menu_empty_rows_no_blank():
     header_idx = next(i for i, line in enumerate(lines) if "遅延ランキング上位10系統" in line)
     # Line immediately after header should not be empty
     assert lines[header_idx + 1].strip() != ""
+
+
+def test_dow_label_int_maps_to_japanese_char():
+    from pipeline.query.formatter import _dow_label
+    assert _dow_label(1) == "月"
+    assert _dow_label(7) == "日"
+
+
+def test_dow_label_string_passes_through():
+    from pipeline.query.formatter import _dow_label
+    assert _dow_label("平日") == "平日"
+    assert _dow_label("月") == "月"
+
+
+def test_dow_label_unknown_int_falls_back_to_str():
+    from pipeline.query.formatter import _dow_label
+    assert _dow_label(99) == "99"

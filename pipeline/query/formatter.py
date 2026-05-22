@@ -3,6 +3,8 @@ import logging
 import os
 import re
 
+from pipeline.db import _DOW_ISO_TO_JP
+
 _log = logging.getLogger(__name__)
 
 _groq_client = None
@@ -49,6 +51,20 @@ _FIX_RE = re.compile(r"\b[Ss]ystem\b|(?<![ァ-ヴ])システム(?![ァ-ヴ])")
 
 def _fix(text: str) -> str:
     return _FIX_RE.sub("系統", text).replace("系统", "系統")
+
+
+def _dow_label(value) -> str:
+    """Render a DOW column value for display.
+
+    Accepts an ISODOW int (1..7) and returns the matching Japanese char
+    ('月'..'日'). Also accepts a string and passes it through unchanged
+    — that path covers rollup labels like '平日' / '週末' emitted by the
+    weekday/weekend grouping SQL. During the migration transition it
+    also tolerates already-Japanese-char input from agg_route_dow.
+    """
+    if isinstance(value, int):
+        return _DOW_ISO_TO_JP.get(value, str(value))
+    return str(value)
 
 
 def _r(x, d: int = 1) -> str:
