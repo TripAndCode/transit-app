@@ -1,3 +1,11 @@
+"""Legacy SQL executors used by the v1 /api/{id}/query endpoint and the
+v2 LLM tool surface (pipeline/query/tools.py). Each `_exec_*` returns a
+list of tuples shaped to match the formatters in pipeline/query/formatter.py.
+
+This module shares its dedup SQL with pipeline/db.py — see
+build_dedup_inner_sql.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -7,7 +15,6 @@ from pipeline.db import _DOW_PG, build_dedup_inner_sql
 
 _log = logging.getLogger(__name__)
 
-# Asyncpg ($1) binding of the shared dedup SQL.
 _DEDUP_INNER = build_dedup_inner_sql(placeholder="$1")
 
 

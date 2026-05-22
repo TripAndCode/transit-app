@@ -36,7 +36,8 @@ def build_dedup_inner_sql(
     The trailing `id DESC` makes the dedup deterministic when two rows
     share the same `captured_at` (different files, same poll second).
     """
-    extra = f" AND {extra_where}" if extra_where else ""
+    # Wrap in parens so a fragment containing top-level OR composes correctly.
+    extra = f" AND ({extra_where})" if extra_where else ""
     return (
         "SELECT DISTINCT ON (route_code, service_type, scheduled_time, "
         "trip_id, captured_at::date, stop_sequence) "
@@ -49,8 +50,7 @@ def build_dedup_inner_sql(
     )
 
 
-# Back-compat: existing call sites in pipeline/analyze.py reference this
-# constant by name. Kept as the psycopg2 binding.
+# Psycopg2 binding used by pipeline/analyze.py.
 _DEDUP_INNER = build_dedup_inner_sql()
 
 
