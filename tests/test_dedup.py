@@ -23,12 +23,11 @@ from pipeline.db import _DEDUP_INNER as DB_DEDUP_INNER
 from pipeline.query.executor import _DEDUP_INNER as EXEC_DEDUP_INNER
 from pipeline.reports import _dedup_cte
 
-
 _SEED = [
     # (file_name, captured_at_offset_sec, dep_delay)
     ("pb_t_minus_120", -120, 300),  # worst, also earliest
-    ("pb_t_minus_60",   -60,  60),
-    ("pb_t",              0, 120),  # latest
+    ("pb_t_minus_60", -60, 60),
+    ("pb_t", 0, 120),  # latest
 ]
 
 
@@ -71,10 +70,7 @@ def test_db_dedup_inner_picks_latest_observation(pg_conn, agency_id):
         cur.execute(sql, {"agency_id": agency_id})
         rows = cur.fetchall()
     assert len(rows) == 1, f"expected one deduped row, got {len(rows)}"
-    assert rows[0][0] == 120, (
-        f"expected latest (120s), got {rows[0][0]} "
-        "(would be 300 under old MAX semantics)"
-    )
+    assert rows[0][0] == 120, f"expected latest (120s), got {rows[0][0]} (would be 300 under old MAX semantics)"
 
 
 @pytest.mark.asyncio
@@ -85,8 +81,7 @@ async def test_executor_dedup_inner_picks_latest_observation(aconn, aagency_id):
     rows = await aconn.fetch(sql, aagency_id)
     assert len(rows) == 1
     assert rows[0]["dep_delay"] == 120, (
-        f"expected latest (120s), got {rows[0]['dep_delay']} "
-        "(would be 300 under old MAX semantics)"
+        f"expected latest (120s), got {rows[0]['dep_delay']} (would be 300 under old MAX semantics)"
     )
 
 
@@ -106,6 +101,5 @@ async def test_reports_dedup_cte_picks_latest_observation(aconn, aagency_id):
     rows = await aconn.fetch(sql, aagency_id, *params)
     assert len(rows) == 1
     assert rows[0]["dep_delay"] == 120, (
-        f"expected latest (120s), got {rows[0]['dep_delay']} "
-        "(would be 300 under old MAX semantics)"
+        f"expected latest (120s), got {rows[0]['dep_delay']} (would be 300 under old MAX semantics)"
     )
