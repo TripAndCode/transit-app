@@ -2,14 +2,16 @@
 
 Pins behavior for all three dedup definitions in the codebase:
 
-- pipeline.db._DEDUP_INNER          (psycopg2 / %(agency_id)s)
+- pipeline.db._DEDUP_INNER              (psycopg2 / %(agency_id)s)
 - pipeline.query.executor._DEDUP_INNER  (asyncpg / $1)
-- pipeline.reports._dedup_cte()     (asyncpg / $1 + WHERE fragment)
+- pipeline.reports._dedup_cte()         (asyncpg / $1 + WHERE fragment)
 
-Each test seeds one trip × stop_sequence with three observations,
-inserts them deliberately out of captured_at order to prove the CTE
-relies on the column (not insertion order), then asserts the deduped
-row carries the LATEST dep_delay (120s), not the MAX (300s).
+Each test seeds one trip × stop_sequence with three observations
+spaced 60s apart. The trick: dep_delay is NOT monotone with
+captured_at — the worst delay (300s) sits on the EARLIEST row and the
+final delay (120s) sits on the latest. MAX(dep_delay) would pick 300;
+latest-by-captured_at picks 120, which is the value passengers
+actually experienced as the trip neared the stop.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -92,8 +94,13 @@ async def test_executor_dedup_inner_picks_latest_observation(aconn, aagency_id):
 async def test_reports_dedup_cte_picks_latest_observation(aconn, aagency_id):
     """pipeline.reports._dedup_cte() (asyncpg / used by every compute_* report)."""
     await _seed_three_observations_async(aconn, aagency_id)
+    # Widen the range one day either side so the 120-second seed never
+    # straddles a JST/UTC date-boundary edge case. The session timezone
+    # is pinned to Asia/Tokyo (see api/main.py _init_connection) and the
+    # CTE's captured_at::date cast uses JST, while `today` is a UTC
+    # calendar value — at JST midnight (15:00 UTC) those disagree.
     today = datetime.now(timezone.utc).date()
-    ctx = RangeCtx(from_date=today, to_date=today)
+    ctx = RangeCtx(from_date=today - timedelta(days=1), to_date=today + timedelta(days=1))
     where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = f"WITH {_dedup_cte(where)} SELECT dep_delay FROM deduped"
     rows = await aconn.fetch(sql, aagency_id, *params)
