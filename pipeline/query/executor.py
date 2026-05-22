@@ -3,24 +3,12 @@ from __future__ import annotations
 import logging
 import re
 
-from pipeline.db import _DOW_PG
+from pipeline.db import _DOW_PG, build_dedup_inner_sql
 
 _log = logging.getLogger(__name__)
 
-# See pipeline/db.py for the rationale. This duplicate definition
-# exists because the executor's queries use asyncpg-style $N
-# placeholders while pipeline.db._DEDUP_INNER uses psycopg2's
-# %(name)s. Both must change together so analyze.py and the legacy
-# /query route agree on report numbers.
-_DEDUP_INNER = """\
-        SELECT DISTINCT ON (route_code, service_type, scheduled_time,
-                            trip_id, captured_at::date, stop_sequence)
-               route_code, service_type, scheduled_time, trip_id,
-               captured_at::date AS date, stop_sequence, dep_delay
-        FROM updates
-        WHERE dep_delay IS NOT NULL AND agency_id = $1
-        ORDER BY route_code, service_type, scheduled_time, trip_id,
-                 captured_at::date, stop_sequence, captured_at DESC"""
+# Asyncpg ($1) binding of the shared dedup SQL.
+_DEDUP_INNER = build_dedup_inner_sql(placeholder="$1")
 
 
 async def _agg_loaded(conn, agency_id: int) -> bool:
