@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 
 import pytest
 
@@ -47,7 +47,7 @@ async def test_execute_returns_tuples(aconn, aagency_id):
             datetime(2026, 4, (i % 28) + 1, 11, 37, 0),
             "平日_11時37分_系統44372",
             "平日",
-            "11:37",
+            time(11, 37),  # Updated 2026-05-22: TIME column (was "11:37" text).
             "44372",
             1,
             120 + i * 10,
@@ -78,7 +78,7 @@ async def test_execute_agency_isolation(aconn, aagency_id):
             datetime(2026, 4, (i % 28) + 1, 11, 37, 0),
             "平日_11時37分_系統44372",
             "平日",
-            "11:37",
+            time(11, 37),  # Updated 2026-05-22: TIME column (was "11:37" text).
             "44372",
             1,
             999,
@@ -113,7 +113,7 @@ async def test_exec_by_hour_service_and_time_band(aconn, aagency_id):
         aagency_id,
         "44372",
         "平日",
-        "08:00",
+        time(8, 0),  # Updated 2026-05-22: TIME column (was "08:00" text).
         2.5,
         2.0,
         5.0,
@@ -146,7 +146,7 @@ async def test_exec_on_time_with_route_and_service_raw(aconn, aagency_id):
             datetime(2026, 4, i + 1, 8, 0, 0),
             "平日_08時00分_系統44372",
             "平日",
-            "08:00",
+            time(8, 0),  # Updated 2026-05-22: TIME column (was "08:00" text).
             "44372",
             1,
             30 + i * 10,

@@ -118,7 +118,7 @@ def _fmt_by_dow(rows: list, intent: dict) -> str:
     scope = _route_scope_label(intent)
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
-    lines = [f"系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for r in rows]
+    lines = [f"系統{r[0]}（{r[1]}）{_dow_label(r[2])}: 平均{_r(r[3])}分（{r[4]}件）" for r in rows]
     if dow:
         header = f"【{scope} {dow}曜の遅延】"
     elif dow_group == "weekend":
@@ -211,7 +211,9 @@ def _fmt_dow_ranking(rows: list, intent: dict) -> str:
     dow = intent.get("dow", "")
     dow_group = intent.get("dow_group")
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [f"{i}位: 系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
+    lines = [
+        f"{i}位: 系統{r[0]}（{r[1]}）{_dow_label(r[2])}: 平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)
+    ]
     if dow_group == "weekend":
         header = f"【{label}週末遅延ランキング】"
     elif dow_group == "weekday":

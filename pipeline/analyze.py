@@ -119,18 +119,11 @@ def analyze(agency_id: int, conn) -> None:
         SELECT
             %(agency_id)s AS agency_id,
             route_code, service_type,
-            CASE EXTRACT(DOW FROM date::date)::int
-                WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
-                WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
-                ELSE '土' END  AS dow,
+            EXTRACT(ISODOW FROM date::date)::smallint AS dow,
             ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
             COUNT(*) AS samples
         FROM deduped
-        GROUP BY route_code, service_type,
-                 CASE EXTRACT(DOW FROM date::date)::int
-                     WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
-                     WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
-                     ELSE '土' END
+        GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
         ORDER BY route_code
     """
     rows = _run_query(sql, p, conn)

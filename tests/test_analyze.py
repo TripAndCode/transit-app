@@ -61,8 +61,9 @@ def test_analyze_creates_agg_route_dow(pg_conn, agency_id):
             (agency_id,),
         )
         dows = {r[0] for r in cur.fetchall()}
+    # Updated 2026-05-22: dow column is SMALLINT ISODOW (was Japanese chars).
+    assert dows <= {1, 2, 3, 4, 5, 6, 7}
     assert len(dows) > 0
-    assert dows.issubset({"月", "火", "水", "木", "金", "土", "日"})
 
 
 def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id):
