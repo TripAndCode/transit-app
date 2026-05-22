@@ -8,7 +8,11 @@ Rows where the JOIN misses get NULLs in service_type / scheduled_time;
 route_code is taken straight from the RT trip.route_id and is always non-null.
 """
 
+import logging
+
 from pipeline.strategies._pb import _dec, _fields
+
+_log = logging.getLogger(__name__)
 
 
 def _decode_rows(pb_bytes: bytes):
@@ -85,10 +89,24 @@ def parse_feed(
 
     rows = []
     miss = 0
+    skipped_extended = 0
     for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             miss += 1
+        elif sched and sched[:2].isdigit() and int(sched[:2]) >= 24:
+            # GTFS allows departure_time like "25:30:00" for trips spanning
+            # midnight as continuation of the previous service day. Migration
+            # 0011 makes scheduled_time a TIME column which can't hold those;
+            # drop the row + log.
+            _log.warning(
+                "static_join: skipping trip_id=%r seq=%s extended departure_time=%r",
+                trip_id,
+                stop_seq,
+                sched,
+            )
+            skipped_extended += 1
+            continue
         rows.append(
             (
                 file_name,
@@ -103,5 +121,7 @@ def parse_feed(
         )
 
     if miss:
-        print(f"[static_join] agency={agency_id} {miss}/{len(rows)} rows missed JOIN (logged)")
+        print(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
+    if skipped_extended:
+        print(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
     return rows
