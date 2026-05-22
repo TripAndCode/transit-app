@@ -11,19 +11,38 @@ const PRESETS: Preset[] = [
   { label: "先月", from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
 ];
 
+// JST-pinned month boundaries. See rangeContext.ts for why the
+// frontend pins Asia/Tokyo and not UTC.
+const _TZ = "Asia/Tokyo";
+const _fmtParts = new Intl.DateTimeFormat("en-CA", {
+  timeZone: _TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function _jstYearMonth(d: Date): { year: number; month: number } {
+  // formatToParts returns the calendar year/month in the target TZ.
+  const parts = _fmtParts.formatToParts(d);
+  const year = Number(parts.find((p) => p.type === "year")!.value);
+  const month = Number(parts.find((p) => p.type === "month")!.value);
+  return { year, month };
+}
+
 function firstOfMonth(offset: number): string {
-  const d = new Date();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + offset);
-  return d.toISOString().slice(0, 10);
+  const { year, month } = _jstYearMonth(new Date());
+  // month is 1-12; offset is 0 for current month, -1 for last month, etc.
+  // Anchor at 12:00 UTC to stay safe across all browser TZ contexts.
+  const target = new Date(Date.UTC(year, month - 1 + offset, 1, 12));
+  return _fmtParts.format(target);
 }
 
 function lastOfMonth(offset: number): string {
-  const d = new Date();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + offset + 1);
-  d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
+  const { year, month } = _jstYearMonth(new Date());
+  // Day 0 of next month = last day of target month.
+  // Anchor at 12:00 UTC to stay safe across all browser TZ contexts.
+  const target = new Date(Date.UTC(year, month + offset, 0, 12));
+  return _fmtParts.format(target);
 }
 
 function jpDate(iso: string): string {
