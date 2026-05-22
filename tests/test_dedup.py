@@ -89,13 +89,10 @@ async def test_executor_dedup_inner_picks_latest_observation(aconn, aagency_id):
 async def test_reports_dedup_cte_picks_latest_observation(aconn, aagency_id):
     """pipeline.reports._dedup_cte() (asyncpg / used by every compute_* report)."""
     await _seed_three_observations_async(aconn, aagency_id)
-    # Widen the range one day either side so the 120-second seed never
-    # straddles a JST/UTC date-boundary edge case. The session timezone
-    # is pinned to Asia/Tokyo (see api/main.py _init_connection) and the
-    # CTE's captured_at::date cast uses JST, while `today` is a UTC
-    # calendar value — at JST midnight (15:00 UTC) those disagree.
-    today = datetime.now(timezone.utc).date()
-    ctx = RangeCtx(from_date=today - timedelta(days=1), to_date=today + timedelta(days=1))
+    # aconn fixture pins SET TIME ZONE 'Asia/Tokyo' so captured_at::date in
+    # the CTE matches what the seed inserted on the JST civil calendar.
+    today = datetime.now(timezone(timedelta(hours=9))).date()
+    ctx = RangeCtx(from_date=today, to_date=today)
     where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = f"WITH {_dedup_cte(where)} SELECT dep_delay FROM deduped"
     rows = await aconn.fetch(sql, aagency_id, *params)

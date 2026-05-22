@@ -34,30 +34,39 @@ export type RangeCtxPatch = {
 
 export const DEFAULT_RANGE_DAYS = 30;
 
-// The server pins its session timezone to Asia/Tokyo (api/main.py
-// _init_connection), so all `captured_at::date` casts use the JST
-// civil calendar. The frontend default range must use the same
-// calendar; otherwise the ~9h/day window where UTC and JST disagree
-// on the date causes off-by-one defaults.
-//
-// JST has no DST, so a naive UTC+9 offset would also work, but
-// Intl.DateTimeFormat is more robust if we ever extend to per-agency
-// timezones (filed for follow-up).
-const TZ = "Asia/Tokyo";
-const fmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: TZ,
+/** JST is the only timezone the server uses (see api/main.py _init_connection). */
+export const JST_TZ = "Asia/Tokyo";
+
+// en-CA renders YYYY-MM-DD without locale-specific separators.
+const _jstFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: JST_TZ,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
 });
 
-export function todayISO(): string {
-  // en-CA renders YYYY-MM-DD without locale-specific separators.
-  return fmt.format(new Date());
+/** Format a Date as YYYY-MM-DD in JST. */
+export function toJstISO(d: Date): string {
+  return _jstFmt.format(d);
 }
 
+/** YYYY-MM-DD today in JST. Default `to` for the date-range UI. */
+export function todayISO(): string {
+  return toJstISO(new Date());
+}
+
+/** YYYY-MM-DD `days` calendar days before today, in JST. */
 export function isoDaysAgo(days: number): string {
-  return fmt.format(new Date(Date.now() - days * 86_400_000));
+  return toJstISO(new Date(Date.now() - days * 86_400_000));
+}
+
+/** JST calendar (year, month=1..12) of a Date. */
+export function jstYearMonth(d: Date): { year: number; month: number } {
+  const parts = _jstFmt.formatToParts(d);
+  return {
+    year: Number(parts.find((p) => p.type === "year")!.value),
+    month: Number(parts.find((p) => p.type === "month")!.value),
+  };
 }
 
 export function useRangeContext(): [RangeCtx, (patch: RangeCtxPatch) => void] {

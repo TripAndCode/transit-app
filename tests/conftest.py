@@ -127,6 +127,9 @@ async def aconn(apply_schema):
     import asyncpg
 
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    # Mirror api/main.py _init_connection so `captured_at::date` casts in
+    # tests use the same JST civil calendar as production.
+    await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
     yield conn
     # clean up
     try:

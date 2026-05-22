@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 
 type Preset = { label: string; from: () => string; to: () => string };
 
@@ -11,38 +11,18 @@ const PRESETS: Preset[] = [
   { label: "先月", from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
 ];
 
-// JST-pinned month boundaries. See rangeContext.ts for why the
-// frontend pins Asia/Tokyo and not UTC.
-const _TZ = "Asia/Tokyo";
-const _fmtParts = new Intl.DateTimeFormat("en-CA", {
-  timeZone: _TZ,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function _jstYearMonth(d: Date): { year: number; month: number } {
-  // formatToParts returns the calendar year/month in the target TZ.
-  const parts = _fmtParts.formatToParts(d);
-  const year = Number(parts.find((p) => p.type === "year")!.value);
-  const month = Number(parts.find((p) => p.type === "month")!.value);
-  return { year, month };
-}
-
+/** First day of the current JST month, offset by `offset` months (negative = past). */
 function firstOfMonth(offset: number): string {
-  const { year, month } = _jstYearMonth(new Date());
-  // month is 1-12; offset is 0 for current month, -1 for last month, etc.
-  // Anchor at 12:00 UTC to stay safe across all browser TZ contexts.
-  const target = new Date(Date.UTC(year, month - 1 + offset, 1, 12));
-  return _fmtParts.format(target);
+  const { year, month } = jstYearMonth(new Date());
+  // Anchor at 12:00 UTC: the JST formatter never slides a day in the JST cal.
+  return toJstISO(new Date(Date.UTC(year, month - 1 + offset, 1, 12)));
 }
 
+/** Last day of the current JST month, offset by `offset` months. */
 function lastOfMonth(offset: number): string {
-  const { year, month } = _jstYearMonth(new Date());
-  // Day 0 of next month = last day of target month.
-  // Anchor at 12:00 UTC to stay safe across all browser TZ contexts.
-  const target = new Date(Date.UTC(year, month + offset, 0, 12));
-  return _fmtParts.format(target);
+  const { year, month } = jstYearMonth(new Date());
+  // Day 0 of next month = last day of this one.
+  return toJstISO(new Date(Date.UTC(year, month + offset, 0, 12)));
 }
 
 function jpDate(iso: string): string {
