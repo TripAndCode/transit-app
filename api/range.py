@@ -160,11 +160,17 @@ def time_band_clause(
     ctx: RangeCtx,
     next_param: int,
 ) -> tuple[str, list, int]:
-    """``column`` is a 'HH:MM:SS' text column (e.g. ``scheduled_time``)."""
+    """``column`` is a TIME column (e.g. ``scheduled_time``). Each side of
+    the comparison is explicitly cast so the fragment is correct both
+    before and after migration 0011 (TEXT was implicitly OK; TIME needs
+    the typed bind)."""
     if ctx.time_band == "all":
         return "TRUE", [], next_param
     start, end = _TIME_BAND_RANGES[ctx.time_band]
-    fragment = f"({column} >= ${next_param} AND {column} < ${next_param + 1})"
+    fragment = (
+        f"({column}::time >= (${next_param}::text)::time"
+        f" AND {column}::time < (${next_param + 1}::text)::time)"
+    )
     return fragment, [start, end], next_param + 2
 
 
