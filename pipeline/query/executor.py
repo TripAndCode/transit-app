@@ -76,20 +76,22 @@ def _route_in_clause(route_codes: list, n: int) -> tuple[str, list, int]:
 
 
 def _time_band_clause(time_band: str | None, n: int, col: str = "scheduled_time") -> tuple[str, list, int]:
-    """Return (sql_fragment, values, next_n)."""
+    """Return (sql_fragment, values, next_n). Each bind is cast to ::time so
+    the fragment is correct both before and after migration 0011."""
     if not time_band:
         return "", [], n
     if time_band == "morning":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["05:00", "10:00"], n + 2
+        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["05:00", "10:00"], n + 2
     if time_band == "day":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["10:00", "16:00"], n + 2
+        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["10:00", "16:00"], n + 2
     if time_band == "evening":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["16:00", "20:00"], n + 2
+        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["16:00", "20:00"], n + 2
     if time_band == "night":
-        return f"({col} >= ${n} OR {col} < ${n + 1})", ["20:00", "05:00"], n + 2
+        return f"({col}::time >= (${n}::text)::time OR {col}::time < (${n + 1}::text)::time)", ["20:00", "05:00"], n + 2
     if time_band == "rush":
         return (
-            f"(({col} >= ${n} AND {col} < ${n + 1}) OR ({col} >= ${n + 2} AND {col} < ${n + 3}))",
+            f"(({col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time)"
+            f" OR ({col}::time >= (${n + 2}::text)::time AND {col}::time < (${n + 3}::text)::time))",
             ["07:00", "10:00", "17:00", "20:00"],
             n + 4,
         )
