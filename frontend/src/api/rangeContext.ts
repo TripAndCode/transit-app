@@ -34,14 +34,30 @@ export type RangeCtxPatch = {
 
 export const DEFAULT_RANGE_DAYS = 30;
 
+// The server pins its session timezone to Asia/Tokyo (api/main.py
+// _init_connection), so all `captured_at::date` casts use the JST
+// civil calendar. The frontend default range must use the same
+// calendar; otherwise the ~9h/day window where UTC and JST disagree
+// on the date causes off-by-one defaults.
+//
+// JST has no DST, so a naive UTC+9 offset would also work, but
+// Intl.DateTimeFormat is more robust if we ever extend to per-agency
+// timezones (filed for follow-up).
+const TZ = "Asia/Tokyo";
+const fmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // en-CA renders YYYY-MM-DD without locale-specific separators.
+  return fmt.format(new Date());
 }
 
 export function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  return fmt.format(new Date(Date.now() - days * 86_400_000));
 }
 
 export function useRangeContext(): [RangeCtx, (patch: RangeCtxPatch) => void] {
