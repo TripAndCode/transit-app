@@ -7,12 +7,20 @@ from pipeline.db import _DOW_PG
 
 _log = logging.getLogger(__name__)
 
+# See pipeline/db.py for the rationale. This duplicate definition
+# exists because the executor's queries use asyncpg-style $N
+# placeholders while pipeline.db._DEDUP_INNER uses psycopg2's
+# %(name)s. Both must change together so analyze.py and the legacy
+# /query route agree on report numbers.
 _DEDUP_INNER = """\
-        SELECT route_code, service_type, scheduled_time,
-               trip_id, DATE(captured_at) AS date, stop_sequence,
-               MAX(dep_delay) AS dep_delay
-        FROM updates WHERE dep_delay IS NOT NULL AND agency_id = $1
-        GROUP BY route_code, service_type, scheduled_time, trip_id, DATE(captured_at), stop_sequence"""
+        SELECT DISTINCT ON (route_code, service_type, scheduled_time,
+                            trip_id, captured_at::date, stop_sequence)
+               route_code, service_type, scheduled_time, trip_id,
+               captured_at::date AS date, stop_sequence, dep_delay
+        FROM updates
+        WHERE dep_delay IS NOT NULL AND agency_id = $1
+        ORDER BY route_code, service_type, scheduled_time, trip_id,
+                 captured_at::date, stop_sequence, captured_at DESC"""
 
 
 async def _agg_loaded(conn, agency_id: int) -> bool:
