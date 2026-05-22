@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 
-from pipeline.db import _DOW_PG, build_dedup_inner_sql
+from pipeline.db import _DOW_JP_TO_ISO, build_dedup_inner_sql  # _DOW_PG removed in Task 6
 
 _log = logging.getLogger(__name__)
 
@@ -98,11 +98,12 @@ def _time_band_clause(time_band: str | None, n: int, col: str = "scheduled_time"
     return "", [], n
 
 
-def _dow_group_values(dow_group: str | None) -> list[str]:
+def _dow_group_values(dow_group: str | None) -> list[int]:
+    """ISODOW ints (Mon=1..Sun=7) for weekday / weekend rollups."""
     if dow_group == "weekend":
-        return ["土", "日"]
+        return [6, 7]  # Sat, Sun
     if dow_group == "weekday":
-        return ["月", "火", "水", "木", "金"]
+        return [1, 2, 3, 4, 5]  # Mon-Fri
     return []
 
 
@@ -260,12 +261,9 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
 # _exec_by_dow
 # ---------------------------------------------------------------------------
 
-_DOW_CASE = (
-    "CASE EXTRACT(DOW FROM date::date)::int "
-    "WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火' "
-    "WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金' "
-    "ELSE '土' END"
-)
+# Emit ISODOW int matching agg_route_dow.dow (post migration 0011).
+# Callers render via pipeline/query/formatter._dow_label.
+_DOW_CASE = "EXTRACT(ISODOW FROM date::date)::smallint"
 
 
 async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
@@ -291,8 +289,11 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             n_agg += 1
 
         if dow:
+            dow_iso = _DOW_JP_TO_ISO.get(dow)
+            if dow_iso is None:
+                return []
             conds.append(f"dow=${n_agg}")
-            params.append(dow)
+            params.append(dow_iso)
             where_sql = " AND ".join(conds)
             rows = await conn.fetch(
                 "SELECT route_code, service_type, dow, avg_min, samples "
@@ -338,11 +339,11 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
         outer_n += 1
 
     if dow:
-        dow_num = _DOW_PG.get(dow)
-        if dow_num is None:
+        dow_iso = _DOW_JP_TO_ISO.get(dow)
+        if dow_iso is None:
             return []
-        outer_conds.append(f"EXTRACT(DOW FROM date::date)::int = ${outer_n}")
-        outer_vals.append(dow_num)
+        outer_conds.append(f"EXTRACT(ISODOW FROM date::date)::smallint = ${outer_n}")
+        outer_vals.append(dow_iso)
         outer_n += 1
         where_sql = " AND ".join(outer_conds)
         rows = await conn.fetch(
@@ -358,9 +359,9 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
 
     if dow_group:
         label = "週末" if dow_group == "weekend" else "平日"
-        dow_nums = [0, 6] if dow_group == "weekend" else [1, 2, 3, 4, 5]
+        dow_nums = _dow_group_values(dow_group)  # ISODOW ints
         phs = ", ".join(f"${outer_n + i}" for i in range(len(dow_nums)))
-        where_sql = " AND ".join(outer_conds + [f"EXTRACT(DOW FROM date::date)::int IN ({phs})"])
+        where_sql = " AND ".join(outer_conds + [f"EXTRACT(ISODOW FROM date::date)::smallint IN ({phs})"])
         rows = await conn.fetch(
             f"WITH deduped AS ({_DEDUP_INNER}) "
             f"SELECT route_code, service_type, '{label}' AS dow, "
@@ -967,10 +968,10 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
 
     # raw fallback
     if dow:
-        dow_num = _DOW_PG.get(dow)
-        if dow_num is None:
+        dow_iso = _DOW_JP_TO_ISO.get(dow)
+        if dow_iso is None:
             return []
-        params = [agency_id, dow_num]
+        params = [agency_id, dow_iso]
         n = 3
         svc_and = ""
         if service:
@@ -983,7 +984,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             "SELECT route_code, service_type, "
             f"{_DOW_CASE} AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
-            f"FROM deduped WHERE EXTRACT(DOW FROM date::date)::int = $2{svc_and} "
+            f"FROM deduped WHERE EXTRACT(ISODOW FROM date::date)::smallint = $2{svc_and} "
             f"GROUP BY route_code, service_type HAVING COUNT(*) > 5 "
             f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT ${n}",
             *params,
@@ -991,7 +992,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
         return [tuple(r) for r in rows]
 
     if dow_group:
-        dow_nums = [0, 6] if dow_group == "weekend" else [1, 2, 3, 4, 5]
+        dow_nums = _dow_group_values(dow_group)
         label = "週末" if dow_group == "weekend" else "平日"
         phs = ", ".join(f"${2 + i}" for i in range(len(dow_nums)))
         params = [agency_id, *dow_nums]
@@ -1006,7 +1007,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             f"WITH deduped AS ({_DEDUP_INNER}) "
             f"SELECT route_code, service_type, '{label}' AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
-            f"FROM deduped WHERE EXTRACT(DOW FROM date::date)::int IN ({phs}){svc_and} "
+            f"FROM deduped WHERE EXTRACT(ISODOW FROM date::date)::smallint IN ({phs}){svc_and} "
             "GROUP BY route_code, service_type HAVING COUNT(*) > 5 "
             f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT ${n}",
             *params,

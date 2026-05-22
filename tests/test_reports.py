@@ -76,7 +76,7 @@ async def test_reports_get_ranking_with_seeded_updates(reports_client):
     Compute requires HAVING COUNT(*) > 20, so seed 25 update rows for route 44
     spread across distinct trip_ids so the dedup CTE preserves them all.
     """
-    from datetime import datetime
+    from datetime import datetime, time
 
     client, agency_id, pool = reports_client
     today = "2026-05-01"
@@ -91,7 +91,7 @@ async def test_reports_get_ranking_with_seeded_updates(reports_client):
                 f"trip-{i}",
                 "44",
                 "平日",
-                "10:00:00",
+                time(10, 0),  # Updated 2026-05-22: TIME column (was "10:00:00" text).
                 1,
                 300,
                 datetime.fromisoformat(f"{today}T10:0{i % 10}:00"),
