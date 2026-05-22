@@ -11,18 +11,18 @@ const PRESETS: Preset[] = [
   { label: "先月", from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
 ];
 
-/** First day of the current JST month, offset by `offset` months (negative = past). */
+/** First day of the current JST month, offset by `offset` months. */
 function firstOfMonth(offset: number): string {
   const { year, month } = jstYearMonth(new Date());
-  // Anchor at 12:00 UTC: the JST formatter never slides a day in the JST cal.
-  return toJstISO(new Date(Date.UTC(year, month - 1 + offset, 1, 12)));
+  // 00:00 UTC = 09:00 JST same civil day — no anchor needed for JST.
+  return toJstISO(new Date(Date.UTC(year, month - 1 + offset, 1)));
 }
 
 /** Last day of the current JST month, offset by `offset` months. */
 function lastOfMonth(offset: number): string {
   const { year, month } = jstYearMonth(new Date());
   // Day 0 of next month = last day of this one.
-  return toJstISO(new Date(Date.UTC(year, month + offset, 0, 12)));
+  return toJstISO(new Date(Date.UTC(year, month + offset, 0)));
 }
 
 function jpDate(iso: string): string {

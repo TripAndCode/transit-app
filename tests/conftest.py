@@ -94,6 +94,12 @@ def apply_schema():
 @pytest.fixture
 def pg_conn(apply_schema):
     conn = psycopg2.connect(DATABASE_URL)
+    # Mirror api/main.py _init_connection (and the aconn fixture) so
+    # `captured_at::date` casts in psycopg2-path tests use the same JST
+    # civil calendar as production. Without this, tests that depend on
+    # JST date boundaries flake near 15:00 UTC (00:00 JST).
+    with conn.cursor() as cur:
+        cur.execute("SET TIME ZONE 'Asia/Tokyo'")
     yield conn
     try:
         conn.rollback()

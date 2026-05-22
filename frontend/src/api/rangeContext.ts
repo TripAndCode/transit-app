@@ -38,7 +38,7 @@ export const DEFAULT_RANGE_DAYS = 30;
 export const JST_TZ = "Asia/Tokyo";
 
 // en-CA renders YYYY-MM-DD without locale-specific separators.
-const _jstFmt = new Intl.DateTimeFormat("en-CA", {
+const jstFmt = new Intl.DateTimeFormat("en-CA", {
   timeZone: JST_TZ,
   year: "numeric",
   month: "2-digit",
@@ -47,7 +47,7 @@ const _jstFmt = new Intl.DateTimeFormat("en-CA", {
 
 /** Format a Date as YYYY-MM-DD in JST. */
 export function toJstISO(d: Date): string {
-  return _jstFmt.format(d);
+  return jstFmt.format(d);
 }
 
 /** YYYY-MM-DD today in JST. Default `to` for the date-range UI. */
@@ -62,7 +62,7 @@ export function isoDaysAgo(days: number): string {
 
 /** JST calendar (year, month=1..12) of a Date. */
 export function jstYearMonth(d: Date): { year: number; month: number } {
-  const parts = _jstFmt.formatToParts(d);
+  const parts = jstFmt.formatToParts(d);
   return {
     year: Number(parts.find((p) => p.type === "year")!.value),
     month: Number(parts.find((p) => p.type === "month")!.value),

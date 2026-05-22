@@ -191,8 +191,9 @@ async def compute_compare_ranking(
     wd_where, wd_params, n_after_wd = build_updates_filter(weekday_ctx, next_param=2)
     we_where, we_params, n = build_updates_filter(weekend_ctx, next_param=n_after_wd)
     sql = (
-        # Narrower dedup key than _dedup_cte (no service_type/scheduled_time);
-        # the weekday-vs-weekend rollup doesn't need them.
+        # Narrower dedup key than _dedup_cte (no service_type/scheduled_time):
+        # the weekday-vs-weekend rollup doesn't need them. Assumes
+        # (trip_id, date) determines service_type in clean data.
         "WITH wd_dedup AS (\n"
         "    SELECT DISTINCT ON (route_code, trip_id,\n"
         "                        captured_at::date, stop_sequence)\n"
