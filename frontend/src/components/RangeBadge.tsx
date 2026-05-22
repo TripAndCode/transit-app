@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 
 type Preset = { label: string; from: () => string; to: () => string };
 
@@ -11,19 +11,18 @@ const PRESETS: Preset[] = [
   { label: "先月", from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
 ];
 
+/** First day of the current JST month, offset by `offset` months. */
 function firstOfMonth(offset: number): string {
-  const d = new Date();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + offset);
-  return d.toISOString().slice(0, 10);
+  const { year, month } = jstYearMonth(new Date());
+  // 00:00 UTC = 09:00 JST same civil day — no anchor needed for JST.
+  return toJstISO(new Date(Date.UTC(year, month - 1 + offset, 1)));
 }
 
+/** Last day of the current JST month, offset by `offset` months. */
 function lastOfMonth(offset: number): string {
-  const d = new Date();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + offset + 1);
-  d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
+  const { year, month } = jstYearMonth(new Date());
+  // Day 0 of next month = last day of this one.
+  return toJstISO(new Date(Date.UTC(year, month + offset, 0)));
 }
 
 function jpDate(iso: string): string {

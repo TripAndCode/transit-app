@@ -1,18 +1,21 @@
+"""Legacy SQL executors used by the v1 /api/{id}/query endpoint and the
+v2 LLM tool surface (pipeline/query/tools.py). Each `_exec_*` returns a
+list of tuples shaped to match the formatters in pipeline/query/formatter.py.
+
+This module shares its dedup SQL with pipeline/db.py — see
+build_dedup_inner_sql.
+"""
+
 from __future__ import annotations
 
 import logging
 import re
 
-from pipeline.db import _DOW_PG
+from pipeline.db import _DOW_PG, build_dedup_inner_sql
 
 _log = logging.getLogger(__name__)
 
-_DEDUP_INNER = """\
-        SELECT route_code, service_type, scheduled_time,
-               trip_id, DATE(captured_at) AS date, stop_sequence,
-               MAX(dep_delay) AS dep_delay
-        FROM updates WHERE dep_delay IS NOT NULL AND agency_id = $1
-        GROUP BY route_code, service_type, scheduled_time, trip_id, DATE(captured_at), stop_sequence"""
+_DEDUP_INNER = build_dedup_inner_sql(placeholder="$1")
 
 
 async def _agg_loaded(conn, agency_id: int) -> bool:

@@ -266,6 +266,21 @@ Computes five aggregation tables used by all API queries:
 | `agg_daily_trend` | per route × service type × date |
 | `agg_stop_seq` | per route × stop sequence |
 
+> **2026-05-22 note on delay semantics:** report numbers from this date
+> onward use the *most recent* `dep_delay` observation per stop event
+> (latest by `captured_at`, with `id DESC` as a deterministic tiebreaker),
+> not the maximum across the polling window. This matches what passengers
+> actually experienced — GTFS-RT estimates refine as the trip nears each
+> stop. Average delays may shift slightly downward on noisy feeds. The
+> first `make analyze` (or hourly cron tick) after the change rewrites
+> every `agg_*` row that still meets the sample-count cutoffs; routes
+> that no longer receive samples keep their previous (MAX-era) values
+> until they age out of the data window. Rows with `dep_delay IS NULL`
+> are filtered at the inner dedup SELECT, so the "latest" is the latest
+> *numeric* estimate per stop event. There is no rollback flag — to
+> revert, revert the PR and re-analyze; pre-PR numbers may not fully
+> restore for routes whose data has since rolled over.
+
 ---
 
 ## API
