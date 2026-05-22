@@ -34,14 +34,39 @@ export type RangeCtxPatch = {
 
 export const DEFAULT_RANGE_DAYS = 30;
 
-export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+/** JST is the only timezone the server uses (see api/main.py _init_connection). */
+export const JST_TZ = "Asia/Tokyo";
+
+// en-CA renders YYYY-MM-DD without locale-specific separators.
+const jstFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: JST_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** Format a Date as YYYY-MM-DD in JST. */
+export function toJstISO(d: Date): string {
+  return jstFmt.format(d);
 }
 
+/** YYYY-MM-DD today in JST. Default `to` for the date-range UI. */
+export function todayISO(): string {
+  return toJstISO(new Date());
+}
+
+/** YYYY-MM-DD `days` calendar days before today, in JST. */
 export function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  return toJstISO(new Date(Date.now() - days * 86_400_000));
+}
+
+/** JST calendar (year, month=1..12) of a Date. */
+export function jstYearMonth(d: Date): { year: number; month: number } {
+  const parts = jstFmt.formatToParts(d);
+  return {
+    year: Number(parts.find((p) => p.type === "year")!.value),
+    month: Number(parts.find((p) => p.type === "month")!.value),
+  };
 }
 
 export function useRangeContext(): [RangeCtx, (patch: RangeCtxPatch) => void] {

@@ -17,21 +17,16 @@ from __future__ import annotations
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline.cache import async_lru_cache
+from pipeline.db import build_dedup_inner_sql
 
 
 def _dedup_cte(where_frag: str) -> str:
-    """The v1 dedup CTE, parameterized with the ctx WHERE fragment."""
-    return (
-        "deduped AS (\n"
-        "    SELECT route_code, service_type, scheduled_time, trip_id,\n"
-        "           captured_at::date AS date, stop_sequence,\n"
-        "           MAX(dep_delay) AS dep_delay\n"
-        "    FROM updates\n"
-        f"    WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {where_frag}\n"
-        "    GROUP BY route_code, service_type, scheduled_time, trip_id,\n"
-        "             captured_at::date, stop_sequence\n"
-        ")"
-    )
+    """Wrap the shared latest-by-captured_at dedup SQL in a `deduped` CTE.
+
+    `where_frag` is a trusted server-built fragment from
+    `api.range.build_updates_filter` — never user input.
+    """
+    return f"deduped AS ({build_dedup_inner_sql(placeholder='$1', extra_where=where_frag)})"
 
 
 # ---------------------------------------------------------------------------
@@ -196,21 +191,28 @@ async def compute_compare_ranking(
     wd_where, wd_params, n_after_wd = build_updates_filter(weekday_ctx, next_param=2)
     we_where, we_params, n = build_updates_filter(weekend_ctx, next_param=n_after_wd)
     sql = (
+        # Narrower dedup key than _dedup_cte (no service_type/scheduled_time):
+        # the weekday-vs-weekend rollup doesn't need them. Assumes
+        # (trip_id, date) determines service_type in clean data.
         "WITH wd_dedup AS (\n"
-        "    SELECT route_code, trip_id,\n"
-        "           captured_at::date AS date, stop_sequence,\n"
-        "           MAX(dep_delay) AS dep_delay\n"
+        "    SELECT DISTINCT ON (route_code, trip_id,\n"
+        "                        captured_at::date, stop_sequence)\n"
+        "           route_code, trip_id,\n"
+        "           captured_at::date AS date, stop_sequence, dep_delay\n"
         "    FROM updates\n"
         f"    WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {wd_where}\n"
-        "    GROUP BY route_code, trip_id, captured_at::date, stop_sequence\n"
+        "    ORDER BY route_code, trip_id, captured_at::date,\n"
+        "             stop_sequence, captured_at DESC, id DESC\n"
         "),\n"
         "we_dedup AS (\n"
-        "    SELECT route_code, trip_id,\n"
-        "           captured_at::date AS date, stop_sequence,\n"
-        "           MAX(dep_delay) AS dep_delay\n"
+        "    SELECT DISTINCT ON (route_code, trip_id,\n"
+        "                        captured_at::date, stop_sequence)\n"
+        "           route_code, trip_id,\n"
+        "           captured_at::date AS date, stop_sequence, dep_delay\n"
         "    FROM updates\n"
         f"    WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {we_where}\n"
-        "    GROUP BY route_code, trip_id, captured_at::date, stop_sequence\n"
+        "    ORDER BY route_code, trip_id, captured_at::date,\n"
+        "             stop_sequence, captured_at DESC, id DESC\n"
         "),\n"
         "wd_avg AS (\n"
         "    SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n\n"
