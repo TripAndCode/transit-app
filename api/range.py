@@ -161,10 +161,15 @@ def time_band_clause(
     ctx: RangeCtx,
     next_param: int,
 ) -> tuple[str, list, int]:
-    """``column`` is a TIME column (e.g. ``scheduled_time``). Each side of
-    the comparison is explicitly cast so the fragment is correct both
-    before and after migration 0011 (TEXT was implicitly OK; TIME needs
-    the typed bind)."""
+    """Return a WHERE fragment filtering ``column`` (a TIME column) to the
+    range named by ``ctx.time_band``.
+
+    Each placeholder is cast as ``(${n}::text)::time`` so asyncpg sends
+    the Python ``str`` over the wire as TEXT — without the ``::text``
+    coercion, asyncpg's prepared-statement type inference would try to
+    encode the string as ``datetime.time`` and fail. The server then
+    parses the text into TIME for the comparison.
+    """
     if ctx.time_band == "all":
         return "TRUE", [], next_param
     start, end = _TIME_BAND_RANGES[ctx.time_band]

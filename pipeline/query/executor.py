@@ -75,27 +75,51 @@ def _route_in_clause(route_codes: list, n: int) -> tuple[str, list, int]:
     return f"route_code IN ({phs})", list(route_codes), n + len(route_codes)
 
 
+# Time-band ranges as (start_inclusive, end_exclusive) text pairs; night
+# and rush use four bounds to express the wrap-midnight / two-window shape.
+# Values are bound as TEXT and cast server-side — see _time_band_clause for
+# why the bind type matters.
+_TIME_BAND_RANGES: dict[str, list[str]] = {
+    "morning": ["05:00", "10:00"],
+    "day": ["10:00", "16:00"],
+    "evening": ["16:00", "20:00"],
+    "night": ["20:00", "05:00"],
+    "rush": ["07:00", "10:00", "17:00", "20:00"],
+}
+
+
 def _time_band_clause(time_band: str | None, n: int, col: str = "scheduled_time") -> tuple[str, list, int]:
-    """Return (sql_fragment, values, next_n). Each bind is cast to ::time so
-    the fragment is correct both before and after migration 0011."""
-    if not time_band:
+    """Return ``(sql_fragment, values, next_n)`` for a named time-band filter.
+
+    Each bind is cast as ``(${n}::text)::time`` so asyncpg sends the
+    Python ``str`` over the wire as TEXT (avoiding asyncpg's prepared-
+    statement type inference, which would otherwise try to encode the
+    string as ``datetime.time`` and fail). The server then parses the
+    text into TIME for the comparison against ``col``, which is itself
+    cast to TIME to be correct both before and after migration 0011.
+    """
+    if not time_band or time_band not in _TIME_BAND_RANGES:
         return "", [], n
-    if time_band == "morning":
-        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["05:00", "10:00"], n + 2
-    if time_band == "day":
-        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["10:00", "16:00"], n + 2
-    if time_band == "evening":
-        return f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time", ["16:00", "20:00"], n + 2
+    vals = _TIME_BAND_RANGES[time_band]
     if time_band == "night":
-        return f"({col}::time >= (${n}::text)::time OR {col}::time < (${n + 1}::text)::time)", ["20:00", "05:00"], n + 2
+        # Wraps midnight: hour >= 20:00 OR hour < 05:00.
+        return (
+            f"({col}::time >= (${n}::text)::time OR {col}::time < (${n + 1}::text)::time)",
+            vals,
+            n + 2,
+        )
     if time_band == "rush":
         return (
             f"(({col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time)"
             f" OR ({col}::time >= (${n + 2}::text)::time AND {col}::time < (${n + 3}::text)::time))",
-            ["07:00", "10:00", "17:00", "20:00"],
+            vals,
             n + 4,
         )
-    return "", [], n
+    return (
+        f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time",
+        vals,
+        n + 2,
+    )
 
 
 def _dow_group_values(dow_group: str | None) -> list[int]:

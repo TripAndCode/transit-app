@@ -15,8 +15,8 @@ def test_parse_trip_id_extracts_extended_hour():
 def test_static_join_loop_drops_extended_hour_row():
     """Mirror of the inner loop in static_join.parse_feed: rows whose
     joined departure_time has hour >= 24 are skipped, normal rows are
-    kept. The actual function wraps protobuf decoding around this same
-    loop; tests/test_ingest_*.py covers the wire layer."""
+    kept. This is a logic-level pin, not a wire-level fixture — the
+    full protobuf path is exercised by the ingest smoke suite."""
     raw_rows = [
         ("trip_a", "route10", 1, 60),
         ("trip_b", "route10", 1, 60),

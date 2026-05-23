@@ -112,3 +112,27 @@ def test_dow_label_unknown_int_falls_back_to_str():
     from pipeline.query.formatter import _dow_label
 
     assert _dow_label(99) == "99"
+
+
+def test_time_label_time_object_renders_hhmm():
+    """Post-migration 0011: agg_route_hour.scheduled_time is TIME → datetime.time."""
+    from datetime import time
+
+    from pipeline.query.formatter import _time_label
+
+    assert _time_label(time(8, 0)) == "08:00"
+    assert _time_label(time(17, 35, 12)) == "17:35"
+
+
+def test_time_label_string_truncates_to_hhmm():
+    """Legacy/raw text scheduled_time stays HH:MM regardless of source width."""
+    from pipeline.query.formatter import _time_label
+
+    assert _time_label("08:00") == "08:00"
+    assert _time_label("08:00:00") == "08:00"
+
+
+def test_time_label_none_becomes_empty():
+    from pipeline.query.formatter import _time_label
+
+    assert _time_label(None) == ""
