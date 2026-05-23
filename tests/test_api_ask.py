@@ -5,6 +5,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.conftest import TEST_ORIGIN
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
@@ -62,7 +64,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     resp = await client.post(
         f"/api/{agency_id}/ask",
         json={"question": "一番遅れている路線は？"},
-        headers={"Origin": "http://test"},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -76,7 +78,11 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
 @pytest.mark.asyncio
 async def test_ask_endpoint_unknown_agency(ask_client):
     client, _ = ask_client
-    resp = await client.post("/api/99999/ask", json={"question": "test"})
+    resp = await client.post(
+        "/api/99999/ask",
+        json={"question": "test"},
+        headers={"Origin": TEST_ORIGIN},
+    )
     assert resp.status_code == 404
 
 

@@ -5,6 +5,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.conftest import TEST_ORIGIN
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
@@ -60,7 +62,7 @@ async def test_list_agencies_empty(agencies_client):
 @pytest.mark.asyncio
 async def test_create_agency(agencies_client):
     payload = {"agency_name": "Aomori Bus", "feed_url": "http://aomori.example.com"}
-    resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": "http://test"})
+    resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": TEST_ORIGIN})
     assert resp.status_code == 201
     data = resp.json()
     assert "agency_id" in data
@@ -71,7 +73,7 @@ async def test_create_agency(agencies_client):
 @pytest.mark.asyncio
 async def test_get_agency(agencies_client):
     payload = {"agency_name": "Test Agency", "feed_url": "http://test2.example.com"}
-    create_resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": "http://test"})
+    create_resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": TEST_ORIGIN})
     aid = create_resp.json()["agency_id"]
     resp = await agencies_client.get(f"/api/agencies/{aid}")
     assert resp.status_code == 200
@@ -89,12 +91,12 @@ async def test_list_agencies_returns_multiple(agencies_client):
     await agencies_client.post(
         "/api/agencies",
         json={"agency_name": "A", "feed_url": "http://a.example.com"},
-        headers={"Origin": "http://test"},
+        headers={"Origin": TEST_ORIGIN},
     )
     await agencies_client.post(
         "/api/agencies",
         json={"agency_name": "B", "feed_url": "http://b.example.com"},
-        headers={"Origin": "http://test"},
+        headers={"Origin": TEST_ORIGIN},
     )
     resp = await agencies_client.get("/api/agencies")
     assert resp.status_code == 200
@@ -110,3 +112,6 @@ async def test_create_agency_rejects_cross_origin(agencies_client):
         headers={"Origin": "https://evil.example.com"},
     )
     assert resp.status_code == 403
+    # Belt-and-suspenders: verify the INSERT didn't fire before the guard.
+    listing = await agencies_client.get("/api/agencies")
+    assert all(a["agency_name"] != "evil" for a in listing.json())

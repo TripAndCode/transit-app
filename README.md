@@ -351,6 +351,7 @@ context as query params: `from`, `to`, `dow`, `time_band`, `service`,
 ```bash
 curl -X POST http://localhost:8000/api/1/ask \
   -H "Content-Type: application/json" \
+  -H "Origin: http://localhost:8000" \
   -d '{"question": "系統5の遅延は？"}'
 ```
 
