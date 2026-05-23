@@ -86,8 +86,16 @@ async def test_get_agency_not_found(agencies_client):
 
 @pytest.mark.asyncio
 async def test_list_agencies_returns_multiple(agencies_client):
-    await agencies_client.post("/api/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"}, headers={"Origin": "http://test"})
-    await agencies_client.post("/api/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"}, headers={"Origin": "http://test"})
+    await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "A", "feed_url": "http://a.example.com"},
+        headers={"Origin": "http://test"},
+    )
+    await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "B", "feed_url": "http://b.example.com"},
+        headers={"Origin": "http://test"},
+    )
     resp = await agencies_client.get("/api/agencies")
     assert resp.status_code == 200
     assert len(resp.json()) >= 2
