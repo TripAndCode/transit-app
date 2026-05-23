@@ -126,3 +126,32 @@ async def test_create_agency_rejects_path_suffixed_origin(agencies_client):
         headers={"Origin": f"{TEST_ORIGIN}/.evil"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "bad_origin",
+    [
+        f"{TEST_ORIGIN}?evil=1",  # query in Origin
+        "http://user:pass@test",  # userinfo in Origin
+    ],
+)
+@pytest.mark.asyncio
+async def test_create_agency_rejects_malformed_origin(agencies_client, bad_origin):
+    """Origin headers carrying query / userinfo are RFC-invalid → 403."""
+    resp = await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "x", "feed_url": "https://x/y"},
+        headers={"Origin": bad_origin},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_agency_accepts_uppercase_scheme(agencies_client):
+    """Schemes are case-insensitive per RFC 3986; uppercase Origin normalises."""
+    resp = await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "Caps", "feed_url": "https://caps/feed"},
+        headers={"Origin": TEST_ORIGIN.upper()},
+    )
+    assert resp.status_code == 201
