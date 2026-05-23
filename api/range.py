@@ -30,9 +30,10 @@ TimeBand = Literal[
 ]
 ServiceType = Literal["all", "平日", "土日祝"]
 
-# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings; compared
-# textually against scheduled_time, which is also 'HH:MM:SS' text. Lexicographic
-# string comparison works because all values use leading zeros.
+# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
+# 0011 made `scheduled_time` a TIME column, so `time_band_clause` casts both
+# sides of the comparison to TIME — these literals are sent over the wire as
+# text and cast server-side. '24:00' is a valid Postgres TIME (end-of-day).
 _TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
     "morning": ("05:00", "09:00"),
     "forenoon": ("09:00", "12:00"),
