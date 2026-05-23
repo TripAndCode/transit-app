@@ -8,11 +8,8 @@ place and every report endpoint, the analyze materializer, and the legacy
 
 import psycopg2
 
-# Japanese DOW label to Postgres EXTRACT(DOW) integer (Sunday=0).
-_DOW_PG = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 0}
-
-# ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause. Replaces _DOW_PG
-# once migration 0011 lands. Kept side-by-side during the transition.
+# ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and agg_route_dow.dow
+# (SMALLINT) after migration 0011.
 _DOW_JP_TO_ISO = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 7}
 _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 
