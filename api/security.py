@@ -96,6 +96,10 @@ def _build_allowed_origins() -> frozenset[str]:
     return frozenset(out)
 
 
+# Frozen at import time — tests that monkeypatch `PUBLIC_BASE_URL` /
+# `CORS_ORIGINS` / `ALLOW_TEST_ORIGIN` after this point will not see the
+# change. Reload the module or call `_build_allowed_origins()` and
+# reassign in a fixture if you need a different allow-list per test.
 _ALLOWED_ORIGINS = _build_allowed_origins()
 
 
