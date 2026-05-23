@@ -30,7 +30,6 @@ from api.routers.auth import router as auth_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
 from api.routers.me import router as me_router
-from api.routers.query import router as query_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 
@@ -142,7 +141,6 @@ app.include_router(admin_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(auth_router)
-app.include_router(query_router)
 app.include_router(reports_router)
 app.include_router(map_router)
 app.include_router(me_router)
