@@ -1,12 +1,14 @@
 """Format raw query-result tuples into Japanese-language report strings.
 
-Each `_fmt_*` function matches a query_type returned by executor.py and
-produces a human-readable Japanese string suitable for display in the UI
-or as LLM context. The public entry point is `format_result`.
+Each `_fmt_*` function matches a query_type produced by the reports
+endpoint (api/routers/reports.py) and renders a human-readable Japanese
+string suitable for display in the UI. The public entry point is
+`format_result`.
 
-DOW values arriving from executor.py are ISODOW ints (1=Mon..7=Sun) after
-migration 0011. `_dow_label` renders them to Japanese characters; rollup
-labels ('平日', '週末') pass through unchanged.
+DOW values arriving from the compute_* helpers in pipeline.reports are
+ISODOW ints (1=Mon..7=Sun) after migration 0011. `_dow_label` renders
+them to Japanese characters; rollup labels ('平日', '週末') pass through
+unchanged.
 """
 
 import asyncio
