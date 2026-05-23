@@ -60,7 +60,7 @@ async def test_list_agencies_empty(agencies_client):
 @pytest.mark.asyncio
 async def test_create_agency(agencies_client):
     payload = {"agency_name": "Aomori Bus", "feed_url": "http://aomori.example.com"}
-    resp = await agencies_client.post("/api/agencies", json=payload)
+    resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": "http://test"})
     assert resp.status_code == 201
     data = resp.json()
     assert "agency_id" in data
@@ -71,7 +71,7 @@ async def test_create_agency(agencies_client):
 @pytest.mark.asyncio
 async def test_get_agency(agencies_client):
     payload = {"agency_name": "Test Agency", "feed_url": "http://test2.example.com"}
-    create_resp = await agencies_client.post("/api/agencies", json=payload)
+    create_resp = await agencies_client.post("/api/agencies", json=payload, headers={"Origin": "http://test"})
     aid = create_resp.json()["agency_id"]
     resp = await agencies_client.get(f"/api/agencies/{aid}")
     assert resp.status_code == 200
@@ -86,8 +86,19 @@ async def test_get_agency_not_found(agencies_client):
 
 @pytest.mark.asyncio
 async def test_list_agencies_returns_multiple(agencies_client):
-    await agencies_client.post("/api/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"})
-    await agencies_client.post("/api/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"})
+    await agencies_client.post("/api/agencies", json={"agency_name": "A", "feed_url": "http://a.example.com"}, headers={"Origin": "http://test"})
+    await agencies_client.post("/api/agencies", json={"agency_name": "B", "feed_url": "http://b.example.com"}, headers={"Origin": "http://test"})
     resp = await agencies_client.get("/api/agencies")
     assert resp.status_code == 200
     assert len(resp.json()) >= 2
+
+
+@pytest.mark.asyncio
+async def test_create_agency_rejects_cross_origin(agencies_client):
+    """Cross-origin POST without an allowlisted Origin returns 403 (csrf_guard)."""
+    resp = await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "evil", "feed_url": "http://evil.example.com/feed.pb"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert resp.status_code == 403

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.deps import get_conn
+from api.security import csrf_guard
 
 router = APIRouter(prefix="/api/agencies", tags=["agencies"])
 
@@ -37,7 +38,10 @@ async def get_agency(agency_id: int, conn=Depends(get_conn)):
 
 
 @router.post("", response_model=AgencyOut, status_code=201)
-async def create_agency(body: AgencyCreate, conn=Depends(get_conn)):
+async def create_agency(body: AgencyCreate, request: Request, conn=Depends(get_conn)):
+    """Create an agency row. Origin-gated by csrf_guard (no SSO requirement —
+    operator workflows like `make seed-agencies` go through the CLI, not HTTP)."""
+    csrf_guard(request)
     row = await conn.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url, static_url) VALUES ($1, $2, $3) "
         "RETURNING agency_id, agency_name, feed_url, static_url",
