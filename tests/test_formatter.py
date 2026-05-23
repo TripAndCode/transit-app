@@ -75,7 +75,7 @@ def test_fmt_ranking_no_service_uses_p50_p90_labels():
     """compute_ranking returns (route, service, avg, p50, p90, samples).
     The no-service path was previously mis-labelling p50 as 平日 and p90 as
     土日祝 — pin the corrected label set so a regression is immediate."""
-    rows = [("16101", "全日", 7.9, 4.8, 22.8, 152)]
+    rows = [("16101", "平日", 7.9, 4.8, 22.8, 152)]
     result = format_result("ranking", rows, {"limit": 100})
     assert "p50=4.8" in result
     assert "p90=22.8" in result

@@ -23,15 +23,9 @@ def _r(x, d: int = 1) -> str:
     return f"{round(float(x), d):.{d}f}"
 
 
-def _no_data(label: str = "") -> str:
+def _no_data() -> str:
     """Default empty-result string for any FORMATTERS branch."""
-    return f"{label}データがありません。期間や系統フィルタを見直してください。"
-
-
-def _route_scope_label(intent: dict) -> str:
-    """Render the leading '系統N' prefix from the intent's route field."""
-    route = intent.get("route") or intent.get("route_name")
-    return f"系統{route}" if route else ""
+    return "データがありません。期間や系統フィルタを見直してください。"
 
 
 _NO_STATIC_MSG = (
@@ -48,9 +42,6 @@ def _fmt_ranking(rows: list, intent: dict) -> str:
     """
     service = intent.get("service")
     label = f"{service}の" if service else ""
-    # Both branches render avg / p50 / p90 / samples in that order. The
-    # pre-trim no-service branch mis-labelled p50/p90 as 平日/土日祝 — fixed
-    # because that branch is the always-used /reports/ranking path.
     lines = [
         f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
         for i, r in enumerate(rows, 1)
