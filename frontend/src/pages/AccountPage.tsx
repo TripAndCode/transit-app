@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
 import { useLogout, useSession } from "../api/auth";
+import { apiGet } from "../api/client";
 
 type SessionRow = {
   sid_prefix: string;
@@ -10,16 +11,13 @@ type SessionRow = {
   last_seen_at: string;
 };
 
-async function fetchMySessions(): Promise<SessionRow[]> {
-  const r = await fetch("/api/me/sessions", { credentials: "include" });
-  if (!r.ok) throw new Error(`/api/me/sessions ${r.status}`);
-  return (await r.json()) as SessionRow[];
-}
-
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
   const { data: session, isLoading } = useSession();
-  const { data: sessions } = useQuery({ queryKey: ["mySessions"], queryFn: fetchMySessions });
+  const { data: sessions } = useQuery({
+    queryKey: ["mySessions"],
+    queryFn: () => apiGet<SessionRow[]>("/api/me/sessions"),
+  });
   const logout = useLogout();
 
   if (isLoading) return <div style={{ padding: 24 }}>読み込み中...</div>;
