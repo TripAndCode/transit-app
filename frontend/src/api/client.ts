@@ -15,23 +15,52 @@ export async function apiGet<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET" });
 }
 
+/** GET that returns null on 401. Used for the anonymous-allowed `/api/me` probe. */
+export async function apiGetOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await request<T>(path, { method: "GET" });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) return null;
+    throw e;
+  }
+}
+
+/** POST — tolerates 204 No Content (returns undefined when the endpoint
+ * intentionally has no JSON body, e.g. logout). */
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return requestMaybeEmpty<T>(path, { method: "POST", body: JSON.stringify(body) }) as Promise<T>;
+}
+
+/** PATCH — tolerates 204 No Content like apiPost. */
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return requestMaybeEmpty<T>(path, { method: "PATCH", body: JSON.stringify(body) }) as Promise<T>;
+}
+
+/** DELETE — handles 204 No Content (returns undefined when no JSON body). */
+export async function apiDelete<T = void>(path: string): Promise<T | undefined> {
+  return requestMaybeEmpty<T>(path, { method: "DELETE" });
+}
+
+/** Extract a human-readable message from an unknown error, preferring an
+ * `ApiError`'s parsed `detail` field. Mirrors the previous per-caller
+ * `Error(detail.detail ?? detail)` shape so existing UI text stays intact. */
+export function formatApiError(e: unknown): string {
+  if (e instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(e.body);
+      if (parsed && typeof parsed === "object" && typeof parsed.detail === "string") {
+        return parsed.detail;
+      }
+    } catch {
+      // body wasn't JSON — fall through
+    }
+    return e.body || e.message;
+  }
+  return e instanceof Error ? e.message : String(e);
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const apiKey = localStorage.getItem("api_key");
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(apiKey ? { "X-API-Key": apiKey } : {}),
-  };
-  // credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends
-  // the sid cookie. Same-origin requests (single-origin prod / make serve)
-  // are unaffected — browsers always send same-origin cookies.
-  const r = await fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
+  const r = await rawFetch(path, init);
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new ApiError(r.status, text);
@@ -41,4 +70,30 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   } catch {
     throw new ApiError(r.status, "Response was not valid JSON");
   }
+}
+
+async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T | undefined> {
+  const r = await rawFetch(path, init);
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new ApiError(r.status, text);
+  }
+  if (r.status === 204) return undefined;
+  try {
+    return (await r.json()) as T;
+  } catch {
+    throw new ApiError(r.status, "Response was not valid JSON");
+  }
+}
+
+// credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
+// cookie. Same-origin requests (single-origin prod / make serve) are
+// unaffected — browsers always send same-origin cookies.
+async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  const apiKey = localStorage.getItem("api_key");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(apiKey ? { "X-API-Key": apiKey } : {}),
+  };
+  return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
 }
