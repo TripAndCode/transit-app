@@ -78,9 +78,13 @@ def _fmt_on_time(rows: list, intent: dict) -> str:
 
 
 def _fmt_worst_5min(rows: list, intent: dict) -> str:
-    """Render the >5min-delay-count ranking into Japanese text."""
+    """Render the >5min-delay-count ranking into Japanese text.
+
+    Row shape from ``compute_worst_5min`` is
+    ``(route_code, service_type, late5_count, avg_min, samples)``.
+    """
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[3]}回、平均{_r(r[2])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
+    lines = [f"{i}位: 系統{r[0]}（{r[1]}）5分超: {r[2]}回、平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
     return f"【{label}5分超遅延ランキング】\n" + "\n".join(lines)
 
 

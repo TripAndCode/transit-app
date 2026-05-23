@@ -48,3 +48,24 @@ def test_fmt_dow_ranking_renders_int_dow_as_jp():
     rows = [("44372", "平日", 1, 3.5, 100)]  # 1 = Monday in ISODOW
     result = format_result("dow_ranking", rows, {})
     assert "月" in result, f"expected '月' in {result!r}"
+
+
+def test_fmt_worst_5min_row_shape():
+    """compute_worst_5min returns (route_code, service_type, late5_count,
+    avg_min, samples). Pin the index mapping to catch the historical
+    r[2]/r[3] swap that surfaced on live data."""
+    rows = [("14022", "平日", 759, 3.4, 3159)]
+    result = format_result("worst_5min", rows, {})
+    assert "759回" in result, f"expected '759回' in {result!r}"
+    assert "3.4" in result, f"expected '3.4' avg in {result!r}"
+    assert "3159件" in result, f"expected '3159件' in {result!r}"
+
+
+def test_fmt_compare_ranking_signs_direction():
+    """Sign of the delta determines the Japanese direction label."""
+    # signed > 0 → 土日祝>平日
+    pos_rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
+    assert "土日祝>平日" in format_result("compare_ranking", pos_rows, {})
+    # signed < 0 → 平日>土日祝
+    neg_rows = [("56041", 4.1, 0.8, 3.3, -3.3)]
+    assert "平日>土日祝" in format_result("compare_ranking", neg_rows, {})
