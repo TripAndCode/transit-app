@@ -249,19 +249,19 @@ async def compute_hourly_heatmap(
     """Hour-of-day × date cells for the granular trend view.
 
     Returns ``[ { date, hour, avg_min, samples } ]`` filtered by the same
-    ctx the rest of the trend uses. Hour parsed from ``scheduled_time``
-    text (HH:MM:SS); cells with too few samples (<3) are dropped to keep
-    the rendering signal-strong.
+    ctx the rest of the trend uses. Hour is extracted from
+    ``scheduled_time`` (a TIME column post migration 0011); cells with too
+    few samples (<3) are dropped to keep the rendering signal-strong.
     """
     where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = (
         f"WITH {_dedup_cte(where)}\n"
-        "SELECT date, SUBSTRING(scheduled_time FROM 1 FOR 2)::int AS hour,\n"
+        "SELECT date, EXTRACT(HOUR FROM scheduled_time)::int AS hour,\n"
         "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
         "       COUNT(*) AS samples\n"
         "FROM deduped\n"
-        "WHERE scheduled_time IS NOT NULL AND scheduled_time != ''\n"
-        "GROUP BY date, SUBSTRING(scheduled_time FROM 1 FOR 2)::int\n"
+        "WHERE scheduled_time IS NOT NULL\n"
+        "GROUP BY date, EXTRACT(HOUR FROM scheduled_time)::int\n"
         "HAVING COUNT(*) >= 3\n"
         "ORDER BY date, hour"
     )
