@@ -62,6 +62,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     resp = await client.post(
         f"/api/{agency_id}/ask",
         json={"question": "一番遅れている路線は？"},
+        headers={"Origin": "http://test"},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -77,3 +78,27 @@ async def test_ask_endpoint_unknown_agency(ask_client):
     client, _ = ask_client
     resp = await client.post("/api/99999/ask", json={"question": "test"})
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ask_rejects_cross_origin(ask_client, monkeypatch):
+    """Cross-origin POST to /ask returns 403 even before reaching the LLM."""
+    client, agency_id = ask_client
+
+    # If csrf_guard somehow misses, chat_with_tools would be hit.
+    # Patch it to a sentinel so a 200 with this answer indicates the guard
+    # let the request through (= bug).
+    async def must_not_be_called(*args, **kwargs):
+        return {
+            "answer": "csrf_guard FAILED — request reached chat_with_tools",
+            "tool_call": None,
+            "result": None,
+        }
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", must_not_be_called)
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "テスト"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text[:200]}"
