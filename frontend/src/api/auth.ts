@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiGetOrNull, apiPost } from "./client";
 
 export type Identity = { provider: "google" | "github"; email_at_link: string | null };
 
@@ -13,10 +14,7 @@ export type Session = {
 
 /** GET /api/me; returns null on 401 so callers can treat anonymous as a normal state. */
 async function fetchMe(): Promise<Session | null> {
-  const r = await fetch("/api/me", { credentials: "include" });
-  if (r.status === 401) return null;
-  if (!r.ok) throw new Error(`/api/me ${r.status}`);
-  return (await r.json()) as Session;
+  return apiGetOrNull<Session>("/api/me");
 }
 
 /** React Query hook for the current session (or null when anonymous). */
@@ -28,13 +26,7 @@ export function useSession() {
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const r = await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!r.ok) throw new Error("logout failed");
-    },
+    mutationFn: () => apiPost<void>("/api/auth/logout", {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
 }
