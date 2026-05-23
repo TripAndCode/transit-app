@@ -1,3 +1,14 @@
+"""Format raw query-result tuples into Japanese-language report strings.
+
+Each `_fmt_*` function matches a query_type returned by executor.py and
+produces a human-readable Japanese string suitable for display in the UI
+or as LLM context. The public entry point is `format_result`.
+
+DOW values arriving from executor.py are ISODOW ints (1=Mon..7=Sun) after
+migration 0011. `_dow_label` renders them to Japanese characters; rollup
+labels ('平日', '週末') pass through unchanged.
+"""
+
 import asyncio
 import logging
 import os
@@ -68,7 +79,10 @@ def _dow_label(value) -> str:
 
 
 def _r(x, d: int = 1) -> str:
-    """Round a numeric DB value to d decimal places and return as string."""
+    """Round a numeric DB value to *d* decimal places and return as a string.
+
+    Returns '—' for None/NULL values.
+    """
     if x is None:
         return "—"
     return str(round(float(x), d))
@@ -115,6 +129,12 @@ def _fmt_by_hour(rows: list, intent: dict) -> str:
 
 
 def _fmt_by_dow(rows: list, intent: dict) -> str:
+    """Format per-DOW delay rows into a Japanese display string.
+
+    Each row is (route_code, service_type, dow, avg_min, samples).
+    `dow` is an ISODOW int (1..7) or a rollup label string; _dow_label
+    handles both forms.
+    """
     scope = _route_scope_label(intent)
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
@@ -208,6 +228,11 @@ def _fmt_stop_ranking(rows: list, intent: dict) -> str:
 
 
 def _fmt_dow_ranking(rows: list, intent: dict) -> str:
+    """Format a DOW-filtered delay ranking into a Japanese display string.
+
+    Each row is (route_code, service_type, dow, avg_min, samples).
+    `dow` is an ISODOW int or a rollup label string; _dow_label renders it.
+    """
     dow = intent.get("dow", "")
     dow_group = intent.get("dow_group")
     label = f"{intent.get('service')}の" if intent.get("service") else ""
