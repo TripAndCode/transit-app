@@ -83,13 +83,11 @@ async def test_route_compare_service_returns_per_service_type(aconn, aagency_id)
 async def test_route_info_returns_static_metadata(aconn, aagency_id):
     """Helper joins static_routes + static_trips + static_stop_times."""
     await aconn.execute(
-        "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
-        "VALUES ($1, 'route_X (R3)', 'Test Route')",
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'route_X (R3)', 'Test Route')",
         aagency_id,
     )
     await aconn.execute(
-        "INSERT INTO static_trips (agency_id, trip_id, route_id) "
-        "VALUES ($1, 'trip_a', 'route_X (R3)')",
+        "INSERT INTO static_trips (agency_id, trip_id, route_id) VALUES ($1, 'trip_a', 'route_X (R3)')",
         aagency_id,
     )
     await aconn.execute(

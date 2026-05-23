@@ -27,6 +27,8 @@ from pipeline.query.labels import dow_label
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
+)
+from pipeline.query.tool_queries import (
     route_info as fetch_route_info,
 )
 from pipeline.reports import (
@@ -348,9 +350,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
         )
     # DOW column is ISODOW int (1..7); render as Japanese char so the
     # LLM sees '月' instead of '1' when it formats the response.
-    rendered = [
-        [r[0], r[1], dow_label(r[2]), r[3], r[4]] for r in rows
-    ]
+    rendered = [[r[0], r[1], dow_label(r[2]), r[3], r[4]] for r in rows]
     return ToolResult(
         kind="table",
         summary_jp=f"系統{route} の遅延サマリ",

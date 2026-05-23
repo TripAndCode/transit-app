@@ -1,9 +1,9 @@
 """Shared DB helpers and SQL builders used by both psycopg2 (analyze) and
-asyncpg (api / reports / executor) paths.
+asyncpg (api / reports / tool_queries) paths.
 
 The dedup SQL lives here so the two paths never drift apart. Update one
-place and every report endpoint, the analyze materializer, and the legacy
-/query route all pick up the change atomically.
+place and every report endpoint, the analyze materializer, and the LLM
+tool helpers all pick up the change atomically.
 """
 
 import psycopg2
@@ -32,8 +32,8 @@ def build_dedup_inner_sql(
 
     `placeholder` selects the parameter style for `agency_id`:
     `%(agency_id)s` for psycopg2 (analyze.py), `$1` for asyncpg
-    (executor.py, reports.py). `extra_where` is ANDed onto the inner
-    WHERE; pass server-built SQL only.
+    (reports.py, pipeline.query.tool_queries). `extra_where` is ANDed
+    onto the inner WHERE; pass server-built SQL only.
 
     The trailing `id DESC` makes the dedup deterministic when two rows
     share the same `captured_at` (different files, same poll second).
