@@ -1,9 +1,11 @@
 """Display helpers for DB column values shared across the query layer.
 
-Lifted from the now-retired pipeline/query/formatter.py. Leading
-underscores dropped because these are imported by tool_queries.py,
-tools.py, and potentially future helpers — they are public API of
-this module.
+``dow_label`` and ``time_label`` were lifted out of
+``pipeline/query/formatter.py`` so the LLM tool surface
+(``pipeline.query.tools``) can render rows without depending on the
+report-layer formatter module. The leading underscore from the
+formatter-internal names was dropped because these are now public API
+of this module.
 """
 
 from datetime import time as _time
