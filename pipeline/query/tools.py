@@ -23,7 +23,12 @@ from datetime import date, timedelta
 from typing import Any, Literal
 
 from api.range import MAX_RANGE_DAYS, RangeCtx
-from pipeline.query.executor import execute as _legacy_execute
+from pipeline.query.labels import dow_label
+from pipeline.query.tool_queries import (
+    route_compare_service,
+    route_dow_breakdown,
+    route_info as fetch_route_info,
+)
 from pipeline.reports import (
     compute_compare_ranking,
     compute_on_time,
@@ -332,8 +337,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
                 f"/api/{agency_id}/routes で一覧を確認してください。"
             ),
         )
-    intent = {"query_type": "by_dow", "route": str(route), "limit": 50}
-    rows = await _legacy_execute(intent, conn, agency_id) or []
+    rows = await route_dow_breakdown(agency_id, ctx, conn, route=str(route))
     if not rows:
         return ToolResult(
             kind="empty",
@@ -342,10 +346,15 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
                 "期間を広げるか、フィルタを解除して試してください。"
             ),
         )
+    # DOW column is ISODOW int (1..7); render as Japanese char so the
+    # LLM sees '月' instead of '1' when it formats the response.
+    rendered = [
+        [r[0], r[1], dow_label(r[2]), r[3], r[4]] for r in rows
+    ]
     return ToolResult(
         kind="table",
         summary_jp=f"系統{route} の遅延サマリ",
-        rows=[list(r) for r in rows],
+        rows=rendered,
         columns=["route_code", "service_type", "dow", "avg_min", "samples"],
     )
 
@@ -410,15 +419,14 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
                 kind="empty",
                 summary_jp="dimension=service_type の場合は route が必要です。",
             )
-        intent = {"query_type": "compare", "route": str(route)}
-        rows = await _legacy_execute(intent, conn, agency_id) or []
+        rows = await route_compare_service(agency_id, ctx, conn, route=str(route))
         if not rows:
             return ToolResult(kind="empty", summary_jp=f"系統{route} の比較データなし。")
         return ToolResult(
             kind="table",
             summary_jp=f"系統{route} 種別比較",
             rows=[list(r) for r in rows],
-            columns=["route_code", "heijitsu_min", "kyujitsu_min", "samples"],
+            columns=["service_type", "avg_min", "samples"],
         )
 
     return ToolResult(kind="empty", summary_jp=f"未知の dimension: {dimension}")
@@ -456,11 +464,9 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int) -> T
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
-    intent = {"query_type": "route_info", "route": str(route)}
-    rows = await _legacy_execute(intent, conn, agency_id) or []
-    if not rows:
+    r = await fetch_route_info(agency_id, conn, route=str(route))
+    if r is None:
         return ToolResult(kind="empty", summary_jp=f"系統{route} の路線情報が見つかりません。")
-    r = rows[0]
     pairs = [
         ("路線名", r[1] or "—"),
         ("停留所数", f"{r[2]}駅" if r[2] is not None else "—"),
