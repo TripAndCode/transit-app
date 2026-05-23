@@ -1,3 +1,5 @@
+from datetime import time
+
 from pipeline.analyze import analyze
 
 
@@ -17,7 +19,7 @@ def _seed_updates(pg_conn, agency_id):
                     f"2026-04-{day:02d}T11:37:00",
                     "平日_11時37分_系統44372",
                     "平日",
-                    "11:37",
+                    time(11, 37),  # TIME column after migration 0011 (was "11:37" text).
                     "44372",
                     seq,
                     (seq * 60) + i * 30,
@@ -61,8 +63,9 @@ def test_analyze_creates_agg_route_dow(pg_conn, agency_id):
             (agency_id,),
         )
         dows = {r[0] for r in cur.fetchall()}
+    # Updated 2026-05-22: dow column is SMALLINT ISODOW (was Japanese chars).
+    assert dows <= {1, 2, 3, 4, 5, 6, 7}
     assert len(dows) > 0
-    assert dows.issubset({"月", "火", "水", "木", "金", "土", "日"})
 
 
 def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id):
@@ -142,7 +145,7 @@ def test_analyze_agency_isolated(pg_conn):
                         f"2026-04-{(i % 25) + 1:02d}T11:37:00",
                         "平日_11時37分_系統44372",
                         "平日",
-                        "11:37",
+                        time(11, 37),  # TIME column after migration 0011 (was "11:37" text).
                         "44372",
                         1,
                         delay,

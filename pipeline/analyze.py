@@ -1,3 +1,16 @@
+"""Materialise per-agency aggregation tables from the `updates` fact table.
+
+Called by `gtfs_pipeline.py analyze` after ingestion. All tables are written
+via INSERT … ON CONFLICT DO UPDATE so the function is safe to re-run.
+
+Aggregation tables produced:
+- agg_route_stats   — overall delay stats per route/service_type
+- agg_route_hour    — delay by scheduled departure time
+- agg_route_dow     — delay by day-of-week (ISODOW 1=Mon..7=Sun)
+- agg_daily_trend   — per-day delay averages for trend queries
+- agg_stop_seq      — per-stop delay (requires static data)
+"""
+
 import psycopg2.extras
 
 from pipeline.db import _DEDUP_INNER, _static_loaded
@@ -14,12 +27,22 @@ _VALID_AGG_TABLES = frozenset(
 
 
 def _run_query(sql: str, params: dict, conn) -> list:
+    """Execute *sql* with *params* via psycopg2 and return all rows."""
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
 
 
 def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) -> None:
+    """Bulk-upsert *rows* into *table* using INSERT … ON CONFLICT DO UPDATE.
+
+    Args:
+        table:     Target aggregation table (must be in _VALID_AGG_TABLES).
+        pk_cols:   Column names that form the conflict target.
+        col_names: All column names in insertion order (must match *rows* tuple width).
+        rows:      Iterable of tuples to insert.
+        conn:      psycopg2 connection; committed on success.
+    """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
     if not rows:
@@ -38,6 +61,12 @@ def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) ->
 
 
 def analyze(agency_id: int, conn) -> None:
+    """Compute and materialise all aggregation tables for *agency_id*.
+
+    Reads from `updates` (deduplicated via _DEDUP_INNER CTE) and writes to
+    agg_route_stats, agg_route_hour, agg_route_dow, agg_daily_trend, and
+    agg_stop_seq. Each table is upserted so re-runs are safe.
+    """
     p = {"agency_id": agency_id}
 
     # ── agg_route_stats ──────────────────────────────────────────────────────
@@ -119,18 +148,11 @@ def analyze(agency_id: int, conn) -> None:
         SELECT
             %(agency_id)s AS agency_id,
             route_code, service_type,
-            CASE EXTRACT(DOW FROM date::date)::int
-                WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
-                WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
-                ELSE '土' END  AS dow,
+            EXTRACT(ISODOW FROM date::date)::smallint AS dow,
             ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
             COUNT(*) AS samples
         FROM deduped
-        GROUP BY route_code, service_type,
-                 CASE EXTRACT(DOW FROM date::date)::int
-                     WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火'
-                     WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金'
-                     ELSE '土' END
+        GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
         ORDER BY route_code
     """
     rows = _run_query(sql, p, conn)

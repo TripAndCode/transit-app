@@ -1,7 +1,21 @@
+"""Format raw query-result tuples into Japanese-language report strings.
+
+Each `_fmt_*` function matches a query_type returned by executor.py and
+produces a human-readable Japanese string suitable for display in the UI
+or as LLM context. The public entry point is `format_result`.
+
+DOW values arriving from executor.py are ISODOW ints (1=Mon..7=Sun) after
+migration 0011. `_dow_label` renders them to Japanese characters; rollup
+labels ('平日', '週末') pass through unchanged.
+"""
+
 import asyncio
 import logging
 import os
 import re
+from datetime import time as _time
+
+from pipeline.db import _DOW_ISO_TO_JP
 
 _log = logging.getLogger(__name__)
 
@@ -51,8 +65,40 @@ def _fix(text: str) -> str:
     return _FIX_RE.sub("系統", text).replace("系统", "系統")
 
 
+def _dow_label(value) -> str:
+    """Render a DOW column value for display.
+
+    Accepts an ISODOW int (1..7) and returns the matching Japanese char
+    ('月'..'日'). Also accepts a string and passes it through unchanged
+    — that path covers rollup labels like '平日' / '週末' emitted by the
+    weekday/weekend grouping SQL. During the migration transition it
+    also tolerates already-Japanese-char input from agg_route_dow.
+    """
+    if isinstance(value, int):
+        return _DOW_ISO_TO_JP.get(value, str(value))
+    return str(value)
+
+
+def _time_label(value) -> str:
+    """Render a ``scheduled_time`` value for display as ``HH:MM``.
+
+    Post migration 0011, asyncpg/psycopg2 return TIME columns as
+    ``datetime.time``; pre-migration callers passed a ``HH:MM`` or
+    ``HH:MM:SS`` string. Both paths normalise to ``HH:MM`` so the
+    Japanese-formatted output is stable across the migration boundary.
+    """
+    if isinstance(value, _time):
+        return value.strftime("%H:%M")
+    if isinstance(value, str) and len(value) >= 5 and value[2] == ":":
+        return value[:5]
+    return str(value) if value is not None else ""
+
+
 def _r(x, d: int = 1) -> str:
-    """Round a numeric DB value to d decimal places and return as string."""
+    """Round a numeric DB value to *d* decimal places and return as a string.
+
+    Returns '—' for None/NULL values.
+    """
     if x is None:
         return "—"
     return str(round(float(x), d))
@@ -91,18 +137,32 @@ def _fmt_ranking(rows: list, intent: dict) -> str:
 
 
 def _fmt_by_hour(rows: list, intent: dict) -> str:
+    """Format per-departure-time delay rows into a Japanese display string.
+
+    Each row is ``(route_code, service_type, scheduled_time, avg_min, p50_min,
+    p90_min, samples)``. ``scheduled_time`` is rendered through
+    :func:`_time_label` so the migration-0011 TIME column displays as
+    ``HH:MM`` (the legacy text format) rather than ``HH:MM:SS``.
+    """
     scope = _route_scope_label(intent)
     lines = [
-        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）" for r in rows
+        f"系統{r[0]}（{r[1]}）{_time_label(r[2])}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）"
+        for r in rows
     ]
     return f"【{scope} 発車時刻別遅延】\n" + "\n".join(lines)
 
 
 def _fmt_by_dow(rows: list, intent: dict) -> str:
+    """Format per-DOW delay rows into a Japanese display string.
+
+    Each row is (route_code, service_type, dow, avg_min, samples).
+    `dow` is an ISODOW int (1..7) or a rollup label string; _dow_label
+    handles both forms.
+    """
     scope = _route_scope_label(intent)
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
-    lines = [f"系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for r in rows]
+    lines = [f"系統{r[0]}（{r[1]}）{_dow_label(r[2])}: 平均{_r(r[3])}分（{r[4]}件）" for r in rows]
     if dow:
         header = f"【{scope} {dow}曜の遅延】"
     elif dow_group == "weekend":
@@ -192,10 +252,17 @@ def _fmt_stop_ranking(rows: list, intent: dict) -> str:
 
 
 def _fmt_dow_ranking(rows: list, intent: dict) -> str:
+    """Format a DOW-filtered delay ranking into a Japanese display string.
+
+    Each row is (route_code, service_type, dow, avg_min, samples).
+    `dow` is an ISODOW int or a rollup label string; _dow_label renders it.
+    """
     dow = intent.get("dow", "")
     dow_group = intent.get("dow_group")
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    lines = [f"{i}位: 系統{r[0]}（{r[1]}）{r[2]}: 平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)]
+    lines = [
+        f"{i}位: 系統{r[0]}（{r[1]}）{_dow_label(r[2])}: 平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)
+    ]
     if dow_group == "weekend":
         header = f"【{label}週末遅延ランキング】"
     elif dow_group == "weekday":

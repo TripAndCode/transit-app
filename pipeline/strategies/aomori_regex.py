@@ -8,9 +8,12 @@ This strategy expects rows where the regex matches; non-matching trip_ids are
 dropped (preserving today's Aomori ingest behaviour).
 """
 
+import logging
 import re
 
 from pipeline.strategies._pb import _dec, _fields
+
+_log = logging.getLogger(__name__)
 
 _TRIP_RE_DEFAULT = re.compile(r"^(?P<service>.+?)_(?P<hour>\d+)時(?P<minute>\d+)分_系統(?P<route>\d+)$")
 
@@ -71,6 +74,17 @@ def parse_feed(
         service = parsed.get("service")
         hour = parsed.get("hour", "")
         minute = parsed.get("minute", "")
+        if (hour and int(hour) >= 24) or (minute and int(minute) >= 60):
+            # Strict TIME column (migration 0011) rejects extended-hour and
+            # invalid-minute values; skip the whole trip's stop_time_updates
+            # so cron doesn't abort the entire feed's batch INSERT.
+            _log.warning(
+                "aomori: skipping trip_id %r with invalid time %s:%s",
+                trip_id,
+                hour,
+                minute,
+            )
+            continue
         sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
         route = parsed.get("route")
         for stu_bytes in tu.get(2, []):

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 
-from pipeline.db import _DOW_PG, build_dedup_inner_sql
+from pipeline.db import _DOW_JP_TO_ISO, build_dedup_inner_sql
 
 _log = logging.getLogger(__name__)
 
@@ -75,32 +75,59 @@ def _route_in_clause(route_codes: list, n: int) -> tuple[str, list, int]:
     return f"route_code IN ({phs})", list(route_codes), n + len(route_codes)
 
 
+# Time-band ranges as (start_inclusive, end_exclusive) text pairs; night
+# and rush use four bounds to express the wrap-midnight / two-window shape.
+# Values are bound as TEXT and cast server-side — see _time_band_clause for
+# why the bind type matters.
+_TIME_BAND_RANGES: dict[str, list[str]] = {
+    "morning": ["05:00", "10:00"],
+    "day": ["10:00", "16:00"],
+    "evening": ["16:00", "20:00"],
+    "night": ["20:00", "05:00"],
+    "rush": ["07:00", "10:00", "17:00", "20:00"],
+}
+
+
 def _time_band_clause(time_band: str | None, n: int, col: str = "scheduled_time") -> tuple[str, list, int]:
-    """Return (sql_fragment, values, next_n)."""
-    if not time_band:
+    """Return ``(sql_fragment, values, next_n)`` for a named time-band filter.
+
+    Each bind is cast as ``(${n}::text)::time`` so asyncpg sends the
+    Python ``str`` over the wire as TEXT (avoiding asyncpg's prepared-
+    statement type inference, which would otherwise try to encode the
+    string as ``datetime.time`` and fail). The server then parses the
+    text into TIME for the comparison against ``col``, which is itself
+    cast to TIME to be correct both before and after migration 0011.
+    """
+    if not time_band or time_band not in _TIME_BAND_RANGES:
         return "", [], n
-    if time_band == "morning":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["05:00", "10:00"], n + 2
-    if time_band == "day":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["10:00", "16:00"], n + 2
-    if time_band == "evening":
-        return f"{col} >= ${n} AND {col} < ${n + 1}", ["16:00", "20:00"], n + 2
+    vals = _TIME_BAND_RANGES[time_band]
     if time_band == "night":
-        return f"({col} >= ${n} OR {col} < ${n + 1})", ["20:00", "05:00"], n + 2
+        # Wraps midnight: hour >= 20:00 OR hour < 05:00.
+        return (
+            f"({col}::time >= (${n}::text)::time OR {col}::time < (${n + 1}::text)::time)",
+            vals,
+            n + 2,
+        )
     if time_band == "rush":
         return (
-            f"(({col} >= ${n} AND {col} < ${n + 1}) OR ({col} >= ${n + 2} AND {col} < ${n + 3}))",
-            ["07:00", "10:00", "17:00", "20:00"],
+            f"(({col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time)"
+            f" OR ({col}::time >= (${n + 2}::text)::time AND {col}::time < (${n + 3}::text)::time))",
+            vals,
             n + 4,
         )
-    return "", [], n
+    return (
+        f"{col}::time >= (${n}::text)::time AND {col}::time < (${n + 1}::text)::time",
+        vals,
+        n + 2,
+    )
 
 
-def _dow_group_values(dow_group: str | None) -> list[str]:
+def _dow_group_values(dow_group: str | None) -> list[int]:
+    """ISODOW ints (Mon=1..Sun=7) for weekday / weekend rollups."""
     if dow_group == "weekend":
-        return ["土", "日"]
+        return [6, 7]  # Sat, Sun
     if dow_group == "weekday":
-        return ["月", "火", "水", "木", "金"]
+        return [1, 2, 3, 4, 5]  # Mon-Fri
     return []
 
 
@@ -258,15 +285,19 @@ async def _exec_by_hour(intent: dict, conn, agency_id: int) -> list:
 # _exec_by_dow
 # ---------------------------------------------------------------------------
 
-_DOW_CASE = (
-    "CASE EXTRACT(DOW FROM date::date)::int "
-    "WHEN 0 THEN '日' WHEN 1 THEN '月' WHEN 2 THEN '火' "
-    "WHEN 3 THEN '水' WHEN 4 THEN '木' WHEN 5 THEN '金' "
-    "ELSE '土' END"
-)
+# Emit ISODOW int matching agg_route_dow.dow (post migration 0011).
+# Callers render via pipeline/query/formatter._dow_label.
+_DOW_CASE = "EXTRACT(ISODOW FROM date::date)::smallint"
 
 
 async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
+    """Return per-DOW delay stats for the requested route(s).
+
+    Prefers the agg_route_dow aggregate table (post migration 0011 stores
+    ISODOW ints). Falls back to a live deduped CTE when aggregates are absent.
+    DOW values in the returned tuples are ISODOW ints (1=Mon..7=Sun); rollup
+    labels ('平日', '週末') are literal strings injected by the SQL.
+    """
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
     if not route_codes:
         return []
@@ -289,8 +320,11 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             n_agg += 1
 
         if dow:
+            dow_iso = _DOW_JP_TO_ISO.get(dow)
+            if dow_iso is None:
+                return []
             conds.append(f"dow=${n_agg}")
-            params.append(dow)
+            params.append(dow_iso)
             where_sql = " AND ".join(conds)
             rows = await conn.fetch(
                 "SELECT route_code, service_type, dow, avg_min, samples "
@@ -336,11 +370,11 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
         outer_n += 1
 
     if dow:
-        dow_num = _DOW_PG.get(dow)
-        if dow_num is None:
+        dow_iso = _DOW_JP_TO_ISO.get(dow)
+        if dow_iso is None:
             return []
-        outer_conds.append(f"EXTRACT(DOW FROM date::date)::int = ${outer_n}")
-        outer_vals.append(dow_num)
+        outer_conds.append(f"EXTRACT(ISODOW FROM date::date)::smallint = ${outer_n}")
+        outer_vals.append(dow_iso)
         outer_n += 1
         where_sql = " AND ".join(outer_conds)
         rows = await conn.fetch(
@@ -348,7 +382,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             f"SELECT route_code, service_type, {_DOW_CASE} AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             f"FROM deduped WHERE {where_sql} "
-            f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
+            f"GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date) "
+            f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
             agency_id,
             *outer_vals,
         )
@@ -356,9 +391,9 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
 
     if dow_group:
         label = "週末" if dow_group == "weekend" else "平日"
-        dow_nums = [0, 6] if dow_group == "weekend" else [1, 2, 3, 4, 5]
+        dow_nums = _dow_group_values(dow_group)  # ISODOW ints
         phs = ", ".join(f"${outer_n + i}" for i in range(len(dow_nums)))
-        where_sql = " AND ".join(outer_conds + [f"EXTRACT(DOW FROM date::date)::int IN ({phs})"])
+        where_sql = " AND ".join(outer_conds + [f"EXTRACT(ISODOW FROM date::date)::smallint IN ({phs})"])
         rows = await conn.fetch(
             f"WITH deduped AS ({_DEDUP_INNER}) "
             f"SELECT route_code, service_type, '{label}' AS dow, "
@@ -377,7 +412,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
         f"SELECT route_code, service_type, {_DOW_CASE} AS dow, "
         "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {where_sql} "
-        f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
+        f"GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date) "
+        f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
         agency_id,
         *outer_vals,
     )
@@ -913,6 +949,13 @@ async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
 
 
 async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
+    """Return a delay ranking filtered to a specific DOW or DOW group.
+
+    Requires either 'dow' (Japanese char, e.g. '月') or 'dow_group'
+    ('weekday'/'weekend') in intent. Returns [] when neither is set.
+    DOW column in result tuples is an ISODOW int (agg path) or the rollup
+    label string (dow_group path). Callers must pass through _dow_label.
+    """
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
     service = intent.get("service")
@@ -930,8 +973,11 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             n += 1
 
         if dow:
+            dow_iso = _DOW_JP_TO_ISO.get(dow)
+            if dow_iso is None:
+                return []
             conds.append(f"dow=${n}")
-            params.append(dow)
+            params.append(dow_iso)
             n += 1
             where_sql = "WHERE " + " AND ".join(conds)
             params.append(limit)
@@ -965,10 +1011,10 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
 
     # raw fallback
     if dow:
-        dow_num = _DOW_PG.get(dow)
-        if dow_num is None:
+        dow_iso = _DOW_JP_TO_ISO.get(dow)
+        if dow_iso is None:
             return []
-        params = [agency_id, dow_num]
+        params = [agency_id, dow_iso]
         n = 3
         svc_and = ""
         if service:
@@ -981,7 +1027,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             "SELECT route_code, service_type, "
             f"{_DOW_CASE} AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
-            f"FROM deduped WHERE EXTRACT(DOW FROM date::date)::int = $2{svc_and} "
+            f"FROM deduped WHERE EXTRACT(ISODOW FROM date::date)::smallint = $2{svc_and} "
             f"GROUP BY route_code, service_type HAVING COUNT(*) > 5 "
             f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT ${n}",
             *params,
@@ -989,7 +1035,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
         return [tuple(r) for r in rows]
 
     if dow_group:
-        dow_nums = [0, 6] if dow_group == "weekend" else [1, 2, 3, 4, 5]
+        dow_nums = _dow_group_values(dow_group)
         label = "週末" if dow_group == "weekend" else "平日"
         phs = ", ".join(f"${2 + i}" for i in range(len(dow_nums)))
         params = [agency_id, *dow_nums]
@@ -1004,7 +1050,7 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             f"WITH deduped AS ({_DEDUP_INNER}) "
             f"SELECT route_code, service_type, '{label}' AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
-            f"FROM deduped WHERE EXTRACT(DOW FROM date::date)::int IN ({phs}){svc_and} "
+            f"FROM deduped WHERE EXTRACT(ISODOW FROM date::date)::smallint IN ({phs}){svc_and} "
             "GROUP BY route_code, service_type HAVING COUNT(*) > 5 "
             f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order} LIMIT ${n}",
             *params,
