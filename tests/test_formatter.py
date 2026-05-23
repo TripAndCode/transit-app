@@ -69,3 +69,30 @@ def test_fmt_compare_ranking_signs_direction():
     # signed < 0 → 平日>土日祝
     neg_rows = [("56041", 4.1, 0.8, 3.3, -3.3)]
     assert "平日>土日祝" in format_result("compare_ranking", neg_rows, {})
+
+
+def test_fmt_ranking_no_service_uses_p50_p90_labels():
+    """compute_ranking returns (route, service, avg, p50, p90, samples).
+    The no-service path was previously mis-labelling p50 as 平日 and p90 as
+    土日祝 — pin the corrected label set so a regression is immediate."""
+    rows = [("16101", "全日", 7.9, 4.8, 22.8, 152)]
+    result = format_result("ranking", rows, {"limit": 100})
+    assert "p50=4.8" in result
+    assert "p90=22.8" in result
+    # The mis-label was "平日{p50}分・土日祝{p90}分" — verify it's gone.
+    assert "土日祝22.8" not in result
+
+
+def test_fmt_on_time_ranking_shape():
+    """compute_on_time returns (route, service, on_time_pct, avg, samples)."""
+    rows = [("14081", "平日", 76.6, 0.5, 205)]
+    result = format_result("on_time", rows, {})
+    assert "定時率76.6%" in result
+    assert "平均0.5分" in result
+    assert "205件" in result
+
+
+def test_fmt_dow_ranking_weekday_header():
+    rows = [("16101", "平日", "平日", 8.8, 114)]
+    result = format_result("dow_ranking", rows, {"dow_group": "weekday"})
+    assert "【平日遅延ランキング】" in result
