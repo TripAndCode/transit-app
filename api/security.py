@@ -9,6 +9,7 @@ in unit tests.
 import os as _os
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
@@ -52,6 +53,21 @@ def require_admin(request: Request) -> User:
     return user
 
 
+def _serialized_origin(value: str) -> str | None:
+    """Reduce an Origin or Referer header value to its serialized origin
+    form (``scheme://host[:port]``, lowercased), or None if it can't be
+    parsed. Strips path / query / fragment so a Referer with a path is
+    normalised against an Origin, and a hostile path-suffixed Origin
+    like ``http://localhost:8000/.evil.com`` no longer prefix-matches.
+    """
+    if not value:
+        return None
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
 def csrf_guard(request: Request) -> None:
     """Reject mutating requests whose Origin/Referer is cross-site.
 
@@ -59,22 +75,31 @@ def csrf_guard(request: Request) -> None:
     separate token. Same-origin SPA POSTs always send Origin matching
     PUBLIC_BASE_URL.
 
+    Both incoming and allowed values are reduced to a serialized origin
+    (scheme://host[:port], lowercased) before equality compare, so
+    path-suffixed bypasses like ``Origin: http://localhost:8000/.evil``
+    are rejected.
+
     The ``http://test`` ASGITransport origin is only allowed when
     ``ALLOW_TEST_ORIGIN=1`` so production deployments don't accidentally
     accept that base from non-browser callers.
     """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    origin = request.headers.get("origin") or request.headers.get("referer", "")
-    base = _PUBLIC_BASE_URL.rstrip("/")
-    if not origin:
+    raw = request.headers.get("origin") or request.headers.get("referer", "")
+    incoming = _serialized_origin(raw)
+    if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")
-    if origin == base or origin.startswith(base + "/"):
-        return
-    for allowed in _CORS_ORIGINS:
-        a = allowed.rstrip("/")
-        if origin == a or origin.startswith(a + "/"):
-            return
-    if _ALLOW_TEST_ORIGIN and (origin == "http://test" or origin.startswith("http://test/")):
+    allowed: set[str] = set()
+    base_norm = _serialized_origin(_PUBLIC_BASE_URL)
+    if base_norm is not None:
+        allowed.add(base_norm)
+    for o in _CORS_ORIGINS:
+        n = _serialized_origin(o)
+        if n is not None:
+            allowed.add(n)
+    if _ALLOW_TEST_ORIGIN:
+        allowed.add("http://test")
+    if incoming in allowed:
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")

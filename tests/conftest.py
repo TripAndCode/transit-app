@@ -81,6 +81,12 @@ def _redirect_to_test_db() -> None:
 _redirect_to_test_db()
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+# Origin that ASGITransport's default `base_url="http://test"` emits when tests
+# set it. csrf_guard's ALLOW_TEST_ORIGIN path trusts this exact value when
+# ALLOW_TEST_ORIGIN=1 (set by `_redirect_to_test_db` above). Use this constant
+# in test files instead of hard-coding the string in headers.
+TEST_ORIGIN = "http://test"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
