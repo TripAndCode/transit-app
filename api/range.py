@@ -30,9 +30,10 @@ TimeBand = Literal[
 ]
 ServiceType = Literal["all", "平日", "土日祝"]
 
-# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings; compared
-# textually against scheduled_time, which is also 'HH:MM:SS' text. Lexicographic
-# string comparison works because all values use leading zeros.
+# (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
+# 0011 made `scheduled_time` a TIME column, so `time_band_clause` casts both
+# sides of the comparison to TIME — these literals are sent over the wire as
+# text and cast server-side. '24:00' is a valid Postgres TIME (end-of-day).
 _TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
     "morning": ("05:00", "09:00"),
     "forenoon": ("09:00", "12:00"),
@@ -160,11 +161,19 @@ def time_band_clause(
     ctx: RangeCtx,
     next_param: int,
 ) -> tuple[str, list, int]:
-    """``column`` is a 'HH:MM:SS' text column (e.g. ``scheduled_time``)."""
+    """Return a WHERE fragment filtering ``column`` (a TIME column) to the
+    range named by ``ctx.time_band``.
+
+    Each placeholder is cast as ``(${n}::text)::time`` so asyncpg sends
+    the Python ``str`` over the wire as TEXT — without the ``::text``
+    coercion, asyncpg's prepared-statement type inference would try to
+    encode the string as ``datetime.time`` and fail. The server then
+    parses the text into TIME for the comparison.
+    """
     if ctx.time_band == "all":
         return "TRUE", [], next_param
     start, end = _TIME_BAND_RANGES[ctx.time_band]
-    fragment = f"({column} >= ${next_param} AND {column} < ${next_param + 1})"
+    fragment = f"({column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time)"
     return fragment, [start, end], next_param + 2
 
 

@@ -217,6 +217,24 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0008_static_routes_long_name` | `static_routes.route_long_name` for richer filters |
 | `0009_auth` | `users`, `oauth_identities`, `sessions`, `login_events`, `filter_presets` |
 | `0010_audit_kinds` | widens `login_events.kind` to include `account_created` + `login_failed` |
+| `0011_correctness_types` | `scheduled_time` TEXT→TIME (`updates` + `agg_route_hour`); `agg_route_dow.dow` TEXT→SMALLINT (ISODOW) |
+
+> **2026-05-22 note on type changes:** migration `0011` retypes
+> `scheduled_time` from `TEXT` to `TIME` and `agg_route_dow.dow` from
+> Japanese-char `TEXT` to `SMALLINT` (ISODOW: Mon=1..Sun=7). After
+> `make migrate`, run `make analyze` (or wait one hour for the cron
+> tick) to repopulate `agg_*` rows under the new types. Ingest
+> strategies skip rows with `scheduled_time` hour >= 24 or minute >= 60
+> with a structured warning log — defensive guards against any feed
+> producing values the strict TIME column can't hold.
+>
+> The migration normalises any pre-existing empty-string
+> `scheduled_time` rows to `NULL` (`UPDATE … = NULL WHERE … = ''`)
+> before the type cast, so operators upgrading a long-running database
+> don't see the ALTER abort on legacy data. The `/api/{agency_id}/delays/live`
+> JSON now returns `scheduled_time` as `"HH:MM:SS"` consistently (it
+> used to be a mix of `"HH:MM"` and `"HH:MM:SS"` depending on the
+> source strategy).
 
 ---
 
