@@ -94,6 +94,12 @@ async def ask(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
+    """Answer a Japanese natural-language question via tool-use.
+
+    Cross-origin POSTs are rejected by ``csrf_guard`` before the LLM call
+    fires, so an attacker can't burn the operator's Groq quota or extract
+    answers through a victim's session cookie.
+    """
     csrf_guard(request)
     ctx = _resolve_ctx(body.ctx)
     payload = await chat_with_tools(body.question, ctx, conn, agency_id, model=body.model)
