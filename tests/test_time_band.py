@@ -1,15 +1,27 @@
 """Typed time_band SQL fragments and end-to-end filtering."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from api.range import RangeCtx, build_updates_filter, time_band_clause
 
+# The asyncpg conftest pins the DB session to Asia/Tokyo, so `captured_at::date`
+# inside build_updates_filter compares against the JST civil day. Computing
+# `today` in JST (instead of `date.today()`, which uses the Python process's
+# local TZ — UTC on CI) keeps the test deterministic across the JST/UTC
+# boundary window when a CI runner happens to wake up between 15:00 UTC and
+# 00:00 UTC.
+_JST = timezone(timedelta(hours=9))
+
+
+def _today_jst() -> date:
+    return datetime.now(_JST).date()
+
 
 def test_time_band_clause_uses_typed_cast():
     """time_band_clause must compare against ${n}::time, not raw text."""
-    today = date.today()
+    today = _today_jst()
     ctx = RangeCtx(from_date=today, to_date=today, time_band="morning")
     frag, params, _ = time_band_clause("scheduled_time", ctx, next_param=2)
     assert "::time" in frag
@@ -17,7 +29,7 @@ def test_time_band_clause_uses_typed_cast():
 
 
 def test_time_band_clause_all_is_unfiltered():
-    today = date.today()
+    today = _today_jst()
     ctx = RangeCtx(from_date=today, to_date=today, time_band="all")
     frag, params, _ = time_band_clause("scheduled_time", ctx, next_param=2)
     assert frag == "TRUE"
@@ -27,7 +39,7 @@ def test_time_band_clause_all_is_unfiltered():
 @pytest.mark.asyncio
 async def test_time_band_filter_against_real_column(aconn, aagency_id):
     """End-to-end: insert TIME values, run the morning filter, count what matches."""
-    today = date.today()
+    today = _today_jst()
     await aconn.execute(
         "INSERT INTO updates "
         "(agency_id, file_name, captured_at, trip_id, service_type, "
