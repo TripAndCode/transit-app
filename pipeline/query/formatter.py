@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import time as _time
 
 from pipeline.db import _DOW_ISO_TO_JP
 
@@ -78,6 +79,21 @@ def _dow_label(value) -> str:
     return str(value)
 
 
+def _time_label(value) -> str:
+    """Render a ``scheduled_time`` value for display as ``HH:MM``.
+
+    Post migration 0011, asyncpg/psycopg2 return TIME columns as
+    ``datetime.time``; pre-migration callers passed a ``HH:MM`` or
+    ``HH:MM:SS`` string. Both paths normalise to ``HH:MM`` so the
+    Japanese-formatted output is stable across the migration boundary.
+    """
+    if isinstance(value, _time):
+        return value.strftime("%H:%M")
+    if isinstance(value, str) and len(value) >= 5 and value[2] == ":":
+        return value[:5]
+    return str(value) if value is not None else ""
+
+
 def _r(x, d: int = 1) -> str:
     """Round a numeric DB value to *d* decimal places and return as a string.
 
@@ -121,9 +137,17 @@ def _fmt_ranking(rows: list, intent: dict) -> str:
 
 
 def _fmt_by_hour(rows: list, intent: dict) -> str:
+    """Format per-departure-time delay rows into a Japanese display string.
+
+    Each row is ``(route_code, service_type, scheduled_time, avg_min, p50_min,
+    p90_min, samples)``. ``scheduled_time`` is rendered through
+    :func:`_time_label` so the migration-0011 TIME column displays as
+    ``HH:MM`` (the legacy text format) rather than ``HH:MM:SS``.
+    """
     scope = _route_scope_label(intent)
     lines = [
-        f"系統{r[0]}（{r[1]}）{r[2]}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）" for r in rows
+        f"系統{r[0]}（{r[1]}）{_time_label(r[2])}発: 平均{_r(r[3])}分、p50={_r(r[4])}分、p90={_r(r[5])}分（{r[6]}件）"
+        for r in rows
     ]
     return f"【{scope} 発車時刻別遅延】\n" + "\n".join(lines)
 
