@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx
+from api.security import csrf_guard
 from pipeline.query.chat import chat_with_tools
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
@@ -93,6 +94,7 @@ async def ask(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
+    csrf_guard(request)
     ctx = _resolve_ctx(body.ctx)
     payload = await chat_with_tools(body.question, ctx, conn, agency_id, model=body.model)
     return AskResponse(
