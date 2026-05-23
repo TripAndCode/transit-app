@@ -1,10 +1,18 @@
+-- Pre-clean: empty-string scheduled_time values are valid under the old TEXT
+-- column (compute_hourly_heatmap filtered ``scheduled_time != ''`` for this
+-- reason) but ``''::time`` raises. Normalise to NULL before the type change
+-- so the ALTER USING cast doesn't abort on production data.
+UPDATE updates SET scheduled_time = NULL WHERE scheduled_time = '';
+
 -- updates.scheduled_time was made nullable by 0006; preserve nullability.
 ALTER TABLE updates
-  ALTER COLUMN scheduled_time TYPE TIME USING (scheduled_time::time);
+  ALTER COLUMN scheduled_time TYPE TIME USING (NULLIF(scheduled_time, '')::time);
 
--- agg_route_hour.scheduled_time is part of the PK; Postgres rebuilds the index.
+-- agg_route_hour.scheduled_time is part of the PK (NOT NULL); empty strings
+-- would have been bugs, but ``NULLIF`` keeps the cast safe even if any slipped
+-- through, surfacing them as a NOT NULL violation rather than a USING crash.
 ALTER TABLE agg_route_hour
-  ALTER COLUMN scheduled_time TYPE TIME USING (scheduled_time::time);
+  ALTER COLUMN scheduled_time TYPE TIME USING (NULLIF(scheduled_time, '')::time);
 
 -- agg_route_dow.dow: TEXT(Japanese) -> SMALLINT(ISODOW 1..7). Part of PK.
 -- Drop PK first; rebuild after the type change.

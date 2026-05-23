@@ -74,14 +74,15 @@ def parse_feed(
         service = parsed.get("service")
         hour = parsed.get("hour", "")
         minute = parsed.get("minute", "")
-        if hour and int(hour) >= 24:
-            # Strict TIME column (migration 0011) rejects this; skip the
-            # whole trip's stop_time_updates so cron doesn't crash on the
-            # entire feed.
+        if (hour and int(hour) >= 24) or (minute and int(minute) >= 60):
+            # Strict TIME column (migration 0011) rejects extended-hour and
+            # invalid-minute values; skip the whole trip's stop_time_updates
+            # so cron doesn't abort the entire feed's batch INSERT.
             _log.warning(
-                "aomori: skipping trip_id %r with extended hour %s",
+                "aomori: skipping trip_id %r with invalid time %s:%s",
                 trip_id,
                 hour,
+                minute,
             )
             continue
         sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
