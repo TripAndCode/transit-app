@@ -115,3 +115,14 @@ async def test_create_agency_rejects_cross_origin(agencies_client):
     # Belt-and-suspenders: verify the INSERT didn't fire before the guard.
     listing = await agencies_client.get("/api/agencies")
     assert all(a["agency_name"] != "evil" for a in listing.json())
+
+
+@pytest.mark.asyncio
+async def test_create_agency_rejects_path_suffixed_origin(agencies_client):
+    """Origin with a path is RFC-invalid and must not collapse to the trusted base."""
+    resp = await agencies_client.post(
+        "/api/agencies",
+        json={"agency_name": "evil", "feed_url": "http://evil.example.com/feed.pb"},
+        headers={"Origin": f"{TEST_ORIGIN}/.evil"},
+    )
+    assert resp.status_code == 403

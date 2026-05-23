@@ -1,9 +1,10 @@
-"""Auth dependencies + User dataclass.
+"""Auth dependencies + CSRF guard.
 
 `require_user` / `require_admin` are FastAPI dependencies that read the
 user previously loaded by `session_middleware` into `request.state.user`.
-Keep this module dependency-free of asyncpg so it stays cheap to import
-in unit tests.
+`csrf_guard` Origin/Referer-gates mutating routes via a serialized-origin
+equality against the env-driven allow-list. Keep this module
+dependency-free of asyncpg so it stays cheap to import in unit tests.
 """
 
 import os as _os
@@ -56,16 +57,46 @@ def require_admin(request: Request) -> User:
 def _serialized_origin(value: str) -> str | None:
     """Reduce an Origin or Referer header value to its serialized origin
     form (``scheme://host[:port]``, lowercased), or None if it can't be
-    parsed. Strips path / query / fragment so a Referer with a path is
-    normalised against an Origin, and a hostile path-suffixed Origin
-    like ``http://localhost:8000/.evil.com`` no longer prefix-matches.
+    parsed. A Referer with a path normalises down to its origin, but a
+    bare Origin header per RFC 6454 must itself be path-less — a
+    request claiming ``Origin: http://localhost:8000/.evil`` is rejected
+    rather than silently collapsing to the trusted base.
     """
     if not value:
         return None
     parts = urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return None
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return None
     return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+def _has_origin_path(value: str) -> bool:
+    """True if `value` carries a non-trivial path (anything beyond '' or '/').
+
+    Origin headers are path-less by RFC 6454; Referer headers carry a path.
+    `csrf_guard` uses this to apply the stricter no-path rule only to Origin.
+    """
+    return urlsplit(value).path not in ("", "/")
+
+
+def _build_allowed_origins() -> frozenset[str]:
+    """Compute the allow-list once at import; csrf_guard reads it per request."""
+    out: set[str] = set()
+    base_norm = _serialized_origin(_PUBLIC_BASE_URL)
+    if base_norm is not None:
+        out.add(base_norm)
+    for o in _CORS_ORIGINS:
+        n = _serialized_origin(o)
+        if n is not None:
+            out.add(n)
+    if _ALLOW_TEST_ORIGIN:
+        out.add("http://test")
+    return frozenset(out)
+
+
+_ALLOWED_ORIGINS = _build_allowed_origins()
 
 
 def csrf_guard(request: Request) -> None:
@@ -75,10 +106,10 @@ def csrf_guard(request: Request) -> None:
     separate token. Same-origin SPA POSTs always send Origin matching
     PUBLIC_BASE_URL.
 
-    Both incoming and allowed values are reduced to a serialized origin
-    (scheme://host[:port], lowercased) before equality compare, so
-    path-suffixed bypasses like ``Origin: http://localhost:8000/.evil``
-    are rejected.
+    The Origin header (if present) must be path-less per RFC 6454;
+    ``http://localhost:8000/.evil`` is rejected outright rather than
+    collapsing to the trusted base. Referer falls back when Origin is
+    absent and is normalised to its serialized origin.
 
     The ``http://test`` ASGITransport origin is only allowed when
     ``ALLOW_TEST_ORIGIN=1`` so production deployments don't accidentally
@@ -86,20 +117,13 @@ def csrf_guard(request: Request) -> None:
     """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    raw = request.headers.get("origin") or request.headers.get("referer", "")
+    origin_raw = request.headers.get("origin")
+    if origin_raw is not None and _has_origin_path(origin_raw):
+        raise HTTPException(status_code=403, detail="cross-origin request denied")
+    raw = origin_raw or request.headers.get("referer", "")
     incoming = _serialized_origin(raw)
     if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")
-    allowed: set[str] = set()
-    base_norm = _serialized_origin(_PUBLIC_BASE_URL)
-    if base_norm is not None:
-        allowed.add(base_norm)
-    for o in _CORS_ORIGINS:
-        n = _serialized_origin(o)
-        if n is not None:
-            allowed.add(n)
-    if _ALLOW_TEST_ORIGIN:
-        allowed.add("http://test")
-    if incoming in allowed:
+    if incoming in _ALLOWED_ORIGINS:
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")
