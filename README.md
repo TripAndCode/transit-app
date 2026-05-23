@@ -312,7 +312,6 @@ Computes five aggregation tables used by all API queries:
 | `POST` | `/api/agencies` | Register agency |
 | `GET` | `/api/agencies/{id}` | Get agency |
 | `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer (Groq tool-use) |
-| `POST` | `/api/{agency_id}/query` | Structured intent dict → rows + Japanese answer |
 | `GET` | `/api/{agency_id}/reports` | List pre-computed reports |
 | `GET` | `/api/{agency_id}/reports/{type}` | Report payload (`format=json` default, `csv` for download) |
 | `GET` | `/api/{agency_id}/delays/live` | Latest delay per trip |
@@ -354,8 +353,6 @@ curl -X POST http://localhost:8000/api/1/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "系統5の遅延は？"}'
 ```
-
-Query types understood: `ranking`, `by_hour`, `by_dow`, `by_stop`, `by_date`, `trend`, `on_time`, `compare`, `worst_5min`, `stop_ranking`, `dow_ranking`, `compare_ranking`, `stop_list`, `routes_at_stop`, `route_info`, `timetable`.
 
 ## Authentication & user management
 
@@ -509,7 +506,6 @@ api/middleware/
 api/routers/
   agencies.py               agency CRUD
   ask.py                    NL question → Groq tool-use → answer (pipeline/query/chat)
-  query.py                  structured intent dict → execute → format
   reports.py                pre-computed report payloads (json + csv)
   map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
@@ -525,8 +521,9 @@ api/range.py                shared RangeCtx (from/to/dow/time_band/service/route
 pipeline/query/
   chat.py                   Groq tool-use chat (six tools, system prompt, date overrides)
   tools.py                  the six tool implementations + route validation
-  executor.py               legacy SQL executors used by /query and tools
-  formatter.py              Python templates → Japanese text
+  tool_queries.py           SQL helpers for tools.py (per-route DOW / compare / metadata)
+  labels.py                 dow_label / time_label display helpers
+  formatter.py              Python templates → Japanese text (reports endpoint)
 pipeline/audit.py           one-row INSERT into login_events (caller owns the txn)
 pipeline/reports.py         compute_* aggregations (cached via async_lru_cache)
 pipeline/cache.py           bounded async LRU + TTL decorator
@@ -551,7 +548,7 @@ Run a specific test file:
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5433/transit \
   GROQ_API_KEY=test-key \
-  poetry run pytest tests/test_executor.py -v
+  poetry run pytest tests/test_tool_queries.py -v
 ```
 
 ---
