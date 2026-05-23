@@ -3,8 +3,12 @@
 Each function is small, focused, and returns plain rows / tuples that
 tools.py wraps in a ToolResult. None of these are exposed via REST —
 the legacy /api/{id}/query route was retired with executor.py
-(2026-05-23). SQL is lifted from the corresponding _exec_* functions
-to preserve LLM-answer behaviour byte-for-byte.
+(2026-05-23). SQL is lifted from the corresponding _exec_* functions,
+with one intentional change: ``route_dow_breakdown`` always reads from
+the deduped ``updates`` table and honours ``ctx`` (date / DOW / time
+band / service), where the old executor's by_dow path silently
+preferred the all-time ``agg_route_dow`` aggregate when present,
+ignoring the requested window.
 """
 
 from api.range import RangeCtx, build_updates_filter
