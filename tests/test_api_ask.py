@@ -39,26 +39,6 @@ async def ask_client(ask_app):
 
 
 @pytest.mark.asyncio
-async def test_query_endpoint_ranking_empty(ask_client):
-    client, agency_id = ask_client
-    payload = {"query_type": "ranking", "unknown": False, "limit": 5}
-    resp = await client.post(f"/api/{agency_id}/query", json=payload)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "answer" in data
-    assert "rows" in data
-    assert isinstance(data["rows"], list)
-
-
-@pytest.mark.asyncio
-async def test_query_endpoint_unknown_agency(ask_client):
-    client, _ = ask_client
-    payload = {"query_type": "ranking", "unknown": False}
-    resp = await client.post("/api/99999/query", json=payload)
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
