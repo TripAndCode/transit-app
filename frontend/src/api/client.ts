@@ -26,12 +26,15 @@ export async function apiGetOrNull<T>(path: string): Promise<T | null> {
 }
 
 /** POST — tolerates 204 No Content (returns undefined when the endpoint
- * intentionally has no JSON body, e.g. logout). */
+ * intentionally has no JSON body, e.g. logout). The signature stays
+ * `Promise<T>` so JSON-returning callers (`/ask`, `/agencies`,
+ * `/admin/users/:uid` PATCH) don't have to narrow — callers of
+ * 204-only endpoints should type T as `void`. */
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return requestMaybeEmpty<T>(path, { method: "POST", body: JSON.stringify(body) }) as Promise<T>;
 }
 
-/** PATCH — tolerates 204 No Content like apiPost. */
+/** PATCH — same JSON-or-204 contract as apiPost. */
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return requestMaybeEmpty<T>(path, { method: "PATCH", body: JSON.stringify(body) }) as Promise<T>;
 }
