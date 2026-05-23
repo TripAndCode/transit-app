@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
+import { apiGet } from "../api/client";
 
 type Detail = {
   user_id: number;
@@ -18,11 +19,7 @@ export function AdminUserDetailPage() {
   const { uid } = useParams<{ uid: string }>();
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
-    queryFn: async (): Promise<Detail> => {
-      const r = await fetch(`/api/admin/users/${uid}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`/api/admin/users/${uid} ${r.status}`);
-      return r.json();
-    },
+    queryFn: () => apiGet<Detail>(`/api/admin/users/${uid}`),
   });
   if (isLoading) return <div style={{ padding: 24 }}>読み込み中...</div>;
   if (error || !data) return <div style={{ padding: 24 }}>エラー: {String(error)}</div>;
