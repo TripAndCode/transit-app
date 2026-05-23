@@ -62,7 +62,12 @@ def _serialized_origin(value: str) -> str | None:
     request claiming ``Origin: http://localhost:8000/.evil`` is rejected
     rather than silently collapsing to the trusted base.
     """
-    if not value:
+    if not value or value != value.strip():
+        # HTTP transports already strip Origin's OWS, so this is
+        # defence-in-depth against a future caller constructing a Request
+        # in-process with a padded header value. Python's urlsplit
+        # silently absorbs a leading space, which would otherwise let
+        # such a caller smuggle a trusted origin past the allow-list.
         return None
     parts = urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.netloc:
