@@ -41,36 +41,30 @@ _NO_STATIC_MSG = (
 
 
 def _fmt_ranking(rows: list, intent: dict) -> str:
-    """Render a ranking report (worst-delay routes) into Japanese text."""
-    if not rows:
-        return ""
+    """Render a ranking report (worst-delay routes) into Japanese text.
+
+    Row shape from ``compute_ranking`` is
+    ``(route_code, service_type, avg_min, p50_min, p90_min, samples)``.
+    """
     service = intent.get("service")
     label = f"{service}の" if service else ""
-    if service:
-        lines = [
-            f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
-            for i, r in enumerate(rows, 1)
-        ]
-    else:
-        lines = [
-            f"{i}位: 系統{r[0]} 平均{_r(r[2])}分（平日{_r(r[3])}分・土日祝{_r(r[4])}分、計{r[5]}件）"
-            for i, r in enumerate(rows, 1)
-        ]
+    # Both branches render avg / p50 / p90 / samples in that order. The
+    # pre-trim no-service branch mis-labelled p50/p90 as 平日/土日祝 — fixed
+    # because that branch is the always-used /reports/ranking path.
+    lines = [
+        f"{i}位: 系統{r[0]}（{r[1]}）平均{_r(r[2])}分、p50={_r(r[3])}分、p90={_r(r[4])}分（{r[5]}件）"
+        for i, r in enumerate(rows, 1)
+    ]
     return f"【{label}遅延ランキング上位{intent.get('limit', 15)}系統】\n" + "\n".join(lines)
 
 
 def _fmt_on_time(rows: list, intent: dict) -> str:
-    """Render on-time-rate rows; switches between route-scoped + ranking shapes."""
-    route = intent.get("route")
-    route_name = intent.get("route_name")
+    """Render the on-time-rate ranking into Japanese text.
+
+    Row shape from ``compute_on_time`` is
+    ``(route_code, service_type, on_time_pct, avg_min, samples)``.
+    """
     label = f"{intent.get('service')}の" if intent.get("service") else ""
-    if route or route_name:
-        scope = _route_scope_label(intent)
-        lines = [
-            f"系統{r[0]}（{r[1]}）: 定時率{_r(r[3], 1)}%、5分超遅延率{_r(r[4], 1)}%、平均遅延{_r(r[2])}分（{r[5]}件）"
-            for r in rows
-        ]
-        return f"【{scope} 定時率】\n" + "\n".join(lines)
     lines = [
         f"{i}位: 系統{r[0]}（{r[1]}）定時率{_r(r[2], 1)}%、平均{_r(r[3])}分（{r[4]}件）" for i, r in enumerate(rows, 1)
     ]
