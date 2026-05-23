@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { apiGet } from "../api/client";
+import { apiGet, formatApiError } from "../api/client";
 
 type Detail = {
   user_id: number;
@@ -22,7 +22,7 @@ export function AdminUserDetailPage() {
     queryFn: () => apiGet<Detail>(`/api/admin/users/${uid}`),
   });
   if (isLoading) return <div style={{ padding: 24 }}>読み込み中...</div>;
-  if (error || !data) return <div style={{ padding: 24 }}>エラー: {String(error)}</div>;
+  if (error || !data) return <div style={{ padding: 24 }}>エラー: {formatApiError(error)}</div>;
   return (
     <div style={{ padding: 24, maxWidth: 720 }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{data.email}</h1>

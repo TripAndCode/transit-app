@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../api/admin";
+import { formatApiError } from "../api/client";
 
 /** Admin: searchable user list with inline role / suspend / delete controls. */
 export function AdminUsersPage() {
@@ -19,7 +20,7 @@ export function AdminUsersPage() {
         onChange={(e) => setQ(e.target.value)}
         style={{ padding: 8, marginBottom: 16, width: 320 }}
       />
-      {error && <div style={{ color: "var(--text-tertiary)" }}>{String(error)}</div>}
+      {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
       {isLoading && <div>読み込み中...</div>}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
         <thead>
@@ -77,7 +78,7 @@ export function AdminUsersPage() {
       {(patch.error || del.error) && (
         <div role="alert" style={{ marginTop: 8, padding: 8, background: "var(--surface-2)",
                                     borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
-          {String(patch.error || del.error)}
+          {formatApiError(patch.error || del.error)}
         </div>
       )}
       <div style={{ marginTop: 12, color: "var(--text-tertiary)", fontSize: 12 }}>
