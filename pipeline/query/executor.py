@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 
-from pipeline.db import _DOW_JP_TO_ISO, build_dedup_inner_sql  # _DOW_PG removed in Task 6
+from pipeline.db import _DOW_JP_TO_ISO, build_dedup_inner_sql
 
 _log = logging.getLogger(__name__)
 
@@ -267,6 +267,13 @@ _DOW_CASE = "EXTRACT(ISODOW FROM date::date)::smallint"
 
 
 async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
+    """Return per-DOW delay stats for the requested route(s).
+
+    Prefers the agg_route_dow aggregate table (post migration 0011 stores
+    ISODOW ints). Falls back to a live deduped CTE when aggregates are absent.
+    DOW values in the returned tuples are ISODOW ints (1=Mon..7=Sun); rollup
+    labels ('平日', '週末') are literal strings injected by the SQL.
+    """
     route_codes = await _route_codes_from_intent(intent, conn, agency_id)
     if not route_codes:
         return []
@@ -351,7 +358,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
             f"SELECT route_code, service_type, {_DOW_CASE} AS dow, "
             "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
             f"FROM deduped WHERE {where_sql} "
-            f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
+            f"GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date) "
+            f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
             agency_id,
             *outer_vals,
         )
@@ -380,7 +388,8 @@ async def _exec_by_dow(intent: dict, conn, agency_id: int) -> list:
         f"SELECT route_code, service_type, {_DOW_CASE} AS dow, "
         "ROUND(AVG(dep_delay)/60.0::numeric, 2), COUNT(*) "
         f"FROM deduped WHERE {where_sql} "
-        f"GROUP BY route_code, service_type, date ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
+        f"GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date) "
+        f"ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) {order}",
         agency_id,
         *outer_vals,
     )
@@ -916,6 +925,13 @@ async def _exec_compare_ranking(intent: dict, conn, agency_id: int) -> list:
 
 
 async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
+    """Return a delay ranking filtered to a specific DOW or DOW group.
+
+    Requires either 'dow' (Japanese char, e.g. '月') or 'dow_group'
+    ('weekday'/'weekend') in intent. Returns [] when neither is set.
+    DOW column in result tuples is an ISODOW int (agg path) or the rollup
+    label string (dow_group path). Callers must pass through _dow_label.
+    """
     dow = intent.get("dow")
     dow_group = intent.get("dow_group")
     service = intent.get("service")
@@ -933,8 +949,11 @@ async def _exec_dow_ranking(intent: dict, conn, agency_id: int) -> list:
             n += 1
 
         if dow:
+            dow_iso = _DOW_JP_TO_ISO.get(dow)
+            if dow_iso is None:
+                return []
             conds.append(f"dow=${n}")
-            params.append(dow)
+            params.append(dow_iso)
             n += 1
             where_sql = "WHERE " + " AND ".join(conds)
             params.append(limit)

@@ -167,10 +167,7 @@ def time_band_clause(
     if ctx.time_band == "all":
         return "TRUE", [], next_param
     start, end = _TIME_BAND_RANGES[ctx.time_band]
-    fragment = (
-        f"({column}::time >= (${next_param}::text)::time"
-        f" AND {column}::time < (${next_param + 1}::text)::time)"
-    )
+    fragment = f"({column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time)"
     return fragment, [start, end], next_param + 2
 
 

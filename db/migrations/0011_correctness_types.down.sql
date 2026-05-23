@@ -12,6 +12,7 @@ ALTER TABLE agg_route_dow
   );
 
 ALTER TABLE agg_route_dow
+  ALTER COLUMN dow SET NOT NULL,
   ADD CONSTRAINT agg_route_dow_pkey
     PRIMARY KEY (agency_id, route_code, service_type, dow);
 
