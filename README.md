@@ -224,10 +224,17 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 > Japanese-char `TEXT` to `SMALLINT` (ISODOW: Mon=1..Sun=7). After
 > `make migrate`, run `make analyze` (or wait one hour for the cron
 > tick) to repopulate `agg_*` rows under the new types. Ingest
-> strategies now skip rows with `scheduled_time` hour >= 24 with a
-> structured warning log — none of the current agencies emit such
-> values, but the guard keeps a strict TIME column from crashing a
-> future cron run.
+> strategies skip rows with `scheduled_time` hour >= 24 or minute >= 60
+> with a structured warning log — defensive guards against any feed
+> producing values the strict TIME column can't hold.
+>
+> The migration normalises any pre-existing empty-string
+> `scheduled_time` rows to `NULL` (`UPDATE … = NULL WHERE … = ''`)
+> before the type cast, so operators upgrading a long-running database
+> don't see the ALTER abort on legacy data. The `/api/{agency_id}/delays/live`
+> JSON now returns `scheduled_time` as `"HH:MM:SS"` consistently (it
+> used to be a mix of `"HH:MM"` and `"HH:MM:SS"` depending on the
+> source strategy).
 
 ---
 
