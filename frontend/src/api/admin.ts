@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiDelete, apiGet, apiPatch } from "./client";
 
 export type AdminUser = {
   user_id: number;
@@ -20,37 +21,16 @@ export function useAdminUsers(params: { q?: string; role?: string; suspended?: s
   if (params.suspended) qs.set("suspended", params.suspended);
   return useQuery({
     queryKey: ["adminUsers", params],
-    queryFn: async (): Promise<AdminUserList> => {
-      const r = await fetch(`/api/admin/users?${qs}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`/api/admin/users ${r.status}`);
-      return r.json();
-    },
+    queryFn: () => apiGet<AdminUserList>(`/api/admin/users?${qs}`),
   });
 }
 
 async function patchUser(uid: number, body: { role?: string; suspended?: boolean }) {
-  const r = await fetch(`/api/admin/users/${uid}`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) {
-    const detail = await r.json().catch(() => ({}));
-    throw new Error(detail.detail || `PATCH ${r.status}`);
-  }
-  return r.json();
+  return apiPatch<AdminUser>(`/api/admin/users/${uid}`, body);
 }
 
 async function deleteUser(uid: number) {
-  const r = await fetch(`/api/admin/users/${uid}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  if (!r.ok) {
-    const detail = await r.json().catch(() => ({}));
-    throw new Error(detail.detail || `DELETE ${r.status}`);
-  }
+  await apiDelete(`/api/admin/users/${uid}`);
 }
 
 /** Mutation: PATCH a user's role/suspended flag; invalidates the user list on success. */
