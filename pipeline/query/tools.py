@@ -27,9 +27,7 @@ from pipeline.query.labels import dow_label
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
-)
-from pipeline.query.tool_queries import (
-    route_info as fetch_route_info,
+    route_info,
 )
 from pipeline.reports import (
     compute_compare_ranking,
@@ -245,6 +243,7 @@ SYSTEM_PROMPT = """\
 
 
 def _route_name_lookup(route: str | None) -> str:
+    """Human-facing label for a route_code in summary strings."""
     return f"系統{route}" if route else "（系統指定なし）"
 
 
@@ -348,8 +347,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> 
                 "期間を広げるか、フィルタを解除して試してください。"
             ),
         )
-    # DOW column is ISODOW int (1..7); render as Japanese char so the
-    # LLM sees '月' instead of '1' when it formats the response.
+    # Render ISODOW int as Japanese char so the LLM sees '月' not '1'.
     rendered = [[r[0], r[1], dow_label(r[2]), r[3], r[4]] for r in rows]
     return ToolResult(
         kind="table",
@@ -464,7 +462,7 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int) -> T
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
-    r = await fetch_route_info(agency_id, conn, route=str(route))
+    r = await route_info(agency_id, conn, route=str(route))
     if r is None:
         return ToolResult(kind="empty", summary_jp=f"系統{route} の路線情報が見つかりません。")
     pairs = [

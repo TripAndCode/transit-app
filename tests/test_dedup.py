@@ -1,6 +1,6 @@
 """Latest-by-captured_at dedup, replacing the old MAX semantics.
 
-Pins behavior for all two dedup definitions in the codebase:
+Pins behavior for both dedup definitions in the codebase:
 
 - pipeline.db._DEDUP_INNER              (psycopg2 / %(agency_id)s)
 - pipeline.reports._dedup_cte()         (asyncpg / $1 + WHERE fragment)
