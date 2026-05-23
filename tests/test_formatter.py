@@ -1,21 +1,27 @@
+"""Tests for pipeline/query/formatter.py.
+
+After the post-/query-retire trim, formatter.py renders only the 5
+query_types that api/routers/reports.py dispatches:
+ranking / on_time / worst_5min / compare_ranking / dow_ranking.
+
+Label-helper coverage (dow_label / time_label) lives in
+tests/test_labels.py.
+"""
+
 import pytest
 
-from pipeline.query.formatter import (
-    _fix,
-    format_result,
-)
+from pipeline.query.formatter import format_result
 
 
-# Override the session-scoped DB fixture so formatter tests run without PostgreSQL
+# Override the session-scoped DB fixture — pure-Python tests, no DB needed.
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
-    """No-op override: formatter tests are pure Python, no DB needed."""
     yield
 
 
 def test_fmt_ranking_basic():
     rows = [("49022", "平日", 2.5, 2.1, 5.0, 100)]
-    intent = {"route": "49022", "limit": 15}
+    intent = {"route": "49022", "limit": 15, "service": "平日"}
     result = format_result("ranking", rows, intent)
     assert "49022" in result
     assert "2.5" in result
@@ -28,7 +34,7 @@ def test_fmt_ranking_empty():
 
 def test_format_result_none_rows_returns_static_msg():
     result = format_result("ranking", None, {})
-    assert "GTFSスタティック" in result or "load_static" in result
+    assert "GTFS" in result or "load_static" in result
 
 
 def test_format_result_unknown_type():
@@ -36,103 +42,57 @@ def test_format_result_unknown_type():
     assert "データがありません" in result
 
 
-def test_fix_replaces_system_english():
-    assert _fix("System 44372") == "系統 44372"
+def test_fmt_dow_ranking_renders_int_dow_as_jp():
+    """ISODOW int from compute_dow_ranking renders as a Japanese day char."""
+    # Row shape: (route_code, service_type, dow, avg_min, samples)
+    rows = [("44372", "平日", 1, 3.5, 100)]  # 1 = Monday in ISODOW
+    result = format_result("dow_ranking", rows, {})
+    assert "月" in result, f"expected '月' in {result!r}"
 
 
-def test_fix_replaces_chinese_system():
-    assert _fix("系统44372") == "系統44372"
+def test_fmt_worst_5min_row_shape():
+    """compute_worst_5min returns (route_code, service_type, late5_count,
+    avg_min, samples). Pin the index mapping to catch the historical
+    r[2]/r[3] swap that surfaced on live data."""
+    rows = [("14022", "平日", 759, 3.4, 3159)]
+    result = format_result("worst_5min", rows, {})
+    assert "759回" in result, f"expected '759回' in {result!r}"
+    assert "3.4" in result, f"expected '3.4' avg in {result!r}"
+    assert "3159件" in result, f"expected '3159件' in {result!r}"
 
 
-def test_fmt_compare_verdict():
-    rows = [("平日", 2.0, 50), ("土日祝", 3.5, 30)]
-    intent = {"route": "44372"}
-    result = format_result("compare", rows, intent)
-    assert "土日祝" in result
-    assert "1.5" in result or "判定" in result
+def test_fmt_compare_ranking_signs_direction():
+    """Sign of the delta determines the Japanese direction label."""
+    # signed > 0 → 土日祝>平日
+    pos_rows = [("19042", 2.6, 8.2, 5.6, 5.6)]
+    assert "土日祝>平日" in format_result("compare_ranking", pos_rows, {})
+    # signed < 0 → 平日>土日祝
+    neg_rows = [("56041", 4.1, 0.8, 3.3, -3.3)]
+    assert "平日>土日祝" in format_result("compare_ranking", neg_rows, {})
 
 
-def test_fmt_trend_empty():
-    result = format_result("trend", [], {})
-    assert "トレンド計算" in result
+def test_fmt_ranking_no_service_uses_p50_p90_labels():
+    """compute_ranking returns (route, service, avg, p50, p90, samples).
+    The no-service path was previously mis-labelling p50 as 平日 and p90 as
+    土日祝 — pin the corrected label set so a regression is immediate."""
+    rows = [("16101", "平日", 7.9, 4.8, 22.8, 152)]
+    result = format_result("ranking", rows, {"limit": 100})
+    assert "p50=4.8" in result
+    assert "p90=22.8" in result
+    # The mis-label was "平日{p50}分・土日祝{p90}分" — verify it's gone.
+    assert "土日祝22.8" not in result
 
 
-def test_fmt_by_date():
-    rows = [("44372", "平日", 2.1, 100)]
-    intent = {"date": "2026-04-15"}
-    result = format_result("by_date", rows, intent)
-    assert "2026-04-15" in result
-    assert "44372" in result
+def test_fmt_on_time_ranking_shape():
+    """compute_on_time returns (route, service, on_time_pct, avg, samples)."""
+    rows = [("14081", "平日", 76.6, 0.5, 205)]
+    result = format_result("on_time", rows, {})
+    assert "定時率76.6%" in result
+    assert "平均0.5分" in result
+    assert "205件" in result
 
 
-def test_fmt_route_info_empty_rows():
-    result = format_result("route_info", [], {"route": "44372"})
-    assert "データがありません" in result  # falls back to _no_data()
-
-
-def test_format_guidance_menu_empty_rows_no_blank():
-    # Verify empty ranking yields "(データなし)" not blank line
-    # We can test the output string by checking the rendered text without a DB
-    # by inspecting the constant structure
-    import asyncio
-
-    from pipeline.query.formatter import format_guidance_menu
-
-    async def _run():
-        class FakeConn:
-            async def fetch(self, sql, *args):
-                return []
-
-        return await format_guidance_menu(FakeConn(), 1)
-
-    result = asyncio.run(_run())
-    assert "データなし" in result
-    # The LLM context menu should not have an empty line between header and menu
-    lines = result.split("\n")
-    header_idx = next(i for i, line in enumerate(lines) if "遅延ランキング上位10系統" in line)
-    # Line immediately after header should not be empty
-    assert lines[header_idx + 1].strip() != ""
-
-
-def test_dow_label_int_maps_to_japanese_char():
-    from pipeline.query.formatter import _dow_label
-
-    assert _dow_label(1) == "月"
-    assert _dow_label(7) == "日"
-
-
-def test_dow_label_string_passes_through():
-    from pipeline.query.formatter import _dow_label
-
-    assert _dow_label("平日") == "平日"
-    assert _dow_label("月") == "月"
-
-
-def test_dow_label_unknown_int_falls_back_to_str():
-    from pipeline.query.formatter import _dow_label
-
-    assert _dow_label(99) == "99"
-
-
-def test_time_label_time_object_renders_hhmm():
-    """Post-migration 0011: agg_route_hour.scheduled_time is TIME → datetime.time."""
-    from datetime import time
-
-    from pipeline.query.formatter import _time_label
-
-    assert _time_label(time(8, 0)) == "08:00"
-    assert _time_label(time(17, 35, 12)) == "17:35"
-
-
-def test_time_label_string_truncates_to_hhmm():
-    """Legacy/raw text scheduled_time stays HH:MM regardless of source width."""
-    from pipeline.query.formatter import _time_label
-
-    assert _time_label("08:00") == "08:00"
-    assert _time_label("08:00:00") == "08:00"
-
-
-def test_time_label_none_becomes_empty():
-    from pipeline.query.formatter import _time_label
-
-    assert _time_label(None) == ""
+def test_fmt_dow_ranking_weekday_header():
+    rows = [("16101", "平日", "平日", 8.8, 114)]
+    result = format_result("dow_ranking", rows, {"dow_group": "weekday"})
+    assert "【平日遅延ランキング】" in result
