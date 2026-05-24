@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 
 export function AgencyPicker() {
+  const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
   const { agencyId } = useParams();
   const navigate = useNavigate();
@@ -42,11 +44,11 @@ export function AgencyPicker() {
   }, [agencies, filter]);
 
   if (isLoading) {
-    return <span style={{ color: "var(--text-tertiary)" }}>事業者読み込み中...</span>;
+    return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;
   }
 
   if (!agencies || agencies.length === 0) {
-    return <span style={{ color: "var(--text-tertiary)" }}>事業者が登録されていません</span>;
+    return <span style={{ color: "var(--text-tertiary)" }}>{t("header.agency_picker_empty")}</span>;
   }
 
   // Single agency: static label, no dropdown
@@ -75,7 +77,7 @@ export function AgencyPicker() {
           textAlign: "left",
         }}
       >
-        {current?.agency_name ?? "事業者を選択"}
+        {current?.agency_name ?? t("header.agency_picker_placeholder")}
         <span style={{ float: "right", color: "var(--text-tertiary)" }}>▾</span>
       </button>
       {open && (
@@ -97,7 +99,7 @@ export function AgencyPicker() {
             autoFocus
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="検索..."
+            placeholder={t("common.search_placeholder")}
             style={{ width: "100%", border: "none", borderBottom: "1px solid var(--border-soft)", borderRadius: 0 }}
           />
           <div style={{ maxHeight: 280, overflowY: "auto" }}>
@@ -115,7 +117,7 @@ export function AgencyPicker() {
               </div>
             ))}
             {filtered.length === 0 && (
-              <div style={{ padding: 12, color: "var(--text-tertiary)" }}>該当なし</div>
+              <div style={{ padding: 12, color: "var(--text-tertiary)" }}>{t("common.no_match")}</div>
             )}
           </div>
         </div>

@@ -1,3 +1,5 @@
+import i18n from "../i18n";
+
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export class ApiError extends Error {
@@ -92,10 +94,17 @@ async function requestMaybeEmpty<T>(path: string, init: RequestInit): Promise<T 
 // credentials:'include' so cross-origin Vite-dev (:5173 → :8000) sends the sid
 // cookie. Same-origin requests (single-origin prod / make serve) are
 // unaffected — browsers always send same-origin cookies.
+//
+// Accept-Language is stamped from the current i18n instance so the
+// backend (Ask LLM prelude / formatter / tool summaries) renders in
+// the same language the user picked in the UI. Falls back to "ja" so
+// the header is always present, matching the LocaleMiddleware default.
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   const apiKey = localStorage.getItem("api_key");
+  const lang = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "Accept-Language": lang,
     ...(apiKey ? { "X-API-Key": apiKey } : {}),
   };
   return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });

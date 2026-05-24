@@ -65,7 +65,7 @@ export type RouteShapeResponse = {
 export type HeatmapProps = {
   stop_id: string;
   stop_name: string;
-  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's
+  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's // i18n-ignore: GTFS format example
    *  static feed includes it; clustered stops yield a "/-joined" set. */
   stop_code?: string;
   /** Optional GTFS platform_code (pole number, e.g. "2"). */
@@ -109,7 +109,9 @@ export type TrendDay = {
 
 export type ToolResult = {
   kind: "table" | "series" | "kv" | "empty" | "text";
-  summary_jp: string;
+  /** Backend-rendered summary string, already in the locale the
+   *  current request asked for via Accept-Language. */
+  summary: string;
   rows?: unknown[][];
   columns?: string[];
   series?: TrendDay[];

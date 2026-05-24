@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
@@ -30,6 +31,7 @@ export function RoutesPicker({
   selected: string[];
   onChange: (v: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const id = useAgencyId();
   const { data, isPending, refetch } = useRoutes(id);
   const [filter, setFilter] = useState("");
@@ -104,7 +106,7 @@ export function RoutesPicker({
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="検索 (名前 / コード)"
+        placeholder={t("filters.routes.search_placeholder")}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
       <div
@@ -154,14 +156,14 @@ export function RoutesPicker({
                     <span style={{ color: "var(--text-secondary)" }}> {topSuffix}</span>
                   )}
                   {multi && (
-                    <span style={{ color: "var(--text-tertiary)" }}> ({g.variants.length}系統)</span>
+                    <span style={{ color: "var(--text-tertiary)" }}> {t("filters.routes.variant_count", { count: g.variants.length })}</span>
                   )}
                 </span>
                 {multi && (
                   <button
                     type="button"
                     onClick={() => toggleExpanded(g.name)}
-                    aria-label={isOpen ? "閉じる" : "展開"}
+                    aria-label={isOpen ? t("common.close") : t("common.expand")}
                     style={{
                       background: "transparent",
                       border: "none",
@@ -215,16 +217,17 @@ export function RoutesPicker({
         })}
         {filteredGroups.length === 0 && isPending && (
           <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
-            読み込み中...
+            {t("common.loading")}
           </div>
         )}
         {filteredGroups.length === 0 && !isPending && filter.trim() !== "" && (
-          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>該当なし</div>
+          <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>{t("common.no_match")}</div>
         )}
         {filteredGroups.length === 0 && !isPending && filter.trim() === "" && (
           <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
-            ルートが登録されていません。
-            初回ingest中の場合は数分後に再度お試しください。
+            {t("filters.routes.empty_title")}
+            {" "}
+            {t("filters.routes.empty_hint")}
             <button
               type="button"
               onClick={() => refetch()}
@@ -239,7 +242,7 @@ export function RoutesPicker({
                 marginLeft: 6,
               }}
             >
-              再読み込み
+              {t("common.reload")}
             </button>
           </div>
         )}

@@ -11,3 +11,12 @@ async def get_agency(agency_id: int, conn=Depends(get_conn)):
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return agency_id
+
+
+def get_locale(request: Request) -> str:
+    """Read the per-request locale set by :class:`LocaleMiddleware`.
+
+    Defaults to ``"ja"`` when the middleware hasn't run (e.g. ad-hoc test
+    fixtures), so callers can always assume a non-empty supported value.
+    """
+    return getattr(request.state, "locale", "ja")

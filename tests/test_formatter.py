@@ -96,3 +96,34 @@ def test_fmt_dow_ranking_weekday_header():
     rows = [("16101", "平日", "平日", 8.8, 114)]
     result = format_result("dow_ranking", rows, {"dow_group": "weekday"})
     assert "【平日遅延ランキング】" in result
+
+
+def test_fmt_ranking_en_locale_uses_english_strings():
+    """locale='en' switches every label/header/row template to English.
+
+    Pins the basic EN ranking shape so a regression on the formatter
+    translation table surfaces immediately.
+    """
+    rows = [("16101", "平日", 7.9, 4.8, 22.8, 152)]
+    result = format_result("ranking", rows, {"limit": 100}, locale="en")
+    assert "Delay ranking" in result
+    assert "top 100 routes" in result
+    assert "route 16101" in result
+    assert "mean 7.9 min" in result
+    assert "p50=4.8" in result
+    # Empty-rows path also translates.
+    empty = format_result("ranking", [], {"limit": 100}, locale="en")
+    assert "No data available" in empty
+
+
+def test_fmt_dow_ranking_en_translates_iso_dow_and_rollup():
+    """EN locale: ISODOW int → short EN name, rollup label → EN word."""
+    # ISODOW int path.
+    int_rows = [("44372", "平日", 1, 3.5, 100)]
+    result = format_result("dow_ranking", int_rows, {}, locale="en")
+    assert "Mon" in result, f"expected 'Mon' in {result!r}"
+    # Rollup label path with weekday header.
+    rollup_rows = [("16101", "平日", "平日", 8.8, 114)]
+    result = format_result("dow_ranking", rollup_rows, {"dow_group": "weekday"}, locale="en")
+    assert "Weekday delay ranking" in result
+    assert "Weekday" in result  # the per-row label too

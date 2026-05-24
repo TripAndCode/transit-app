@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
 import {
   DEFAULT_RANGE_DAYS,
@@ -13,33 +14,6 @@ import {
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
-
-const DOW_OPTIONS: { value: DowFilter; label: string }[] = [
-  { value: "all", label: "全曜日" },
-  { value: "weekday", label: "平日" },
-  { value: "weekend", label: "土日祝" },
-];
-
-const SERVICE_OPTIONS: { value: ServiceFilter; label: string }[] = [
-  { value: "all", label: "全種別" },
-  { value: "平日", label: "平日" },
-  { value: "土日祝", label: "土日祝" },
-];
-
-const TIME_BAND_OPTIONS: { value: TimeBand; label: string }[] = [
-  { value: "all", label: "全時間帯" },
-  { value: "morning", label: "朝(05-09)" },
-  { value: "forenoon", label: "午前(09-12)" },
-  { value: "noon", label: "昼(12-14)" },
-  { value: "afternoon", label: "午後(14-17)" },
-  { value: "evening", label: "夕(17-20)" },
-  { value: "night", label: "夜(20-24)" },
-  { value: "late_night", label: "深夜(00-05)" },
-];
-
-const TIME_BAND_LABEL: Record<TimeBand, string> = Object.fromEntries(
-  TIME_BAND_OPTIONS.map((o) => [o.value, o.label]),
-) as Record<TimeBand, string>;
 
 const pill = (active: boolean): CSSProperties => ({
   background: active ? "var(--accent-soft)" : "var(--bg-surface)",
@@ -70,6 +44,7 @@ type Draft = {
 };
 
 export function TabFilterBar() {
+  const { t } = useTranslation();
   const [ctx, setCtx] = useRangeContext();
   const agencyIdNum = useAgencyId();
   const [open, setOpen] = useState(false);
@@ -81,6 +56,49 @@ export function TabFilterBar() {
     routes: ctx.routes,
   });
   const { data: routes } = useRoutes(agencyIdNum);
+
+  const dowOptions = useMemo<{ value: DowFilter; label: string }[]>(
+    () => [
+      { value: "all", label: t("filters.dow.all") },
+      { value: "weekday", label: t("filters.dow.weekday") },
+      { value: "weekend", label: t("filters.dow.weekend") },
+    ],
+    [t],
+  );
+
+  const serviceOptions = useMemo<{ value: ServiceFilter; label: string }[]>(
+    () => [
+      { value: "all", label: t("filters.service.all") },
+      // value stays as the raw JP string (URL query value); only the label is translated
+      { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
+      { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
+    ],
+    [t],
+  );
+
+  const timeBandOptions = useMemo<{ value: TimeBand; label: string }[]>(
+    () => [
+      { value: "all", label: t("filters.time_band.all") },
+      { value: "morning", label: t("filters.time_band.morning") },
+      { value: "forenoon", label: t("filters.time_band.forenoon") },
+      { value: "noon", label: t("filters.time_band.noon") },
+      { value: "afternoon", label: t("filters.time_band.afternoon") },
+      { value: "evening", label: t("filters.time_band.evening") },
+      { value: "night", label: t("filters.time_band.night") },
+      { value: "late_night", label: t("filters.time_band.late_night") },
+    ],
+    [t],
+  );
+
+  const timeBandLabel = useMemo<Record<TimeBand, string>>(
+    () => Object.fromEntries(timeBandOptions.map((o) => [o.value, o.label])) as Record<TimeBand, string>,
+    [timeBandOptions],
+  );
+
+  const serviceLabel = useMemo<Record<ServiceFilter, string>>(
+    () => Object.fromEntries(serviceOptions.map((o) => [o.value, o.label])) as Record<ServiceFilter, string>,
+    [serviceOptions],
+  );
 
   useEffect(() => {
     setDraft({ dow: ctx.dow, time_band: ctx.time_band, service: ctx.service, routes: ctx.routes });
@@ -115,7 +133,7 @@ export function TabFilterBar() {
   }, [routes]);
 
   // route_short_name → list of route_codes that share it.
-  // A single display name like "K37 観光通り線" maps to several codes
+  // A single display name like "K37 観光通り線" maps to several codes // i18n-ignore: comment
   // (different operating variants); the picker can collapse-select all
   // of them, and the chips below merge accordingly.
   const groupCodesByName = useMemo(() => {
@@ -164,7 +182,7 @@ export function TabFilterBar() {
 
   function reset() {
     // Reset includes the date range — drilldowns from the trend heatmap set
-    // from=to=<single day>; without resetting the dates here, "全てクリア"
+    // from=to=<single day>; without resetting the dates here, "全てクリア" // i18n-ignore: comment
     // leaves the user stuck on a one-day window.
     const cleared: Draft = { dow: "all", time_band: "all", service: "all", routes: [] };
     setDraft(cleared);
@@ -234,7 +252,7 @@ export function TabFilterBar() {
         }}
       >
         <span aria-hidden style={{ fontSize: 16 }}>⚙</span>
-        フィルタ
+        {t("filters.title")}
         {activeCount > 0 && (
           <span
             style={{
@@ -256,25 +274,25 @@ export function TabFilterBar() {
 
       {/* Inline chips of active filters with × to clear individually */}
       {ctx.dow !== "all" && (
-        <Chip label={`曜日: ${dowLabel(ctx.dow)}`} onClear={() => clearChip("dow")} />
+        <Chip label={`${t("filters.dow.label")}: ${dowLabel(ctx.dow, t)}`} onClear={() => clearChip("dow")} />
       )}
       {ctx.service !== "all" && (
-        <Chip label={`種別: ${ctx.service}`} onClear={() => clearChip("service")} />
+        <Chip label={`${t("filters.service.label")}: ${serviceLabel[ctx.service]}`} onClear={() => clearChip("service")} />
       )}
       {ctx.time_band !== "all" && (
-        <Chip label={`時間帯: ${TIME_BAND_LABEL[ctx.time_band]}`} onClear={() => clearChip("time_band")} />
+        <Chip label={`${t("filters.time_band.label")}: ${timeBandLabel[ctx.time_band]}`} onClear={() => clearChip("time_band")} />
       )}
       {routeChips.map((c) =>
         c.kind === "name" ? (
           <Chip
             key={`name:${c.name}`}
-            label={`${c.name} (${c.codes.length}系統)`}
+            label={`${c.name} ${t("filters.routes.variant_count", { count: c.codes.length })}`}
             onClear={() => clearNameChip(c.codes)}
           />
         ) : (
           <Chip
             key={c.code}
-            label={routeNameMap.get(c.code) ? `${routeNameMap.get(c.code)} (${c.code})` : `系統${c.code}`}
+            label={routeNameMap.get(c.code) ? `${routeNameMap.get(c.code)} (${c.code})` : t("common.route_code_fallback", { code: c.code })}
             onClear={() => clearChip("route", c.code)}
           />
         ),
@@ -293,7 +311,7 @@ export function TabFilterBar() {
             textDecoration: "underline",
           }}
         >
-          全てクリア
+          {t("filters.clear_all")}
         </button>
       )}
 
@@ -314,9 +332,9 @@ export function TabFilterBar() {
           }}
         >
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>曜日</span>
+            <span style={groupLabel}>{t("filters.dow.label")}</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {DOW_OPTIONS.map((o) => (
+              {dowOptions.map((o) => (
                 <button
                   key={o.value}
                   type="button"
@@ -330,9 +348,9 @@ export function TabFilterBar() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>種別 (GTFS)</span>
+            <span style={groupLabel}>{t("filters.service.label_gtfs")}</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {SERVICE_OPTIONS.map((o) => (
+              {serviceOptions.map((o) => (
                 <button
                   key={o.value}
                   type="button"
@@ -346,9 +364,9 @@ export function TabFilterBar() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>時間帯</span>
+            <span style={groupLabel}>{t("filters.time_band.label")}</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {TIME_BAND_OPTIONS.map((o) => (
+              {timeBandOptions.map((o) => (
                 <button
                   key={o.value}
                   type="button"
@@ -362,7 +380,7 @@ export function TabFilterBar() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>系統</span>
+            <span style={groupLabel}>{t("filters.routes.label")}</span>
             <RoutesPicker
               selected={draft.routes}
               onChange={(routes) => setDraft((d) => ({ ...d, routes }))}
@@ -383,7 +401,7 @@ export function TabFilterBar() {
                 cursor: "pointer",
               }}
             >
-              ↺ リセット
+              {`↺ ${t("common.reset")}`}
             </button>
             <button
               type="button"
@@ -401,7 +419,7 @@ export function TabFilterBar() {
                 boxShadow: dirty ? "0 1px 2px rgba(91,108,173,0.25)" : "none",
               }}
             >
-              ✓ 適用
+              {`✓ ${t("common.apply")}`}
             </button>
           </div>
         </div>
@@ -415,11 +433,14 @@ function useAgencyId(): number | null {
   return agencyId ? Number(agencyId) : null;
 }
 
-function dowLabel(d: DowFilter): string {
-  return d === "weekday" ? "平日" : d === "weekend" ? "土日祝" : "全曜日";
+function dowLabel(d: DowFilter, t: (key: string) => string): string {
+  if (d === "weekday") return t("filters.dow.weekday");
+  if (d === "weekend") return t("filters.dow.weekend");
+  return t("filters.dow.all");
 }
 
 function Chip({ label, onClear }: { label: string; onClear: () => void }) {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -439,7 +460,7 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
       <button
         type="button"
         onClick={onClear}
-        aria-label={`${label} を解除`}
+        aria-label={`${label} ${t("filters.chip_remove_suffix")}`}
         style={{
           background: "transparent",
           border: "none",

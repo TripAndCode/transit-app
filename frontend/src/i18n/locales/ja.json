@@ -1,0 +1,396 @@
+{
+  "nav": {
+    "map": "地図",
+    "ask": "質問",
+    "live": "リアルタイム",
+    "reports": "レポート"
+  },
+  "header": {
+    "app_title": "遅延ダッシュボード",
+    "app_tagline": "リアルタイム × 時刻表",
+    "new_agency": "新規事業者",
+    "settings_aria": "設定",
+    "agency_picker_empty": "事業者が登録されていません",
+    "agency_picker_placeholder": "事業者を選択",
+    "settings_title": "設定",
+    "settings_api_key_label": "API キー",
+    "settings_api_key_placeholder": "未設定でも全機能が使えます",
+    "settings_api_key_hint": "通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。"
+  },
+  "common": {
+    "apply": "適用",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "collapse": "折りたたみ",
+    "details": "詳細",
+    "expand": "展開",
+    "hint_aria": "ヒント",
+    "loading": "読み込み中...",
+    "loading_agencies": "事業者を読み込み中...",
+    "locale_ja": "日本語",
+    "locale_en": "English",
+    "login": "ログイン",
+    "no_match": "該当なし",
+    "on_time": "定刻",
+    "optional_paren": "(オプション)",
+    "reload": "再読み込み",
+    "reset": "リセット",
+    "retry": "再試行",
+    "route_code_fallback": "系統{{code}}",
+    "save": "保存",
+    "search_placeholder": "検索...",
+    "unit_count": "件",
+    "unit_min": "分",
+    "unit_min_sec_signed": "{{sign}}{{m}}分{{s}}秒",
+    "unit_min_signed": "{{sign}}{{value}}分",
+    "unit_sec_signed": "{{sign}}{{value}}秒",
+    "rel_days_ago": "{{count}}日前",
+    "rel_hours_ago": "{{count}}時間前",
+    "rel_minutes_ago": "{{count}}分前",
+    "rel_seconds_ago": "{{count}}秒前",
+    "range_separator": "〜",
+    "language_aria": "言語",
+    "service_value": {
+      "平日": "平日",
+      "土日祝": "土日祝"
+    }
+  },
+  "account": {
+    "admin_link": "管理",
+    "guest_prompt": "気に入りましたか？フィルターを保存するにはログインしてください。",
+    "title": "アカウント",
+    "role_label": "ロール",
+    "role": {
+      "admin": "管理者",
+      "user": "ユーザー"
+    },
+    "linked_providers": "連携プロバイダ",
+    "active_sessions": "アクティブなセッション",
+    "session_last_seen": "最終: {{when}}",
+    "logout": "ログアウト",
+    "login": {
+      "error": {
+        "state": "ログインのリクエストが期限切れです。もう一度お試しください。",
+        "unverified_email": "メールアドレスが未確認です。プロバイダ側で確認を完了してください。",
+        "no_email": "GitHubの確認済みメールが取得できませんでした。プライマリメールを公開設定にするか、別の方法でログインしてください。",
+        "provider_down": "プロバイダ側に一時的な問題が発生しています。しばらくしてから再試行してください。",
+        "generic": "ログインに失敗しました。"
+      },
+      "sso_disabled_title": "SSO 未設定",
+      "sso_disabled_body": "このビルドでは SSO が無効です。匿名で閲覧できます。",
+      "back_to_top": "トップへ戻る",
+      "welcome_back": "おかえりなさい",
+      "choose_provider": "アカウントを選択してログイン",
+      "google_aria": "Googleでログイン",
+      "google_continue": "Googleで続ける",
+      "github_aria": "GitHubでログイン",
+      "github_continue": "GitHubで続ける",
+      "terms_prefix": "続行することで、",
+      "terms_link": "利用規約",
+      "terms_and": "と",
+      "privacy_link": "プライバシーポリシー",
+      "terms_suffix": "に同意したものとみなされます。"
+    }
+  },
+  "presets": {
+    "login_to_save_tooltip": "ログインで保存",
+    "label": "プリセット",
+    "option_placeholder": "プリセット",
+    "save_current": "現在の条件を保存",
+    "name_placeholder": "プリセット名"
+  },
+  "filters": {
+    "title": "フィルタ",
+    "clear_all": "全てクリア",
+    "chip_remove_suffix": "を解除",
+    "range": {
+      "last_7d": "直近7日",
+      "last_30d": "直近30日",
+      "last_90d": "直近90日",
+      "this_month": "今月",
+      "last_month": "先月",
+      "custom": "カスタム"
+    },
+    "dow": {
+      "all": "全曜日",
+      "weekday": "平日",
+      "weekend": "土日祝",
+      "label": "曜日"
+    },
+    "service": {
+      "all": "全種別",
+      "weekday": "平日",
+      "weekend": "土日祝",
+      "label": "種別",
+      "label_gtfs": "種別 (GTFS)"
+    },
+    "time_band": {
+      "all": "全時間帯",
+      "morning": "朝(05-09)",
+      "forenoon": "午前(09-12)",
+      "noon": "昼(12-14)",
+      "afternoon": "午後(14-17)",
+      "evening": "夕(17-20)",
+      "night": "夜(20-24)",
+      "late_night": "深夜(00-05)",
+      "label": "時間帯"
+    },
+    "routes": {
+      "label": "系統",
+      "count_suffix": "{{count}}系統",
+      "search_placeholder": "検索 (名前 / コード)",
+      "variant_count": "({{count}}系統)",
+      "empty_title": "ルートが登録されていません。",
+      "empty_hint": "初回ingest中の場合は数分後に再度お試しください。"
+    }
+  },
+  "map": {
+    "legend": {
+      "title": "凡例",
+      "show_single_sample": "1観測のみも表示",
+      "delay_avg": "遅延 (平均)",
+      "band_lt_2": "< 2分",
+      "band_2_5": "2 – 5分",
+      "band_5_10": "5 – 10分",
+      "band_gt_10": "> 10分",
+      "clear_selection": "選択を解除",
+      "size_density": "サイズ・濃度",
+      "few_to_many": "少 → 多",
+      "color_explainer": "色: 平均遅延の段階",
+      "size_explainer": "円の大きさ・濃度: サンプル数"
+    },
+    "popup": {
+      "platform_label": "のりば",
+      "stop_seq_prefix": "停留所 #",
+      "route_prefix": "系統",
+      "routes_label": "系統:",
+      "avg_delay_label": "平均遅延:",
+      "samples_label": "サンプル:",
+      "period_label": "期間:"
+    },
+    "hint": {
+      "title": "地図の読み方",
+      "color_strong": "色",
+      "color_meaning": "は平均遅延の段階、",
+      "size_strong": "大きさ",
+      "size_meaning": "はサンプル数（観測の多さ）。",
+      "body_1": "凡例の色をクリックすると該当の遅延帯のみ表示。停留所をクリックで詳細と拡大。",
+      "body_2": "経路を 1 つに絞ると、実際の道路形状で系統が描画されます。",
+      "hotspots_intro": "ホットスポット（赤・大きい円）は",
+      "hotspots_em": "慢性的に遅れる",
+      "hotspots_outro": "停留所。",
+      "ontime_intro": "小さい緑の円は",
+      "ontime_em": "定刻運行",
+      "ontime_outro": "。期間・曜日・時間帯フィルタで「いつ」遅れるかを掘り下げられます。"
+    },
+    "empty": {
+      "title": "まだ表示できるデータがありません",
+      "hint": "初回データ取得中の可能性があります。数分後に自動で表示されます。"
+    }
+  },
+  "ask": {
+    "suggestion": {
+      "today_ranking": "今日の遅延ランキング",
+      "rain_compare": "雨天時の比較",
+      "recent_trend": "最近の傾向"
+    },
+    "hint": {
+      "title": "使い方とできること",
+      "body_1": "日本語で自由に質問できます。Groq の関数呼び出しで、6 つの SQL ツール（ランキング・時間帯比較・トレンド集計など）を使い分けて回答を生成します。",
+      "body_2": "例：「今日のワースト 3 系統は？」「朝のピーク時に最も遅れる停留所は？」「先週と今週の比較」",
+      "body_3_intro": "現在の",
+      "body_3_strong": "期間 / 曜日 / 時間帯フィルタ",
+      "body_3_outro": "が回答にも反映されるので、画面上のフィルタを変えてから質問すると分析の切り口を変えられます。"
+    },
+    "error_empty": "質問を入力してください",
+    "error_agency_not_selected": "事業者が選択されていません",
+    "empty_state": "質問を入力してください。",
+    "thinking": "考え中...",
+    "input_aria": "質問を入力",
+    "input_placeholder": "例: 系統5の今月の遅延傾向は?",
+    "submit": "送信",
+    "ctx": {
+      "range": "期間 {{from}} 〜 {{to}}",
+      "dow": "曜日: {{value}}",
+      "time_band": "時間帯: {{value}}",
+      "service": "種別: {{value}}",
+      "routes": "系統: {{value}}"
+    },
+    "col": {
+      "route": "系統",
+      "route_code": "系統",
+      "service_type": "種別",
+      "dow": "曜日",
+      "avg_min": "平均(分)",
+      "p50_min": "中央値(分)",
+      "p90_min": "p90(分)",
+      "samples": "観測数",
+      "on_time_pct": "定時率",
+      "late5_count": "5分超回数",
+      "heijitsu_min": "平日(分)",
+      "kyujitsu_min": "土日祝(分)",
+      "abs_delta": "差(絶対)",
+      "signed_delta": "差(符号付)"
+    },
+    "more_rows": "…他{{count}}件"
+  },
+  "live": {
+    "title": "最新観測",
+    "hint": {
+      "title": "このタブで分かること",
+      "body_1_intro": "最新観測日の系統別サマリー。",
+      "avg_strong": "平均",
+      "avg_meaning": "はその日の全便平均、",
+      "max_strong": "最大",
+      "max_meaning": "は最も遅れた便。色付きの ● で深刻度が一目で分かります。",
+      "body_2": "サンプル数（便数 / 観測数）が多い系統ほど数字の信頼性が高い。",
+      "body_3": "並び替えで「最大遅延が大きい順」にすると、その日のホットスポット系統を即座に把握できます。"
+    },
+    "last_observation": "最終観測: {{when}}",
+    "auto_refresh": "自動更新 (30秒)",
+    "manual_refresh": "手動更新",
+    "filter_placeholder": "系統で絞り込み",
+    "sort_label": "並び順",
+    "sort": {
+      "worst": "最大遅延",
+      "avg": "平均遅延",
+      "trips": "運行便数",
+      "name": "名前順"
+    },
+    "updating": "更新中...",
+    "updated_at": "更新: {{time}}",
+    "empty": {
+      "with_last": "まだ表示できる観測がありません (最終受信: {{when}})",
+      "title": "まだ表示できる観測がありません",
+      "hint": "次の取り込みを待っています。数分後に自動で更新されます。"
+    },
+    "card": {
+      "avg": "平均",
+      "max": "最大",
+      "trip_samples": "{{trips}} 便 / {{samples}} 観測"
+    }
+  },
+  "reports": {
+    "list_title": "レポート一覧",
+    "select_prompt": "レポートを選択してください",
+    "rendered_at": "生成: {{when}}",
+    "range_suffix": "・ 期間: {{from}} 〜 {{to}}",
+    "raw_rows": "原文 ({{count}}件)",
+    "type": {
+      "ranking": "遅延ランキング",
+      "ranking_best": "定時運行ランキング",
+      "on_time": "定時率",
+      "worst_5min": "5分以上遅延",
+      "trend": "トレンド",
+      "compare_ranking": "比較ランキング",
+      "dow_weekday": "平日傾向",
+      "dow_weekend": "週末傾向"
+    },
+    "col": {
+      "route": "系統",
+      "service": "種別",
+      "avg": "平均",
+      "median": "中央値",
+      "p90": "p90",
+      "samples": "観測数",
+      "dow": "曜日",
+      "on_time_pct": "定時率",
+      "over_5min_count": "5分超回数",
+      "weekday": "平日",
+      "weekend": "土日祝",
+      "diff": "差",
+      "direction": "向き"
+    },
+    "direction": {
+      "weekend_higher": "土日祝>平日",
+      "weekday_higher": "平日>土日祝"
+    },
+    "hint": {
+      "title": "レポートの読み分け",
+      "ranking_strong": "ランキング系",
+      "ranking_body": "：慢性的に遅い／定時運行が良い系統を特定。",
+      "trend_strong": "トレンド",
+      "trend_body": "：時間経過で改善・悪化しているか。右肩上がりなら遅延が拡大中。",
+      "heatmap_strong": "時間帯ヒートマップ",
+      "heatmap_body": "：1 日のうちのピーク時間。朝夕の通勤帯と昼間の差を比較。",
+      "dow_strong": "平日 / 週末傾向",
+      "dow_body": "：曜日特性。週末便の方が定時率が高い／低いといった傾向を抽出。",
+      "csv": "CSV エクスポートで Excel / BI ツールに渡せます。"
+    },
+    "empty": {
+      "title": "まだレポートがありません",
+      "hint": "集計を準備しています。次の更新までお待ちください。"
+    },
+    "no_data": {
+      "title": "該当データがありません",
+      "hint": "期間や条件を変更してください"
+    },
+    "heatmap": {
+      "empty": "時間帯別データがありません。",
+      "title": "時間帯ヒートマップ",
+      "subtitle": "縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み",
+      "legend_aria": "凡例を表示",
+      "delay_label": "遅延:",
+      "lt_2": "<2分",
+      "legend_explainer": "・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付",
+      "svg_aria": "時間帯別遅延ヒートマップ",
+      "tooltip_hour": "{{hour}}時 ・ 平均",
+      "tooltip_metrics": "{{min}}分 ・ {{count}}件"
+    },
+    "daily": {
+      "empty": "期間内にデータがありません。",
+      "svg_aria": "日次平均遅延チャート",
+      "tooltip_metrics": "平均{{min}}分 / {{count}}件",
+      "worst_label": "悪化:",
+      "offender": "系統{{code}}({{min}}分)"
+    }
+  },
+  "errors": {
+    "rate_limited": "アクセスが集中しています。少し待って再試行してください。",
+    "not_found": "対象のデータがまだありません。",
+    "server_5xx": "一時的に取得できませんでした。再試行してください。",
+    "generic_status": "読み込みに失敗しました ({{status}})",
+    "network": "通信が一時的に途切れました。再試行してください。",
+    "generic": "読み込みに失敗しました。",
+    "no_agency_selected": "事業者が選択されていません"
+  },
+  "admin": {
+    "agency_form": {
+      "title": "新規事業者登録",
+      "name_label": "事業者名",
+      "gtfs_label": "GTFS Static URL (任意)",
+      "error": "登録に失敗しました",
+      "submitting": "登録中...",
+      "submit": "登録"
+    },
+    "users": {
+      "title": "ユーザー管理",
+      "search_placeholder": "メール / 名前で検索",
+      "col": {
+        "email": "メール",
+        "name": "名前",
+        "role": "ロール",
+        "status": "状態"
+      },
+      "status": {
+        "suspended": "停止中",
+        "active": "アクティブ"
+      },
+      "action": {
+        "resume": "再開",
+        "suspend": "停止",
+        "delete": "削除"
+      },
+      "confirm_delete": "{{email}} を削除しますか？(匿名化、復元不可)",
+      "total": "合計 {{count}} 件"
+    },
+    "user_detail": {
+      "error": "エラー: {{msg}}",
+      "name_label": "名前",
+      "status_label": "状態",
+      "created_label": "作成",
+      "email_at_link": "連携時メール: {{email}}",
+      "recent_events": "最近のイベント"
+    }
+  }
+}

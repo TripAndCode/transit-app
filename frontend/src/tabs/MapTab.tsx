@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
@@ -19,6 +20,7 @@ export function MapTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
+  const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useHeatmap(id, ctx);
   // Single-route overlay: only fetch when exactly one route is selected.
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
@@ -35,6 +37,11 @@ export function MapTab() {
   // init, so we read through this ref to always see the current period.
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
+  // Same dance for `t` — the popup builder is invoked from delegated map
+  // event handlers registered once at init, so we re-read through a ref to
+  // pick up any language switch.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // Init the map once. Click / hover handlers are registered here too —
   // MapLibre's delegated listeners no-op until the named layer exists,
@@ -66,6 +73,7 @@ export function MapTab() {
           contributing_routes: (p.route_codes || "").split(",").filter(Boolean),
         },
         { from: c.from, to: c.to },
+        tRef.current,
       );
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
@@ -125,6 +133,7 @@ export function MapTab() {
           active_route: c.routes[0] ?? null,
         },
         { from: c.from, to: c.to },
+        tRef.current,
       );
       popupRef.current?.remove();
       popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
@@ -178,17 +187,17 @@ export function MapTab() {
         fontSize: 12, color: "var(--text-tertiary)",
         margin: "4px 0 8px",
       }}>
-        地図
+        {t("nav.map")}
         <InsightHint
-          title="地図の読み方"
+          title={t("map.hint.title")}
           body={
             <>
-              <strong>色</strong>は平均遅延の段階、<strong>大きさ</strong>はサンプル数（観測の多さ）。
-              凡例の色をクリックすると該当の遅延帯のみ表示。停留所をクリックで詳細と拡大。
-              経路を 1 つに絞ると、実際の道路形状で系統が描画されます。
+              <strong>{t("map.hint.color_strong")}</strong>{t("map.hint.color_meaning")}<strong>{t("map.hint.size_strong")}</strong>{t("map.hint.size_meaning")}
+              {t("map.hint.body_1")}
+              {t("map.hint.body_2")}
               <br /><br />
-              ホットスポット（赤・大きい円）は<em>慢性的に遅れる</em>停留所。
-              小さい緑の円は<em>定刻運行</em>。期間・曜日・時間帯フィルタで「いつ」遅れるかを掘り下げられます。
+              {t("map.hint.hotspots_intro")}<em>{t("map.hint.hotspots_em")}</em>{t("map.hint.hotspots_outro")}
+              {t("map.hint.ontime_intro")}<em>{t("map.hint.ontime_em")}</em>{t("map.hint.ontime_outro")}
             </>
           }
         />
@@ -197,7 +206,7 @@ export function MapTab() {
           whole tab — losing the filter bar and tab nav on a transient
           5xx is jarring. The map container below stays mounted so the
           user keeps their context (zoom / pan / open popup) and just
-          sees a calm "再試行" pill. */}
+          sees a calm "再試行" pill. */} {/* // i18n-ignore: JSX comment */}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       <div style={{ position: "relative", flex: 1, minHeight: 400 }}>
       {isLoading && (
@@ -223,8 +232,8 @@ export function MapTab() {
       {data && data.features.length === 0 && !(shape && shape.stops.length >= 2) && (
         <div style={{ position: "absolute", inset: 0, background: "var(--bg-page)" }}>
           <EmptyState
-            title="まだ表示できるデータがありません"
-            hint="初回データ取得中の可能性があります。数分後に自動で表示されます。"
+            title={t("map.empty.title")}
+            hint={t("map.empty.hint")}
           />
         </div>
       )}
