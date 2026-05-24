@@ -13,6 +13,10 @@ The request ID is either:
 The validation rejects newlines, control chars, and oversize values so
 log lines stay one-per-line and the response header stays sane for
 downstream consumers (Caddy, browsers).
+
+The access log uses a fixed `api.access` channel (not `__name__`) so
+operators can grep on a stable name regardless of where the middleware
+ends up being imported from.
 """
 
 import logging
