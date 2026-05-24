@@ -15,15 +15,16 @@ import psycopg2.extras
 
 from pipeline.db import _DEDUP_INNER, _static_loaded
 
-_VALID_AGG_TABLES = frozenset(
-    {
-        "agg_route_stats",
-        "agg_route_hour",
-        "agg_route_dow",
-        "agg_daily_trend",
-        "agg_stop_seq",
-    }
+# Order matters only for log/diff determinism; FK independence means
+# DELETE order has no semantic effect.
+_AGG_TABLES_ORDERED = (
+    "agg_route_stats",
+    "agg_route_hour",
+    "agg_route_dow",
+    "agg_daily_trend",
+    "agg_stop_seq",
 )
+_VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
 
 def _run_query(sql: str, params: dict, conn) -> list:
@@ -58,6 +59,24 @@ def _upsert_agg(table: str, pk_cols: list, col_names: list, rows: list, conn) ->
     with conn.cursor() as cur:
         psycopg2.extras.execute_batch(cur, sql, rows)
     conn.commit()
+
+
+def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
+    """Bulk-INSERT *rows* into *table* in the current transaction.
+
+    Caller guarantees the table is empty for the agency_id being
+    materialised. No commit — `analyze` controls the transaction so the
+    DELETE + 5 INSERTs land atomically.
+    """
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
+    if not rows:
+        return
+    col_list = ", ".join(col_names)
+    placeholders = ", ".join(["%s"] * len(col_names))
+    sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(cur, sql, rows)
 
 
 def analyze(agency_id: int, conn) -> None:
