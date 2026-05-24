@@ -1,15 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 
-type Preset = { label: string; from: () => string; to: () => string };
-
-const PRESETS: Preset[] = [
-  { label: "直近7日", from: () => isoDaysAgo(6), to: todayISO },
-  { label: "直近30日", from: () => isoDaysAgo(29), to: todayISO },
-  { label: "直近90日", from: () => isoDaysAgo(89), to: todayISO },
-  { label: "今月", from: () => firstOfMonth(0), to: () => lastOfMonth(0) },
-  { label: "先月", from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
-];
+type Preset = { key: string; label: string; from: () => string; to: () => string };
 
 /** First day of the current JST month, offset by `offset` months. */
 function firstOfMonth(offset: number): string {
@@ -30,22 +23,34 @@ function jpDate(iso: string): string {
   return iso.replaceAll("-", "/");
 }
 
-function presetLabel(ctx: RangeCtx): string {
-  for (const p of PRESETS) {
-    if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
-  }
-  return `${jpDate(ctx.from)} 〜 ${jpDate(ctx.to)}`;
-}
-
 function isDefault(ctx: RangeCtx): boolean {
   return ctx.from === isoDaysAgo(29) && ctx.to === todayISO();
 }
 
 export function RangeBadge() {
+  const { t } = useTranslation();
   const [ctx, setCtx] = useRangeContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const active = !isDefault(ctx);
+
+  const presets = useMemo<Preset[]>(
+    () => [
+      { key: "last_7d", label: t("filters.range.last_7d"), from: () => isoDaysAgo(6), to: todayISO },
+      { key: "last_30d", label: t("filters.range.last_30d"), from: () => isoDaysAgo(29), to: todayISO },
+      { key: "last_90d", label: t("filters.range.last_90d"), from: () => isoDaysAgo(89), to: todayISO },
+      { key: "this_month", label: t("filters.range.this_month"), from: () => firstOfMonth(0), to: () => lastOfMonth(0) },
+      { key: "last_month", label: t("filters.range.last_month"), from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
+    ],
+    [t],
+  );
+
+  function presetLabel(ctx: RangeCtx): string {
+    for (const p of presets) {
+      if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
+    }
+    return `${jpDate(ctx.from)} 〜 ${jpDate(ctx.to)}`;
+  }
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -101,11 +106,11 @@ export function RangeBadge() {
             color: "var(--text-primary)",
           }}
         >
-          {PRESETS.map((p) => {
+          {presets.map((p) => {
             const selected = ctx.from === p.from() && ctx.to === p.to();
             return (
               <div
-                key={p.label}
+                key={p.key}
                 onClick={() => applyPreset(p)}
                 style={{
                   padding: "8px 12px",
@@ -123,7 +128,7 @@ export function RangeBadge() {
           })}
           <div style={{ borderTop: "1px solid var(--border-soft)", margin: "6px 0" }} />
           <div style={{ padding: "0 8px", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
-            カスタム
+            {t("filters.range.custom")}
           </div>
           <div style={{ display: "flex", gap: 6, padding: "0 8px 8px", alignItems: "center" }}>
             <input

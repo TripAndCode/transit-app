@@ -8,7 +8,7 @@
   "header": {
     "app_title": "Delay Dashboard",
     "app_tagline": "Real-time × Timetable",
-    "new_agency": "+ New Agency",
+    "new_agency": "New Agency",
     "settings_aria": "Settings",
     "agency_picker_empty": "No agencies registered",
     "agency_picker_placeholder": "Select agency",
@@ -131,9 +131,9 @@
     },
     "routes": {
       "label": "Route",
-      "count_suffix": "routes",
+      "count_suffix": "{{count}} routes",
       "search_placeholder": "Search (name / code)",
-      "variant_count": "routes",
+      "variant_count": "({{count}} routes)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes."
     }
