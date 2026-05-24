@@ -8,11 +8,11 @@ import type { TFunction } from "i18next";
  * one place. Field rules:
  *
  * - stop_name is always shown as the primary heading
- * - platform_code renders as a "のりば N" badge next to the heading
+ * - platform_code renders as a "のりば N" badge next to the heading // i18n-ignore: JSDoc
  * - stop_code shows as a subtitle only when distinct from stop_name
- *   (Aomori's stop_name is often "<station> ②のりば" which already
+ *   (Aomori's stop_name is often "<station> ②のりば" which already // i18n-ignore: JSDoc
  *   contains the stop_code, so duplicating it would be noisy)
- * - meta line ("停留所 #N ・ 系統 X") only renders when sequence or
+ * - meta line ("停留所 #N ・ 系統 X") only renders when sequence or // i18n-ignore: JSDoc
  *   active_route is set; absent in plain heatmap mode
  * - contributing_routes lists the keito codes that contributed to a
  *   heatmap cluster's average — truncated to first 4 + "+N" overflow
@@ -75,7 +75,7 @@ function metaLineHTML(
   if (typeof seq === "number") bits.push(`${escapeHtml(t("map.popup.stop_seq_prefix"))}${seq}`);
   if (active_route) bits.push(`${escapeHtml(t("map.popup.route_prefix"))} ${escapeHtml(active_route)}`);
   if (bits.length === 0) return "";
-  return `<div style="color:#888;font-size:11px;margin-top:2px">${bits.join(" ・ ")}</div>`;
+  return `<div style="color:#888;font-size:11px;margin-top:2px">${bits.join(" ・ ")}</div>`; // i18n-ignore: separator
 }
 
 function routesLineHTML(d: StopPopupData, t: TFunction): string {

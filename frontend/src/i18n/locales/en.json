@@ -197,6 +197,7 @@
       "body_3_outro": "are applied to the answer too, so change the on-screen filters before asking to shift the analytical angle."
     },
     "error_empty": "Please enter a question",
+    "error_agency_not_selected": "Agency not selected",
     "thinking": "Thinking...",
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",

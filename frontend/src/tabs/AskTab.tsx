@@ -234,9 +234,10 @@ function CtxLine({ ctx, t }: { ctx: AskCtxLite | null; t: TFunction }) {
   if (ctx.time_band && ctx.time_band !== "all") bits.push(t("ask.ctx.time_band", { value: ctx.time_band }));
   if (ctx.service && ctx.service !== "all") bits.push(t("ask.ctx.service", { value: ctx.service }));
   if (ctx.routes && ctx.routes.length > 0) bits.push(t("ask.ctx.routes", { value: ctx.routes.join(", ") }));
+  const joined = bits.join(" ・ "); // i18n-ignore: separator
   return (
     <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: -4, marginBottom: 8 }}>
-      {bits.join(" ・ ")}
+      {joined}
     </div>
   );
 }

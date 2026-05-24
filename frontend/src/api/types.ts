@@ -65,7 +65,7 @@ export type RouteShapeResponse = {
 export type HeatmapProps = {
   stop_id: string;
   stop_name: string;
-  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's
+  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's // i18n-ignore: GTFS format example
    *  static feed includes it; clustered stops yield a "/-joined" set. */
   stop_code?: string;
   /** Optional GTFS platform_code (pole number, e.g. "2"). */

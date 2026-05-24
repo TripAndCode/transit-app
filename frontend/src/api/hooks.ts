@@ -4,6 +4,7 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { apiGet, apiPost } from "./client";
 import { ctxToQueryString, type RangeCtx } from "./rangeContext";
 import type {
@@ -24,7 +25,7 @@ export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
     enabled: agencyId != null,
     // Routes are quarterly-static, but a 1-hour staleTime froze empty
     // arrays (returned during a fresh deploy's initial ingest) for an
-    // hour; users opened the filter picker and saw "該当なし" until
+    // hour; users opened the filter picker and saw "該当なし" until // i18n-ignore: example in comment
     // they reloaded. 5 minutes keeps caching meaningful while letting
     // the picker recover on its own once load_static finishes.
     staleTime: 5 * 60 * 1000,
@@ -108,10 +109,11 @@ export function useTodayRouteSummary(
 }
 
 export function useAsk(agencyId: number | null) {
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (vars: { question: string; ctx: RangeCtx }) => {
       if (agencyId == null) {
-        return Promise.reject(new Error("事業者が選択されていません"));
+        return Promise.reject(new Error(t("ask.error_agency_not_selected")));
       }
       return apiPost<AskResponse>(`/api/${agencyId}/ask`, {
         question: vars.question,

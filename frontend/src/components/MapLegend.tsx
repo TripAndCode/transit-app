@@ -35,7 +35,7 @@ type MapLegendProps = {
  *
  * Clicking a delay-ramp swatch focuses that severity band: matching circles
  * keep their full severity-floored opacity; circles outside the band go to
- * opacity 0 (fully invisible). Click the same band again, or 選択を解除,
+ * opacity 0 (fully invisible). Click the same band again, or 選択を解除, // i18n-ignore: JSDoc
  * to clear focus.
  */
 export function MapLegend({
