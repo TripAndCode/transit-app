@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AgencyPicker } from "./AgencyPicker";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { HeaderUserMenu } from "./HeaderUserMenu";
@@ -7,6 +8,7 @@ import { LocaleToggle } from "./LocaleToggle";
 import { AgencyForm } from "../admin/AgencyForm";
 
 export function Header() {
+  const { t } = useTranslation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [params] = useSearchParams();
@@ -43,7 +45,7 @@ export function Header() {
             letterSpacing: "0.01em",
           }}
         >
-          遅延ダッシュボード
+          {t("header.app_title")}
         </h1>
         <span
           style={{
@@ -54,7 +56,7 @@ export function Header() {
             letterSpacing: "0.04em",
           }}
         >
-          リアルタイム × 時刻表
+          {t("header.app_tagline")}
         </span>
       </Link>
       <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
@@ -75,13 +77,13 @@ export function Header() {
               borderRadius: 4,
             }}
           >
-            + 新規事業者
+            {t("header.new_agency")}
           </button>
         )}
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          aria-label="設定"
+          aria-label={t("header.settings_aria")}
           style={{
             background: "transparent",
             border: "1px solid var(--border-subtle)",

@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 
 /** Header slot: login link when anonymous; avatar + name (+ admin link) when signed in.
  *  Renders nothing when the backend reports ``auth_enabled: false`` (SSO unconfigured). */
 export function HeaderUserMenu() {
+  const { t } = useTranslation();
   const { data: config, isLoading: configLoading } = useConfig();
   const { data: session, isLoading: sessionLoading } = useSession();
   if (sessionLoading || configLoading) return null;
@@ -15,7 +17,7 @@ export function HeaderUserMenu() {
   if (!session) {
     return (
       <Link to="/login" style={{ color: "inherit", textDecoration: "none", padding: "4px 12px" }}>
-        ログイン
+        {t("common.login")}
       </Link>
     );
   }
@@ -31,7 +33,7 @@ export function HeaderUserMenu() {
         <Link to="/admin/users" style={{ color: "inherit", textDecoration: "none",
                                           padding: "2px 8px", background: "var(--surface-2)",
                                           borderRadius: 4, fontSize: 12 }}>
-          管理
+          {t("account.admin_link")}
         </Link>
       )}
     </div>
