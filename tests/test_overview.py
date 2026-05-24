@@ -208,3 +208,35 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
     total_pct = sum(r["share_pct"] for r in conc["top_routes"]) + conc["rest_share_pct"]
     assert total_pct == pytest.approx(100.0, abs=0.5)
     assert conc["rest_share_pct"] == pytest.approx(12.5, abs=0.5)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
+    """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg."""
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    rows = [
+        ("06:00", 60),
+        ("08:00", 600),
+        ("08:00", 480),
+        ("17:00", 120),
+    ]
+    for i, (sched, dep) in enumerate(rows):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_pk_' || $4, '平日', $5, 'R_P', 1, $6)",
+            aagency_id, f"pk_{i}", base + timedelta(minutes=i), str(i), sched, dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk = out["peak_hour"]
+    assert pk is not None
+    assert pk["peak_hour"] == 8
+    assert len(pk["by_hour"]) == 24
+    assert pk["by_hour"][8] == pytest.approx(9.0, abs=0.1)
+    assert pk["by_hour"][6] == pytest.approx(1.0, abs=0.1)
+    assert pk["by_hour"][3] is None

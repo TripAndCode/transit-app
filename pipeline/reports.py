@@ -508,6 +508,35 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
     }
 
 
+async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
+    """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    rows = await conn.fetch(
+        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h, "
+        "       AVG(dep_delay)/60.0::numeric AS avg_min "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        "GROUP BY EXTRACT(HOUR FROM scheduled_time)",
+        agency_id, *params,
+    )
+    if not rows:
+        return None
+    by_hour: list[float | None] = [None] * 24
+    for r in rows:
+        h = int(r["h"])
+        if 0 <= h < 24:
+            by_hour[h] = round(float(r["avg_min"]), 2)
+    valid_idx = [h for h in range(24) if by_hour[h] is not None]
+    if not valid_idx:
+        return None
+    peak_h = max(valid_idx, key=lambda h: by_hour[h])
+    return {
+        "by_hour": by_hour,
+        "peak_hour": peak_h,
+        "peak_avg_min": by_hour[peak_h],
+    }
+
+
 async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Top-3 worsened + top-3 improved routes by signed delta_min."""
     cur = await _per_route_avg(agency_id, ctx, conn)
@@ -572,6 +601,7 @@ async def compute_overview_summary(
 
     movers = await _movers(agency_id, ctx, conn)
     concentration = await _concentration(agency_id, ctx, conn)
+    peak = await _peak_hour(agency_id, ctx, conn)
 
     return {
         "headline": {
@@ -583,7 +613,7 @@ async def compute_overview_summary(
         },
         "movers": movers,
         "concentration": concentration,
-        "peak_hour": None,
+        "peak_hour": peak,
         "service_split": {},
         "sparkline_points": [],
     }
