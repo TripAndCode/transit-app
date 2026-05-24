@@ -147,3 +147,31 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
     better_codes = [m["route_code"] for m in out["movers"]["better"]]
     assert worse_codes == ["R_A", "R_B", "R_C"]
     assert better_codes == ["R_E", "R_F", "R_G"]
+
+
+@pytest.mark.asyncio
+async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
+    """A route worsening for 3 of the past 4 weeks reports streak=3
+    and 4 ascending sparkline points (oldest-first)."""
+    base_anchor = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    weekly = [60, 120, 240, 360]
+    for weeks_back, dep in enumerate(reversed(weekly)):
+        when = base_anchor - timedelta(days=7 * weeks_back)
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R_STR', 1, $4)",
+            aagency_id, f"pb_str_{weeks_back}", when, dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    rstr = next((m for m in out["movers"]["worse"] if m["route_code"] == "R_STR"), None)
+    assert rstr is not None, f"R_STR missing; movers={out['movers']}"
+    assert rstr["streak_weeks"] == 3
+    assert len(rstr["sparkline_points"]) == 4
+    pts = rstr["sparkline_points"]
+    assert pts == sorted(pts)

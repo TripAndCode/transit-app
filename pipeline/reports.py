@@ -15,7 +15,7 @@ ported to asyncpg-style ``$N`` placeholders + an injected WHERE fragment.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline.cache import async_lru_cache
@@ -419,6 +419,62 @@ async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> di
     return {r["route_code"]: r["route_short_name"] for r in rows}
 
 
+async def _route_weekly_history(
+    agency_id: int,
+    route_codes: list[str],
+    ctx: RangeCtx,
+    conn,
+    weeks_back: int = 4,
+) -> dict[str, list[float | None]]:
+    """Per-route weekly avg_min for the last ``weeks_back`` weeks ending
+    at ``ctx.to_date``. Returns oldest -> newest list; missing weeks are None."""
+    if not route_codes:
+        return {}
+    windows: list[tuple[date, date]] = []
+    span = (ctx.to_date - ctx.from_date).days
+    for k in range(weeks_back - 1, -1, -1):
+        end = ctx.to_date - timedelta(days=7 * k)
+        start = end - timedelta(days=span)
+        windows.append((start, end))
+
+    out: dict[str, list[float | None]] = {code: [] for code in route_codes}
+    for start, end in windows:
+        rows = await conn.fetch(
+            "SELECT route_code, AVG(dep_delay)/60.0::numeric AS avg_min "
+            "FROM updates "
+            "WHERE agency_id=$1 AND dep_delay IS NOT NULL "
+            "  AND captured_at::date BETWEEN $2 AND $3 "
+            "  AND route_code = ANY($4::text[]) "
+            "GROUP BY route_code",
+            agency_id, start, end, list(route_codes),
+        )
+        wk_map = {r["route_code"]: float(r["avg_min"]) for r in rows}
+        for code in route_codes:
+            out[code].append(wk_map.get(code))
+    return out
+
+
+def _streak_weeks(history: list[float | None], *, direction: str) -> int:
+    """Count trailing consecutive weeks where each week is worse (up) or
+    better (down) than the prior week. Stops at the first non-matching or
+    None pair. Caller passes oldest-first history; we scan from end backwards."""
+    if len(history) < 2:
+        return 0
+    count = 0
+    for i in range(len(history) - 1, 0, -1):
+        cur = history[i]
+        prev = history[i - 1]
+        if cur is None or prev is None:
+            break
+        if direction == "up" and cur > prev:
+            count += 1
+        elif direction == "down" and cur < prev:
+            count += 1
+        else:
+            break
+    return count
+
+
 async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Top-3 worsened + top-3 improved routes by signed delta_min."""
     cur = await _per_route_avg(agency_id, ctx, conn)
@@ -436,22 +492,27 @@ async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     deltas.sort(key=lambda x: x[1])
     better = deltas[:3]  # smallest (most negative) first, [0] is best
     worse = list(reversed(deltas[-3:]))  # largest positive first
+    # Avoid duplicates when there are fewer than 6 routes
+    worse_codes = {c for c, _, _ in worse}
+    better = [item for item in better if item[0] not in worse_codes]
     codes = [c for c, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
+    history = await _route_weekly_history(agency_id, codes, ctx, conn, weeks_back=4)
 
-    def _entry(code, dm, dp):
+    def _entry(code, dm, dp, direction):
+        pts = [v for v in history.get(code, []) if v is not None]
         return {
             "route_code": code,
             "route_short_name": names.get(code),
             "delta_min": dm,
             "delta_pct": dp,
-            "streak_weeks": 0,           # filled in T5
-            "sparkline_points": [],      # filled in T5
+            "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
+            "sparkline_points": pts,
         }
 
     return {
-        "worse": [_entry(c, dm, dp) for c, dm, dp in worse],
-        "better": [_entry(c, dm, dp) for c, dm, dp in better],
+        "worse": [_entry(c, dm, dp, "up") for c, dm, dp in worse],
+        "better": [_entry(c, dm, dp, "down") for c, dm, dp in better],
     }
 
 
