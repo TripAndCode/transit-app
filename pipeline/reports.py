@@ -15,6 +15,8 @@ ported to asyncpg-style ``$N`` placeholders + an injected WHERE fragment.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from api.range import RangeCtx, build_updates_filter
 from pipeline.cache import async_lru_cache
 from pipeline.db import build_dedup_inner_sql
@@ -351,6 +353,22 @@ async def compute_trend_series(
 # ---------------------------------------------------------------------------
 
 
+def _shift_ctx_one_week_back(ctx: RangeCtx) -> RangeCtx:
+    """Return a RangeCtx whose dates are shifted 7 days earlier.
+
+    Preserves dow / time_band / service / routes filters so the baseline
+    is service-day-aware via composition with build_updates_filter.
+    """
+    return RangeCtx(
+        from_date=ctx.from_date - timedelta(days=7),
+        to_date=ctx.to_date - timedelta(days=7),
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+
+
 async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | None, int]:
     """Return (avg_min, samples) for the headline over ``ctx``."""
     where_frag, params, _ = build_updates_filter(ctx, next_param=2)
@@ -377,12 +395,21 @@ async def compute_overview_summary(
     Each sub-section is a separate helper (added in tasks T2-T8).
     """
     avg_min, samples = await _headline_stats(agency_id, ctx, conn)
+    baseline_avg, _ = await _headline_stats(agency_id, _shift_ctx_one_week_back(ctx), conn)
+
+    delta_min = None
+    delta_pct = None
+    if avg_min is not None and baseline_avg is not None:
+        delta_min = round(avg_min - baseline_avg, 2)
+        if baseline_avg != 0:
+            delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
+
     return {
         "headline": {
             "avg_min": avg_min,
-            "baseline_avg_min": None,   # filled in T3
-            "delta_min": None,
-            "delta_pct": None,
+            "baseline_avg_min": baseline_avg,
+            "delta_min": delta_min,
+            "delta_pct": delta_pct,
             "samples": samples,
         },
         "movers": {"worse": [], "better": []},
