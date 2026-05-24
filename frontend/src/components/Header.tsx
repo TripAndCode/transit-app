@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AgencyPicker } from "./AgencyPicker";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { HeaderUserMenu } from "./HeaderUserMenu";
+import { LocaleToggle } from "./LocaleToggle";
 import { AgencyForm } from "../admin/AgencyForm";
 
 export function Header() {
@@ -61,6 +62,7 @@ export function Header() {
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <HeaderUserMenu />
+        <LocaleToggle />
         {isAdmin && (
           <button
             type="button"
