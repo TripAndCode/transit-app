@@ -109,7 +109,9 @@ export type TrendDay = {
 
 export type ToolResult = {
   kind: "table" | "series" | "kv" | "empty" | "text";
-  summary_jp: string;
+  /** Backend-rendered summary string, already in the locale the
+   *  current request asked for via Accept-Language. */
+  summary: string;
   rows?: unknown[][];
   columns?: string[];
   series?: TrendDay[];

@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware as StarletteSessionM
 
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
+from api.middleware.locale import LocaleMiddleware
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
@@ -116,8 +117,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 #   StarletteSessionMiddleware  (Authlib needs request.session)
 #   SessionMiddleware           (loads request.state.user from sid cookie)
 #   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
+#   LocaleMiddleware            (parses Accept-Language → request.state.locale)
 # That means require_user/require_admin see request.state.user before any
-# router runs, which is what we want.
+# router runs, which is what we want. LocaleMiddleware is innermost (cheap,
+# no I/O) and only needs to run before the route handlers read state.locale.
+app.add_middleware(LocaleMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(

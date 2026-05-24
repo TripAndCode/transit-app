@@ -45,13 +45,13 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
 
-    async def mock_chat(question, ctx, conn, agency_id, model="x"):
+    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja"):
         return {
             "answer": "テスト回答",
             "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
             "result": {
                 "kind": "table",
-                "summary_jp": "テスト",
+                "summary": "テスト",
                 "rows": [],
                 "columns": ["route_code", "service_type"],
                 "series": [],
@@ -95,6 +95,7 @@ async def test_ask_rejects_cross_origin(ask_client, monkeypatch):
     # Patch it to a sentinel so a 200 with this answer indicates the guard
     # let the request through (= bug).
     async def must_not_be_called(*args, **kwargs):
+        _ = kwargs.get("locale", "ja")
         return {
             "answer": "csrf_guard FAILED — request reached chat_with_tools",
             "tool_call": None,
