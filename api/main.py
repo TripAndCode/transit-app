@@ -20,8 +20,10 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
+from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.ratelimit import limiter
+from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
 from api.routers.agencies import router as agencies_router
@@ -104,6 +106,8 @@ async def lifespan(app: FastAPI):
 
 _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
+configure_logging()
+
 app = FastAPI(title="Transit Delay API", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -136,6 +140,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
+# Outermost on the request side — sees the final status after every
+# inner middleware ran. Assigns request_id, times the request, emits
+# one INFO log to 'api.access' per request.
+app.add_middleware(RequestLogMiddleware)
 
 app.include_router(admin_router)
 app.include_router(agencies_router)
