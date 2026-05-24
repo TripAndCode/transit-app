@@ -344,3 +344,36 @@ async def compute_trend_series(
             }
         )
     return {"days": days}
+
+
+# ---------------------------------------------------------------------------
+# Overview tab
+# ---------------------------------------------------------------------------
+
+
+async def compute_overview_summary(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    locale: str = "ja",
+) -> dict:
+    """Build the 概況 payload for one agency over ``ctx``.
+
+    See ``docs/superpowers/specs/2026-05-25-overview-tab-design.md``.
+    This stub returns an empty shape; subsequent tasks fill in each
+    of the six sub-results.
+    """
+    return {
+        "headline": {
+            "avg_min": None,
+            "baseline_avg_min": None,
+            "delta_min": None,
+            "delta_pct": None,
+            "samples": 0,
+        },
+        "movers": {"worse": [], "better": []},
+        "concentration": {"top_routes": [], "rest_share_pct": 0.0},
+        "peak_hour": None,
+        "service_split": {},
+        "sparkline_points": [],
+    }
