@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRoutes } from "./hooks";
 
 /** Build a route_code → "K観光通り線 (16071)" lookup map for the agency. */ // i18n-ignore: JSDoc example
@@ -7,6 +8,7 @@ export function useRouteNames(agencyId: number | null): {
   isLoading: boolean;
   format: (route_code: string | null | undefined) => string;
 } {
+  const { t } = useTranslation();
   const { data, isLoading } = useRoutes(agencyId);
   const map = useMemo(() => {
     const m = new Map<string, string>();
@@ -20,7 +22,7 @@ export function useRouteNames(agencyId: number | null): {
   function format(route_code: string | null | undefined): string {
     if (!route_code) return "—";
     const name = map.get(String(route_code));
-    return name ? `${name} (${route_code})` : `系統${route_code}`;
+    return name ? `${name} (${route_code})` : t("common.route_code_fallback", { code: route_code });
   }
 
   return { data: map, isLoading, format };

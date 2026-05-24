@@ -113,7 +113,7 @@ export function AskTab() {
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 4px" }}>
         {msgs.length === 0 && (
           <div style={{ color: "var(--text-tertiary)", textAlign: "center", marginTop: 48 }}>
-            {t("ask.error_empty")}
+            {t("ask.empty_state")}
           </div>
         )}
         {msgs.map((m, i) => (
@@ -258,6 +258,7 @@ function RichResult({
   if (result.kind === "table" && result.rows && result.columns) {
     const cols = result.columns;
     const routeIdx = cols.findIndex((c) => c === "route_code");
+    const serviceTypeIdx = cols.findIndex((c) => c === "service_type");
     return (
       <div>
         {/* `summary` is the backend-formatted, locale-aware summary
@@ -270,7 +271,7 @@ function RichResult({
               <tr style={{ background: "var(--bg-soft)" }}>
                 {cols.map((c) => (
                   <th key={c} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-secondary)", fontWeight: 500 }}>
-                    {c === "route_code" ? t("ask.col.route") : c}
+                    {t(`ask.col.${c}`, { defaultValue: c })}
                   </th>
                 ))}
               </tr>
@@ -282,11 +283,13 @@ function RichResult({
                     <td key={j} style={{ padding: "6px 10px" }}>
                       {j === routeIdx
                         ? formatRoute(cell as string)
-                        : cell == null
-                          ? "—"
-                          : typeof cell === "number"
-                            ? cell.toLocaleString()
-                            : String(cell)}
+                        : j === serviceTypeIdx && cell != null
+                          ? t(`common.service_value.${String(cell)}`, { defaultValue: String(cell) })
+                          : cell == null
+                            ? "—"
+                            : typeof cell === "number"
+                              ? cell.toLocaleString()
+                              : String(cell)}
                     </td>
                   ))}
                 </tr>

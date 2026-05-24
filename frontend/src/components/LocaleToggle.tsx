@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { SUPPORTED_LOCALES, type Locale } from "../i18n";
 
-const LABELS: Record<Locale, string> = { ja: "日本語", en: "English" };
+const LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
 const triggerStyle: CSSProperties = {
   background: "transparent",
@@ -48,10 +48,11 @@ const optionStyle = (selected: boolean): CSSProperties => ({
 });
 
 export function LocaleToggle() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const current = (i18n.resolvedLanguage ?? "ja") as Locale;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -59,7 +60,11 @@ export function LocaleToggle() {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        // Return focus to the trigger so keyboard users don't lose context.
+        triggerRef.current?.focus();
+      }
     }
     document.addEventListener("mousedown", onClick);
     document.addEventListener("keydown", onKey);
@@ -72,11 +77,14 @@ export function LocaleToggle() {
   function select(lng: Locale) {
     void i18n.changeLanguage(lng);
     setOpen(false);
+    // Return focus to the trigger so keyboard users don't lose context.
+    triggerRef.current?.focus();
   }
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={triggerStyle}
@@ -87,7 +95,7 @@ export function LocaleToggle() {
         <span aria-hidden style={{ opacity: 0.7 }}>▾</span>
       </button>
       {open && (
-        <div role="listbox" aria-label="Language" style={menuStyle}>
+        <div role="listbox" aria-label={t("common.language_aria")} style={menuStyle}>
           {SUPPORTED_LOCALES.map((lng) => (
             <button
               key={lng}

@@ -49,7 +49,7 @@ export function RangeBadge() {
     for (const p of presets) {
       if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
     }
-    return `${jpDate(ctx.from)} 〜 ${jpDate(ctx.to)}`;
+    return `${jpDate(ctx.from)} ${t("common.range_separator")} ${jpDate(ctx.to)}`;
   }
 
   useEffect(() => {
@@ -139,7 +139,7 @@ export function RangeBadge() {
               onChange={(e) => setCtx({ from: e.target.value })}
               style={{ flex: 1, fontSize: 13, padding: "4px 6px" }}
             />
-            <span style={{ color: "var(--text-tertiary)" }}>〜</span>
+            <span style={{ color: "var(--text-tertiary)" }}>{t("common.range_separator")}</span>
             <input
               type="date"
               lang="ja"

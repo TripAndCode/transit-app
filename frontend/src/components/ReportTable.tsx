@@ -14,6 +14,13 @@ type Schema = {
   /** When set, draws an inline bar; ``barColor`` is in delay-min space. */
   bar?: "delay" | "pct" | "raw";
   format?: (v: unknown, t: TFunction) => string;
+  /**
+   * When set, the raw cell value is treated as a translation-key suffix:
+   * the rendered text is `t(\`${valueKey}.${raw}\`, { defaultValue: raw })`.
+   * Use this for columns whose DB values are wire contracts (e.g. service_type
+   * "平日" / "土日祝") but should display in the active locale. // i18n-ignore: JSDoc
+   */
+  valueKey?: string;
 };
 
 // Sentinel reference for the route column. The render path uses reference
@@ -24,7 +31,7 @@ const ROUTE_COL: Schema = { index: 0, labelKey: "reports.col.route", align: "lef
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left" },
+  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
   { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
   { index: 3, labelKey: "reports.col.median", align: "right", format: (v, t) => fmtMin(v, t) },
   { index: 4, labelKey: "reports.col.p90", align: "right", format: (v, t) => fmtMin(v, t) },
@@ -34,7 +41,7 @@ const RANKING_COLS: Schema[] = [
 // dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left" },
+  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
   { index: 2, labelKey: "reports.col.dow", align: "left" },
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -45,14 +52,14 @@ const SCHEMAS: Record<string, Schema[]> = {
   ranking_best: RANKING_COLS,
   on_time: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left" },
+    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left" },
+    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 2, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -157,7 +164,15 @@ export function ReportTable({ reportType, rows }: Props) {
                   );
                 }
                 const raw = row[c.index];
-                const text = c.format ? c.format(raw, t) : String(raw ?? "—");
+                let text: string;
+                if (c.format) {
+                  text = c.format(raw, t);
+                } else if (c.valueKey != null && raw != null) {
+                  const rawStr = String(raw);
+                  text = t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
+                } else {
+                  text = String(raw ?? "—");
+                }
                 if (c.bar) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);

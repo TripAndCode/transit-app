@@ -70,8 +70,8 @@ export function TabFilterBar() {
     () => [
       { value: "all", label: t("filters.service.all") },
       // value stays as the raw JP string (URL query value); only the label is translated
-      { value: "平日", label: t("filters.service.weekday") },
-      { value: "土日祝", label: t("filters.service.weekend") },
+      { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
+      { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
     ],
     [t],
   );
