@@ -399,16 +399,24 @@ async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn) -> dict[str, tuple
 
 
 async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> dict[str, str | None]:
-    """Resolve short names for a list of route_codes. Missing -> None."""
+    """Resolve route_short_name for a list of route_codes.
+
+    `route_code` is the digit suffix inside `route_id`'s trailing `(NNNN)`
+    (same regex used by api/routers/static.py:list_routes end-to-end).
+    Routes without a matching static_routes row map to None.
+    """
     if not route_codes:
         return {}
     rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes "
-        "WHERE agency_id=$1 AND route_id = ANY($2::text[])",
+        "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, "
+        "       route_short_name "
+        "FROM static_routes "
+        "WHERE agency_id=$1 "
+        "  AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])",
         agency_id,
         list(route_codes),
     )
-    return {r["route_id"]: r["route_short_name"] for r in rows}
+    return {r["route_code"]: r["route_short_name"] for r in rows}
 
 
 async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
