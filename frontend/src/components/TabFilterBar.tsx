@@ -133,7 +133,7 @@ export function TabFilterBar() {
   }, [routes]);
 
   // route_short_name → list of route_codes that share it.
-  // A single display name like "K37 観光通り線" maps to several codes
+  // A single display name like "K37 観光通り線" maps to several codes // i18n-ignore: comment
   // (different operating variants); the picker can collapse-select all
   // of them, and the chips below merge accordingly.
   const groupCodesByName = useMemo(() => {
@@ -182,7 +182,7 @@ export function TabFilterBar() {
 
   function reset() {
     // Reset includes the date range — drilldowns from the trend heatmap set
-    // from=to=<single day>; without resetting the dates here, "全てクリア"
+    // from=to=<single day>; without resetting the dates here, "全てクリア" // i18n-ignore: comment
     // leaves the user stuck on a one-day window.
     const cleared: Draft = { dow: "all", time_band: "all", service: "all", routes: [] };
     setDraft(cleared);

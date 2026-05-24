@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useRoutes } from "./hooks";
 
-/** Build a route_code → "K観光通り線 (16071)" lookup map for the agency. */
+/** Build a route_code → "K観光通り線 (16071)" lookup map for the agency. */ // i18n-ignore: JSDoc example
 export function useRouteNames(agencyId: number | null): {
   data: Map<string, string>;
   isLoading: boolean;

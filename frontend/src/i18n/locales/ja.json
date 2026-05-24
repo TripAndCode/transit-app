@@ -197,6 +197,7 @@
       "body_3_outro": "が回答にも反映されるので、画面上のフィルタを変えてから質問すると分析の切り口を変えられます。"
     },
     "error_empty": "質問を入力してください",
+    "error_agency_not_selected": "事業者が選択されていません",
     "thinking": "考え中...",
     "input_aria": "質問を入力",
     "input_placeholder": "例: 系統5の今月の遅延傾向は?",
