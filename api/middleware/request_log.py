@@ -89,11 +89,15 @@ class RequestLogMiddleware:
             user_id = _safe_user_id(scope)
             path = scope.get("path", "?")
             method = scope.get("method", "?")
+            # status=0 means the app raised before emitting http.response.start.
+            # Render as "?" so the operator can tell it apart from a real 0.
+            status_raw = status_holder["status"]
+            status = str(status_raw) if status_raw else "?"
             _log.info(
-                "method=%s path=%s status=%d duration_ms=%d user_id=%s",
+                "method=%s path=%s status=%s duration_ms=%d user_id=%s",
                 method,
                 path,
-                status_holder["status"],
+                status,
                 duration_ms,
                 user_id,
             )
