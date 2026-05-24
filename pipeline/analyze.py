@@ -63,6 +63,11 @@ def analyze(agency_id: int, conn) -> None:
     is idempotent — same inputs produce the same final state.
     """
     p = {"agency_id": agency_id}
+    # Resolved BEFORE the txn opens: _static_loaded calls conn.rollback() in
+    # its UndefinedTable branch, which would silently wipe our DELETE + partial
+    # INSERTs if it fired mid-run. Hoisting the probe keeps analyze's
+    # transactional shape clean.
+    has_static = _static_loaded(conn, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
         with conn.cursor() as cur:
@@ -184,7 +189,7 @@ def analyze(agency_id: int, conn) -> None:
         print(f"  agg_daily_trend: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
-        if _static_loaded(conn, agency_id):
+        if has_static:
             sql = f"""
                 WITH deduped AS ({_DEDUP_INNER})
                 SELECT
