@@ -6,7 +6,7 @@ intents tools still needs (by_dow per route, compare per route,
 route_info static metadata).
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
@@ -21,9 +21,16 @@ from pipeline.query.tool_queries import (
 @pytest.mark.asyncio
 async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id):
     """Three observations across two DOWs for one route. Helper should
-    collapse to one row per (service_type, DOW)."""
-    now = datetime.now(timezone(timedelta(hours=9)))
-    monday = now - timedelta(days=(now.weekday()))  # last Monday
+    collapse to one row per (service_type, DOW).
+
+    Timestamps are anchored to noon UTC on a known Monday + Tuesday so the
+    ``EXTRACT(ISODOW FROM date::date)`` cast in the SQL helper resolves the
+    same DOW regardless of the Postgres session timezone (CI runs UTC; dev
+    machines may run JST).
+    """
+    today_utc = datetime.now(timezone.utc).date()
+    monday_date = today_utc - timedelta(days=today_utc.weekday() + 7)
+    monday = datetime.combine(monday_date, time(12, 0), tzinfo=timezone.utc)
     tuesday = monday + timedelta(days=1)
     rows = [
         # (file_name, captured_at, dep_delay)
@@ -42,8 +49,7 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id):
             cap,
             dep,
         )
-    today = date.today()
-    ctx = RangeCtx(from_date=today - timedelta(days=14), to_date=today + timedelta(days=1))
+    ctx = RangeCtx(from_date=monday_date - timedelta(days=1), to_date=today_utc + timedelta(days=1))
     result = await route_dow_breakdown(aagency_id, ctx, aconn, route="R1")
     # Expect 2 rows: one for Monday (DOW=1), one for Tuesday (DOW=2).
     dows = {r[2] for r in result}
