@@ -270,6 +270,7 @@
       "service": "種別",
       "avg": "平均",
       "median": "中央値",
+      "p90": "p90",
       "samples": "観測数",
       "dow": "曜日",
       "on_time_pct": "定時率",

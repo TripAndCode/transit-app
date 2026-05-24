@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DELAY_RAMP } from "../styles/tokens";
 
 type Pos = { x: number; y: number };
@@ -43,6 +44,7 @@ export function MapLegend({
   focusedSeverity,
   onFocusedSeverityChange,
 }: MapLegendProps) {
+  const { t } = useTranslation();
   const [pos, setPos] = useState<Pos>(loadPos);
   const [collapsed, setCollapsed] = useState(false);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -102,11 +104,11 @@ export function MapLegend({
         }}
       >
         <span aria-hidden style={{ fontSize: 10, color: "var(--text-tertiary)" }}>⠿</span>
-        <strong style={{ flex: 1, color: "var(--text-primary)", fontSize: 12 }}>凡例</strong>
+        <strong style={{ flex: 1, color: "var(--text-primary)", fontSize: 12 }}>{t("map.legend.title")}</strong>
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          aria-label={collapsed ? "展開" : "折りたたみ"}
+          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
           style={{
             background: "transparent",
             border: "none",
@@ -139,32 +141,32 @@ export function MapLegend({
               checked={showSingleSampleStops}
               onChange={(e) => onShowSingleSampleStopsChange(e.target.checked)}
             />
-            1観測のみも表示
+            {t("map.legend.show_single_sample")}
           </label>
           <div style={{ marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
-            遅延 (平均)
+            {t("map.legend.delay_avg")}
           </div>
           <Row
             color={DELAY_RAMP.ok}
-            label="< 2分"
+            label={t("map.legend.band_lt_2")}
             selected={focusedSeverity === "ok"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "ok" ? null : "ok")}
           />
           <Row
             color={DELAY_RAMP.mild}
-            label="2 – 5分"
+            label={t("map.legend.band_2_5")}
             selected={focusedSeverity === "mild"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "mild" ? null : "mild")}
           />
           <Row
             color={DELAY_RAMP.moderate}
-            label="5 – 10分"
+            label={t("map.legend.band_5_10")}
             selected={focusedSeverity === "moderate"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "moderate" ? null : "moderate")}
           />
           <Row
             color={DELAY_RAMP.severe}
-            label="> 10分"
+            label={t("map.legend.band_gt_10")}
             selected={focusedSeverity === "severe"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "severe" ? null : "severe")}
           />
@@ -179,21 +181,21 @@ export function MapLegend({
                 paddingLeft: 20,
               }}
             >
-              選択を解除
+              {t("map.legend.clear_selection")}
             </div>
           )}
           <div style={{ marginTop: 8, marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
-            サイズ・濃度
+            {t("map.legend.size_density")}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Dot diameter={6} opacity={0.4} />
             <Dot diameter={9} opacity={0.65} />
             <Dot diameter={12} opacity={0.85} />
-            <span style={{ color: "var(--text-tertiary)" }}>少 → 多</span>
+            <span style={{ color: "var(--text-tertiary)" }}>{t("map.legend.few_to_many")}</span>
           </div>
           <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
-            色: 平均遅延の段階<br />
-            円の大きさ・濃度: サンプル数
+            {t("map.legend.color_explainer")}<br />
+            {t("map.legend.size_explainer")}
           </div>
         </div>
       )}

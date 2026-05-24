@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 /**
  * Single source of truth for map-tooltip HTML.
  *
@@ -17,6 +19,10 @@
  * - active_route is the route the user filtered to (route mode); shown
  *   instead of contributing_routes
  * - stop_id and period render small/grey at the bottom
+ *
+ * `t` is passed in from the React caller because this module is plain
+ * TS (no hooks). All user-visible JP literals route through i18n keys
+ * under `map.popup.*` + shared `common.unit_min` / `common.unit_count`.
  */
 
 export type StopPopupData = {
@@ -44,13 +50,13 @@ export function escapeHtml(s: string): string {
   );
 }
 
-function poleBadgeHTML(platform_code: string | null | undefined): string {
+function poleBadgeHTML(platform_code: string | null | undefined, t: TFunction): string {
   const poles = (platform_code || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (poles.length === 0) return "";
   return (
     `<span style="display:inline-block;background:#eef0fa;color:#5b6cad;` +
     `border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;` +
-    `vertical-align:middle">のりば ${escapeHtml(poles.join("/"))}</span>`
+    `vertical-align:middle">${escapeHtml(t("map.popup.platform_label"))} ${escapeHtml(poles.join("/"))}</span>`
   );
 }
 
@@ -60,15 +66,19 @@ function stopCodeSubtitleHTML(stop_code: string | null | undefined, stop_name: s
   return `<div style="font-size:12px;color:#666;margin-top:1px">${escapeHtml(sc)}</div>`;
 }
 
-function metaLineHTML(seq: number | null | undefined, active_route: string | null | undefined): string {
+function metaLineHTML(
+  seq: number | null | undefined,
+  active_route: string | null | undefined,
+  t: TFunction,
+): string {
   const bits: string[] = [];
-  if (typeof seq === "number") bits.push(`停留所 #${seq}`);
-  if (active_route) bits.push(`系統 ${escapeHtml(active_route)}`);
+  if (typeof seq === "number") bits.push(`${escapeHtml(t("map.popup.stop_seq_prefix"))}${seq}`);
+  if (active_route) bits.push(`${escapeHtml(t("map.popup.route_prefix"))} ${escapeHtml(active_route)}`);
   if (bits.length === 0) return "";
   return `<div style="color:#888;font-size:11px;margin-top:2px">${bits.join(" ・ ")}</div>`;
 }
 
-function routesLineHTML(d: StopPopupData): string {
+function routesLineHTML(d: StopPopupData, t: TFunction): string {
   // Route mode wins — when the user has filtered to one route, listing
   // contributing_routes alongside would just repeat the active filter.
   if (d.active_route) return "";
@@ -78,7 +88,7 @@ function routesLineHTML(d: StopPopupData): string {
     routes.length <= 4
       ? routes.join(", ")
       : `${routes.slice(0, 4).join(", ")} +${routes.length - 4}`;
-  return `<br/>系統: <span style="color:#555">${escapeHtml(label)}</span>`;
+  return `<br/>${escapeHtml(t("map.popup.routes_label"))} <span style="color:#555">${escapeHtml(label)}</span>`;
 }
 
 function stopIdLineHTML(stop_id: string | null | undefined): string {
@@ -92,21 +102,23 @@ function stopIdLineHTML(stop_id: string | null | undefined): string {
   );
 }
 
-export function renderStopPopupHTML(d: StopPopupData, period: Period): string {
+export function renderStopPopupHTML(d: StopPopupData, period: Period, t: TFunction): string {
   const samplesLabel = d.samples.toLocaleString("en-US");
+  const unitMin = escapeHtml(t("common.unit_min"));
+  const unitCount = escapeHtml(t("common.unit_count"));
   return (
     `<div style="font:13px sans-serif;min-width:220px">` +
-    `<div><strong>${escapeHtml(d.stop_name)}</strong>${poleBadgeHTML(d.platform_code)}</div>` +
+    `<div><strong>${escapeHtml(d.stop_name)}</strong>${poleBadgeHTML(d.platform_code, t)}</div>` +
     stopCodeSubtitleHTML(d.stop_code, d.stop_name) +
-    metaLineHTML(d.stop_sequence, d.active_route) +
+    metaLineHTML(d.stop_sequence, d.active_route, t) +
     `<div style="margin-top:6px">` +
-    `平均遅延: ${d.avg_min.toFixed(1)}分<br/>` +
-    `サンプル: ${samplesLabel}件` +
-    routesLineHTML(d) +
+    `${escapeHtml(t("map.popup.avg_delay_label"))} ${d.avg_min.toFixed(1)}${unitMin}<br/>` +
+    `${escapeHtml(t("map.popup.samples_label"))} ${samplesLabel}${unitCount}` +
+    routesLineHTML(d, t) +
     `</div>` +
     stopIdLineHTML(d.stop_id) +
     `<div style="font-size:11px;color:#888;margin-top:4px">` +
-    `期間: ${escapeHtml(period.from)} 〜 ${escapeHtml(period.to)}` +
+    `${escapeHtml(t("map.popup.period_label"))} ${escapeHtml(period.from)} 〜 ${escapeHtml(period.to)}` +
     `</div>` +
     `</div>`
   );
