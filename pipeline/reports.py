@@ -383,6 +383,70 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | 
     return avg, int(row["samples"] or 0)
 
 
+async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn) -> dict[str, tuple[float, int]]:
+    """Per-route avg_min + samples for ``ctx``. Keyed by route_code."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    sql = (
+        "SELECT route_code, "
+        "       AVG(dep_delay)/60.0::numeric AS avg_min, "
+        "       COUNT(*) AS samples "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        "GROUP BY route_code"
+    )
+    rows = await conn.fetch(sql, agency_id, *params)
+    return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
+
+
+async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> dict[str, str | None]:
+    """Resolve short names for a list of route_codes. Missing -> None."""
+    if not route_codes:
+        return {}
+    rows = await conn.fetch(
+        "SELECT route_id, route_short_name FROM static_routes "
+        "WHERE agency_id=$1 AND route_id = ANY($2::text[])",
+        agency_id,
+        list(route_codes),
+    )
+    return {r["route_id"]: r["route_short_name"] for r in rows}
+
+
+async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
+    """Top-3 worsened + top-3 improved routes by signed delta_min."""
+    cur = await _per_route_avg(agency_id, ctx, conn)
+    prv = await _per_route_avg(agency_id, _shift_ctx_one_week_back(ctx), conn)
+    common = set(cur) & set(prv)
+    deltas: list[tuple[str, float, float]] = []
+    for code in common:
+        cur_avg, _ = cur[code]
+        prv_avg, _ = prv[code]
+        if prv_avg == 0:
+            continue
+        d_min = cur_avg - prv_avg
+        d_pct = (d_min / prv_avg) * 100.0
+        deltas.append((code, round(d_min, 2), round(d_pct, 1)))
+    deltas.sort(key=lambda x: x[1])
+    better = deltas[:3]  # smallest (most negative) first, [0] is best
+    worse = list(reversed(deltas[-3:]))  # largest positive first
+    codes = [c for c, _, _ in worse + better]
+    names = await _route_short_names(agency_id, codes, conn)
+
+    def _entry(code, dm, dp):
+        return {
+            "route_code": code,
+            "route_short_name": names.get(code),
+            "delta_min": dm,
+            "delta_pct": dp,
+            "streak_weeks": 0,           # filled in T5
+            "sparkline_points": [],      # filled in T5
+        }
+
+    return {
+        "worse": [_entry(c, dm, dp) for c, dm, dp in worse],
+        "better": [_entry(c, dm, dp) for c, dm, dp in better],
+    }
+
+
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,
@@ -404,6 +468,8 @@ async def compute_overview_summary(
         if baseline_avg != 0:
             delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
+    movers = await _movers(agency_id, ctx, conn)
+
     return {
         "headline": {
             "avg_min": avg_min,
@@ -412,7 +478,7 @@ async def compute_overview_summary(
             "delta_pct": delta_pct,
             "samples": samples,
         },
-        "movers": {"worse": [], "better": []},
+        "movers": movers,
         "concentration": {"top_routes": [], "rest_share_pct": 0.0},
         "peak_hour": None,
         "service_split": {},
