@@ -5,7 +5,6 @@ import { useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { getMapStyle } from "../styles/mapStyle";
-import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
@@ -13,84 +12,8 @@ import { MapLegend, type SeverityKey } from "../components/MapLegend";
 import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
-
-const SOURCE = "delays";
-const LAYER = "delay-circles";       // crisp inner dot
-const HALO_LAYER = "delay-halos";    // soft outer glow, drawn beneath the dot
-const ROUTE_SOURCE = "route-line";
-const ROUTE_LAYER = "route-line-stroke";
-const ROUTE_STOPS_LAYER = "route-stops";
-const ROUTE_UNOBS_SOURCE = "route-unobserved";
-const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
-
-/**
- * Build the MapLibre filter expression that selects circles falling into a
- * single severity band. Used by both the dot and halo opacity helpers so
- * adding or moving a band means editing one place.
- */
-function severityMatchExpr(focused: SeverityKey): maplibregl.ExpressionSpecification {
-  switch (focused) {
-    case "ok":
-      return ["<", ["get", "avg_delay_min"], 2];
-    case "mild":
-      return ["all", [">=", ["get", "avg_delay_min"], 2], ["<", ["get", "avg_delay_min"], 5]];
-    case "moderate":
-      return ["all", [">=", ["get", "avg_delay_min"], 5], ["<", ["get", "avg_delay_min"], 10]];
-    case "severe":
-      return [">=", ["get", "avg_delay_min"], 10];
-  }
-}
-
-/**
- * Severity-floored opacity for the inner crisp dot. When a legend swatch is
- * focused, circles outside that band go to 0 (fully invisible) so the
- * remaining ones stand alone.
- */
-function buildCircleOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.7,
-      [">=", ["get", "avg_delay_min"], 5], 0.55,
-      0.0,
-    ],
-    [
-      "interpolate", ["linear"], ["get", "samples"],
-      1, 0.35,
-      50, 0.7,
-      500, 0.85,
-    ],
-  ];
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
-}
-
-/**
- * Halo opacity: lower base values than the dot so the halo accents rather
- * than dominates. Severe stops keep a slightly stronger glow so they read
- * as priority; everything else stays around 0.10 to avoid overlapping
- * halos forming one solid color across dense city blocks.
- */
-function buildHaloOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.20,
-      [">=", ["get", "avg_delay_min"], 5], 0.14,
-      0.0,
-    ],
-    [
-      "interpolate", ["exponential", 1.4], ["get", "samples"],
-      10, 0.06,
-      1000, 0.10,
-      50000, 0.16,
-    ],
-  ];
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
-}
+import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
+import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -103,7 +26,6 @@ export function MapTab() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
@@ -235,276 +157,18 @@ export function MapTab() {
     };
   }, []);
 
-  // sync data into source/layer
+  // Close any open popup before the heatmap re-renders. Without this, a
+  // popup anchored to stop A would persist (showing stale numbers) after
+  // a filter change drops stop A from the visible set. Matches the
+  // pre-split behavior baked into the old applyData() body.
   useEffect(() => {
-    const m = mapRef.current;
-    if (!m || !data) return;
-    const filteredSnapshot = showSingleSampleStops
-      ? data
-      : { ...data, features: data.features.filter((f: any) => (f.properties?.samples ?? 0) >= 2) };
-
-    function applyData() {
-      if (!m) return;
-      popupRef.current?.remove();
-      popupRef.current = null;
-
-      if (m.getLayer(LAYER)) m.removeLayer(LAYER);
-      if (m.getLayer(HALO_LAYER)) m.removeLayer(HALO_LAYER);
-      if (m.getSource(SOURCE)) m.removeSource(SOURCE);
-
-      // generateId lets the hover feature-state attach to each circle by index.
-      m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
-
-      const colorExpr: maplibregl.ExpressionSpecification = [
-        "step",
-        ["get", "avg_delay_min"],
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
-      ];
-
-      // Sample-count distribution spans 4 orders of magnitude (10..50k+),
-      // so radii use exponential-base interpolation: small terminals shrink
-      // visibly while major hubs grow without flooring everything mid-range.
-      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 6,
-        100, 10,
-        1000, 16,
-        10000, 26,
-        50000, 36,
-      ];
-      const DOT_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 4,
-        100, 6,
-        1000, 7,
-        10000, 12,
-        50000, 18,
-      ];
-
-      // Soft outer halo — accent only, not flood. Low opacity so overlapping
-      // halos in dense areas don't form one solid color blanket.
-      m.addLayer({
-        id: HALO_LAYER,
-        type: "circle",
-        source: SOURCE,
-        paint: {
-          "circle-radius": HALO_RADIUS,
-          "circle-color": colorExpr,
-          "circle-blur": 0.5,
-          "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
-          "circle-pitch-alignment": "map",
-        },
-      });
-
-      // Crisp inner dot — no stroke (hover only), severity color.
-      m.addLayer({
-        id: LAYER,
-        type: "circle",
-        source: SOURCE,
-        paint: {
-          "circle-radius": DOT_RADIUS,
-          "circle-color": colorExpr,
-          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
-          "circle-stroke-width": [
-            "case", ["boolean", ["feature-state", "hover"], false], 2, 1,
-          ],
-          "circle-stroke-color": [
-            "case", ["boolean", ["feature-state", "hover"], false],
-            "#ffffff", "rgba(0,0,0,0.35)",
-          ],
-        },
-      });
-
-      // Fit bounds only on the first data load — subsequent filter changes
-      // keep the user's current pan/zoom so the camera doesn't fight them.
-      if (!fittedRef.current) {
-        if (filteredSnapshot.features.length === 1) {
-          const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
-          m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
-          fittedRef.current = true;
-        } else if (filteredSnapshot.features.length > 1) {
-          let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-          for (const f of filteredSnapshot.features) {
-            const [lon, lat] = f.geometry.coordinates;
-            if (lon < minLon) minLon = lon;
-            if (lon > maxLon) maxLon = lon;
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
-          }
-          m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
-          fittedRef.current = true;
-        }
-      }
-    }
-
-    if (styleLoadedRef.current) applyData();
-    else m.once("load", applyData);
+    popupRef.current?.remove();
+    popupRef.current = null;
   }, [data, showSingleSampleStops, focusedSeverity]);
 
-  // Single-route overlay: thin neutral polyline + small numbered stop markers.
-  // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
-  // (Click handlers for both layers are registered once in the init effect
-  // above so they don't accumulate on filter changes.)
-  useEffect(() => {
-    const m = mapRef.current;
-    if (!m) return;
+  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity);
 
-    function clearOverlay() {
-      if (!m) return;
-      if (m.getLayer(ROUTE_UNOBS_LAYER)) m.removeLayer(ROUTE_UNOBS_LAYER);
-      if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
-      if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
-      if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
-      if (m.getSource(ROUTE_SOURCE + "-stops")) m.removeSource(ROUTE_SOURCE + "-stops");
-      if (m.getSource(ROUTE_UNOBS_SOURCE)) m.removeSource(ROUTE_UNOBS_SOURCE);
-    }
-
-    function drawOverlay() {
-      if (!m || !shape || shape.stops.length < 2) {
-        clearOverlay();
-        // In route mode without enough data, also keep heatmap visible.
-        if (m && m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
-        return;
-      }
-      clearOverlay();
-      const geomCoords = shape.geometry?.coordinates;
-      const coords: [number, number][] =
-        geomCoords && geomCoords.length >= 2
-          ? (geomCoords as [number, number][])
-          : shape.stops.map((s) => [s.lon, s.lat]);
-
-      // Route mode: hide the heatmap (it would show isolated stops without
-      // the connecting line) and use the route's stop sequence directly,
-      // colored by per-stop avg delay.
-      if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "none");
-
-      m.addSource(ROUTE_SOURCE, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: coords },
-          properties: {},
-        },
-      });
-      m.addLayer({
-        id: ROUTE_LAYER,
-        type: "line",
-        source: ROUTE_SOURCE,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#5b6cad",
-          // Bolder when zoomed in so it stays visible at street-level.
-          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
-          "line-opacity": 0.7,
-        },
-      });
-
-      m.addSource(ROUTE_SOURCE + "-stops", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: shape.stops.map((s) => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-            properties: {
-              stop_sequence: s.stop_sequence,
-              stop_name: s.stop_name,
-              stop_id: s.stop_id ?? null,
-              stop_code: s.stop_code ?? null,
-              platform_code: s.platform_code ?? null,
-              avg_min: s.avg_min ?? 0,
-              samples: s.samples,
-            },
-          })),
-        },
-      });
-      m.addLayer({
-        id: ROUTE_STOPS_LAYER,
-        type: "circle",
-        source: ROUTE_SOURCE + "-stops",
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10, 4,
-            14, 7,
-            17, 11,
-          ],
-          // Color by avg_min using the same severity ramp as the heatmap.
-          "circle-color": [
-            "step",
-            ["get", "avg_min"],
-            DELAY_RAMP.ok,
-            2, DELAY_RAMP.mild,
-            5, DELAY_RAMP.moderate,
-            10, DELAY_RAMP.severe,
-          ],
-          "circle-opacity": 0.95,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
-
-      // Unobserved stops on the chosen shape — hollow grey rings so the
-      // route topology is visible even where no delay data has accrued.
-      const unobserved = shape.unobserved_stops ?? [];
-      if (unobserved.length > 0) {
-        m.addSource(ROUTE_UNOBS_SOURCE, {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: unobserved.map((s) => ({
-              type: "Feature",
-              geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-              properties: {
-                stop_sequence: s.stop_sequence,
-                stop_name: s.stop_name,
-                stop_id: s.stop_id ?? null,
-                stop_code: s.stop_code ?? null,
-                platform_code: s.platform_code ?? null,
-              },
-            })),
-          },
-        });
-        m.addLayer({
-          id: ROUTE_UNOBS_LAYER,
-          type: "circle",
-          source: ROUTE_UNOBS_SOURCE,
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
-            "circle-color": "rgba(255,255,255,0.0)",
-            "circle-stroke-width": 1,
-            "circle-stroke-color": "rgba(0,0,0,0.35)",
-          },
-        });
-      }
-
-      // Fit to the route on focus.
-      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-      for (const [lon, lat] of coords) {
-        if (lon < minLon) minLon = lon;
-        if (lon > maxLon) maxLon = lon;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-      }
-      m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
-    }
-
-    if (!shape) {
-      // No focused route — strip overlay and bring the heatmap back.
-      if (styleLoadedRef.current) {
-        clearOverlay();
-        if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
-      }
-      return;
-    }
-    if (styleLoadedRef.current) drawOverlay();
-    else m.once("load", drawOverlay);
-  }, [shape]);
+  useRouteOverlay(mapRef, styleLoadedRef, shape);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
