@@ -265,3 +265,26 @@ async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
     assert set(ss.keys()) == {"平日", "土日祝"}
     assert ss["平日"] > 0
     assert len(out["sparkline_points"]) == 7
+
+
+@pytest.mark.asyncio
+async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aagency_id):
+    """End-to-end: seed data, hit the endpoint, every top-level key present
+    and headline shape is well-populated."""
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    for i in range(5):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_full_' || $4, '平日', '10:00', 'R_F', 1, $5)",
+            aagency_id, f"full_{i}", base + timedelta(hours=i), str(i), 60 + i * 30,
+        )
+
+    r = await client.get(f"/api/{aagency_id}/overview/summary?from=2026-05-18&to=2026-05-24")
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("headline", "movers", "concentration", "peak_hour", "service_split", "sparkline_points"):
+        assert key in body, f"missing key {key}"
+    assert body["headline"]["samples"] == 5
+    assert body["headline"]["avg_min"] is not None
