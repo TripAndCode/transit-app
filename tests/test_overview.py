@@ -107,3 +107,43 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
     assert h["baseline_avg_min"] is None
     assert h["delta_min"] is None
     assert h["delta_pct"] is None
+
+
+@pytest.mark.asyncio
+async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
+    """Five routes with varied this-week vs prior-week deltas;
+    top 3 worsened + top 3 improved come out sorted by |delta_min|."""
+    cur = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    prv = cur - timedelta(days=7)
+    # (route, prior_avg_sec, current_avg_sec)
+    routes = [
+        ("R_A", 60, 600),   # +9 min (worst)
+        ("R_B", 60, 480),   # +7 min
+        ("R_C", 60, 360),   # +5 min
+        ("R_D", 60, 120),   # +1 min (still worse but not top-3)
+        ("R_E", 600, 60),   # -9 min (best improvement)
+        ("R_F", 480, 60),   # -7 min
+        ("R_G", 360, 60),   # -5 min
+        ("R_H", 120, 60),   # -1 min
+    ]
+    rows_to_insert = []
+    for code, prior_dep, cur_dep in routes:
+        rows_to_insert.append(("rs_prv_" + code, prv, prior_dep, code))
+        rows_to_insert.append(("rs_cur_" + code, cur, cur_dep, code))
+    for fname, when, dep, code in rows_to_insert:
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
+            aagency_id, fname, when, code, dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_codes = [m["route_code"] for m in out["movers"]["worse"]]
+    better_codes = [m["route_code"] for m in out["movers"]["better"]]
+    assert worse_codes == ["R_A", "R_B", "R_C"]
+    assert better_codes == ["R_E", "R_F", "R_G"]
