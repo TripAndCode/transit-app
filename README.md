@@ -289,15 +289,15 @@ Computes five aggregation tables used by all API queries:
 > (latest by `captured_at`, with `id DESC` as a deterministic tiebreaker),
 > not the maximum across the polling window. This matches what passengers
 > actually experienced — GTFS-RT estimates refine as the trip nears each
-> stop. Average delays may shift slightly downward on noisy feeds. The
-> first `make analyze` (or hourly cron tick) after the change rewrites
-> every `agg_*` row that still meets the sample-count cutoffs; routes
-> that no longer receive samples keep their previous (MAX-era) values
-> until they age out of the data window. Rows with `dep_delay IS NULL`
-> are filtered at the inner dedup SELECT, so the "latest" is the latest
-> *numeric* estimate per stop event. There is no rollback flag — to
-> revert, revert the PR and re-analyze; pre-PR numbers may not fully
-> restore for routes whose data has since rolled over.
+> stop. Average delays may shift slightly downward on noisy feeds. Each
+> `make analyze` (or hourly cron tick) wipes the agency's five `agg_*`
+> tables and rewrites them from the freshly computed SELECTs in one
+> transaction — routes whose data no longer meets the sample-count
+> cutoffs disappear from the tables on the next run, rather than
+> retaining stale values. Rows with `dep_delay IS NULL` are filtered at
+> the inner dedup SELECT, so the "latest" is the latest *numeric*
+> estimate per stop event. There is no rollback flag — to revert, revert
+> the PR and re-analyze.
 
 ---
 

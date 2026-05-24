@@ -164,3 +164,63 @@ def test_analyze_agency_isolated(pg_conn):
 
     assert round(float(avg_a), 1) == round(120 / 60, 1)
     assert round(float(avg_b), 1) == round(600 / 60, 1)
+
+
+def test_analyze_purges_stale_rows(pg_conn, agency_id):
+    """A row that the current analyze SELECT would NOT produce (e.g. a
+    fabricated GHOST route) must be removed from every agg_* table by the
+    next analyze run. Pins the wipe-and-rewrite semantics across all 5
+    tables so a future drift back to plain UPSERT, or a missed table in
+    the DELETE loop, is caught."""
+    _seed_updates(pg_conn, agency_id)
+
+    ghosts = (
+        (
+            "agg_route_stats",
+            "(agency_id, route_code, service_type, avg_min, p50_min, p90_min, "
+            "late_5min_plus, on_time_pct, late5_pct, samples)",
+            "(%s, 'GHOST', '平日', 99.9, 99.9, 99.9, 999, 0.0, 100.0, 100)",
+        ),
+        (
+            "agg_route_hour",
+            "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples)",
+            "(%s, 'GHOST', '平日', '11:30:00', 99.9, 99.9, 99.9, 100)",
+        ),
+        (
+            "agg_route_dow",
+            "(agency_id, route_code, service_type, dow, avg_min, samples)",
+            "(%s, 'GHOST', '平日', 1, 99.9, 100)",
+        ),
+        (
+            "agg_daily_trend",
+            "(agency_id, date, route_code, service_type, avg_min, samples)",
+            "(%s, '2099-01-01', 'GHOST', '平日', 99.9, 100)",
+        ),
+        (
+            "agg_stop_seq",
+            "(agency_id, route_code, stop_sequence, stop_name, avg_min, samples)",
+            "(%s, 'GHOST', 99, 'GHOST STOP', 99.9, 100)",
+        ),
+    )
+    with pg_conn.cursor() as cur:
+        for table, cols, values in ghosts:
+            cur.execute(f"INSERT INTO {table} {cols} VALUES {values}", (agency_id,))
+        pg_conn.commit()
+
+    analyze(agency_id, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        for table, _cols, _values in ghosts:
+            cur.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND route_code = 'GHOST'",
+                (agency_id,),
+            )
+            ghost_count = cur.fetchone()[0]
+            assert ghost_count == 0, f"stale GHOST row survived analyze in {table}"
+
+        # Sanity: the real route_code from _seed_updates is still present.
+        cur.execute(
+            "SELECT COUNT(*) FROM agg_route_stats WHERE agency_id = %s AND route_code = '44372'",
+            (agency_id,),
+        )
+        assert cur.fetchone()[0] > 0, "real route 44372 missing after analyze"
