@@ -206,7 +206,7 @@ export function MapTab() {
           whole tab — losing the filter bar and tab nav on a transient
           5xx is jarring. The map container below stays mounted so the
           user keeps their context (zoom / pan / open popup) and just
-          sees a calm "再試行" pill. */}
+          sees a calm "再試行" pill. */} {/* // i18n-ignore: JSX comment */}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       <div style={{ position: "relative", flex: 1, minHeight: 400 }}>
       {isLoading && (

@@ -47,7 +47,13 @@
     "rel_days_ago": "{{count}}d ago",
     "rel_hours_ago": "{{count}}h ago",
     "rel_minutes_ago": "{{count}}m ago",
-    "rel_seconds_ago": "{{count}}s ago"
+    "rel_seconds_ago": "{{count}}s ago",
+    "range_separator": "–",
+    "language_aria": "Language",
+    "service_value": {
+      "平日": "Weekday",
+      "土日祝": "Weekend/Holiday"
+    }
   },
   "account": {
     "admin_link": "Admin",
@@ -198,6 +204,7 @@
     },
     "error_empty": "Please enter a question",
     "error_agency_not_selected": "Agency not selected",
+    "empty_state": "Ask a question to get started.",
     "thinking": "Thinking...",
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
@@ -210,7 +217,20 @@
       "routes": "Routes: {{value}}"
     },
     "col": {
-      "route": "Route"
+      "route": "Route",
+      "route_code": "Route",
+      "service_type": "Service",
+      "dow": "Day",
+      "avg_min": "Avg (min)",
+      "p50_min": "Median (min)",
+      "p90_min": "p90 (min)",
+      "samples": "Samples",
+      "on_time_pct": "On-time %",
+      "late5_count": "≥5 min late",
+      "heijitsu_min": "Weekday (min)",
+      "kyujitsu_min": "Weekend (min)",
+      "abs_delta": "Δ (abs)",
+      "signed_delta": "Δ (signed)"
     },
     "more_rows": "…and {{count}} more"
   },

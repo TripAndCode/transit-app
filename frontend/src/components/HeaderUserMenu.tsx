@@ -12,7 +12,7 @@ export function HeaderUserMenu() {
   if (sessionLoading || configLoading) return null;
   // Default-safe: hide login UI unless the backend explicitly confirms SSO is on.
   // Avoids a flash of "ログイン" before /api/config resolves, which would lead the // i18n-ignore: comment
-  // user to /login → SSO 未設定 dead-end.
+  // user to /login → SSO 未設定 dead-end. // i18n-ignore: comment
   if (!config?.auth_enabled) return null;
   if (!session) {
     return (

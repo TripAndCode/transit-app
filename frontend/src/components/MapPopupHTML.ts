@@ -118,7 +118,7 @@ export function renderStopPopupHTML(d: StopPopupData, period: Period, t: TFuncti
     `</div>` +
     stopIdLineHTML(d.stop_id) +
     `<div style="font-size:11px;color:#888;margin-top:4px">` +
-    `${escapeHtml(t("map.popup.period_label"))} ${escapeHtml(period.from)} 〜 ${escapeHtml(period.to)}` +
+    `${escapeHtml(t("map.popup.period_label"))} ${escapeHtml(period.from)} ${escapeHtml(t("common.range_separator"))} ${escapeHtml(period.to)}` +
     `</div>` +
     `</div>`
   );

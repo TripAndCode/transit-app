@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type DowFilter = "all" | "weekday" | "weekend";
-export type ServiceFilter = "all" | "平日" | "土日祝";
+export type ServiceFilter = "all" | "平日" | "土日祝"; // i18n-ignore: query contract
 export type TimeBand =
   | "all"
   | "morning"
