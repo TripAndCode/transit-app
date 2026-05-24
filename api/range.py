@@ -79,8 +79,8 @@ def get_range_ctx(
     so the most recent data is preserved.
     """
     today = date.today()
-    to_date = _parse_date(to) or today
-    from_date = _parse_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    to_date = parse_iso_date(to) or today
+    from_date = parse_iso_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
 
     if from_date > to_date:
         from_date, to_date = to_date, from_date
@@ -112,7 +112,8 @@ def get_range_ctx(
     )
 
 
-def _parse_date(s: str | None) -> date | None:
+def parse_iso_date(s: str | None) -> date | None:
+    """Lenient ISO-8601 date parser: ``None``/empty/invalid → ``None``."""
     if not s:
         return None
     try:

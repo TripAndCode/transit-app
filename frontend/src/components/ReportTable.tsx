@@ -15,23 +15,28 @@ type Schema = {
 
 const ROUTE_COL: Schema = { index: 0, label: "系統", align: "left" };
 
+// ranking + ranking_best share columns; only the API sort order differs.
+const RANKING_COLS: Schema[] = [
+  ROUTE_COL,
+  { index: 1, label: "種別", align: "left" },
+  { index: 2, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
+  { index: 3, label: "中央値", align: "right", format: (v) => fmtMin(v) },
+  { index: 4, label: "p90", align: "right", format: (v) => fmtMin(v) },
+  { index: 5, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+];
+
+// dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
+const DOW_COLS: Schema[] = [
+  ROUTE_COL,
+  { index: 1, label: "種別", align: "left" },
+  { index: 2, label: "曜日", align: "left" },
+  { index: 3, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
+  { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+];
+
 const SCHEMAS: Record<string, Schema[]> = {
-  ranking: [
-    ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-    { index: 3, label: "中央値", align: "right", format: (v) => fmtMin(v) },
-    { index: 4, label: "p90", align: "right", format: (v) => fmtMin(v) },
-    { index: 5, label: "観測数", align: "right", format: (v) => fmtNum(v) },
-  ],
-  ranking_best: [
-    ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-    { index: 3, label: "中央値", align: "right", format: (v) => fmtMin(v) },
-    { index: 4, label: "p90", align: "right", format: (v) => fmtMin(v) },
-    { index: 5, label: "観測数", align: "right", format: (v) => fmtNum(v) },
-  ],
+  ranking: RANKING_COLS,
+  ranking_best: RANKING_COLS,
   on_time: [
     ROUTE_COL,
     { index: 1, label: "種別", align: "left" },
@@ -62,20 +67,8 @@ const SCHEMAS: Record<string, Schema[]> = {
       },
     },
   ],
-  dow_weekend: [
-    ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "曜日", align: "left" },
-    { index: 3, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-    { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
-  ],
-  dow_weekday: [
-    ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "曜日", align: "left" },
-    { index: 3, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-    { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
-  ],
+  dow_weekend: DOW_COLS,
+  dow_weekday: DOW_COLS,
 };
 
 function fmtMin(v: unknown): string {
