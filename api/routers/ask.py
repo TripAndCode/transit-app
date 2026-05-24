@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx
+from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
 from pipeline.query.chat import chat_with_tools
 
@@ -55,16 +55,8 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
     if body_ctx is None:
         return RangeCtx(from_date=today - timedelta(days=DEFAULT_RANGE_DAYS - 1), to_date=today)
 
-    def _parse(s: str | None) -> date | None:
-        if not s:
-            return None
-        try:
-            return date.fromisoformat(s)
-        except ValueError:
-            return None
-
-    to_date = _parse(body_ctx.to_date) or today
-    from_date = _parse(body_ctx.from_date) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    to_date = parse_iso_date(body_ctx.to_date) or today
+    from_date = parse_iso_date(body_ctx.from_date) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
     if from_date > to_date:
         from_date, to_date = to_date, from_date
     if (to_date - from_date).days >= MAX_RANGE_DAYS:
