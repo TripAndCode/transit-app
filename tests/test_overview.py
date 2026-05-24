@@ -225,7 +225,7 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_pk_' || $4, '平日', $5, 'R_P', 1, $6)",
+            "VALUES ($1, $2, $3, 'trip_pk_' || $4, '平日', ($5::text)::time, 'R_P', 1, $6)",
             aagency_id, f"pk_{i}", base + timedelta(minutes=i), str(i), sched, dep,
         )
 
