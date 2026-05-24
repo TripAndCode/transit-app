@@ -351,6 +351,20 @@ async def compute_trend_series(
 # ---------------------------------------------------------------------------
 
 
+async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | None, int]:
+    """Return (avg_min, samples) for the headline over ``ctx``."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    sql = (
+        "SELECT ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min, "
+        "       COUNT(*) AS samples "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag})"
+    )
+    row = await conn.fetchrow(sql, agency_id, *params)
+    avg = float(row["avg_min"]) if row["avg_min"] is not None else None
+    return avg, int(row["samples"] or 0)
+
+
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,
@@ -360,16 +374,16 @@ async def compute_overview_summary(
     """Build the 概況 payload for one agency over ``ctx``.
 
     See ``docs/superpowers/specs/2026-05-25-overview-tab-design.md``.
-    This stub returns an empty shape; subsequent tasks fill in each
-    of the six sub-results.
+    Each sub-section is a separate helper (added in tasks T2-T8).
     """
+    avg_min, samples = await _headline_stats(agency_id, ctx, conn)
     return {
         "headline": {
-            "avg_min": None,
-            "baseline_avg_min": None,
+            "avg_min": avg_min,
+            "baseline_avg_min": None,   # filled in T3
             "delta_min": None,
             "delta_pct": None,
-            "samples": 0,
+            "samples": samples,
         },
         "movers": {"worse": [], "better": []},
         "concentration": {"top_routes": [], "rest_share_pct": 0.0},
