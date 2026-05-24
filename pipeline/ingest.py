@@ -22,6 +22,22 @@ from pipeline.strategies.aomori_regex import (  # noqa: F401
     parse_trip_id,
 )
 
+# YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
+# derive captured_at when the filename alone doesn't carry the date.
+_DATE_DIR_RE = re.compile(r"\d{8}")
+
+
+def _date_dir(name: str) -> str:
+    """Return *name* if it is a YYYYMMDD token, otherwise ``""``."""
+    return name if _DATE_DIR_RE.fullmatch(name) else ""
+
+
+def _insert_updates(cur, agency_id: int, rows: list[tuple]) -> int:
+    """Prepend ``agency_id`` to each row and bulk-INSERT into ``updates``."""
+    pg_rows = [(agency_id, *r) for r in rows]
+    psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
+    return len(pg_rows)
+
 
 def _resolve_strategy_name(agency_id: int, conn) -> str:
     """Return the ingest strategy name for an agency, falling back to aomori_regex."""
@@ -150,7 +166,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                             continue
                         pb_name = pathlib.Path(m.name).name
                         inner_dir = pathlib.Path(m.name).parent.name
-                        d = inner_dir if re.fullmatch(r"\d{8}", inner_dir) else date_dir
+                        d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
                     print(f"  {len(members)} pb files, {len(new)} new")
@@ -158,9 +174,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                         ts = _ts(d, pb_name)
                         raw = tf.extractfile(member).read()
                         rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
-                        pg_rows = [(agency_id, *r) for r in rows]
-                        psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
-                        n_inserted += len(pg_rows)
+                        n_inserted += _insert_updates(cur, agency_id, rows)
                         done.add(f"{d}/{pb_name}")
                         if j % 300 == 0 and j > 0:
                             conn.commit()
@@ -171,20 +185,14 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                 conn.rollback()
             conn.commit()
 
-        new_pb = [
-            p
-            for p in pb_loose
-            if f"{p.parent.name if re.fullmatch(r'\d{8}', p.parent.name) else ''}/{p.name}" not in done
-        ]
+        new_pb = [p for p in pb_loose if f"{_date_dir(p.parent.name)}/{p.name}" not in done]
         if new_pb:
             print(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
-                d = path.parent.name if re.fullmatch(r"\d{8}", path.parent.name) else ""
+                d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
                 rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
-                pg_rows = [(agency_id, *r) for r in rows]
-                psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
-                n_inserted += len(pg_rows)
+                n_inserted += _insert_updates(cur, agency_id, rows)
                 done.add(f"{d}/{path.name}")
                 if j % 500 == 0:
                     conn.commit()
@@ -220,12 +228,10 @@ def ingest_live(agency_id: int, conn) -> int:
     file_name = f"live_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    pg_rows = [(agency_id, *r) for r in rows]
 
     with conn.cursor() as cur:
-        psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
+        n_inserted = _insert_updates(cur, agency_id, rows)
     conn.commit()
 
-    n_inserted = len(pg_rows)
     print(f"Done: {n_inserted} rows inserted (live)")
     return n_inserted
