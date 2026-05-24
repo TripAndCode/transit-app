@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
+import "./i18n";
 import App from "./App";
 import { MapTab } from "./tabs/MapTab";
 import { AskTab } from "./tabs/AskTab";
