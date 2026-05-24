@@ -4,11 +4,12 @@ import type { RouteShapeResponse } from "../../api/types";
 import { DELAY_RAMP } from "../../styles/tokens";
 import { LAYER } from "./useHeatmapLayer";
 
-export const ROUTE_SOURCE = "route-line";
-export const ROUTE_LAYER = "route-line-stroke";
+const ROUTE_SOURCE = "route-line";
+const ROUTE_STOPS_SOURCE = "route-line-stops";
+const ROUTE_LAYER = "route-line-stroke";
 export const ROUTE_STOPS_LAYER = "route-stops";
-export const ROUTE_UNOBS_SOURCE = "route-unobserved";
-export const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
+const ROUTE_UNOBS_SOURCE = "route-unobserved";
+const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
 
 /**
  * Draw the single-route overlay when `shape` is present (polyline + numbered
@@ -30,7 +31,7 @@ export function useRouteOverlay(
       if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
       if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
       if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
-      if (m.getSource(ROUTE_SOURCE + "-stops")) m.removeSource(ROUTE_SOURCE + "-stops");
+      if (m.getSource(ROUTE_STOPS_SOURCE)) m.removeSource(ROUTE_STOPS_SOURCE);
       if (m.getSource(ROUTE_UNOBS_SOURCE)) m.removeSource(ROUTE_UNOBS_SOURCE);
     }
 
@@ -69,7 +70,7 @@ export function useRouteOverlay(
         },
       });
 
-      m.addSource(ROUTE_SOURCE + "-stops", {
+      m.addSource(ROUTE_STOPS_SOURCE, {
         type: "geojson",
         data: {
           type: "FeatureCollection",
@@ -91,7 +92,7 @@ export function useRouteOverlay(
       m.addLayer({
         id: ROUTE_STOPS_LAYER,
         type: "circle",
-        source: ROUTE_SOURCE + "-stops",
+        source: ROUTE_STOPS_SOURCE,
         paint: {
           "circle-radius": [
             "interpolate", ["linear"], ["zoom"],
