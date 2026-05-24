@@ -1,9 +1,33 @@
 {
   "nav": {
+    "overview": "概況",
     "map": "地図",
     "ask": "質問",
     "live": "リアルタイム",
     "reports": "レポート"
+  },
+  "overview": {
+    "eyebrow": "概況 — {{from}} 〜 {{to}}",
+    "hero_avg_prefix": "今週の平均遅延は",
+    "hero_avg_suffix": "分。",
+    "hero_compared": "先週比",
+    "hero_unit_min": "分",
+    "hero_no_baseline": "比較データなし",
+    "hero_samples": "観測 {{count}}件",
+    "section_movers_worse": "最も悪化した系統",
+    "section_movers_better": "最も改善した系統",
+    "streak_worse": "{{count}}週連続悪化",
+    "streak_better": "{{count}}週連続改善",
+    "section_concentration": "遅延の集中度",
+    "concentration_legend": "上位{{count}}系統が遅延全体の {{pct}}% を占める。",
+    "section_peak_hour": "時間帯別の悪化",
+    "peak_hour_callout": "ピーク時間帯は {{hour}}-{{next_hour}} 時 (平均 {{avg}} 分)。",
+    "section_service_split": "サービス日別",
+    "service_split_label": {
+      "平日": "平日",
+      "土日祝": "土日祝"
+    },
+    "empty": "この期間の観測データがありません。期間を広げてください。"
   },
   "header": {
     "app_title": "遅延ダッシュボード",

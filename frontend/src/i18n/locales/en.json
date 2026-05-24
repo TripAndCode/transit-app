@@ -1,9 +1,33 @@
 {
   "nav": {
+    "overview": "Overview",
     "map": "Map",
     "ask": "Ask",
     "live": "Live",
     "reports": "Reports"
+  },
+  "overview": {
+    "eyebrow": "Overview — {{from}} – {{to}}",
+    "hero_avg_prefix": "This week's average delay is",
+    "hero_avg_suffix": " min.",
+    "hero_compared": "vs last week",
+    "hero_unit_min": " min",
+    "hero_no_baseline": "No baseline data",
+    "hero_samples": "{{count}} observations",
+    "section_movers_worse": "Most-worsened routes",
+    "section_movers_better": "Most-improved routes",
+    "streak_worse": "worse {{count}} weeks running",
+    "streak_better": "better {{count}} weeks running",
+    "section_concentration": "Delay concentration",
+    "concentration_legend": "Top {{count}} routes carry {{pct}}% of the delay.",
+    "section_peak_hour": "Worst hour of day",
+    "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
+    "section_service_split": "By service day",
+    "service_split_label": {
+      "平日": "Weekday",
+      "土日祝": "Weekend/Holiday"
+    },
+    "empty": "No observations in this range. Try a wider window."
   },
   "header": {
     "app_title": "Delay Dashboard",
