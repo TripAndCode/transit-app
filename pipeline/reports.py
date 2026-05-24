@@ -446,7 +446,10 @@ async def _route_weekly_history(
             "  AND captured_at::date BETWEEN $2 AND $3 "
             "  AND route_code = ANY($4::text[]) "
             "GROUP BY route_code",
-            agency_id, start, end, list(route_codes),
+            agency_id,
+            start,
+            end,
+            list(route_codes),
         )
         wk_map = {r["route_code"]: float(r["avg_min"]) for r in rows}
         for code in route_codes:
@@ -484,7 +487,8 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
         f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
         "GROUP BY route_code "
         "ORDER BY total_sec DESC NULLS LAST",
-        agency_id, *params,
+        agency_id,
+        *params,
     )
     if not rows:
         return {"top_routes": [], "rest_share_pct": 0.0}
@@ -517,7 +521,8 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
         "FROM updates "
         f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)",
-        agency_id, *params,
+        agency_id,
+        *params,
     )
     if not rows:
         return None
@@ -586,7 +591,8 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float
         "FROM updates "
         f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
         "GROUP BY service_type",
-        agency_id, *params,
+        agency_id,
+        *params,
     )
     return {r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"]}
 
@@ -600,7 +606,8 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
         f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
         "GROUP BY captured_at::date "
         "ORDER BY day ASC",
-        agency_id, *params,
+        agency_id,
+        *params,
     )
     pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
     return pts[-7:]

@@ -1,7 +1,8 @@
 """Tests for the 概況 (Overview) tab endpoint."""
 
-import pytest
 from datetime import date, datetime, time, timedelta, timezone
+
+import pytest
 
 from api.range import RangeCtx
 
@@ -28,9 +29,9 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     """Three observations inside the range -> avg_min reflects them."""
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
-        ("pb1", base, 60),                          # 1.0 min
-        ("pb2", base + timedelta(hours=1), 180),    # 3.0 min
-        ("pb3", base + timedelta(hours=2), 300),    # 5.0 min
+        ("pb1", base, 60),  # 1.0 min
+        ("pb2", base + timedelta(hours=1), 180),  # 3.0 min
+        ("pb3", base + timedelta(hours=2), 300),  # 5.0 min
     ]
     for fname, cap, dep in rows:
         await aconn.execute(
@@ -38,7 +39,10 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R1', 1, $4)",
-            aagency_id, fname, cap, dep,
+            aagency_id,
+            fname,
+            cap,
+            dep,
         )
 
     from pipeline.reports import compute_overview_summary
@@ -63,7 +67,10 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_p', '平日', '10:00', 'R1', 1, $4)",
-            aagency_id, f"pb_prev_{i}", last_week + timedelta(hours=i), dep,
+            aagency_id,
+            f"pb_prev_{i}",
+            last_week + timedelta(hours=i),
+            dep,
         )
     # this week: two rows averaging 4 min
     for i, dep in enumerate([180, 300]):
@@ -72,7 +79,10 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_t', '平日', '10:00', 'R1', 1, $4)",
-            aagency_id, f"pb_cur_{i}", this_week + timedelta(hours=i), dep,
+            aagency_id,
+            f"pb_cur_{i}",
+            this_week + timedelta(hours=i),
+            dep,
         )
 
     from pipeline.reports import compute_overview_summary
@@ -95,7 +105,9 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
         "(agency_id, file_name, captured_at, trip_id, service_type, "
         " scheduled_time, route_code, stop_sequence, dep_delay) "
         "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R1', 1, 120)",
-        aagency_id, "pb_cur", cur,
+        aagency_id,
+        "pb_cur",
+        cur,
     )
 
     from pipeline.reports import compute_overview_summary
@@ -117,14 +129,14 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
     prv = cur - timedelta(days=7)
     # (route, prior_avg_sec, current_avg_sec)
     routes = [
-        ("R_A", 60, 600),   # +9 min (worst)
-        ("R_B", 60, 480),   # +7 min
-        ("R_C", 60, 360),   # +5 min
-        ("R_D", 60, 120),   # +1 min (still worse but not top-3)
-        ("R_E", 600, 60),   # -9 min (best improvement)
-        ("R_F", 480, 60),   # -7 min
-        ("R_G", 360, 60),   # -5 min
-        ("R_H", 120, 60),   # -1 min
+        ("R_A", 60, 600),  # +9 min (worst)
+        ("R_B", 60, 480),  # +7 min
+        ("R_C", 60, 360),  # +5 min
+        ("R_D", 60, 120),  # +1 min (still worse but not top-3)
+        ("R_E", 600, 60),  # -9 min (best improvement)
+        ("R_F", 480, 60),  # -7 min
+        ("R_G", 360, 60),  # -5 min
+        ("R_H", 120, 60),  # -1 min
     ]
     rows_to_insert = []
     for code, prior_dep, cur_dep in routes:
@@ -136,7 +148,11 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
-            aagency_id, fname, when, code, dep,
+            aagency_id,
+            fname,
+            when,
+            code,
+            dep,
         )
 
     from pipeline.reports import compute_overview_summary
@@ -162,7 +178,10 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R_STR', 1, $4)",
-            aagency_id, f"pb_str_{weeks_back}", when, dep,
+            aagency_id,
+            f"pb_str_{weeks_back}",
+            when,
+            dep,
         )
 
     from pipeline.reports import compute_overview_summary
@@ -194,7 +213,11 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
                 "(agency_id, file_name, captured_at, trip_id, service_type, "
                 " scheduled_time, route_code, stop_sequence, dep_delay) "
                 "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
-                aagency_id, f"cn_{code}_{i}", base + timedelta(minutes=i), code, dep,
+                aagency_id,
+                f"cn_{code}_{i}",
+                base + timedelta(minutes=i),
+                code,
+                dep,
             )
 
     from pipeline.reports import compute_overview_summary
@@ -226,7 +249,12 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_pk_' || $4, '平日', ($5::text)::time, 'R_P', 1, $6)",
-            aagency_id, f"pk_{i}", base + timedelta(minutes=i), str(i), sched, dep,
+            aagency_id,
+            f"pk_{i}",
+            base + timedelta(minutes=i),
+            str(i),
+            sched,
+            dep,
         )
 
     from pipeline.reports import compute_overview_summary
@@ -254,7 +282,12 @@ async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_sv_' || $4, $5, '10:00', 'R_S', 1, $6)",
-            aagency_id, f"sv_{i}", base + timedelta(days=i), str(i), svc, 60 * (i + 1),
+            aagency_id,
+            f"sv_{i}",
+            base + timedelta(days=i),
+            str(i),
+            svc,
+            60 * (i + 1),
         )
 
     from pipeline.reports import compute_overview_summary
@@ -278,7 +311,11 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
             "VALUES ($1, $2, $3, 'trip_full_' || $4, '平日', '10:00', 'R_F', 1, $5)",
-            aagency_id, f"full_{i}", base + timedelta(hours=i), str(i), 60 + i * 30,
+            aagency_id,
+            f"full_{i}",
+            base + timedelta(hours=i),
+            str(i),
+            60 + i * 30,
         )
 
     r = await client.get(f"/api/{aagency_id}/overview/summary?from=2026-05-18&to=2026-05-24")
