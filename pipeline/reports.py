@@ -578,6 +578,34 @@ async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     }
 
 
+async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float]:
+    """avg_min per service_type (typically '平日' / '土日祝')."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    rows = await conn.fetch(
+        "SELECT service_type, AVG(dep_delay)/60.0::numeric AS avg_min "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        "GROUP BY service_type",
+        agency_id, *params,
+    )
+    return {r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"]}
+
+
+async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
+    """Up to 7 daily avg_min points (oldest first) inside ``ctx``."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    rows = await conn.fetch(
+        "SELECT captured_at::date AS day, AVG(dep_delay)/60.0::numeric AS avg_min "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        "GROUP BY captured_at::date "
+        "ORDER BY day ASC",
+        agency_id, *params,
+    )
+    pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
+    return pts[-7:]
+
+
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,
@@ -602,6 +630,8 @@ async def compute_overview_summary(
     movers = await _movers(agency_id, ctx, conn)
     concentration = await _concentration(agency_id, ctx, conn)
     peak = await _peak_hour(agency_id, ctx, conn)
+    service_split = await _service_split(agency_id, ctx, conn)
+    sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
 
     return {
         "headline": {
@@ -614,6 +644,6 @@ async def compute_overview_summary(
         "movers": movers,
         "concentration": concentration,
         "peak_hour": peak,
-        "service_split": {},
-        "sparkline_points": [],
+        "service_split": service_split,
+        "sparkline_points": sparkline_points,
     }
