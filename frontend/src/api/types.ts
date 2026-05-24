@@ -132,3 +132,51 @@ export type Route = {
   route_code: string | null;
   trip_headsigns: string[];
 };
+
+export type OverviewHeadline = {
+  avg_min: number | null;
+  baseline_avg_min: number | null;
+  delta_min: number | null;
+  delta_pct: number | null;
+  samples: number;
+};
+
+export type OverviewMover = {
+  route_code: string;
+  route_short_name: string | null;
+  delta_min: number;
+  delta_pct: number;
+  streak_weeks: number;
+  sparkline_points: number[];
+};
+
+export type OverviewMovers = {
+  worse: OverviewMover[];
+  better: OverviewMover[];
+};
+
+export type OverviewConcentrationTopRoute = {
+  route_code: string;
+  route_short_name: string | null;
+  share_pct: number;
+};
+
+export type OverviewConcentration = {
+  top_routes: OverviewConcentrationTopRoute[];
+  rest_share_pct: number;
+};
+
+export type OverviewPeakHour = {
+  by_hour: (number | null)[];
+  peak_hour: number;
+  peak_avg_min: number;
+};
+
+export type OverviewSummary = {
+  headline: OverviewHeadline;
+  movers: OverviewMovers;
+  concentration: OverviewConcentration;
+  peak_hour: OverviewPeakHour | null;
+  service_split: Record<string, number>;
+  sparkline_points: number[];
+};
