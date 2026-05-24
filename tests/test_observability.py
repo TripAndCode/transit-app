@@ -192,3 +192,34 @@ async def test_access_log_renders_status_question_mark_on_early_failure(caplog):
     # status=? depending on Starlette version.
     msg = access[-1].getMessage()
     assert "status=500" in msg or "status=?" in msg
+
+
+@pytest.mark.asyncio
+async def test_access_log_includes_user_id_when_authenticated(caplog):
+    """request.state.user.user_id must surface in the access log.
+    Starlette stores state writes in scope['state'] as a dict — pin the
+    middleware's user_id resolution against that."""
+    from types import SimpleNamespace
+
+    configure()
+    logging.getLogger().addHandler(caplog.handler)
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def attach_user(request, call_next):
+        request.state.user = SimpleNamespace(user_id=42)
+        return await call_next(request)
+
+    @app.get("/me")
+    async def me():
+        return {"ok": True}
+
+    app.add_middleware(RequestLogMiddleware)
+
+    with caplog.at_level(logging.INFO, logger="api.access"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.get("/me")
+
+    access = [r for r in caplog.records if r.name == "api.access"]
+    assert len(access) == 1
+    assert "user_id=42" in access[0].getMessage()
