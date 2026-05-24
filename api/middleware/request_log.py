@@ -45,12 +45,19 @@ def _resolve_request_id(headers: list[tuple[bytes, bytes]]) -> str:
 
 def _safe_user_id(scope) -> str:
     """Read request.state.user.user_id without importing FastAPI types.
+
+    Starlette stores `request.state.<attr>` writes as keys in the
+    `scope["state"]` dict, not as attributes on a State object — so a
+    naive `getattr(scope["state"], "user", None)` always returns None.
+    Handle the dict case explicitly.
+
     Returns '-' on any missing attribute so the format string is always
-    resolvable."""
+    resolvable.
+    """
     state = scope.get("state")
     if not state:
         return "-"
-    user = getattr(state, "user", None)
+    user = state.get("user") if isinstance(state, dict) else getattr(state, "user", None)
     if user is None:
         return "-"
     uid = getattr(user, "user_id", None)
