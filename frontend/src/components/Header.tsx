@@ -77,7 +77,7 @@ export function Header() {
               borderRadius: 4,
             }}
           >
-            {t("header.new_agency")}
+            {`+ ${t("header.new_agency")}`}
           </button>
         )}
         <button

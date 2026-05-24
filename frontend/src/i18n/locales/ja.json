@@ -8,7 +8,7 @@
   "header": {
     "app_title": "遅延ダッシュボード",
     "app_tagline": "リアルタイム × 時刻表",
-    "new_agency": "+ 新規事業者",
+    "new_agency": "新規事業者",
     "settings_aria": "設定",
     "agency_picker_empty": "事業者が登録されていません",
     "agency_picker_placeholder": "事業者を選択",
@@ -18,7 +18,7 @@
     "settings_api_key_hint": "通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。"
   },
   "common": {
-    "apply": "✓ 適用",
+    "apply": "適用",
     "cancel": "キャンセル",
     "close": "閉じる",
     "collapse": "折りたたみ",
@@ -34,7 +34,7 @@
     "on_time": "定刻",
     "optional_paren": "(オプション)",
     "reload": "再読み込み",
-    "reset": "↺ リセット",
+    "reset": "リセット",
     "retry": "再試行",
     "route_code_fallback": "系統{{code}}",
     "save": "保存",
@@ -131,9 +131,9 @@
     },
     "routes": {
       "label": "系統",
-      "count_suffix": "系統",
+      "count_suffix": "{{count}}系統",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count": "系統",
+      "variant_count": "({{count}}系統)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回ingest中の場合は数分後に再度お試しください。"
     }
