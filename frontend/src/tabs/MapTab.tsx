@@ -13,84 +13,13 @@ import { MapLegend, type SeverityKey } from "../components/MapLegend";
 import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
+import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
 
-const SOURCE = "delays";
-const LAYER = "delay-circles";       // crisp inner dot
-const HALO_LAYER = "delay-halos";    // soft outer glow, drawn beneath the dot
 const ROUTE_SOURCE = "route-line";
 const ROUTE_LAYER = "route-line-stroke";
 const ROUTE_STOPS_LAYER = "route-stops";
 const ROUTE_UNOBS_SOURCE = "route-unobserved";
 const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
-
-/**
- * Build the MapLibre filter expression that selects circles falling into a
- * single severity band. Used by both the dot and halo opacity helpers so
- * adding or moving a band means editing one place.
- */
-function severityMatchExpr(focused: SeverityKey): maplibregl.ExpressionSpecification {
-  switch (focused) {
-    case "ok":
-      return ["<", ["get", "avg_delay_min"], 2];
-    case "mild":
-      return ["all", [">=", ["get", "avg_delay_min"], 2], ["<", ["get", "avg_delay_min"], 5]];
-    case "moderate":
-      return ["all", [">=", ["get", "avg_delay_min"], 5], ["<", ["get", "avg_delay_min"], 10]];
-    case "severe":
-      return [">=", ["get", "avg_delay_min"], 10];
-  }
-}
-
-/**
- * Severity-floored opacity for the inner crisp dot. When a legend swatch is
- * focused, circles outside that band go to 0 (fully invisible) so the
- * remaining ones stand alone.
- */
-function buildCircleOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.7,
-      [">=", ["get", "avg_delay_min"], 5], 0.55,
-      0.0,
-    ],
-    [
-      "interpolate", ["linear"], ["get", "samples"],
-      1, 0.35,
-      50, 0.7,
-      500, 0.85,
-    ],
-  ];
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
-}
-
-/**
- * Halo opacity: lower base values than the dot so the halo accents rather
- * than dominates. Severe stops keep a slightly stronger glow so they read
- * as priority; everything else stays around 0.10 to avoid overlapping
- * halos forming one solid color across dense city blocks.
- */
-function buildHaloOpacityExpr(focused: SeverityKey | null): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.20,
-      [">=", ["get", "avg_delay_min"], 5], 0.14,
-      0.0,
-    ],
-    [
-      "interpolate", ["exponential", 1.4], ["get", "samples"],
-      10, 0.06,
-      1000, 0.10,
-      50000, 0.16,
-    ],
-  ];
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
-}
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -103,7 +32,6 @@ export function MapTab() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const fittedRef = useRef(false);
   const popupRef = useRef<Popup | null>(null);
   const styleLoadedRef = useRef(false);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
@@ -235,114 +163,7 @@ export function MapTab() {
     };
   }, []);
 
-  // sync data into source/layer
-  useEffect(() => {
-    const m = mapRef.current;
-    if (!m || !data) return;
-    const filteredSnapshot = showSingleSampleStops
-      ? data
-      : { ...data, features: data.features.filter((f: any) => (f.properties?.samples ?? 0) >= 2) };
-
-    function applyData() {
-      if (!m) return;
-      popupRef.current?.remove();
-      popupRef.current = null;
-
-      if (m.getLayer(LAYER)) m.removeLayer(LAYER);
-      if (m.getLayer(HALO_LAYER)) m.removeLayer(HALO_LAYER);
-      if (m.getSource(SOURCE)) m.removeSource(SOURCE);
-
-      // generateId lets the hover feature-state attach to each circle by index.
-      m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
-
-      const colorExpr: maplibregl.ExpressionSpecification = [
-        "step",
-        ["get", "avg_delay_min"],
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
-      ];
-
-      // Sample-count distribution spans 4 orders of magnitude (10..50k+),
-      // so radii use exponential-base interpolation: small terminals shrink
-      // visibly while major hubs grow without flooring everything mid-range.
-      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 6,
-        100, 10,
-        1000, 16,
-        10000, 26,
-        50000, 36,
-      ];
-      const DOT_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 4,
-        100, 6,
-        1000, 7,
-        10000, 12,
-        50000, 18,
-      ];
-
-      // Soft outer halo — accent only, not flood. Low opacity so overlapping
-      // halos in dense areas don't form one solid color blanket.
-      m.addLayer({
-        id: HALO_LAYER,
-        type: "circle",
-        source: SOURCE,
-        paint: {
-          "circle-radius": HALO_RADIUS,
-          "circle-color": colorExpr,
-          "circle-blur": 0.5,
-          "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
-          "circle-pitch-alignment": "map",
-        },
-      });
-
-      // Crisp inner dot — no stroke (hover only), severity color.
-      m.addLayer({
-        id: LAYER,
-        type: "circle",
-        source: SOURCE,
-        paint: {
-          "circle-radius": DOT_RADIUS,
-          "circle-color": colorExpr,
-          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
-          "circle-stroke-width": [
-            "case", ["boolean", ["feature-state", "hover"], false], 2, 1,
-          ],
-          "circle-stroke-color": [
-            "case", ["boolean", ["feature-state", "hover"], false],
-            "#ffffff", "rgba(0,0,0,0.35)",
-          ],
-        },
-      });
-
-      // Fit bounds only on the first data load — subsequent filter changes
-      // keep the user's current pan/zoom so the camera doesn't fight them.
-      if (!fittedRef.current) {
-        if (filteredSnapshot.features.length === 1) {
-          const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
-          m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
-          fittedRef.current = true;
-        } else if (filteredSnapshot.features.length > 1) {
-          let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-          for (const f of filteredSnapshot.features) {
-            const [lon, lat] = f.geometry.coordinates;
-            if (lon < minLon) minLon = lon;
-            if (lon > maxLon) maxLon = lon;
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
-          }
-          m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
-          fittedRef.current = true;
-        }
-      }
-    }
-
-    if (styleLoadedRef.current) applyData();
-    else m.once("load", applyData);
-  }, [data, showSingleSampleStops, focusedSeverity]);
+  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity);
 
   // Single-route overlay: thin neutral polyline + small numbered stop markers.
   // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
