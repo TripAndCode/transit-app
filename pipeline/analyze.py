@@ -1,7 +1,9 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
-Called by `gtfs_pipeline.py analyze` after ingestion. All tables are written
-via INSERT … ON CONFLICT DO UPDATE so the function is safe to re-run.
+Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
+agency's five agg_* tables and rewrites them from freshly computed
+SELECTs in one transaction, so re-running is idempotent and a crash
+mid-run rolls back to the prior snapshot.
 
 Aggregation tables produced:
 - agg_route_stats   — overall delay stats per route/service_type
