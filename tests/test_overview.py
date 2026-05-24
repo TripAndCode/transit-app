@@ -240,3 +240,28 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
     assert pk["by_hour"][8] == pytest.approx(9.0, abs=0.1)
     assert pk["by_hour"][6] == pytest.approx(1.0, abs=0.1)
     assert pk["by_hour"][3] is None
+
+
+@pytest.mark.asyncio
+async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
+    """7 daily inserts alternating service_type; service_split has both,
+    sparkline returns 7 points oldest-first."""
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    for i in range(7):
+        svc = "平日" if i % 2 == 0 else "土日祝"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_sv_' || $4, $5, '10:00', 'R_S', 1, $6)",
+            aagency_id, f"sv_{i}", base + timedelta(days=i), str(i), svc, 60 * (i + 1),
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    ss = out["service_split"]
+    assert set(ss.keys()) == {"平日", "土日祝"}
+    assert ss["平日"] > 0
+    assert len(out["sparkline_points"]) == 7
