@@ -5,7 +5,6 @@ import { useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { getMapStyle } from "../styles/mapStyle";
-import { DELAY_RAMP } from "../styles/tokens";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
@@ -14,12 +13,7 @@ import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
-
-const ROUTE_SOURCE = "route-line";
-const ROUTE_LAYER = "route-line-stroke";
-const ROUTE_STOPS_LAYER = "route-stops";
-const ROUTE_UNOBS_SOURCE = "route-unobserved";
-const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
+import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -165,167 +159,7 @@ export function MapTab() {
 
   useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity);
 
-  // Single-route overlay: thin neutral polyline + small numbered stop markers.
-  // Drawn on top of the heatmap layer; cleaned up when the focus is lifted.
-  // (Click handlers for both layers are registered once in the init effect
-  // above so they don't accumulate on filter changes.)
-  useEffect(() => {
-    const m = mapRef.current;
-    if (!m) return;
-
-    function clearOverlay() {
-      if (!m) return;
-      if (m.getLayer(ROUTE_UNOBS_LAYER)) m.removeLayer(ROUTE_UNOBS_LAYER);
-      if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
-      if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
-      if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
-      if (m.getSource(ROUTE_SOURCE + "-stops")) m.removeSource(ROUTE_SOURCE + "-stops");
-      if (m.getSource(ROUTE_UNOBS_SOURCE)) m.removeSource(ROUTE_UNOBS_SOURCE);
-    }
-
-    function drawOverlay() {
-      if (!m || !shape || shape.stops.length < 2) {
-        clearOverlay();
-        // In route mode without enough data, also keep heatmap visible.
-        if (m && m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
-        return;
-      }
-      clearOverlay();
-      const geomCoords = shape.geometry?.coordinates;
-      const coords: [number, number][] =
-        geomCoords && geomCoords.length >= 2
-          ? (geomCoords as [number, number][])
-          : shape.stops.map((s) => [s.lon, s.lat]);
-
-      // Route mode: hide the heatmap (it would show isolated stops without
-      // the connecting line) and use the route's stop sequence directly,
-      // colored by per-stop avg delay.
-      if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "none");
-
-      m.addSource(ROUTE_SOURCE, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: coords },
-          properties: {},
-        },
-      });
-      m.addLayer({
-        id: ROUTE_LAYER,
-        type: "line",
-        source: ROUTE_SOURCE,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#5b6cad",
-          // Bolder when zoomed in so it stays visible at street-level.
-          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
-          "line-opacity": 0.7,
-        },
-      });
-
-      m.addSource(ROUTE_SOURCE + "-stops", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: shape.stops.map((s) => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-            properties: {
-              stop_sequence: s.stop_sequence,
-              stop_name: s.stop_name,
-              stop_id: s.stop_id ?? null,
-              stop_code: s.stop_code ?? null,
-              platform_code: s.platform_code ?? null,
-              avg_min: s.avg_min ?? 0,
-              samples: s.samples,
-            },
-          })),
-        },
-      });
-      m.addLayer({
-        id: ROUTE_STOPS_LAYER,
-        type: "circle",
-        source: ROUTE_SOURCE + "-stops",
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10, 4,
-            14, 7,
-            17, 11,
-          ],
-          // Color by avg_min using the same severity ramp as the heatmap.
-          "circle-color": [
-            "step",
-            ["get", "avg_min"],
-            DELAY_RAMP.ok,
-            2, DELAY_RAMP.mild,
-            5, DELAY_RAMP.moderate,
-            10, DELAY_RAMP.severe,
-          ],
-          "circle-opacity": 0.95,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
-
-      // Unobserved stops on the chosen shape — hollow grey rings so the
-      // route topology is visible even where no delay data has accrued.
-      const unobserved = shape.unobserved_stops ?? [];
-      if (unobserved.length > 0) {
-        m.addSource(ROUTE_UNOBS_SOURCE, {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: unobserved.map((s) => ({
-              type: "Feature",
-              geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-              properties: {
-                stop_sequence: s.stop_sequence,
-                stop_name: s.stop_name,
-                stop_id: s.stop_id ?? null,
-                stop_code: s.stop_code ?? null,
-                platform_code: s.platform_code ?? null,
-              },
-            })),
-          },
-        });
-        m.addLayer({
-          id: ROUTE_UNOBS_LAYER,
-          type: "circle",
-          source: ROUTE_UNOBS_SOURCE,
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
-            "circle-color": "rgba(255,255,255,0.0)",
-            "circle-stroke-width": 1,
-            "circle-stroke-color": "rgba(0,0,0,0.35)",
-          },
-        });
-      }
-
-      // Fit to the route on focus.
-      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-      for (const [lon, lat] of coords) {
-        if (lon < minLon) minLon = lon;
-        if (lon > maxLon) maxLon = lon;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-      }
-      m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
-    }
-
-    if (!shape) {
-      // No focused route — strip overlay and bring the heatmap back.
-      if (styleLoadedRef.current) {
-        clearOverlay();
-        if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
-      }
-      return;
-    }
-    if (styleLoadedRef.current) drawOverlay();
-    else m.once("load", drawOverlay);
-  }, [shape]);
+  useRouteOverlay(mapRef, styleLoadedRef, shape);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
