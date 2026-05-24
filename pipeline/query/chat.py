@@ -5,6 +5,20 @@ Groq with the v2 tool surface and either dispatches a tool call to
 Postgres or returns the model's free-form refusal text. Out-of-scope
 questions (weather, fares, etc.) come back as friendly natural-language
 suggestions instead of failing.
+
+Localisation
+------------
+The orchestrator threads a ``locale`` (``"ja"`` or ``"en"``) from the
+HTTP layer through to:
+  * the per-call system addendum that instructs the model which language
+    to reply in (the static :data:`SYSTEM_PROMPT` stays JP because that
+    is the operator-facing instruction set; the addendum overrides the
+    output language without re-translating the rules);
+  * the user-message prelude that scopes the query to a date range, DOW
+    and time band;
+  * fallback / error strings rendered when the model errors or refuses;
+  * the downstream :func:`dispatch` call which threads the same locale
+    through every tool handler and the result summary.
 """
 
 from __future__ import annotations
@@ -15,10 +29,49 @@ import logging
 import os
 
 from api.range import RangeCtx
-from pipeline.query.tools import SYSTEM_PROMPT, TOOLS, ToolResult, dispatch, render_tool_result
+from pipeline.query.tools import (
+    LOCALE_LANGUAGE_NAME,
+    SYSTEM_PROMPT,
+    TOOLS,
+    ToolResult,
+    _summary,
+    dispatch,
+    render_tool_result,
+)
 
 _log = logging.getLogger(__name__)
 _groq_client = None
+
+# Extra per-call localisation strings. Keyed identically to the table in
+# tools.py — they live here only because they're chat-flow specific
+# (user prelude, refusal placeholder, error wrappers) and don't belong
+# on the tool surface.
+_CHAT_STRINGS = {
+    ("locale_instruction", "ja"): (
+        "Reply in 日本語 unless the user explicitly asks in another language. "
+        "Keep system rules from the previous message intact."
+    ),
+    ("locale_instruction", "en"): (
+        "Reply in English unless the user explicitly asks in another language. "
+        "Keep system rules from the previous message intact."
+    ),
+    ("user_prelude", "ja"): "期間: {from_date}〜{to_date} DOW={dow} time_band={time_band}\n質問: {question}",
+    ("user_prelude", "en"): "Range: {from_date} to {to_date} DOW={dow} time_band={time_band}\nQuestion: {question}",
+    ("service_unreachable", "ja"): "AI サービスに接続できませんでした。後ほど再試行してください。",
+    ("service_unreachable", "en"): "Could not reach the AI service. Please retry later.",
+    ("refusal_fallback", "ja"): "ご質問の内容を理解できませんでした。",
+    ("refusal_fallback", "en"): "I couldn't understand your question.",
+    ("tool_error", "ja"): "ツール {name} の実行中にエラーが発生しました: {exc}",
+    ("tool_error", "en"): "Error while running tool {name}: {exc}",
+}
+
+
+def _chat_str(template: str, locale: str, **vars) -> str:
+    """Pick a chat-flow string from :data:`_CHAT_STRINGS`, JP-fallback."""
+    if locale not in ("ja", "en"):
+        locale = "ja"
+    tpl = _CHAT_STRINGS.get((template, locale)) or _CHAT_STRINGS.get((template, "ja"), template)
+    return tpl.format(**vars) if vars else tpl
 
 
 def _get_client():
@@ -42,15 +95,28 @@ async def chat_with_tools(
     conn,
     agency_id: int,
     model: str = "llama-3.3-70b-versatile",
+    locale: str = "ja",
 ) -> dict:
     """Run one round-trip Ask flow.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
     structured payload the frontend can use for richer rendering (charts,
-    tables) when present.
+    tables) when present. ``locale`` ∈ {``"ja"``, ``"en"``} chooses the
+    user-facing language across the entire flow.
     """
     client = _get_client()
+    language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
+    locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    user_prelude = _chat_str(
+        "user_prelude",
+        locale,
+        from_date=ctx.from_date,
+        to_date=ctx.to_date,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        question=question,
+    )
 
     def _sync():
         try:
@@ -58,14 +124,8 @@ async def chat_with_tools(
                 model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"期間: {ctx.from_date}〜{ctx.to_date} "
-                            f"DOW={ctx.dow} time_band={ctx.time_band}\n"
-                            f"質問: {question}"
-                        ),
-                    },
+                    {"role": "system", "content": locale_addendum},
+                    {"role": "user", "content": user_prelude},
                 ],
                 tools=TOOLS,
                 tool_choice="auto",
@@ -79,7 +139,7 @@ async def chat_with_tools(
     msg = await asyncio.to_thread(_sync)
     if msg is None:
         return {
-            "answer": "AI サービスに接続できませんでした。後ほど再試行してください。",
+            "answer": _chat_str("service_unreachable", locale),
             "tool_call": None,
             "result": None,
         }
@@ -87,7 +147,7 @@ async def chat_with_tools(
     tool_calls = getattr(msg, "tool_calls", None)
     if not tool_calls:
         # Out-of-scope path: model returned plain text (refusal + suggestions).
-        text = (msg.content or "").strip() or "ご質問の内容を理解できませんでした。"
+        text = (msg.content or "").strip() or _chat_str("refusal_fallback", locale)
         return {"answer": text, "tool_call": None, "result": None}
 
     if len(tool_calls) > 1:
@@ -106,17 +166,17 @@ async def chat_with_tools(
         args = {}
 
     try:
-        result: ToolResult = await dispatch(name, args, ctx, conn, agency_id)
+        result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
     except Exception as exc:
         _log.exception("Tool %s failed", name)
         return {
-            "answer": f"ツール {name} の実行中にエラーが発生しました: {exc}",
+            "answer": _chat_str("tool_error", locale, name=name, exc=exc),
             "tool_call": {"name": name, "arguments": args},
             "result": None,
         }
 
     return {
-        "answer": render_tool_result(result),
+        "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
     }
@@ -126,9 +186,15 @@ def _result_to_dict(r: ToolResult) -> dict:
     """Serialize a ToolResult for the JSON response."""
     return {
         "kind": r.kind,
-        "summary_jp": r.summary_jp,
+        "summary": r.summary,
         "rows": r.rows,
         "columns": r.columns,
         "series": r.series,
         "pairs": r.pairs,
     }
+
+
+# Re-export the locale lookup helper so tests / shared code can use the
+# same fallback semantics without reaching into the tools module's
+# private namespace.
+__all__ = ["chat_with_tools", "_summary"]

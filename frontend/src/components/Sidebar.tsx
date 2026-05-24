@@ -1,17 +1,19 @@
 import { NavLink, useParams } from "react-router-dom";
 import { Map as MapIcon, MessageSquare, Activity, BarChart3, type LucideIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
-type Item = { to: string; label: string; Icon: LucideIcon };
+type Item = { to: string; labelKey: string; Icon: LucideIcon };
 
 const ITEMS: Item[] = [
-  { to: "map", label: "地図", Icon: MapIcon },
-  { to: "ask", label: "質問", Icon: MessageSquare },
-  { to: "live", label: "リアルタイム", Icon: Activity },
-  { to: "reports", label: "レポート", Icon: BarChart3 },
+  { to: "map", labelKey: "nav.map", Icon: MapIcon },
+  { to: "ask", labelKey: "nav.ask", Icon: MessageSquare },
+  { to: "live", labelKey: "nav.live", Icon: Activity },
+  { to: "reports", labelKey: "nav.reports", Icon: BarChart3 },
 ];
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   // Carry only the filter dimensions across tab switches — building from
   // ctx (not raw location.search) avoids dragging unrelated query keys
@@ -49,7 +51,7 @@ export function Sidebar() {
             })}
           >
             <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" />
-            <span>{item.label}</span>
+            <span>{t(item.labelKey)}</span>
           </NavLink>
         ))}
       </nav>

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
 import type { TrendDay } from "../../api/types";
 
 type Props = { days: TrendDay[]; height?: number };
 
 export function DailyChart({ days, height = 240 }: Props) {
+  const { t } = useTranslation();
   const [hover, setHover] = useState<number | null>(null);
 
   // If the data shrinks (filter narrowed), drop a stale hover index so the
@@ -33,7 +35,7 @@ export function DailyChart({ days, height = 240 }: Props) {
   if (!days.length) {
     return (
       <div style={{ padding: 24, color: "var(--text-tertiary)", textAlign: "center" }}>
-        期間内にデータがありません。
+        {t("reports.daily.empty")}
       </div>
     );
   }
@@ -47,7 +49,7 @@ export function DailyChart({ days, height = 240 }: Props) {
 
   return (
     <div style={{ position: "relative", width: "100%", overflowX: "auto" }}>
-      <svg width={W} height={H} role="img" aria-label="日次平均遅延チャート" style={{ display: "block" }}>
+      <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
         {/* Y axis grid */}
         {[0.25, 0.5, 0.75].map((f) => {
           const y = padT + innerH * 0.35 + (1 - f) * innerH * 0.65;
@@ -138,15 +140,18 @@ export function DailyChart({ days, height = 240 }: Props) {
           }}
         >
           <div>
-            <strong>{days[hover].date}</strong>: 平均{(days[hover].avg_min ?? 0).toFixed(2)}分 /{" "}
-            {(days[hover].samples ?? 0).toLocaleString()}件
+            <strong>{days[hover].date}</strong>:{" "}
+            {t("reports.daily.tooltip_metrics", {
+              min: (days[hover].avg_min ?? 0).toFixed(2),
+              count: (days[hover].samples ?? 0).toLocaleString(),
+            })}
           </div>
           {days[hover].top_offenders?.length > 0 && (
             <div style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-              悪化:{" "}
+              {t("reports.daily.worst_label")}{" "}
               {days[hover].top_offenders
                 .slice(0, 3)
-                .map((o) => `系統${o.route_code}(${o.avg_min.toFixed(1)}分)`)
+                .map((o) => t("reports.daily.offender", { code: o.route_code, min: o.avg_min.toFixed(1) }))
                 .join(", ")}
             </div>
           )}

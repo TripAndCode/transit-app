@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn
+from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
@@ -85,16 +85,18 @@ async def ask(
     body: AskRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
 ):
-    """Answer a Japanese natural-language question via tool-use.
+    """Answer a natural-language question via tool-use.
 
     Cross-origin POSTs are rejected by ``csrf_guard`` before the LLM call
     fires, so an attacker can't burn the operator's Groq quota or extract
-    answers through a victim's session cookie.
+    answers through a victim's session cookie. The Accept-Language header
+    picks the response locale (defaults to JP).
     """
     csrf_guard(request)
     ctx = _resolve_ctx(body.ctx)
-    payload = await chat_with_tools(body.question, ctx, conn, agency_id, model=body.model)
+    payload = await chat_with_tools(body.question, ctx, conn, agency_id, model=body.model, locale=locale)
     return AskResponse(
         answer=payload["answer"],
         tool_call=payload["tool_call"],

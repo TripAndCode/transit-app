@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRangeContext, type TimeBand } from "../../api/rangeContext";
 import { DELAY_RAMP, delayColor } from "../../styles/tokens";
 
@@ -36,6 +37,7 @@ function bandFor(hour: number): TimeBand | null {
  * delays cluster (rush hour, evening, etc.).
  */
 export function HourlyHeatmap({ cells, height = 280 }: Props) {
+  const { t } = useTranslation();
   const [hover, setHover] = useState<HourlyCell | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useRangeContext();
@@ -54,7 +56,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   if (dates.length === 0) {
     return (
       <div style={{ padding: 24, color: "var(--text-tertiary)", textAlign: "center" }}>
-        時間帯別データがありません。
+        {t("reports.heatmap.empty")}
       </div>
     );
   }
@@ -70,14 +72,14 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   return (
     <div style={{ position: "relative", width: "100%", marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 13 }}>時間帯ヒートマップ</strong>
+        <strong style={{ fontSize: 13 }}>{t("reports.heatmap.title")}</strong>
         <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-          縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み
+          {t("reports.heatmap.subtitle")}
         </span>
         <button
           type="button"
           onClick={() => setShowLegend((v) => !v)}
-          aria-label="凡例を表示"
+          aria-label={t("reports.heatmap.legend_aria")}
           style={{
             background: "transparent",
             border: "1px solid var(--border-subtle)",
@@ -106,19 +108,19 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               borderRadius: 4,
             }}
           >
-            <span>遅延:</span>
-            <Swatch color={DELAY_RAMP.ok} label="<2分" />
+            <span>{t("reports.heatmap.delay_label")}</span>
+            <Swatch color={DELAY_RAMP.ok} label={t("reports.heatmap.lt_2")} />
             <Swatch color={DELAY_RAMP.mild} label="2-5" />
             <Swatch color={DELAY_RAMP.moderate} label="5-10" />
             <Swatch color={DELAY_RAMP.severe} label=">10" />
             <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>
-              ・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付
+              {t("reports.heatmap.legend_explainer")}
             </span>
           </div>
         )}
       </div>
       <div style={{ overflowX: "auto" }}>
-      <svg width={padL + innerW + 8} height={height} role="img" aria-label="時間帯別遅延ヒートマップ">
+      <svg width={padL + innerW + 8} height={height} role="img" aria-label={t("reports.heatmap.svg_aria")}>
         {Array.from({ length: 24 }, (_, h) => (
           <text
             key={`h-${h}`}
@@ -200,8 +202,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             pointerEvents: "none",
           }}
         >
-          {hover.date} {String(hover.hour).padStart(2, "0")}時 ・ 平均
-          {(hover.avg_min ?? 0).toFixed(2)}分 ・ {hover.samples}件
+          {hover.date} {t("reports.heatmap.tooltip_hour", { hour: String(hover.hour).padStart(2, "0") })}
+          {" "}
+          {t("reports.heatmap.tooltip_metrics", { min: (hover.avg_min ?? 0).toFixed(2), count: hover.samples })}
         </div>
       )}
     </div>

@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
@@ -12,18 +14,8 @@ import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
 import { ReportTable } from "../components/ReportTable";
 
-const REPORT_LABEL: Record<string, string> = {
-  ranking: "遅延ランキング",
-  ranking_best: "定時運行ランキング",
-  on_time: "定時率",
-  worst_5min: "5分以上遅延",
-  trend: "トレンド",
-  compare_ranking: "比較ランキング",
-  dow_weekday: "平日傾向",
-  dow_weekend: "週末傾向",
-};
-
 export function ReportsTab() {
+  const { t } = useTranslation();
   const { agencyId, reportType } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
@@ -35,26 +27,40 @@ export function ReportsTab() {
   const list = useReports(id);
   const detail = useReport(id, reportType ?? null, ctx);
 
+  const reportLabels: Record<string, string> = useMemo(
+    () => ({
+      ranking: t("reports.type.ranking"),
+      ranking_best: t("reports.type.ranking_best"),
+      on_time: t("reports.type.on_time"),
+      worst_5min: t("reports.type.worst_5min"),
+      trend: t("reports.type.trend"),
+      compare_ranking: t("reports.type.compare_ranking"),
+      dow_weekday: t("reports.type.dow_weekday"),
+      dow_weekend: t("reports.type.dow_weekend"),
+    }),
+    [t],
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TabFilterBar />
       <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          レポート一覧
+          {t("reports.list_title")}
           <InsightHint
-            title="レポートの読み分け"
+            title={t("reports.hint.title")}
             body={
               <>
-                <strong>ランキング系</strong>：慢性的に遅い／定時運行が良い系統を特定。
+                <strong>{t("reports.hint.ranking_strong")}</strong>{t("reports.hint.ranking_body")}
                 <br /><br />
-                <strong>トレンド</strong>：時間経過で改善・悪化しているか。右肩上がりなら遅延が拡大中。
+                <strong>{t("reports.hint.trend_strong")}</strong>{t("reports.hint.trend_body")}
                 <br /><br />
-                <strong>時間帯ヒートマップ</strong>：1 日のうちのピーク時間。朝夕の通勤帯と昼間の差を比較。
+                <strong>{t("reports.hint.heatmap_strong")}</strong>{t("reports.hint.heatmap_body")}
                 <br /><br />
-                <strong>平日 / 週末傾向</strong>：曜日特性。週末便の方が定時率が高い／低いといった傾向を抽出。
+                <strong>{t("reports.hint.dow_strong")}</strong>{t("reports.hint.dow_body")}
                 <br /><br />
-                CSV エクスポートで Excel / BI ツールに渡せます。
+                {t("reports.hint.csv")}
               </>
             }
           />
@@ -65,8 +71,8 @@ export function ReportsTab() {
         ))}
         {list.data && list.data.length === 0 && (
           <EmptyState
-            title="まだレポートがありません"
-            hint="集計を準備しています。次の更新までお待ちください。"
+            title={t("reports.empty.title")}
+            hint={t("reports.empty.hint")}
           />
         )}
         {list.data?.map((r) => {
@@ -84,7 +90,7 @@ export function ReportsTab() {
                 cursor: "pointer",
               }}
             >
-              <div style={{ fontWeight: 500 }}>{REPORT_LABEL[r.report_type] ?? r.report_type}</div>
+              <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
               <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
                 {relativeTime(r.rendered_at)}
               </div>
@@ -95,7 +101,7 @@ export function ReportsTab() {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {!reportType && (
-          <EmptyState title="レポートを選択してください" />
+          <EmptyState title={t("reports.select_prompt")} />
         )}
         {reportType && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
@@ -104,7 +110,7 @@ export function ReportsTab() {
         {detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>{REPORT_LABEL[detail.data.report_type] ?? detail.data.report_type}</h2>
+              <h2 style={{ margin: 0 }}>{reportLabels[detail.data.report_type] ?? detail.data.report_type}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
                   href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
@@ -132,10 +138,10 @@ export function ReportsTab() {
               )}
             </div>
             <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 16px" }}>
-              生成: {relativeTime(detail.data.rendered_at)}
+              {t("reports.rendered_at", { when: relativeTime(detail.data.rendered_at) })}
               {detail.data.ctx && (
                 <>
-                  {" "}・ 期間: {detail.data.ctx.from} 〜 {detail.data.ctx.to}
+                  {" "}{t("reports.range_suffix", { from: detail.data.ctx.from, to: detail.data.ctx.to })}
                 </>
               )}
             </div>
@@ -147,12 +153,12 @@ export function ReportsTab() {
                 rows={detail.data.rows as unknown[][]}
               />
             ) : (
-              <EmptyState title="該当データがありません" hint="期間や条件を変更してください" />
+              <EmptyState title={t("reports.no_data.title")} hint={t("reports.no_data.hint")} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
                 <summary style={{ cursor: "pointer", fontSize: 12 }}>
-                  原文 ({detail.data.rows.length}件)
+                  {t("reports.raw_rows", { count: detail.data.rows.length })}
                 </summary>
                 <pre
                   style={{
@@ -189,4 +195,3 @@ function TrendBlock({ data }: { data: { days: TrendDay[]; hourly: HourlyCell[] }
     </div>
   );
 }
-

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useCreateAgency } from "../api/hooks";
 
 type Props = { onClose: () => void };
 
 export function AgencyForm({ onClose }: Props) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [feed, setFeed] = useState("");
   const [staticUrl, setStaticUrl] = useState("");
@@ -59,8 +61,8 @@ export function AgencyForm({ onClose }: Props) {
           maxWidth: "90vw",
         }}
       >
-        <h3 id="agency-form-title" style={{ marginTop: 0 }}>新規事業者登録</h3>
-        <Field label="事業者名">
+        <h3 id="agency-form-title" style={{ marginTop: 0 }}>{t("admin.agency_form.title")}</h3>
+        <Field label={t("admin.agency_form.name_label")}>
           <input
             autoFocus
             value={name}
@@ -78,7 +80,7 @@ export function AgencyForm({ onClose }: Props) {
             style={{ width: "100%" }}
           />
         </Field>
-        <Field label="GTFS Static URL (任意)">
+        <Field label={t("admin.agency_form.gtfs_label")}>
           <input
             type="url"
             value={staticUrl}
@@ -88,15 +90,15 @@ export function AgencyForm({ onClose }: Props) {
         </Field>
         {create.error && (
           <div style={{ color: "var(--error-fg)", fontSize: 13, marginTop: 8 }}>
-            登録に失敗しました
+            {t("admin.agency_form.error")}
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
           <button type="button" onClick={onClose} style={{ background: "transparent", border: "1px solid var(--border-subtle)", padding: "6px 14px", borderRadius: 4 }}>
-            キャンセル
+            {t("common.cancel")}
           </button>
           <button type="submit" disabled={create.isPending} style={{ background: "var(--accent)", color: "#fff", border: "none", padding: "6px 16px", borderRadius: 4 }}>
-            {create.isPending ? "登録中..." : "登録"}
+            {create.isPending ? t("admin.agency_form.submitting") : t("admin.agency_form.submit")}
           </button>
         </div>
       </form>

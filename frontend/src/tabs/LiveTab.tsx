@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import type { RouteSummary } from "../api/types";
@@ -13,6 +15,7 @@ import { Skeleton } from "../components/Skeleton";
 type SortKey = "worst" | "avg" | "trips" | "name";
 
 export function LiveTab() {
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -48,15 +51,15 @@ export function LiveTab() {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0, fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
-          最新観測 {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
+          {t("live.title")} {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
           <InsightHint
-            title="このタブで分かること"
+            title={t("live.hint.title")}
             body={
               <>
-                最新観測日の系統別サマリー。<strong>平均</strong>はその日の全便平均、
-                <strong>最大</strong>は最も遅れた便。色付きの ● で深刻度が一目で分かります。
-                サンプル数（便数 / 観測数）が多い系統ほど数字の信頼性が高い。
-                並び替えで「最大遅延が大きい順」にすると、その日のホットスポット系統を即座に把握できます。
+                {t("live.hint.body_1_intro")}<strong>{t("live.hint.avg_strong")}</strong>{t("live.hint.avg_meaning")}
+                <strong>{t("live.hint.max_strong")}</strong>{t("live.hint.max_meaning")}
+                {t("live.hint.body_2")}
+                {t("live.hint.body_3")}
               </>
             }
           />
@@ -71,12 +74,12 @@ export function LiveTab() {
               color: stale ? "var(--error-fg)" : "var(--accent)",
             }}
           >
-            最終観測: {relativeTime(latest)}
+            {t("live.last_observation", { when: relativeTime(latest) })}
           </span>
         )}
         <label style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-secondary)", marginLeft: "auto" }}>
           <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-          自動更新 (30秒)
+          {t("live.auto_refresh")}
         </label>
         <button
           type="button"
@@ -89,7 +92,7 @@ export function LiveTab() {
             fontSize: 13,
           }}
         >
-          手動更新
+          {t("live.manual_refresh")}
         </button>
       </div>
 
@@ -97,17 +100,21 @@ export function LiveTab() {
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="系統で絞り込み"
+          placeholder={t("live.filter_placeholder")}
           style={{ flex: "1 1 240px", maxWidth: 320 }}
         />
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>並び順</span>
-        <SortPill active={sort === "worst"} onClick={() => setSort("worst")}>最大遅延</SortPill>
-        <SortPill active={sort === "avg"} onClick={() => setSort("avg")}>平均遅延</SortPill>
-        <SortPill active={sort === "trips"} onClick={() => setSort("trips")}>運行便数</SortPill>
-        <SortPill active={sort === "name"} onClick={() => setSort("name")}>名前順</SortPill>
+        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("live.sort_label")}</span>
+        <SortPill active={sort === "worst"} onClick={() => setSort("worst")}>{t("live.sort.worst")}</SortPill>
+        <SortPill active={sort === "avg"} onClick={() => setSort("avg")}>{t("live.sort.avg")}</SortPill>
+        <SortPill active={sort === "trips"} onClick={() => setSort("trips")}>{t("live.sort.trips")}</SortPill>
+        <SortPill active={sort === "name"} onClick={() => setSort("name")}>{t("live.sort.name")}</SortPill>
         {data && (
           <span style={{ fontSize: 12, color: "var(--text-tertiary)", marginLeft: "auto" }}>
-            {isFetching ? "更新中..." : dataUpdatedAt ? `更新: ${formatLocal(dataUpdatedAt)}` : ""}
+            {isFetching
+              ? t("live.updating")
+              : dataUpdatedAt
+                ? t("live.updated_at", { time: formatLocal(dataUpdatedAt) })
+                : ""}
           </span>
         )}
       </div>
@@ -122,17 +129,17 @@ export function LiveTab() {
         <EmptyState
           title={
             data.latest_captured_at
-              ? `まだ表示できる観測がありません (最終受信: ${relativeTime(data.latest_captured_at)})`
-              : "まだ表示できる観測がありません"
+              ? t("live.empty.with_last", { when: relativeTime(data.latest_captured_at) })
+              : t("live.empty.title")
           }
-          hint="次の取り込みを待っています。数分後に自動で更新されます。"
+          hint={t("live.empty.hint")}
         />
       )}
 
       {cards.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
           {cards.map((c) => (
-            <RouteCard key={`${c.route_code}|${c.service_type}`} card={c} formatRoute={routeNames.format} />
+            <RouteCard key={`${c.route_code}|${c.service_type}`} card={c} formatRoute={routeNames.format} t={t} />
           ))}
         </div>
       )}
@@ -160,7 +167,15 @@ function SortPill({ active, onClick, children }: { active: boolean; onClick: () 
   );
 }
 
-function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc: string) => string }) {
+function RouteCard({
+  card,
+  formatRoute,
+  t,
+}: {
+  card: RouteSummary;
+  formatRoute: (rc: string) => string;
+  t: TFunction;
+}) {
   const avgMin = card.avg_delay_sec / 60;
   const worstMin = card.worst_delay_sec / 60;
   return (
@@ -185,20 +200,20 @@ function RouteCard({ card, formatRoute }: { card: RouteSummary; formatRoute: (rc
       </div>
       <div style={{ display: "flex", gap: 12 }}>
         <Stat
-          label="平均"
-          value={formatDelayMinutesRounded(card.avg_delay_sec)}
-          fullPrecision={formatDelay(card.avg_delay_sec)}
+          label={t("live.card.avg")}
+          value={formatDelayMinutesRounded(card.avg_delay_sec, t)}
+          fullPrecision={formatDelay(card.avg_delay_sec, t)}
           dotColor={delayColor(avgMin)}
         />
         <Stat
-          label="最大"
-          value={formatDelayMinutesRounded(card.worst_delay_sec)}
-          fullPrecision={formatDelay(card.worst_delay_sec)}
+          label={t("live.card.max")}
+          value={formatDelayMinutesRounded(card.worst_delay_sec, t)}
+          fullPrecision={formatDelay(card.worst_delay_sec, t)}
           dotColor={delayColor(worstMin)}
         />
       </div>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-        {card.trips_observed} 便 / {card.samples.toLocaleString()} 観測
+        {t("live.card.trip_samples", { trips: card.trips_observed, samples: card.samples.toLocaleString() })}
       </div>
     </div>
   );
@@ -239,23 +254,25 @@ function Stat({
   );
 }
 
-function formatDelayMinutesRounded(seconds: number): string {
+function formatDelayMinutesRounded(seconds: number, t: TFunction): string {
   const minutes = Math.round(Math.abs(seconds) / 60);
-  if (minutes === 0) return "定刻";
+  if (minutes === 0) return t("common.on_time");
   const sign = seconds < 0 ? "-" : "+";
-  return `${sign}${minutes}分`;
+  return t("common.unit_min_signed", { sign, value: minutes });
 }
 
-function formatDelay(seconds: number): string {
-  if (seconds === 0) return "定刻";
+function formatDelay(seconds: number, t: TFunction): string {
+  if (seconds === 0) return t("common.on_time");
   const sign = seconds < 0 ? "-" : "+";
   const abs = Math.abs(seconds);
   const m = Math.floor(abs / 60);
   const s = abs % 60;
-  if (m === 0) return `${sign}${s}秒`;
-  return `${sign}${m}分${s.toString().padStart(2, "0")}秒`;
+  if (m === 0) return t("common.unit_sec_signed", { sign, value: s });
+  return t("common.unit_min_sec_signed", { sign, m, s: s.toString().padStart(2, "0") });
 }
 
 function formatLocal(ts: number): string {
+  // Date locale is intentionally left as ja-JP per plan v1 — switching it on
+  // i18n.language is tracked under date locale handling (out of scope here).
   return new Date(ts).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

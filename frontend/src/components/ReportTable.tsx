@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useParams } from "react-router-dom";
@@ -6,32 +8,43 @@ import { useParams } from "react-router-dom";
 type Schema = {
   /** Column index in the row tuple */
   index: number;
-  label: string;
+  /** i18n key for the column header label */
+  labelKey: string;
   align?: "left" | "right";
   /** When set, draws an inline bar; ``barColor`` is in delay-min space. */
   bar?: "delay" | "pct" | "raw";
-  format?: (v: unknown) => string;
+  format?: (v: unknown, t: TFunction) => string;
+  /**
+   * When set, the raw cell value is treated as a translation-key suffix:
+   * the rendered text is `t(\`${valueKey}.${raw}\`, { defaultValue: raw })`.
+   * Use this for columns whose DB values are wire contracts (e.g. service_type
+   * "平日" / "土日祝") but should display in the active locale. // i18n-ignore: JSDoc
+   */
+  valueKey?: string;
 };
 
-const ROUTE_COL: Schema = { index: 0, label: "系統", align: "left" };
+// Sentinel reference for the route column. The render path uses reference
+// equality (`c === ROUTE_COL`) to swap in route-name formatting, so every
+// schema below must reuse this exact instance.
+const ROUTE_COL: Schema = { index: 0, labelKey: "reports.col.route", align: "left" };
 
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, label: "種別", align: "left" },
-  { index: 2, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-  { index: 3, label: "中央値", align: "right", format: (v) => fmtMin(v) },
-  { index: 4, label: "p90", align: "right", format: (v) => fmtMin(v) },
-  { index: 5, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+  { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
+  { index: 3, labelKey: "reports.col.median", align: "right", format: (v, t) => fmtMin(v, t) },
+  { index: 4, labelKey: "reports.col.p90", align: "right", format: (v, t) => fmtMin(v, t) },
+  { index: 5, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
 
 // dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, label: "種別", align: "left" },
-  { index: 2, label: "曜日", align: "left" },
-  { index: 3, label: "平均", align: "right", bar: "delay", format: (v) => fmtMin(v) },
-  { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+  { index: 2, labelKey: "reports.col.dow", align: "left" },
+  { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
+  { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
 
 const SCHEMAS: Record<string, Schema[]> = {
@@ -39,31 +52,31 @@ const SCHEMAS: Record<string, Schema[]> = {
   ranking_best: RANKING_COLS,
   on_time: [
     ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "定時率", align: "right", bar: "pct", format: (v) => fmtPct(v) },
-    { index: 3, label: "平均", align: "right", format: (v) => fmtMin(v) },
-    { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
+    { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
-    { index: 1, label: "種別", align: "left" },
-    { index: 2, label: "5分超回数", align: "right", bar: "raw", format: (v) => fmtNum(v) },
-    { index: 3, label: "平均", align: "right", format: (v) => fmtMin(v) },
-    { index: 4, label: "観測数", align: "right", format: (v) => fmtNum(v) },
+    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 2, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t) },
+    { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
   ],
   compare_ranking: [
     ROUTE_COL,
-    { index: 1, label: "平日", align: "right", format: (v) => fmtMin(v) },
-    { index: 2, label: "土日祝", align: "right", format: (v) => fmtMin(v) },
-    { index: 3, label: "差", align: "right", bar: "delay", format: (v) => fmtMin(v) },
+    { index: 1, labelKey: "reports.col.weekday", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 2, labelKey: "reports.col.weekend", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
     {
       index: 4,
-      label: "向き",
+      labelKey: "reports.col.direction",
       align: "left",
-      format: (v) => {
+      format: (v, t) => {
         const n = Number(v);
         if (!isFinite(n) || n === 0) return "—";
-        return n > 0 ? "土日祝>平日" : "平日>土日祝";
+        return n > 0 ? t("reports.direction.weekend_higher") : t("reports.direction.weekday_higher");
       },
     },
   ],
@@ -71,21 +84,21 @@ const SCHEMAS: Record<string, Schema[]> = {
   dow_weekday: DOW_COLS,
 };
 
-function fmtMin(v: unknown): string {
+function fmtMin(v: unknown, t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return `${n.toFixed(1)}分`;
+  return `${n.toFixed(1)}${t("common.unit_min")}`;
 }
 
-function fmtPct(v: unknown): string {
+function fmtPct(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
   return `${n.toFixed(1)}%`;
 }
 
-function fmtNum(v: unknown): string {
+function fmtNum(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
@@ -98,6 +111,7 @@ type Props = {
 };
 
 export function ReportTable({ reportType, rows }: Props) {
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const { format: formatRoute } = useRouteNames(id);
@@ -130,8 +144,8 @@ export function ReportTable({ reportType, rows }: Props) {
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th(40)}>#</th>
             {schema.map((c) => (
-              <th key={c.label} style={{ ...th(), textAlign: c.align ?? "left" }}>
-                {c.label}
+              <th key={c.labelKey} style={{ ...th(), textAlign: c.align ?? "left" }}>
+                {t(c.labelKey)}
               </th>
             ))}
           </tr>
@@ -144,26 +158,34 @@ export function ReportTable({ reportType, rows }: Props) {
                 if (c === ROUTE_COL) {
                   const code = String(row[c.index] ?? "");
                   return (
-                    <td key={c.label} style={{ ...td(), fontWeight: 500 }}>
+                    <td key={c.labelKey} style={{ ...td(), fontWeight: 500 }}>
                       {formatRoute(code)}
                     </td>
                   );
                 }
                 const raw = row[c.index];
-                const text = c.format ? c.format(raw) : String(raw ?? "—");
+                let text: string;
+                if (c.format) {
+                  text = c.format(raw, t);
+                } else if (c.valueKey != null && raw != null) {
+                  const rawStr = String(raw);
+                  text = t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
+                } else {
+                  text = String(raw ?? "—");
+                }
                 if (c.bar) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
                   const ratio = isFinite(v) ? Math.min(1, Math.abs(v) / max) : 0;
                   const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
                   return (
-                    <td key={c.label} style={{ ...td(), textAlign: c.align ?? "right", minWidth: 110 }}>
+                    <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "right", minWidth: 110 }}>
                       <BarCell text={text} ratio={ratio} color={color} />
                     </td>
                   );
                 }
                 return (
-                  <td key={c.label} style={{ ...td(), textAlign: c.align ?? "left" }}>
+                  <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "left" }}>
                     {text}
                   </td>
                 );
