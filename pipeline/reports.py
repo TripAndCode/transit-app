@@ -475,6 +475,39 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
     return count
 
 
+async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
+    """Top-3 routes by SUM(dep_delay) + the rest share as one bucket."""
+    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    rows = await conn.fetch(
+        "SELECT route_code, SUM(dep_delay) AS total_sec "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        "GROUP BY route_code "
+        "ORDER BY total_sec DESC NULLS LAST",
+        agency_id, *params,
+    )
+    if not rows:
+        return {"top_routes": [], "rest_share_pct": 0.0}
+    grand_total = sum(int(r["total_sec"] or 0) for r in rows)
+    if grand_total == 0:
+        return {"top_routes": [], "rest_share_pct": 0.0}
+    top_3 = rows[:3]
+    codes = [r["route_code"] for r in top_3]
+    names = await _route_short_names(agency_id, codes, conn)
+    top_3_sum = sum(int(r["total_sec"] or 0) for r in top_3)
+    return {
+        "top_routes": [
+            {
+                "route_code": r["route_code"],
+                "route_short_name": names.get(r["route_code"]),
+                "share_pct": round((int(r["total_sec"] or 0) / grand_total) * 100.0, 1),
+            }
+            for r in top_3
+        ],
+        "rest_share_pct": round(((grand_total - top_3_sum) / grand_total) * 100.0, 1),
+    }
+
+
 async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Top-3 worsened + top-3 improved routes by signed delta_min."""
     cur = await _per_route_avg(agency_id, ctx, conn)
@@ -538,6 +571,7 @@ async def compute_overview_summary(
             delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
     movers = await _movers(agency_id, ctx, conn)
+    concentration = await _concentration(agency_id, ctx, conn)
 
     return {
         "headline": {
@@ -548,7 +582,7 @@ async def compute_overview_summary(
             "samples": samples,
         },
         "movers": movers,
-        "concentration": {"top_routes": [], "rest_share_pct": 0.0},
+        "concentration": concentration,
         "peak_hour": None,
         "service_split": {},
         "sparkline_points": [],

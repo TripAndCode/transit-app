@@ -175,3 +175,36 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     assert len(rstr["sparkline_points"]) == 4
     pts = rstr["sparkline_points"]
     assert pts == sorted(pts)
+
+
+@pytest.mark.asyncio
+async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
+    """4 routes; top 3 absorb ~87.5%; the 4th absorbs ~12.5%."""
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    rows = [
+        ("R_X", [300, 300, 300]),
+        ("R_Y", [600]),
+        ("R_Z", [300, 300]),
+        ("R_W", [150, 150]),
+    ]
+    for code, deps in rows:
+        for i, dep in enumerate(deps):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
+                aagency_id, f"cn_{code}_{i}", base + timedelta(minutes=i), code, dep,
+            )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    conc = out["concentration"]
+    codes = [r["route_code"] for r in conc["top_routes"]]
+    assert len(codes) == 3
+    assert set(codes) == {"R_X", "R_Y", "R_Z"}
+    total_pct = sum(r["share_pct"] for r in conc["top_routes"]) + conc["rest_share_pct"]
+    assert total_pct == pytest.approx(100.0, abs=0.5)
+    assert conc["rest_share_pct"] == pytest.approx(12.5, abs=0.5)
