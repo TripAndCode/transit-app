@@ -93,7 +93,7 @@ test:
 # ── Server ───────────────────────────────────────────────────────────────────
 
 serve:
-	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT)
+	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
 
 # ── Database ─────────────────────────────────────────────────────────────────
 

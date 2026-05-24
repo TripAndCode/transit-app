@@ -605,3 +605,9 @@ To debug an issue:
 
 `LOG_LEVEL` env var (default `INFO`) sets the root level. Set to
 `DEBUG` for verbose investigations.
+
+`make serve` and the Docker entrypoint both pass `--no-access-log` so
+uvicorn's default access line doesn't double up with the `api.access`
+emission. Plan for ~150 B per access line; at 1 req/s that's ~13 MB/day
+— bound container logs with `--log-opt max-size=…` or rotate
+`journalctl` retention to taste.
