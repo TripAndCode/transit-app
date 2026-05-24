@@ -584,3 +584,24 @@ Domain ideas (portfolio): `transit-delay.app`, `gtfs-jp.dev`, `chien-map.app` (�
 - Migrations: not auto-run. After `git pull && docker compose --profile prod up -d --build`, run `docker compose exec app python gtfs_pipeline.py migrate up` if the pull included new migrations.
 - The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run "Hourly Ingest"`.
 - `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.
+
+### Observability
+
+Every HTTP response carries an `X-Request-Id` header. Clients can pass
+their own `X-Request-Id` (alphanumeric + dash, ≤64 chars) — anything
+that doesn't match gets replaced with a fresh UUID4 hex. Every request
+emits one access-log line to the `api.access` logger:
+
+```
+2026-05-24T12:34:56.789Z INFO api.access request_id=8a1f… msg="method=GET path=/api/agencies status=200 duration_ms=12 user_id=-"
+```
+
+To debug an issue:
+1. Grab the `X-Request-Id` from the client's error (or from the user
+   reporting it — the SPA echoes it on every response).
+2. `journalctl -u transit-api | grep request_id=<value>` (or
+   `docker logs … | grep …`) finds every log line emitted during that
+   request, including inner module-level loggers.
+
+`LOG_LEVEL` env var (default `INFO`) sets the root level. Set to
+`DEBUG` for verbose investigations.
