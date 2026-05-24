@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../api/admin";
 import { formatApiError } from "../api/client";
 
 /** Admin: searchable user list with inline role / suspend / delete controls. */
 export function AdminUsersPage() {
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const { data, isLoading, error } = useAdminUsers({ q });
   const patch = usePatchUser();
@@ -12,23 +14,23 @@ export function AdminUsersPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 16 }}>ユーザー管理</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.users.title")}</h1>
       <input
         type="search"
-        placeholder="メール / 名前で検索"
+        placeholder={t("admin.users.search_placeholder")}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ padding: 8, marginBottom: 16, width: 320 }}
       />
       {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
-      {isLoading && <div>読み込み中...</div>}
+      {isLoading && <div>{t("common.loading")}</div>}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
         <thead>
           <tr style={{ background: "var(--surface-1)" }}>
-            <th style={{ padding: 8, textAlign: "left" }}>メール</th>
-            <th style={{ padding: 8, textAlign: "left" }}>名前</th>
-            <th style={{ padding: 8, textAlign: "left" }}>ロール</th>
-            <th style={{ padding: 8, textAlign: "left" }}>状態</th>
+            <th style={{ padding: 8, textAlign: "left" }}>{t("admin.users.col.email")}</th>
+            <th style={{ padding: 8, textAlign: "left" }}>{t("admin.users.col.name")}</th>
+            <th style={{ padding: 8, textAlign: "left" }}>{t("admin.users.col.role")}</th>
+            <th style={{ padding: 8, textAlign: "left" }}>{t("admin.users.col.status")}</th>
             <th style={{ padding: 8 }}></th>
           </tr>
         </thead>
@@ -51,7 +53,7 @@ export function AdminUsersPage() {
               <td style={{ padding: 8 }}>
                 {u.suspended_at ? (
                   <span style={{ padding: "2px 8px", background: "var(--surface-2)",
-                                  borderRadius: 4, fontSize: 12 }}>停止中</span>
+                                  borderRadius: 4, fontSize: 12 }}>{t("admin.users.status.suspended")}</span>
                 ) : "—"}
               </td>
               <td style={{ padding: 8, textAlign: "right" }}>
@@ -59,16 +61,16 @@ export function AdminUsersPage() {
                   onClick={() => patch.mutate({ uid: u.user_id, body: { suspended: !u.suspended_at } })}
                   style={{ marginRight: 8 }}
                 >
-                  {u.suspended_at ? "再開" : "停止"}
+                  {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm(`${u.email} を削除しますか？(匿名化、復元不可)`)) {
+                    if (confirm(t("admin.users.confirm_delete", { email: u.email }))) {
                       del.mutate(u.user_id);
                     }
                   }}
                 >
-                  削除
+                  {t("admin.users.action.delete")}
                 </button>
               </td>
             </tr>
@@ -82,7 +84,7 @@ export function AdminUsersPage() {
         </div>
       )}
       <div style={{ marginTop: 12, color: "var(--text-tertiary)", fontSize: 12 }}>
-        合計 {data?.total ?? 0} 件
+        {t("admin.users.total", { count: data?.total ?? 0 })}
       </div>
     </div>
   );

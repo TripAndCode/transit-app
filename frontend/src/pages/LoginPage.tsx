@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
 import "./LoginPage.css";
 
-const ERROR_COPY: Record<string, string> = {
-  state: "ログインのリクエストが期限切れです。もう一度お試しください。",
-  unverified_email: "メールアドレスが未確認です。プロバイダ側で確認を完了してください。",
-  no_email: "GitHubの確認済みメールが取得できませんでした。プライマリメールを公開設定にするか、別の方法でログインしてください。",
-  provider_down: "プロバイダ側に一時的な問題が発生しています。しばらくしてから再試行してください。",
+const ERROR_KEYS: Record<string, string> = {
+  state: "account.login.error.state",
+  unverified_email: "account.login.error.unverified_email",
+  no_email: "account.login.error.no_email",
+  provider_down: "account.login.error.provider_down",
 };
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const next = params.get("next") || "/";
   const error = params.get("error");
@@ -30,15 +32,15 @@ export function LoginPage() {
         <div className="login-shell__grid" aria-hidden="true" />
         <main className="login-card">
           <div className="login-card__brand">
-            <span className="login-card__brand-title">遅延ダッシュボード</span>
-            <span className="login-card__brand-tag">リアルタイム × 時刻表</span>
+            <span className="login-card__brand-title">{t("header.app_title")}</span>
+            <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
           </div>
-          <h1 className="login-card__h1">SSO 未設定</h1>
+          <h1 className="login-card__h1">{t("account.login.sso_disabled_title")}</h1>
           <p className="login-card__sub">
-            このビルドでは SSO が無効です。匿名で閲覧できます。
+            {t("account.login.sso_disabled_body")}
           </p>
           <p className="login-card__footer">
-            <Link to="/" style={{ color: "inherit" }}>トップへ戻る</Link>
+            <Link to="/" style={{ color: "inherit" }}>{t("account.login.back_to_top")}</Link>
           </p>
         </main>
       </div>
@@ -50,17 +52,17 @@ export function LoginPage() {
       <div className="login-shell__grid" aria-hidden="true" />
       <main className="login-card">
         <div className="login-card__brand">
-          <span className="login-card__brand-title">遅延ダッシュボード</span>
-          <span className="login-card__brand-tag">リアルタイム × 時刻表</span>
+          <span className="login-card__brand-title">{t("header.app_title")}</span>
+          <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
-        <h1 className="login-card__h1">おかえりなさい</h1>
-        <p className="login-card__sub">アカウントを選択してログイン</p>
+        <h1 className="login-card__h1">{t("account.login.welcome_back")}</h1>
+        <p className="login-card__sub">{t("account.login.choose_provider")}</p>
 
         {error && (
           <div className="login-card__error" role="alert">
             <AlertCircle size={16} aria-hidden="true" />
-            <span>{ERROR_COPY[error] ?? "ログインに失敗しました。"}</span>
+            <span>{ERROR_KEYS[error] ? t(ERROR_KEYS[error]) : t("account.login.error.generic")}</span>
           </div>
         )}
 
@@ -68,27 +70,39 @@ export function LoginPage() {
           <button
             type="button"
             className="login-card__btn login-card__btn--google"
-            aria-label="Googleでログイン"
+            aria-label={t("account.login.google_aria")}
             aria-disabled={pending !== null}
             onClick={handleSubmit("google")}
           >
             {pending === "google" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GoogleMark />}
-            <span>Googleで続ける</span>
+            <span>{t("account.login.google_continue")}</span>
           </button>
           <button
             type="button"
             className="login-card__btn login-card__btn--github"
-            aria-label="GitHubでログイン"
+            aria-label={t("account.login.github_aria")}
             aria-disabled={pending !== null}
             onClick={handleSubmit("github")}
           >
             {pending === "github" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GitHubMark />}
-            <span>GitHubで続ける</span>
+            <span>{t("account.login.github_continue")}</span>
           </button>
         </div>
 
+        {/*
+          Terms paragraph: the inventory pre-split it into seven keys
+          (prefix / link / and / link / suffix). We assemble those keys
+          back into the sentence here so we don't need <Trans> for now.
+          When we tighten the copy in a follow-up, we can collapse to a
+          single `account.login.terms_paragraph` key with <terms> and
+          <privacy> placeholders.
+        */}
         <p className="login-card__footer">
-          続行することで、<a href="/terms" target="_blank" rel="noreferrer">利用規約</a>と<a href="/privacy" target="_blank" rel="noreferrer">プライバシーポリシー</a>に同意したものとみなされます。
+          {t("account.login.terms_prefix")}
+          <a href="/terms" target="_blank" rel="noreferrer">{t("account.login.terms_link")}</a>
+          {t("account.login.terms_and")}
+          <a href="/privacy" target="_blank" rel="noreferrer">{t("account.login.privacy_link")}</a>
+          {t("account.login.terms_suffix")}
         </p>
       </main>
     </div>
