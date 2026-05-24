@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../api/auth";
+import { apiGet, apiPost, formatApiError } from "../api/client";
 
 type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: Record<string, any> };
 
@@ -21,27 +22,13 @@ export function PresetMenu({
 
   const { data: presets } = useQuery({
     queryKey: ["presets", agencyId],
-    queryFn: async (): Promise<Preset[]> => {
-      const r = await fetch(`/api/me/presets?agency_id=${agencyId}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`/api/me/presets ${r.status}`);
-      return r.json();
-    },
+    queryFn: () => apiGet<Preset[]>(`/api/me/presets?agency_id=${agencyId}`),
     enabled: !!session,
   });
 
   const create = useMutation({
-    mutationFn: async (n: string) => {
-      const r = await fetch("/api/me/presets", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agency_id: agencyId, name: n, range_ctx: currentRangeCtx }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.detail || `POST ${r.status}`);
-      }
-    },
+    mutationFn: (n: string) =>
+      apiPost<Preset>("/api/me/presets", { agency_id: agencyId, name: n, range_ctx: currentRangeCtx }),
     onSuccess: () => {
       setOpen(false);
       setName("");
@@ -93,7 +80,7 @@ export function PresetMenu({
           <button onClick={() => setOpen(false)} style={{ marginLeft: 8 }}>キャンセル</button>
           {create.error && (
             <div style={{ color: "var(--text-tertiary)", fontSize: 12, marginTop: 4 }}>
-              {String(create.error)}
+              {formatApiError(create.error)}
             </div>
           )}
         </div>
