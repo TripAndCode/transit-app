@@ -12,8 +12,17 @@ Public surface:
   chat-completions call.
 * :func:`dispatch` — execute a tool call against Postgres and return a
   :class:`ToolResult`.
-* :func:`render_tool_result` — produce a Japanese summary string the
-  frontend can show in the assistant bubble.
+* :func:`render_tool_result` — produce a locale-appropriate summary
+  string the frontend can show in the assistant bubble.
+
+Localisation
+------------
+Every user-facing string is keyed on ``(template, locale)`` via
+:data:`_LOCALES`. Handlers thread ``locale`` (``"ja"`` or ``"en"``) from
+the middleware-driven request state into :func:`_summary`, so the same
+data path renders in whichever language the UI is set to. The wire
+contract column codes (``route_code``, ``service_type`` …) stay English
+because the frontend i18n layer translates display names client-side.
 """
 
 from __future__ import annotations
@@ -50,11 +59,123 @@ class ToolResult:
     """Discriminated union (by ``kind``) returned to the API layer."""
 
     kind: Literal["table", "series", "kv", "empty", "text"]
-    summary_jp: str
+    summary: str
     rows: list = field(default_factory=list)
     columns: list[str] = field(default_factory=list)
     series: list = field(default_factory=list)
     pairs: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Localisation table
+# ---------------------------------------------------------------------------
+
+
+# Keyed by (template_name, locale). Values are ``str.format``-style
+# templates so handlers can interpolate route codes, counts, etc. without
+# string-concatenation noise. Add a new template here rather than peppering
+# inline ``if locale == "en"`` conditionals through the handlers.
+_LOCALES: dict[tuple[str, str], str] = {
+    ("route_arg_required", "ja"): "route 引数が必要です。",
+    ("route_arg_required", "en"): "The route argument is required.",
+    ("route_not_registered", "ja"): (
+        "'{route}' は登録されている系統コードではありません。/api/{agency_id}/routes で一覧を確認してください。"
+    ),
+    ("route_not_registered", "en"): (
+        "'{route}' is not a registered route code. See /api/{agency_id}/routes for the full list."
+    ),
+    ("route_no_data", "ja"): (
+        "系統{route} の集計データが選択期間 ({from_date}〜{to_date}) にありません。"
+        "期間を広げるか、フィルタを解除して試してください。"
+    ),
+    ("route_no_data", "en"): (
+        "No aggregated data for route {route} in the selected window "
+        "({from_date} to {to_date}). Try widening the range or clearing filters."
+    ),
+    ("route_summary", "ja"): "系統{route} の遅延サマリ",
+    ("route_summary", "en"): "Delay summary for route {route}",
+    ("unknown_metric", "ja"): "未知の metric: {metric}",
+    ("unknown_metric", "en"): "Unknown metric: {metric}",
+    ("no_data", "ja"): "データがありません。",
+    ("no_data", "en"): "No data available.",
+    ("ranking_summary", "ja"): "{label}ランキング 上位{count}系統",
+    ("ranking_summary", "en"): "{label} ranking, top {count} routes",
+    ("label_ranking_ontime", "ja"): "定時運行",
+    ("label_ranking_ontime", "en"): "On-time",
+    ("label_ranking_delay", "ja"): "遅延",
+    ("label_ranking_delay", "en"): "Delay",
+    ("label_ranking_ontime_rate", "ja"): "定時率",
+    ("label_ranking_ontime_rate", "en"): "On-time rate",
+    ("label_ranking_late5", "ja"): "5分以上遅延件数",
+    ("label_ranking_late5", "en"): "5+ minute delay count",
+    ("compare_no_data", "ja"): "比較に必要なデータがありません。",
+    ("compare_no_data", "en"): "Not enough data to compare.",
+    ("compare_summary_dow", "ja"): "平日 vs 土日祝 遅延比較",
+    ("compare_summary_dow", "en"): "Weekday vs weekend/holiday delay comparison",
+    ("compare_service_needs_route", "ja"): "dimension=service_type の場合は route が必要です。",
+    ("compare_service_needs_route", "en"): "dimension=service_type requires a route argument.",
+    ("compare_route_no_data", "ja"): "系統{route} の比較データなし。",
+    ("compare_route_no_data", "en"): "No comparison data for route {route}.",
+    ("compare_summary_service", "ja"): "系統{route} 種別比較",
+    ("compare_summary_service", "en"): "Service-type comparison for route {route}",
+    ("unknown_dimension", "ja"): "未知の dimension: {dimension}",
+    ("unknown_dimension", "en"): "Unknown dimension: {dimension}",
+    ("trend_no_data", "ja"): "期間内に観測データがありません。",
+    ("trend_no_data", "en"): "No observations in the selected window.",
+    ("trend_summary", "ja"): "日次トレンド ({from_date}〜{to_date}): 平均{avg:.2f}分",
+    ("trend_summary", "en"): "Daily trend ({from_date} to {to_date}): mean {avg:.2f} min",
+    ("on_time_no_data", "ja"): "定時率を計算できるデータがありません。",
+    ("on_time_no_data", "en"): "Not enough data to compute on-time rate.",
+    ("on_time_summary", "ja"): "定時率 (遅延 {threshold_min} 分以内) 上位{count}系統",
+    ("on_time_summary", "en"): "On-time rate (within {threshold_min} min) — top {count} routes",
+    ("route_meta_not_found", "ja"): "系統{route} の路線情報が見つかりません。",
+    ("route_meta_not_found", "en"): "No metadata found for route {route}.",
+    ("route_meta_summary", "ja"): "系統{route} 路線情報",
+    ("route_meta_summary", "en"): "Route info — {route}",
+    ("meta_label_name", "ja"): "路線名",
+    ("meta_label_name", "en"): "Route name",
+    ("meta_label_stops", "ja"): "停留所数",
+    ("meta_label_stops", "en"): "Stops",
+    ("meta_label_first", "ja"): "始発",
+    ("meta_label_first", "en"): "First departure",
+    ("meta_label_last", "ja"): "最終",
+    ("meta_label_last", "en"): "Last departure",
+    ("meta_label_trips", "ja"): "運行便数",
+    ("meta_label_trips", "en"): "Daily trips",
+    ("meta_stops_value", "ja"): "{n}駅",
+    ("meta_stops_value", "en"): "{n}",
+    ("meta_trips_value", "ja"): "{n}便",
+    ("meta_trips_value", "en"): "{n}",
+    ("dash", "ja"): "—",
+    ("dash", "en"): "—",
+    ("unsupported_tool", "ja"): "未対応のツール: {name}",
+    ("unsupported_tool", "en"): "Unsupported tool: {name}",
+    # render_tool_result decorations
+    ("series_top_offenders", "ja"): " (悪化: {routes})",
+    ("series_top_offenders", "en"): " (worst: {routes})",
+    ("series_line", "ja"): "{date}: 平均{avg:.2f}分 / {samples}件{top}",
+    ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} samples{top}",
+    ("more_rows", "ja"): "…他{n}件",
+    ("more_rows", "en"): "…{n} more",
+    ("route_prefix", "ja"): "系統{route}",
+    ("route_prefix", "en"): "route {route}",
+}
+
+
+def _summary(template: str, lang: str = "ja", **vars: Any) -> str:
+    """Resolve a localised template, falling back to JP when missing.
+
+    The fallback keeps the behaviour predictable if an EN string is added
+    later but the lookup table is briefly inconsistent — the user sees JP
+    text rather than a KeyError 500.
+    """
+    if lang not in ("ja", "en"):
+        lang = "ja"
+    tpl = _LOCALES.get((template, lang)) or _LOCALES.get((template, "ja"), template)
+    try:
+        return tpl.format(**vars) if vars else tpl
+    except KeyError:
+        return tpl
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +327,7 @@ SYSTEM_PROMPT = """\
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
 2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')のみ。**
    ユーザーが '系統5' のような短い数字や '雨天' のような単語を route として渡してきた場合、
-   ツールを呼ばず、日本語で「'<入力>' は系統コードではない可能性があります」と説明し、
+   ツールを呼ばず、ユーザーのUI言語で「'<入力>' は系統コードではない可能性があります」と説明し、
    類似の答えられる質問を 2〜3 件提案する。
 3. データの提供範囲外の質問(天気、運賃、事故、車両情報など)はツールを呼ばず、
    利用できるデータを伝え、関連する答えられる質問を 2〜3 件提案する。
@@ -217,7 +338,6 @@ SYSTEM_PROMPT = """\
    - 「先月の定時率」→ on_time_rate(days_back=30) (シンプルに30日と解釈)
    - 「過去3日の遅延」→ top_n(metric='avg_delay', n=10, days_back=3)
 5. 曜日/時間帯フィルタはツール引数で上書きする必要はない(UIで適用済み)。
-6. 出力は日本語のみ。
 
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 系統の遅延統計
@@ -237,14 +357,22 @@ SYSTEM_PROMPT = """\
 """
 
 
+# Human-readable name of each locale, for the "Reply in ..." system addendum
+# (see :mod:`pipeline.query.chat`). Kept here so the LLM-related strings live
+# alongside their translation table.
+LOCALE_LANGUAGE_NAME = {"ja": "日本語", "en": "English"}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _route_name_lookup(route: str | None) -> str:
+def _route_name_lookup(route: str | None, locale: str = "ja") -> str:
     """Human-facing label for a route_code in summary strings."""
-    return f"系統{route}" if route else "（系統指定なし）"
+    if route:
+        return _summary("route_prefix", lang=locale, route=route)
+    return "（系統指定なし）" if locale == "ja" else "(no route specified)"
 
 
 # ---------------------------------------------------------------------------
@@ -326,38 +454,38 @@ async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
     return row is not None
 
 
-async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     route = args.get("route")
     if not route:
-        return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
     if not await _is_route_registered(route, conn, agency_id):
         return ToolResult(
             kind="empty",
-            summary_jp=(
-                f"'{route}' は登録されている系統コードではありません。"
-                f"/api/{agency_id}/routes で一覧を確認してください。"
-            ),
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
         )
     rows = await route_dow_breakdown(agency_id, ctx, conn, route=str(route))
     if not rows:
         return ToolResult(
             kind="empty",
-            summary_jp=(
-                f"系統{route} の集計データが選択期間 ({ctx.from_date}〜{ctx.to_date}) にありません。"
-                "期間を広げるか、フィルタを解除して試してください。"
+            summary=_summary(
+                "route_no_data",
+                lang=locale,
+                route=route,
+                from_date=ctx.from_date,
+                to_date=ctx.to_date,
             ),
         )
-    # Render ISODOW int as Japanese char so the LLM sees '月' not '1'.
-    rendered = [[r[0], r[1], dow_label(r[2]), r[3], r[4]] for r in rows]
+    # Render ISODOW int as locale-appropriate label so the LLM sees '月' / 'Mon' not '1'.
+    rendered = [[r[0], r[1], dow_label(r[2], lang=locale), r[3], r[4]] for r in rows]
     return ToolResult(
         kind="table",
-        summary_jp=f"系統{route} の遅延サマリ",
+        summary=_summary("route_summary", lang=locale, route=route),
         rows=rendered,
         columns=["route_code", "service_type", "dow", "avg_min", "samples"],
     )
 
 
-async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     metric = args.get("metric", "avg_delay")
     n = int(args.get("n", 10))
     best_first = bool(args.get("best_first", metric == "on_time_rate"))
@@ -366,30 +494,33 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolRe
         sort_order = "asc" if best_first else "desc"
         rows = await compute_ranking(agency_id, ctx, conn, sort_order=sort_order, limit=n)
         cols = ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"]
-        label = "定時運行" if best_first else "遅延"
+        label = _summary(
+            "label_ranking_ontime" if best_first else "label_ranking_delay",
+            lang=locale,
+        )
     elif metric == "on_time_rate":
         rows = await compute_on_time(agency_id, ctx, conn, limit=n)
         cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
-        label = "定時率"
+        label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
         cols = ["route_code", "service_type", "late5_count", "avg_min", "samples"]
-        label = "5分以上遅延件数"
+        label = _summary("label_ranking_late5", lang=locale)
     else:
-        return ToolResult(kind="empty", summary_jp=f"未知の metric: {metric}")
+        return ToolResult(kind="empty", summary=_summary("unknown_metric", lang=locale, metric=metric))
 
     if not rows:
-        return ToolResult(kind="empty", summary_jp="データがありません。")
+        return ToolResult(kind="empty", summary=_summary("no_data", lang=locale))
 
     return ToolResult(
         kind="table",
-        summary_jp=f"{label}ランキング 上位{len(rows)}系統",
+        summary=_summary("ranking_summary", lang=locale, label=label, count=len(rows)),
         rows=[list(r) for r in rows],
         columns=cols,
     )
 
 
-async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     dimension = args.get("dimension", "dow")
     route = args.get("route")
 
@@ -402,11 +533,11 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         if not rows:
             return ToolResult(
                 kind="empty",
-                summary_jp="比較に必要なデータがありません。",
+                summary=_summary("compare_no_data", lang=locale),
             )
         return ToolResult(
             kind="table",
-            summary_jp="平日 vs 土日祝 遅延比較",
+            summary=_summary("compare_summary_dow", lang=locale),
             rows=[list(r) for r in rows],
             columns=["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
         )
@@ -415,66 +546,87 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         if not route:
             return ToolResult(
                 kind="empty",
-                summary_jp="dimension=service_type の場合は route が必要です。",
+                summary=_summary("compare_service_needs_route", lang=locale),
             )
         rows = await route_compare_service(agency_id, ctx, conn, route=str(route))
         if not rows:
-            return ToolResult(kind="empty", summary_jp=f"系統{route} の比較データなし。")
+            return ToolResult(
+                kind="empty",
+                summary=_summary("compare_route_no_data", lang=locale, route=route),
+            )
         return ToolResult(
             kind="table",
-            summary_jp=f"系統{route} 種別比較",
+            summary=_summary("compare_summary_service", lang=locale, route=route),
             rows=[list(r) for r in rows],
             columns=["service_type", "avg_min", "samples"],
         )
 
-    return ToolResult(kind="empty", summary_jp=f"未知の dimension: {dimension}")
+    return ToolResult(kind="empty", summary=_summary("unknown_dimension", lang=locale, dimension=dimension))
 
 
-async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     series = await compute_trend_series(agency_id, ctx, conn)
     days = series.get("days") or []
     if not days:
-        return ToolResult(kind="empty", summary_jp="期間内に観測データがありません。")
+        return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
     avg = sum((d["avg_min"] or 0) for d in days) / len(days)
     return ToolResult(
         kind="series",
-        summary_jp=f"日次トレンド ({ctx.from_date}〜{ctx.to_date}): 平均{avg:.2f}分",
+        summary=_summary(
+            "trend_summary",
+            lang=locale,
+            from_date=ctx.from_date,
+            to_date=ctx.to_date,
+            avg=avg,
+        ),
         series=days,
     )
 
 
-async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
     n = int(args.get("n", 20))
     rows = await compute_on_time(agency_id, ctx, conn, threshold_sec=threshold_sec, limit=n)
     if not rows:
-        return ToolResult(kind="empty", summary_jp="定時率を計算できるデータがありません。")
+        return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
     return ToolResult(
         kind="table",
-        summary_jp=f"定時率 (遅延 {threshold_min} 分以内) 上位{len(rows)}系統",
+        summary=_summary(
+            "on_time_summary",
+            lang=locale,
+            threshold_min=threshold_min,
+            count=len(rows),
+        ),
         rows=[list(r) for r in rows],
         columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples"],
     )
 
 
-async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int) -> ToolResult:
+async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     route = args.get("route")
     if not route:
-        return ToolResult(kind="empty", summary_jp="route 引数が必要です。")
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
     r = await route_info(agency_id, conn, route=str(route))
     if r is None:
-        return ToolResult(kind="empty", summary_jp=f"系統{route} の路線情報が見つかりません。")
+        return ToolResult(kind="empty", summary=_summary("route_meta_not_found", lang=locale, route=route))
+    dash = _summary("dash", lang=locale)
     pairs = [
-        ("路線名", r[1] or "—"),
-        ("停留所数", f"{r[2]}駅" if r[2] is not None else "—"),
-        ("始発", r[3] or "—"),
-        ("最終", r[4] or "—"),
-        ("運行便数", f"{r[5]}便" if r[5] is not None else "—"),
+        (_summary("meta_label_name", lang=locale), r[1] or dash),
+        (
+            _summary("meta_label_stops", lang=locale),
+            _summary("meta_stops_value", lang=locale, n=r[2]) if r[2] is not None else dash,
+        ),
+        (_summary("meta_label_first", lang=locale), r[3] or dash),
+        (_summary("meta_label_last", lang=locale), r[4] or dash),
+        (
+            _summary("meta_label_trips", lang=locale),
+            _summary("meta_trips_value", lang=locale, n=r[5]) if r[5] is not None else dash,
+        ),
     ]
     return ToolResult(
         kind="kv",
-        summary_jp=f"系統{route} 路線情報",
+        summary=_summary("route_meta_summary", lang=locale, route=route),
         pairs=pairs,
     )
 
@@ -495,19 +647,21 @@ async def dispatch(
     ctx: RangeCtx,
     conn,
     agency_id: int,
+    locale: str = "ja",
 ) -> ToolResult:
     """Run the named tool. Unknown tool → empty ToolResult with explanation.
 
     Tool args may include ``days_back``/``from``/``to`` to override the UI
     range; ``_apply_date_overrides`` produces a derived ctx that all handlers
     consume. The original UI ctx is otherwise preserved (DOW / time_band /
-    routes / service still apply).
+    routes / service still apply). ``locale`` selects the language for the
+    human-readable ``summary`` field on the returned :class:`ToolResult`.
     """
     handler = _HANDLERS.get(tool_name)
     if handler is None:
-        return ToolResult(kind="empty", summary_jp=f"未対応のツール: {tool_name}")
+        return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
     effective_ctx = _apply_date_overrides(ctx, arguments)
-    return await handler(arguments, effective_ctx, conn, agency_id)
+    return await handler(arguments, effective_ctx, conn, agency_id, locale)
 
 
 # ---------------------------------------------------------------------------
@@ -515,19 +669,19 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 
 
-def render_tool_result(result: ToolResult) -> str:
-    """Compact Japanese text rendering of a :class:`ToolResult`."""
+def render_tool_result(result: ToolResult, locale: str = "ja") -> str:
+    """Compact locale-aware text rendering of a :class:`ToolResult`."""
     if result.kind == "empty" or result.kind == "text":
-        return result.summary_jp
+        return result.summary
 
-    lines = [f"【{result.summary_jp}】"]
+    lines = [f"【{result.summary}】"]
 
     if result.kind == "table":
         for i, row in enumerate(result.rows[:30], 1):
             cells = [str(c) if c is not None else "—" for c in row]
             lines.append(f"{i}. " + " / ".join(cells))
         if len(result.rows) > 30:
-            lines.append(f"…他{len(result.rows) - 30}件")
+            lines.append(_summary("more_rows", lang=locale, n=len(result.rows) - 30))
         return "\n".join(lines)
 
     if result.kind == "series":
@@ -535,8 +689,18 @@ def render_tool_result(result: ToolResult) -> str:
             top = d.get("top_offenders") or []
             top_txt = ""
             if top:
-                top_txt = " (悪化: " + ", ".join(f"系統{t['route_code']}" for t in top[:3]) + ")"
-            lines.append(f"{d['date']}: 平均{d.get('avg_min', 0):.2f}分 / {d.get('samples', 0)}件{top_txt}")
+                routes = ", ".join(_summary("route_prefix", lang=locale, route=t["route_code"]) for t in top[:3])
+                top_txt = _summary("series_top_offenders", lang=locale, routes=routes)
+            lines.append(
+                _summary(
+                    "series_line",
+                    lang=locale,
+                    date=d["date"],
+                    avg=d.get("avg_min", 0),
+                    samples=d.get("samples", 0),
+                    top=top_txt,
+                )
+            )
         return "\n".join(lines)
 
     if result.kind == "kv":
@@ -544,4 +708,4 @@ def render_tool_result(result: ToolResult) -> str:
             lines.append(f"{k}: {v}")
         return "\n".join(lines)
 
-    return result.summary_jp
+    return result.summary

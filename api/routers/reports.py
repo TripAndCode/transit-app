@@ -13,10 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn
+from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
-from pipeline.query.formatter import format_result
+from pipeline.query.formatter import format_result, format_trend_text
 from pipeline.reports import (
     compute_compare_ranking,
     compute_dow_ranking,
@@ -142,6 +142,7 @@ async def get_report(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
+    locale: str = Depends(get_locale),
 ):
     """Compute the named report live and render it."""
     if report_type not in _REPORT_TYPES:
@@ -179,11 +180,7 @@ async def get_report(
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx)
-        if days:
-            avg = sum(d["avg_min"] or 0 for d in days) / len(days)
-            text = f"【日次トレンド({ctx.from_date} 〜 {ctx.to_date})】\n平均: {avg:.2f}分 / 観測日数: {len(days)}日"
-        else:
-            text = "選択した期間にデータがありません。"
+        text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
@@ -197,7 +194,7 @@ async def get_report(
     if format == "csv":
         return _csv_response(report_type, rows, ctx)
 
-    text = format_result(intent["query_type"], rows, intent)
+    text = format_result(intent["query_type"], rows, intent, locale=locale)
     return ReportResponse(
         report_type=report_type,
         rendered_at=datetime.now(timezone.utc),

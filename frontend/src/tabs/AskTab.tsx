@@ -210,9 +210,8 @@ function Bubble({
           <RichResult result={result} fallbackText={msg.text} formatRoute={formatRoute} ctx={ctx} t={t} />
         ) : (
           // The assistant response `text` is server-rendered by the backend
-          // formatter (currently JP-only). T-EXTRA-B will wire the user's
-          // locale through to the backend so this text comes back localized
-          // — until then it's treated as opaque, NOT translated client-side.
+          // formatter, already in the locale the request asked for via
+          // Accept-Language (see api/middleware/locale.py). Rendered as-is.
           <span style={{ whiteSpace: "pre-wrap" }}>{msg.text}</span>
         )}
         {!isUser && "result" in msg && (msg.tool_call || msg.result) && (
@@ -260,9 +259,9 @@ function RichResult({
     const routeIdx = cols.findIndex((c) => c === "route_code");
     return (
       <div>
-        {/* `summary_jp` is the backend-formatted summary; still JP-only
-            until T-EXTRA-B. Rendered as-is. */}
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        {/* `summary` is the backend-formatted, locale-aware summary
+            (rendered by pipeline.query.tools._summary on the server). */}
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
         <CtxLine ctx={ctx} t={t} />
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -305,7 +304,7 @@ function RichResult({
   if (result.kind === "kv" && result.pairs) {
     return (
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
         <CtxLine ctx={ctx} t={t} />
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
@@ -323,7 +322,7 @@ function RichResult({
   if (result.kind === "series" && result.series && result.series.length > 0) {
     return (
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary_jp}</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
         <CtxLine ctx={ctx} t={t} />
         <DailyChart days={result.series as TrendDay[]} height={200} />
       </div>
