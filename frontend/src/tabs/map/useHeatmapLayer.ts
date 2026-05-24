@@ -6,7 +6,7 @@ import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
-export const HALO_LAYER = "delay-halos";
+const HALO_LAYER = "delay-halos";
 
 /**
  * Build the MapLibre filter expression that selects circles falling into a
