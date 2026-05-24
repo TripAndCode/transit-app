@@ -1,0 +1,109 @@
+/* frontend/src/styles/overview.css
+   Magazine + animations for the 概況 tab. Calm-UI compliant: no tilts,
+   no parallax, no >1s animations, all disabled under reduced-motion. */
+
+.ov-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+               "Helvetica Neue", sans-serif;
+  color: var(--text-primary);
+}
+
+.ov-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 18px;
+}
+
+.ov-hero {
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+.ov-hero strong { font-weight: 700; }
+.ov-delta-up   { color: #b45309; font-weight: 600; }
+.ov-delta-down { color: #166534; font-weight: 600; }
+.ov-sub        { color: var(--text-secondary); font-size: 14px; }
+
+.ov-divider { border: 0; border-top: 1px solid var(--border-soft); margin: 32px 0; }
+
+.ov-label {
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.ov-movers { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.ov-mover  { font-size: 15px; line-height: 1.7; }
+.ov-mover .name { font-weight: 600; }
+.ov-mover .quiet { color: var(--text-tertiary); font-size: 13px; display: block; margin-top: 2px; }
+.ov-streak {
+  display: inline-block;
+  background: rgba(180, 83, 9, 0.08);
+  color: #92400e;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  margin-left: 6px;
+  font-weight: 500;
+}
+.ov-streak.good { background: rgba(22, 101, 52, 0.08); color: #14532d; }
+
+.ov-conc-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--bg-soft); }
+.ov-conc-seg {
+  background: linear-gradient(180deg, #c2a47a 0%, #b45309 100%);
+  opacity: 0.85;
+  border-right: 1px solid rgba(255, 255, 255, 0.65);
+  transform-origin: left center;
+}
+.ov-conc-seg.rest { background: var(--bg-soft-2, #b8b8be); opacity: 0.30; border-right: 0; }
+.ov-conc-legend { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+
+.ov-hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 28px; }
+.ov-hour  { background: #f0eee9; border-radius: 2px; }
+.ov-hour.peak { background: #b45309; opacity: 0.85; }
+.ov-hour.high { background: #d97706; opacity: 0.55; }
+.ov-hour.mid  { background: #d97706; opacity: 0.32; }
+.ov-hour.low  { background: #d97706; opacity: 0.18; }
+
+.ov-svc { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end; }
+.ov-svc-num { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Animations — guarded by reduced-motion */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-fade-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes ov-grow-x {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+  @keyframes ov-draw {
+    to { stroke-dashoffset: 0; }
+  }
+  .ov-anim-fade  { animation: ov-fade-in 400ms ease-out forwards; }
+  .ov-anim-delta { animation: ov-fade-in 400ms ease-out 600ms backwards; display: inline-block; }
+  .ov-anim-grow-x { animation: ov-grow-x 700ms ease-out 400ms backwards; }
+  .ov-sparkline polyline {
+    stroke-dasharray: 200; stroke-dashoffset: 200;
+    animation: ov-draw 800ms ease-out 200ms forwards;
+  }
+}
+
+/* Mobile (≤ 600px) */
+@media (max-width: 600px) {
+  .ov-page { padding: 20px 16px 60px; }
+  .ov-hero { font-size: 22px; }
+  .ov-movers { grid-template-columns: 1fr; gap: 24px; }
+  .ov-svc { grid-template-columns: 1fr; gap: 16px; }
+}
