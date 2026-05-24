@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Small (?) info icon that opens a quiet popover with a paragraph or two
@@ -13,6 +14,7 @@ export function InsightHint({
   title: string;
   body: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -30,7 +32,7 @@ export function InsightHint({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="ヒント"
+        aria-label={t("common.hint_aria")}
         style={{
           background: "transparent",
           border: "none",

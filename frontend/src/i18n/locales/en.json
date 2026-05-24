@@ -270,6 +270,7 @@
       "service": "Service",
       "avg": "Avg",
       "median": "Median",
+      "p90": "p90",
       "samples": "Samples",
       "dow": "Day",
       "on_time_pct": "On-time %",

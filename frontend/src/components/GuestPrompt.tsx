@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 
 const STARTED = "guest_started_at";
@@ -9,6 +10,7 @@ const RE_NUDGE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** Sticky banner that nudges anonymous users to log in after 10 min of use. */
 export function GuestPrompt() {
+  const { t } = useTranslation();
   const { data: session, isLoading } = useSession();
   const [show, setShow] = useState(false);
 
@@ -52,14 +54,14 @@ export function GuestPrompt() {
         display: "flex", alignItems: "center", gap: 12, fontSize: 13,
       }}
     >
-      <span style={{ flex: 1 }}>気に入りましたか？フィルターを保存するにはログインしてください。</span>
+      <span style={{ flex: 1 }}>{t("account.guest_prompt")}</span>
       <Link to="/login" style={{ color: "inherit", padding: "4px 12px",
                                   background: "var(--surface-1)", borderRadius: 4,
                                   textDecoration: "none" }}>
-        ログイン
+        {t("common.login")}
       </Link>
       <button
-        aria-label="閉じる"
+        aria-label={t("common.close")}
         onClick={() => {
           localStorage.setItem(DISMISSED, String(Date.now()));
           setShow(false);

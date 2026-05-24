@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type Props = { open: boolean; onClose: () => void };
 
 export function SettingsDrawer({ open, onClose }: Props) {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
 
   useEffect(() => {
@@ -49,20 +51,20 @@ export function SettingsDrawer({ open, onClose }: Props) {
           boxShadow: "-4px 0 16px rgba(0,0,0,0.06)",
         }}
       >
-        <h3 style={{ marginTop: 0 }}>設定</h3>
+        <h3 style={{ marginTop: 0 }}>{t("header.settings_title")}</h3>
         <label style={{ display: "block", marginTop: 16 }}>
           <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: 13 }}>
-            API キー <span style={{ color: "var(--text-tertiary)" }}>(オプション)</span>
+            {t("header.settings_api_key_label")} <span style={{ color: "var(--text-tertiary)" }}>{t("common.optional_paren")}</span>
           </div>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="未設定でも全機能が使えます"
+            placeholder={t("header.settings_api_key_placeholder")}
             style={{ width: "100%" }}
           />
           <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
-            通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。
+            {t("header.settings_api_key_hint")}
           </div>
         </label>
         <div style={{ display: "flex", gap: 8, marginTop: 24, justifyContent: "flex-end" }}>
@@ -71,14 +73,14 @@ export function SettingsDrawer({ open, onClose }: Props) {
             onClick={onClose}
             style={{ background: "transparent", border: "1px solid var(--border-subtle)", padding: "6px 12px", borderRadius: 4 }}
           >
-            キャンセル
+            {t("common.cancel")}
           </button>
           <button
             type="button"
             onClick={save}
             style={{ background: "var(--accent)", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 4 }}
           >
-            保存
+            {t("common.save")}
           </button>
         </div>
       </div>

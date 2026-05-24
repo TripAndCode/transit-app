@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ApiError } from "../api/client";
 
 type Props = {
@@ -5,18 +7,19 @@ type Props = {
   onRetry?: () => void;
 };
 
-function messageFor(err: unknown): string {
+function messageFor(err: unknown, t: TFunction): string {
   if (err instanceof ApiError) {
-    if (err.status === 429) return "アクセスが集中しています。少し待って再試行してください。";
-    if (err.status === 404) return "対象のデータがまだありません。";
-    if (err.status >= 500) return "一時的に取得できませんでした。再試行してください。";
-    return `読み込みに失敗しました (${err.status})`;
+    if (err.status === 429) return t("errors.rate_limited");
+    if (err.status === 404) return t("errors.not_found");
+    if (err.status >= 500) return t("errors.server_5xx");
+    return t("errors.generic_status", { status: err.status });
   }
-  if (err instanceof Error) return "通信が一時的に途切れました。再試行してください。";
-  return "読み込みに失敗しました。";
+  if (err instanceof Error) return t("errors.network");
+  return t("errors.generic");
 }
 
 export function ErrorBanner({ error, onRetry }: Props) {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
@@ -32,7 +35,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
         margin: "0 0 16px",
       }}
     >
-      <span style={{ flex: 1 }}>{messageFor(error)}</span>
+      <span style={{ flex: 1 }}>{messageFor(error, t)}</span>
       {onRetry && (
         <button
           type="button"
@@ -45,7 +48,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
             borderRadius: 4,
           }}
         >
-          再試行
+          {t("common.retry")}
         </button>
       )}
     </div>
