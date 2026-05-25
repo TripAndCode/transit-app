@@ -1,10 +1,15 @@
 """Tool-use chat orchestration for the v2 Ask tab.
 
-Single entry point :func:`chat_with_tools` — sends the user's question to
-Groq with the v2 tool surface and either dispatches a tool call to
-Postgres or returns the model's free-form refusal text. Out-of-scope
-questions (weather, fares, etc.) come back as friendly natural-language
+Single entry point :func:`chat_with_tools` — sends the user's question
+through the provider-agnostic :class:`~pipeline.query.llm_client.LLMClient`
+with the v2 tool surface and either dispatches a tool call to Postgres
+or returns the model's free-form refusal text. Out-of-scope questions
+(weather, fares, etc.) come back as friendly natural-language
 suggestions instead of failing.
+
+Provider selection lives in env (``CHAT_PROVIDERS``); this module is
+provider-agnostic. The historical default of Groq is preserved when
+``CHAT_PROVIDERS`` is unset.
 
 Localisation
 ------------
@@ -26,9 +31,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 
 from api.range import RangeCtx
+from pipeline.query.llm_client import get_client, reset_client_for_tests
 from pipeline.query.tools import (
     LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
@@ -40,7 +45,6 @@ from pipeline.query.tools import (
 )
 
 _log = logging.getLogger(__name__)
-_groq_client = None
 
 # Extra per-call localisation strings. Keyed identically to the table in
 # tools.py — they live here only because they're chat-flow specific
@@ -75,18 +79,18 @@ def _chat_str(template: str, locale: str, **vars) -> str:
 
 
 def _get_client():
-    global _groq_client
-    if _groq_client is None:
-        from groq import Groq
+    """Back-compat shim returning the provider-agnostic LLM client.
 
-        _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    return _groq_client
+    Older tests monkeypatch this symbol with a fake Groq-shaped client;
+    keep it around so ``monkeypatch.setattr(chat, "_get_client", ...)``
+    still works while production code goes through ``llm_client``.
+    """
+    return get_client()
 
 
 def _reset_client_for_tests() -> None:
-    """Reset the singleton — used in tests via monkeypatch."""
-    global _groq_client
-    _groq_client = None
+    """Reset the LLM singleton — used in tests via monkeypatch."""
+    reset_client_for_tests()
 
 
 async def chat_with_tools(
@@ -104,6 +108,16 @@ async def chat_with_tools(
     structured payload the frontend can use for richer rendering (charts,
     tables) when present. ``locale`` ∈ {``"ja"``, ``"en"``} chooses the
     user-facing language across the entire flow.
+
+    Model selection
+    ---------------
+    The ``model`` parameter is forwarded to the LLM adapter as a
+    per-call override. When the caller does not pin a model the adapter
+    falls back to each provider's own configured default
+    (``{PROVIDER}_MODEL`` env var, e.g. ``CEREBRAS_MODEL`` /
+    ``GROQ_MODEL``). Passing a vendor-specific model name (e.g.
+    ``"llama-3.3-70b-versatile"``) only works if every provider in the
+    fallback ladder accepts it.
     """
     client = _get_client()
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
@@ -119,22 +133,21 @@ async def chat_with_tools(
     )
 
     def _sync():
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "system", "content": locale_addendum},
-                    {"role": "user", "content": user_prelude},
-                ],
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0,
-            )
-            return resp.choices[0].message
-        except Exception as exc:
-            _log.warning("Groq chat call failed (%s): %r", exc.__class__.__name__, exc)
-            return None
+        # The adapter handles per-provider retries, rate-limit fallback,
+        # and logging internally; on total failure (or zero configured
+        # providers) it returns None and we surface the standard
+        # "service_unreachable" message below.
+        return client.chat_completions(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": locale_addendum},
+                {"role": "user", "content": user_prelude},
+            ],
+            tools=TOOLS,
+            tool_choice="auto",
+            temperature=0.0,
+            model_override=model,
+        )
 
     msg = await asyncio.to_thread(_sync)
     if msg is None:
