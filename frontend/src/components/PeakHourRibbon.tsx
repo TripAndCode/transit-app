@@ -7,11 +7,11 @@ import type { OverviewPeakHour } from "../api/types";
 type Props = { peak_hour: OverviewPeakHour | null };
 
 const W = 660;
-const H = 120;
-const PAD_TOP = 22; // headroom for max-label callout
+const H = 140;
+const PAD_TOP = 28; // headroom for max-label callout
 const PAD_BOTTOM = 22;
 const PAD_LEFT = 0;
-const PAD_RIGHT = 28; // space for "avg" label at the right edge
+const PAD_RIGHT = 32; // space for "avg" label at the right edge
 const CELL_W = (W - PAD_LEFT - PAD_RIGHT) / 24;
 
 type HoverState = {
@@ -54,6 +54,26 @@ export function PeakHourRibbon({ peak_hour }: Props) {
   const peakBarY = toY(peakV);
 
   const avgY = toY(overallAvg);
+
+  // Worse-than-average spread band. Compute the bounding hours of contiguous
+  // segments where avg_min > overallAvg. We render one rect per segment.
+  // Omit entirely if fewer than 3 hours have data (too sparse).
+  const showSpread = nonNull.length >= 3 && overallAvg > 0;
+  type Segment = { startHour: number; endHour: number };
+  const spreadSegments: Segment[] = [];
+  if (showSpread) {
+    let segStart: number | null = null;
+    for (let h = 0; h < 24; h++) {
+      const v = hourValues[h];
+      const isWorse = v != null && v > overallAvg;
+      if (isWorse && segStart == null) segStart = h;
+      if (!isWorse && segStart != null) {
+        spreadSegments.push({ startHour: segStart, endHour: h });
+        segStart = null;
+      }
+    }
+    if (segStart != null) spreadSegments.push({ startHour: segStart, endHour: 24 });
+  }
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = e.currentTarget;
@@ -98,7 +118,19 @@ export function PeakHourRibbon({ peak_hour }: Props) {
           aria-label={t("overview.section_peak_hour")}
           onMouseMove={handleMove}
         >
-          {/* Bars */}
+          {/* Spread band: translucent amber rect over the worse-than-avg window(s) */}
+          {spreadSegments.map((seg, i) => (
+            <rect
+              key={`spread-${i}`}
+              className="ov-peak-spread"
+              x={PAD_LEFT + seg.startHour * CELL_W}
+              y={PAD_TOP - 4}
+              width={(seg.endHour - seg.startHour) * CELL_W}
+              height={H - PAD_BOTTOM - (PAD_TOP - 4)}
+            />
+          ))}
+
+          {/* Bars — only rendered where data exists; empty hours render nothing */}
           {hourValues.map((v, h) => {
             if (v == null) return null;
             const x = PAD_LEFT + h * CELL_W + 1;
@@ -106,7 +138,7 @@ export function PeakHourRibbon({ peak_hour }: Props) {
             const bar_h = Math.max((H - PAD_BOTTOM) - y, 0);
             const isPeak = h === peakIdx;
             const fill = isPeak ? "#b45309" : "#475569";
-            const opacity = isPeak ? 0.95 : 0.25;
+            const opacity = isPeak ? 0.95 : 0.30;
             return (
               <rect
                 key={h}
@@ -117,6 +149,7 @@ export function PeakHourRibbon({ peak_hour }: Props) {
                 fill={fill}
                 opacity={opacity}
                 rx={2}
+                ry={2}
               />
             );
           })}
@@ -145,27 +178,31 @@ export function PeakHourRibbon({ peak_hour }: Props) {
             </>
           )}
 
-          {/* Peak callout: arrow + label above peak bar */}
+          {/* Peak callout: short L-shaped leader line + label up-and-to-the-right */}
           <g>
             <line
               x1={peakBarX + CELL_W / 2}
-              y1={peakBarY - 4}
+              y1={peakBarY - 2}
               x2={peakBarX + CELL_W / 2}
               y2={peakBarY - 12}
               stroke="#b45309"
               strokeWidth="1"
             />
-            <polygon
-              points={`${peakBarX + CELL_W / 2 - 3},${peakBarY - 5} ${peakBarX + CELL_W / 2 + 3},${peakBarY - 5} ${peakBarX + CELL_W / 2},${peakBarY - 1}`}
-              fill="#b45309"
+            <line
+              x1={peakBarX + CELL_W / 2}
+              y1={peakBarY - 12}
+              x2={peakBarX + CELL_W / 2 + 4}
+              y2={peakBarY - 12}
+              stroke="#b45309"
+              strokeWidth="1"
             />
             <text
-              x={peakBarX + CELL_W / 2}
-              y={peakBarY - 14}
+              x={peakBarX + CELL_W / 2 + 6}
+              y={peakBarY - 9}
               fontSize="11"
               fontWeight="600"
               fill="#b45309"
-              textAnchor="middle"
+              textAnchor="start"
             >
               {t("overview.peak_hour.max_label", {
                 avg: peak_hour.peak_avg_min.toFixed(1),

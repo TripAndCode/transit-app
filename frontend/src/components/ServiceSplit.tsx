@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 
 type Props = { service_split: Record<string, number> };
 
+const WEEKDAY_KEY = "平日"; // i18n-ignore: GTFS service-type key
+const WEEKEND_KEY = "土日祝"; // i18n-ignore: GTFS service-type key
+
 export function ServiceSplit({ service_split }: Props) {
   const { t } = useTranslation();
   const keys = Object.keys(service_split);
@@ -11,12 +14,45 @@ export function ServiceSplit({ service_split }: Props) {
   const values = keys.map((k) => service_split[k]);
   const maxVal = Math.max(...values, 0.0001); // avoid div-by-zero
 
-  // For the "diff" annotation we need top two values when there are at least 2.
+  // Story + diff annotation (computed only when we have two values).
+  let storyNode: React.ReactNode = null;
   let diffNode: React.ReactNode = null;
   if (keys.length >= 2) {
+    const weekday = service_split[WEEKDAY_KEY];
+    const weekend = service_split[WEEKEND_KEY];
     const sorted = [...values].sort((a, b) => b - a);
     const diff = sorted[0] - sorted[1];
     const pct = sorted[1] > 0 ? (diff / sorted[1]) * 100 : 0;
+
+    if (weekday != null && weekend != null && Math.min(weekday, weekend) > 0) {
+      const hi = Math.max(weekday, weekend);
+      const lo = Math.min(weekday, weekend);
+      const ratio = hi / lo;
+      if (ratio < 1.15) {
+        storyNode = (
+          <p className="ov-svc-story">
+            {t("overview.service_split.story_same")}
+          </p>
+        );
+      } else if (weekday > weekend) {
+        storyNode = (
+          <p className="ov-svc-story">
+            {t("overview.service_split.story_weekday_higher", {
+              ratio: ratio.toFixed(1),
+            })}
+          </p>
+        );
+      } else {
+        storyNode = (
+          <p className="ov-svc-story">
+            {t("overview.service_split.story_weekend_higher", {
+              ratio: ratio.toFixed(1),
+            })}
+          </p>
+        );
+      }
+    }
+
     if (diff > 0) {
       diffNode = (
         <p className="ov-svc-diff">
@@ -57,6 +93,7 @@ export function ServiceSplit({ service_split }: Props) {
           );
         })}
       </div>
+      {storyNode}
       {diffNode}
     </div>
   );

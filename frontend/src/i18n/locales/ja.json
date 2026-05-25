@@ -32,8 +32,24 @@
       "label": "今週の平均遅延",
       "baseline_label": "先週平均"
     },
+    "story": {
+      "better": "今週は先週より良くなった。",
+      "worse": "今週は先週より悪化した。",
+      "same": "今週は先週とほぼ同じ。",
+      "no_baseline": "今週の状況。"
+    },
+    "mover": {
+      "worsened": "{{val}}分 悪化",
+      "improved": "{{val}}分 改善"
+    },
+    "concentration": {
+      "single_route": "{{name}} が全体の 100% を占める。1系統のみの観測。"
+    },
     "service_split": {
-      "diff": "差: {{diff}}分 ({{pct}}%)"
+      "diff": "差: {{diff}}分 ({{pct}}%)",
+      "story_weekday_higher": "平日は土日祝の {{ratio}}倍 遅延。",
+      "story_weekend_higher": "土日祝は平日の {{ratio}}倍 遅延。",
+      "story_same": "平日と土日祝はほぼ同じ。"
     },
     "peak_hour": {
       "max_label": "最大 {{avg}}分",
