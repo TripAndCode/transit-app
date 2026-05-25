@@ -72,6 +72,49 @@ async def test_dispatch_route_unresolved_returns_candidates(conn_routes):
             or "登録" in result.summary)
 
 
+@pytest.fixture
+async def conn_routes_with_alias(apply_schema):
+    """Seed routes whose names trigger a trigram match for a deliberately
+    similar input — used to assert the 'did you mean' message localises."""
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') "
+            "RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+        await conn.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
+            "VALUES ($1, $2, $3, $4)",
+            [
+                (agency_id, "中央大橋線(12211)", "L21 中央大橋線", None),
+                (agency_id, "中央大橋線(16021)", "L31 中央大橋線", None),
+                (agency_id, "中央大橋線(17091)", "L30 中央大橋線", None),
+            ],
+        )
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_did_you_mean_locale_en(conn_routes_with_alias):
+    """When the route resolver returns candidates (no confident match), the
+    'did you mean' summary must render in English for locale='en'."""
+    pool, agency_id = conn_routes_with_alias
+    async with pool.acquire() as conn:
+        result = await dispatch(
+            "route_stats", {"route": "中央大橋線"}, _ctx(), conn, agency_id, locale="en"
+        )
+    assert result.kind == "empty"
+    # English message: "not found. Did you mean: ..."
+    assert "not found" in result.summary
+    assert "Did you mean" in result.summary
+    # JP phrasing must not leak through.
+    assert "もしかして" not in result.summary
+
+
 @pytest.mark.asyncio
 async def test_dispatch_capabilities(conn_routes):
     pool, agency_id = conn_routes

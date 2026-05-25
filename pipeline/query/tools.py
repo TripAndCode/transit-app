@@ -150,6 +150,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dash", "en"): "—",
     ("unsupported_tool", "ja"): "未対応のツール: {name}",
     ("unsupported_tool", "en"): "Unsupported tool: {name}",
+    ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
+    ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
+    ("did_you_mean_candidate", "ja"): "系統{code}({name})",
+    ("did_you_mean_candidate", "en"): "route {code} ({name})",
     # render_tool_result decorations
     ("series_top_offenders", "ja"): " (悪化: {routes})",
     ("series_top_offenders", "en"): " (worst: {routes})",
@@ -702,11 +706,17 @@ async def dispatch(
                 arguments = {**arguments, "route": resolution.route_code}
             elif resolution.candidates:
                 cand_txt = " / ".join(
-                    f"系統{code}({name})" for code, name in resolution.candidates[:5]
+                    _summary("did_you_mean_candidate", lang=locale, code=code, name=name)
+                    for code, name in resolution.candidates[:5]
                 )
                 return ToolResult(
                     kind="empty",
-                    summary=f"'{raw_route}' は見つかりません。もしかして: {cand_txt}",
+                    summary=_summary(
+                        "route_did_you_mean",
+                        lang=locale,
+                        raw=raw_route,
+                        candidates=cand_txt,
+                    ),
                 )
 
     effective_ctx = _apply_date_overrides(ctx, arguments)
