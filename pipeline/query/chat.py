@@ -164,7 +164,13 @@ async def chat_with_tools(
             call.function.arguments,
         )
         args = {}
-    if args is None:
+    # Some LLMs occasionally hand back ``arguments`` as a non-object JSON
+    # value — null (None after json.loads), a string ('"foo"'), or a list
+    # ('[]'). All of these would crash the downstream ``args.get(...)``
+    # calls in the tool handlers. Normalise everything that isn't a dict
+    # to ``{}`` so the handler still runs (likely returning a "missing
+    # required arg" empty result, which is the correct UX).
+    if not isinstance(args, dict):
         args = {}
 
     try:
