@@ -16,25 +16,10 @@ all DB queries are scoped to the request's ``agency_id`` except
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from api.range import RangeCtx
-
-if TYPE_CHECKING:  # pragma: no cover — annotation-only
-    from pipeline.query.tools import ToolResult
-
-
-def _ToolResult(*args, **kwargs):
-    """Lazy proxy for :class:`pipeline.query.tools.ToolResult`.
-
-    Importing ``ToolResult`` at module load time creates a circular import
-    once :mod:`pipeline.query.tools` re-imports ``META_TOOLS``/``META_HANDLERS``
-    from this module. Defer the import until first call so module
-    initialization order is irrelevant.
-    """
-    from pipeline.query.tools import ToolResult as _TR
-
-    return _TR(*args, **kwargs)
+from pipeline.query.tools import ToolResult
 
 
 VALID_KINDS = (
@@ -72,7 +57,7 @@ async def describe_data(
         limit = 50
 
     if kind not in VALID_KINDS:
-        return _ToolResult(
+        return ToolResult(
             kind="empty",
             summary=_summary(
                 f"未知の kind: {kind}。有効値: {', '.join(VALID_KINDS)}",
@@ -95,7 +80,7 @@ async def describe_data(
         total = await conn.fetchval(
             "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id
         )
-        return _ToolResult(
+        return ToolResult(
             kind="table",
             summary=_summary(
                 f"このエージェンシーには {total} 路線あります（先頭 {len(rows)} 件を表示）",
@@ -124,7 +109,7 @@ async def describe_data(
         total = await conn.fetchval(
             "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id
         )
-        return _ToolResult(
+        return ToolResult(
             kind="table",
             summary=_summary(
                 f"このエージェンシーには {total} 停留所あります（先頭 {len(rows)} 件）",
@@ -145,7 +130,7 @@ async def describe_data(
             agency_id,
         )
         if row is None or row["first_obs"] is None:
-            return _ToolResult(
+            return ToolResult(
                 kind="empty",
                 summary=_summary("観測データがありません。", "no observations.", locale),
             )
@@ -155,7 +140,7 @@ async def describe_data(
             ("distinct_days", str(row["days"])),
             ("total_rows", str(row["rows_n"])),
         ]
-        return _ToolResult(
+        return ToolResult(
             kind="kv",
             summary=_summary(
                 f"観測期間: {row['first_obs'].date()} 〜 {row['last_obs'].date()}",
@@ -181,7 +166,7 @@ async def describe_data(
                 "WHERE agency_id = $1 ORDER BY agency_id",
                 agency_id,
             )
-        return _ToolResult(
+        return ToolResult(
             kind="table",
             summary=_summary(
                 f"登録されているエージェンシー: {len(rows)} 社",
@@ -203,7 +188,7 @@ async def describe_data(
             "LIMIT $4",
             agency_id, ctx.from_date, ctx.to_date, limit,
         )
-        return _ToolResult(
+        return ToolResult(
             kind="table",
             summary=_summary(
                 f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{ctx.to_date})",
@@ -239,7 +224,7 @@ async def describe_data(
                 obs_row["last_obs"].isoformat() if obs_row["last_obs"] else "—",
             ),
         ]
-        return _ToolResult(
+        return ToolResult(
             kind="kv",
             summary=_summary("データセット概要", "dataset overview", locale),
             pairs=pairs,
@@ -264,7 +249,7 @@ async def describe_data(
                 ("late5_pct",   "5分超過率 (%)"),
                 ("samples",     "観測サンプル数"),
             ]
-        return _ToolResult(
+        return ToolResult(
             kind="kv",
             summary=_summary(
                 "計算可能な指標の一覧", "available metrics", locale
@@ -273,7 +258,7 @@ async def describe_data(
         )
 
     # Unreachable — VALID_KINDS gate caught it.
-    return _ToolResult(kind="empty", summary="impossible")
+    return ToolResult(kind="empty", summary="impossible")
 
 
 _CAPABILITY_EXAMPLES_JP = {
@@ -310,7 +295,7 @@ async def capabilities(
         pairs = [(requested, table[requested])]
     else:
         pairs = list(table.items())
-    return _ToolResult(
+    return ToolResult(
         kind="kv",
         summary=_summary(
             "答えられる質問の例（カテゴリ別）",
