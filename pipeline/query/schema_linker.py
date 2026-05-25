@@ -33,6 +33,7 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
 
     if ROUTE_CODE_RE.match(raw):
         row = await conn.fetchrow(
+            # Extract trailing-parenthesized digits from route_id (e.g. "国道線(1021)" → "1021")
             "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
             "       route_short_name "
             "FROM static_routes "
