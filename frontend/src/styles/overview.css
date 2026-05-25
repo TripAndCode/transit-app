@@ -58,22 +58,46 @@
 }
 .ov-streak.good { background: rgba(22, 101, 52, 0.08); color: #14532d; }
 
-.ov-conc-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--bg-soft); }
-.ov-conc-seg {
-  background: linear-gradient(180deg, #c2a47a 0%, #b45309 100%);
-  opacity: 0.85;
-  border-right: 1px solid rgba(255, 255, 255, 0.65);
-  transform-origin: left center;
-}
-.ov-conc-seg.rest { background: var(--bg-soft-2, #b8b8be); opacity: 0.30; border-right: 0; }
 .ov-conc-legend { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
 
-.ov-hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 28px; }
-.ov-hour  { background: #f0eee9; border-radius: 2px; }
-.ov-hour.peak { background: #b45309; opacity: 0.85; }
-.ov-hour.high { background: #d97706; opacity: 0.55; }
-.ov-hour.mid  { background: #d97706; opacity: 0.32; }
-.ov-hour.low  { background: #d97706; opacity: 0.18; }
+.ov-pareto-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2.5fr 50px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.ov-pareto-label {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-pareto-track {
+  height: 10px;
+  background: var(--bg-soft);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.ov-pareto-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #c2a47a 0%, #b45309 100%);
+  opacity: 0.85;
+  transform-origin: left center;
+}
+.ov-pareto-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.ov-pareto-rest {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 6px 0 0;
+}
 
 .ov-svc { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end; }
 .ov-svc-num { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
@@ -106,4 +130,6 @@
   .ov-hero { font-size: 22px; }
   .ov-movers { grid-template-columns: 1fr; gap: 24px; }
   .ov-svc { grid-template-columns: 1fr; gap: 16px; }
+  .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
+  .ov-pareto-label { white-space: normal; }
 }

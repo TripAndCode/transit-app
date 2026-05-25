@@ -62,10 +62,11 @@ class ConcentrationTopRoute(BaseModel):
 
 
 class Concentration(BaseModel):
-    """Top-3 routes plus aggregate "rest" share."""
+    """Top-5 routes plus aggregate "rest" share and rest route count."""
 
     top_routes: list[ConcentrationTopRoute]
     rest_share_pct: float
+    rest_route_count: int = 0
 
 
 class PeakHour(BaseModel):

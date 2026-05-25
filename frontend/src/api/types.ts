@@ -170,6 +170,7 @@ export type OverviewConcentrationTopRoute = {
 export type OverviewConcentration = {
   top_routes: OverviewConcentrationTopRoute[];
   rest_share_pct: number;
+  rest_route_count?: number;
 };
 
 export type OverviewPeakHour = {

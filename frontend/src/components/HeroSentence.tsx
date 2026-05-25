@@ -43,7 +43,13 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
                 ? ` (${headline.delta_pct > 0 ? "+" : ""}${headline.delta_pct.toFixed(0)}%)`
                 : ""}
             </span>{" "}
-            <InlineSparkline points={sparkline_points} />
+            <InlineSparkline
+              points={sparkline_points}
+              width={200}
+              height={56}
+              baseline={headline.baseline_avg_min ?? undefined}
+              showLabels
+            />
           </>
         ) : (
           <>

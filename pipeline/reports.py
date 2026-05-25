@@ -630,7 +630,7 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 
 
 async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
-    """Top-3 routes by total positive delay contribution + rest share.
+    """Top-5 routes by total positive delay contribution + rest share.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
     approximates ``SUM(GREATEST(dep_delay, 0))`` as
@@ -669,14 +669,14 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
             *params,
         )
     if not rows:
-        return {"top_routes": [], "rest_share_pct": 0.0}
+        return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
     grand_total = sum(float(r["total_late_min"] or 0.0) for r in rows)
     if grand_total == 0:
-        return {"top_routes": [], "rest_share_pct": 0.0}
-    top_3 = rows[:3]
-    codes = [r["route_code"] for r in top_3]
+        return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
+    top_n = rows[:5]
+    codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
-    top_3_sum = sum(float(r["total_late_min"] or 0.0) for r in top_3)
+    top_n_sum = sum(float(r["total_late_min"] or 0.0) for r in top_n)
     return {
         "top_routes": [
             {
@@ -684,9 +684,10 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
                 "route_short_name": names.get(r["route_code"]),
                 "share_pct": round((float(r["total_late_min"] or 0.0) / grand_total) * 100.0, 1),
             }
-            for r in top_3
+            for r in top_n
         ],
-        "rest_share_pct": round(((grand_total - top_3_sum) / grand_total) * 100.0, 1),
+        "rest_share_pct": round(((grand_total - top_n_sum) / grand_total) * 100.0, 1),
+        "rest_route_count": max(len(rows) - len(top_n), 0),
     }
 
 

@@ -319,7 +319,7 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
-    """4 routes; top 3 absorb ~87.5%; the 4th absorbs ~12.5%.
+    """6 routes; top 5 absorb the bulk, the 6th is the rest share.
 
     Concentration is computed as ``SUM(GREATEST(avg_min, 0) * samples)``
     per route on ``agg_daily_trend`` — directly proportional to total
@@ -331,6 +331,8 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
         ("R_Y", [600]),  # avg=10.0, n=1 -> total=10
         ("R_Z", [300, 300]),  # avg=5.0, n=2 -> total=10
         ("R_W", [150, 150]),  # avg=2.5, n=2 -> total=5
+        ("R_V", [240, 240]),  # avg=4.0, n=2 -> total=8
+        ("R_U", [120, 120]),  # avg=2.0, n=2 -> total=4
     ]
     for code, deps in rows:
         for i, dep in enumerate(deps):
@@ -355,11 +357,15 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     conc = out["concentration"]
     codes = [r["route_code"] for r in conc["top_routes"]]
-    assert len(codes) == 3
-    assert set(codes) == {"R_X", "R_Y", "R_Z"}
+    assert len(codes) == 5
+    # Top 5 are X, Y, Z, V, W; rest is U (4 min of a 52-min grand total ≈ 7.7%).
+    assert set(codes) == {"R_X", "R_Y", "R_Z", "R_V", "R_W"}
     total_pct = sum(r["share_pct"] for r in conc["top_routes"]) + conc["rest_share_pct"]
     assert total_pct == pytest.approx(100.0, abs=0.5)
-    assert conc["rest_share_pct"] == pytest.approx(12.5, abs=0.5)
+    grand_total = 15 + 10 + 10 + 5 + 8 + 4
+    expected_rest = (4 / grand_total) * 100.0
+    assert conc["rest_share_pct"] == pytest.approx(expected_rest, abs=0.5)
+    assert conc["rest_route_count"] == 1
 
 
 @pytest.mark.asyncio
