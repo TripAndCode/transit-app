@@ -6,6 +6,8 @@ type Props = {
   width?: number;
   height?: number;
   accent?: string;
+  /** When true, always render in `accent`; skip the auto green-on-improvement. */
+  forceAccent?: boolean;
   showEndDot?: boolean;
   baseline?: number;
   showLabels?: boolean;
@@ -17,6 +19,7 @@ export function InlineSparkline({
   width = 160,
   height = 48,
   accent = "#b45309",
+  forceAccent = false,
   showEndDot = true,
   baseline,
   showLabels = true,
@@ -25,10 +28,10 @@ export function InlineSparkline({
   if (!points || points.length < 2) {
     return null;
   }
-  // Trend down (last <= first) = improvement => muted green.
+  // Trend down (last <= first) = improvement => muted green (unless forced).
   const first = points[0];
   const last_v = points[points.length - 1];
-  const stroke = last_v <= first ? "#166534" : accent;
+  const stroke = forceAccent ? accent : last_v <= first ? "#166534" : accent;
 
   // Y scale: include baseline so the dashed line is in-range.
   const data_min = Math.min(...points);
