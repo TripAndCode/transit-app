@@ -164,6 +164,8 @@ async def chat_with_tools(
             call.function.arguments,
         )
         args = {}
+    if args is None:
+        args = {}
 
     try:
         result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
