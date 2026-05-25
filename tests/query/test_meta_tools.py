@@ -159,6 +159,25 @@ async def test_describe_data_metrics(conn_with_observations):
         )
     assert result.kind == "kv"
     assert any(k == "avg_delay" for k, _ in result.pairs)
+    # JP labels include 遅延.
+    avg_delay_value = dict(result.pairs)["avg_delay"]
+    assert "遅延" in avg_delay_value
+
+
+@pytest.mark.asyncio
+async def test_describe_data_metrics_locale_en(conn_with_observations):
+    """The metric-list value strings must switch to English when locale='en'."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "metrics"}, _ctx(), conn, agency_id, locale="en"
+        )
+    assert result.kind == "kv"
+    pairs = dict(result.pairs)
+    assert "avg_delay" in pairs
+    # At least one value must contain English text rather than the JP labels.
+    assert "delay" in pairs["avg_delay"]
+    assert "遅延" not in pairs["avg_delay"]
 
 
 @pytest.mark.asyncio

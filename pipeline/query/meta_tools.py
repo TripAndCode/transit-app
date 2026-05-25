@@ -225,14 +225,24 @@ async def describe_data(
         )
 
     if kind == "metrics":
-        metric_list = [
-            ("avg_delay", "平均遅延 (分)"),
-            ("p50_min",   "中央値遅延 (分)"),
-            ("p90_min",   "90 パーセンタイル遅延 (分)"),
-            ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
-            ("late5_pct", "5分超過率 (%)"),
-            ("samples",   "観測サンプル数"),
-        ]
+        if locale == "en":
+            metric_list = [
+                ("avg_delay",   "average delay (min)"),
+                ("p50_min",     "median delay (min)"),
+                ("p90_min",     "90th percentile delay (min)"),
+                ("on_time_pct", "on-time rate (%) — default threshold 60 s"),
+                ("late5_pct",   "share of >5-minute delays (%)"),
+                ("samples",     "observation sample count"),
+            ]
+        else:
+            metric_list = [
+                ("avg_delay",   "平均遅延 (分)"),
+                ("p50_min",     "中央値遅延 (分)"),
+                ("p90_min",     "90 パーセンタイル遅延 (分)"),
+                ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
+                ("late5_pct",   "5分超過率 (%)"),
+                ("samples",     "観測サンプル数"),
+            ]
         return _ToolResult(
             kind="kv",
             summary=_summary(
