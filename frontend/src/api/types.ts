@@ -132,3 +132,70 @@ export type Route = {
   route_code: string | null;
   trip_headsigns: string[];
 };
+
+export type OverviewHeadline = {
+  avg_min: number | null;
+  baseline_avg_min: number | null;
+  delta_min: number | null;
+  delta_pct: number | null;
+  samples: number;
+  /** ISO date of the start of the 7-day window the headline covers
+   *  (always anchored at ctx.to and 7 days wide, regardless of the
+   *  full ctx range). Use this for the eyebrow label. */
+  window_from: string;
+  /** ISO date of the end of the headline 7-day window (= ctx.to). */
+  window_to: string;
+};
+
+export type OverviewMover = {
+  route_code: string;
+  route_short_name: string | null;
+  delta_min: number;
+  delta_pct: number;
+  streak_weeks: number;
+  sparkline_points: number[];
+};
+
+export type OverviewMovers = {
+  worse: OverviewMover[];
+  better: OverviewMover[];
+};
+
+export type OverviewConcentrationTopRoute = {
+  route_code: string;
+  route_short_name: string | null;
+  share_pct: number;
+};
+
+export type OverviewConcentration = {
+  top_routes: OverviewConcentrationTopRoute[];
+  rest_share_pct: number;
+  rest_route_count?: number;
+};
+
+export type OverviewPeakHour = {
+  by_hour: (number | null)[];
+  peak_hour: number;
+  peak_avg_min: number;
+};
+
+export type OverviewServiceSplitDay = {
+  date: string;
+  weekday: number | null;
+  weekend: number | null;
+};
+
+export type OverviewSummary = {
+  headline: OverviewHeadline;
+  movers: OverviewMovers;
+  concentration: OverviewConcentration;
+  peak_hour: OverviewPeakHour | null;
+  /** Weekday-only 24-hour profile, used by the peak-hour modal split. */
+  peak_hour_weekday?: OverviewPeakHour | null;
+  /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
+  peak_hour_weekend?: OverviewPeakHour | null;
+  service_split: Record<string, number>;
+  /** Per-date weekday/weekend split, used by the service-split modal. */
+  service_split_daily?: OverviewServiceSplitDay[];
+  sparkline_points: number[];
+};

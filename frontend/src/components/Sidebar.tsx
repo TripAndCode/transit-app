@@ -1,11 +1,12 @@
 import { NavLink, useParams } from "react-router-dom";
-import { Map as MapIcon, MessageSquare, Activity, BarChart3, type LucideIcon } from "lucide-react";
+import { Map as MapIcon, MessageSquare, Activity, BarChart3, LayoutDashboard, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
 type Item = { to: string; labelKey: string; Icon: LucideIcon };
 
 const ITEMS: Item[] = [
+  { to: "overview", labelKey: "nav.overview", Icon: LayoutDashboard },
   { to: "map", labelKey: "nav.map", Icon: MapIcon },
   { to: "ask", labelKey: "nav.ask", Icon: MessageSquare },
   { to: "live", labelKey: "nav.live", Icon: Activity },
