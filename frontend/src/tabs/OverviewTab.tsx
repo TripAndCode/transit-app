@@ -42,7 +42,6 @@ export function OverviewTab() {
             <HeroSentence
               headline={data.headline}
               sparkline_points={data.sparkline_points}
-              range={{ from: ctx.from, to: ctx.to }}
             />
             <hr className="ov-divider" />
             <div className="ov-movers">

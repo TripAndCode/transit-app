@@ -15,7 +15,7 @@ ported to asyncpg-style ``$N`` placeholders + an injected WHERE fragment.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline.cache import async_lru_cache
@@ -353,15 +353,33 @@ async def compute_trend_series(
 # ---------------------------------------------------------------------------
 
 
-def _shift_ctx_one_week_back(ctx: RangeCtx) -> RangeCtx:
-    """Return a RangeCtx whose dates are shifted 7 days earlier.
+def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
+    """Build the comparison-baseline ctx for the headline + movers.
 
-    Preserves dow / time_band / service / routes filters so the baseline
-    is service-day-aware via composition with build_updates_filter.
+    Compares the most recent 7 days of ``ctx`` against the 7-day window
+    one week earlier. This keeps the delta semantically a true week-over-
+    week even when the user has widened the filter to a longer range.
     """
+    end_current = ctx.to_date
+    start_current = end_current - timedelta(days=6)  # most-recent 7d
+    baseline_end = start_current - timedelta(days=1)
+    baseline_start = baseline_end - timedelta(days=6)
     return RangeCtx(
-        from_date=ctx.from_date - timedelta(days=7),
-        to_date=ctx.to_date - timedelta(days=7),
+        from_date=baseline_start,
+        to_date=baseline_end,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+
+
+def _current_week_ctx(ctx: RangeCtx) -> RangeCtx:
+    """The most-recent 7-day window inside ``ctx``, for headline math."""
+    end = ctx.to_date
+    return RangeCtx(
+        from_date=end - timedelta(days=6),
+        to_date=end,
         dow=ctx.dow,
         time_band=ctx.time_band,
         service=ctx.service,
@@ -370,13 +388,17 @@ def _shift_ctx_one_week_back(ctx: RangeCtx) -> RangeCtx:
 
 
 async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | None, int]:
-    """Return (avg_min, samples) for the headline over ``ctx``."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """Return (avg_min, samples) for the headline over ``ctx``.
+
+    Reads from the shared `deduped` CTE so a recapture-heavy stop counts
+    once — matches the rest of the report helpers in this module.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = (
-        "SELECT ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min, "
-        "       COUNT(*) AS samples "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag})"
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+        "       COUNT(*) AS samples\n"
+        "FROM deduped"
     )
     row = await conn.fetchrow(sql, agency_id, *params)
     avg = float(row["avg_min"]) if row["avg_min"] is not None else None
@@ -384,14 +406,18 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | 
 
 
 async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn) -> dict[str, tuple[float, int]]:
-    """Per-route avg_min + samples for ``ctx``. Keyed by route_code."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """Per-route avg_min + samples for ``ctx``. Keyed by route_code.
+
+    Reads from the shared `deduped` CTE for consistency with the rest of
+    the overview helpers.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = (
-        "SELECT route_code, "
-        "       AVG(dep_delay)/60.0::numeric AS avg_min, "
-        "       COUNT(*) AS samples "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT route_code,\n"
+        "       AVG(dep_delay)/60.0::numeric AS avg_min,\n"
+        "       COUNT(*) AS samples\n"
+        "FROM deduped\n"
         "GROUP BY route_code"
     )
     rows = await conn.fetch(sql, agency_id, *params)
@@ -426,29 +452,35 @@ async def _route_weekly_history(
     conn,
     weeks_back: int = 4,
 ) -> dict[str, list[float | None]]:
-    """Per-route weekly avg_min for the last ``weeks_back`` weeks ending
-    at ``ctx.to_date``. Returns oldest -> newest list; missing weeks are None."""
+    """Per-route weekly avg_min for the last ``weeks_back`` true 7-day
+    buckets ending at ``ctx.to_date``. Honors the full ctx filter set
+    (DOW / time_band / service / routes) via build_updates_filter, and
+    reads from the shared dedup CTE for consistency with the other
+    overview helpers."""
     if not route_codes:
         return {}
-    windows: list[tuple[date, date]] = []
-    span = (ctx.to_date - ctx.from_date).days
-    for k in range(weeks_back - 1, -1, -1):
-        end = ctx.to_date - timedelta(days=7 * k)
-        start = end - timedelta(days=span)
-        windows.append((start, end))
 
     out: dict[str, list[float | None]] = {code: [] for code in route_codes}
-    for start, end in windows:
+    for k in range(weeks_back - 1, -1, -1):
+        end = ctx.to_date - timedelta(days=7 * k)
+        start = end - timedelta(days=6)  # inclusive 7-day window
+        window_ctx = RangeCtx(
+            from_date=start,
+            to_date=end,
+            dow=ctx.dow,
+            time_band=ctx.time_band,
+            service=ctx.service,
+            routes=ctx.routes,
+        )
+        where, params, n = build_updates_filter(window_ctx, next_param=2)
         rows = await conn.fetch(
-            "SELECT route_code, AVG(dep_delay)/60.0::numeric AS avg_min "
-            "FROM updates "
-            "WHERE agency_id=$1 AND dep_delay IS NOT NULL "
-            "  AND captured_at::date BETWEEN $2 AND $3 "
-            "  AND route_code = ANY($4::text[]) "
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT route_code, AVG(dep_delay)/60.0::numeric AS avg_min\n"
+            "FROM deduped\n"
+            f"WHERE route_code = ANY(${n}::text[])\n"
             "GROUP BY route_code",
             agency_id,
-            start,
-            end,
+            *params,
             list(route_codes),
         )
         wk_map = {r["route_code"]: float(r["avg_min"]) for r in rows}
@@ -479,13 +511,19 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 
 
 async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
-    """Top-3 routes by SUM(dep_delay) + the rest share as one bucket."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """Top-3 routes by SUM(GREATEST(dep_delay, 0)) + the rest share as one
+    bucket.
+
+    Uses GREATEST(dep_delay, 0) so routes running early (negative dep_delay)
+    don't cancel out routes running late — the metric reports contribution
+    to LATENESS, not to the signed sum. Reads from the shared dedup CTE.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     rows = await conn.fetch(
-        "SELECT route_code, SUM(dep_delay) AS total_sec "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
-        "GROUP BY route_code "
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT route_code, SUM(GREATEST(dep_delay, 0)) AS total_sec\n"
+        "FROM deduped\n"
+        "GROUP BY route_code\n"
         "ORDER BY total_sec DESC NULLS LAST",
         agency_id,
         *params,
@@ -513,13 +551,17 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
 
 
 async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
-    """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
+
+    Reads from the shared dedup CTE for consistency with the other
+    overview helpers.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     rows = await conn.fetch(
-        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h, "
-        "       AVG(dep_delay)/60.0::numeric AS avg_min "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
+        "       AVG(dep_delay)/60.0::numeric AS avg_min\n"
+        "FROM deduped\n"
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)",
         agency_id,
         *params,
@@ -542,16 +584,27 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     }
 
 
-async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
-    """Top-3 worsened + top-3 improved routes by signed delta_min."""
-    cur = await _per_route_avg(agency_id, ctx, conn)
-    prv = await _per_route_avg(agency_id, _shift_ctx_one_week_back(ctx), conn)
+async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -> dict:
+    """Top-3 worsened + top-3 improved routes by signed delta_min.
+
+    Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
+    ``compute_overview_summary`` so the comparison is a true 7-day
+    week-over-week regardless of the user's selected range). Requires
+    >= 10 samples in BOTH windows for a route to enter the ranking — a
+    route with a handful of obs can swing a huge delta_pct and would
+    otherwise dominate top-3 with low statistical confidence.
+    """
+    cur = await _per_route_avg(agency_id, cur_ctx, conn)
+    prv = await _per_route_avg(agency_id, base_ctx, conn)
     common = set(cur) & set(prv)
     deltas: list[tuple[str, float, float]] = []
+    MIN_SAMPLES = 10
     for code in common:
-        cur_avg, _ = cur[code]
-        prv_avg, _ = prv[code]
+        cur_avg, cur_n = cur[code]
+        prv_avg, prv_n = prv[code]
         if prv_avg == 0:
+            continue
+        if cur_n < MIN_SAMPLES or prv_n < MIN_SAMPLES:
             continue
         d_min = cur_avg - prv_avg
         d_pct = (d_min / prv_avg) * 100.0
@@ -564,7 +617,7 @@ async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
     better = [item for item in better if item[0] not in worse_codes]
     codes = [c for c, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
-    history = await _route_weekly_history(agency_id, codes, ctx, conn, weeks_back=4)
+    history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4)
 
     def _entry(code, dm, dp, direction):
         pts = [v for v in history.get(code, []) if v is not None]
@@ -584,12 +637,16 @@ async def _movers(agency_id: int, ctx: RangeCtx, conn) -> dict:
 
 
 async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float]:
-    """avg_min per service_type (typically '平日' / '土日祝')."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """avg_min per service_type (typically '平日' / '土日祝').
+
+    Reads from the shared dedup CTE for consistency with the other
+    overview helpers.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     rows = await conn.fetch(
-        "SELECT service_type, AVG(dep_delay)/60.0::numeric AS avg_min "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT service_type, AVG(dep_delay)/60.0::numeric AS avg_min\n"
+        "FROM deduped\n"
         "GROUP BY service_type",
         agency_id,
         *params,
@@ -598,13 +655,17 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float
 
 
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
-    """Up to 7 daily avg_min points (oldest first) inside ``ctx``."""
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+    """Up to 7 daily avg_min points (oldest first) inside ``ctx``.
+
+    Reads from the shared dedup CTE; the CTE already aliases
+    ``captured_at::date`` as ``date``, so we group/order on that.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     rows = await conn.fetch(
-        "SELECT captured_at::date AS day, AVG(dep_delay)/60.0::numeric AS avg_min "
-        "FROM updates "
-        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where_frag}) "
-        "GROUP BY captured_at::date "
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT date AS day, AVG(dep_delay)/60.0::numeric AS avg_min\n"
+        "FROM deduped\n"
+        "GROUP BY date\n"
         "ORDER BY day ASC",
         agency_id,
         *params,
@@ -613,6 +674,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
     return pts[-7:]
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,
@@ -622,10 +684,18 @@ async def compute_overview_summary(
     """Build the 概況 payload for one agency over ``ctx``.
 
     See ``docs/superpowers/specs/2026-05-25-overview-tab-design.md``.
-    Each sub-section is a separate helper (added in tasks T2-T8).
+
+    Headline math uses the LAST 7 days of ``ctx`` and compares against
+    the 7-day window immediately prior, so the "this week vs last week"
+    copy is honest regardless of how the user has widened the ctx range.
+    Concentration / peak / service_split / sparkline still aggregate over
+    the full ctx to surface broader patterns.
     """
-    avg_min, samples = await _headline_stats(agency_id, ctx, conn)
-    baseline_avg, _ = await _headline_stats(agency_id, _shift_ctx_one_week_back(ctx), conn)
+    cur_ctx = _current_week_ctx(ctx)
+    base_ctx = _baseline_ctx(ctx)
+
+    avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
+    baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
 
     delta_min = None
     delta_pct = None
@@ -634,11 +704,11 @@ async def compute_overview_summary(
         if baseline_avg != 0:
             delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
-    movers = await _movers(agency_id, ctx, conn)
+    movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
     concentration = await _concentration(agency_id, ctx, conn)
     peak = await _peak_hour(agency_id, ctx, conn)
     service_split = await _service_split(agency_id, ctx, conn)
-    sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
+    sparkline_points = await _daily_sparkline(agency_id, cur_ctx, conn)
 
     return {
         "headline": {
@@ -647,6 +717,8 @@ async def compute_overview_summary(
             "delta_min": delta_min,
             "delta_pct": delta_pct,
             "samples": samples,
+            "window_from": cur_ctx.from_date.isoformat(),
+            "window_to": cur_ctx.to_date.isoformat(),
         },
         "movers": movers,
         "concentration": concentration,

@@ -7,17 +7,19 @@ import { InlineSparkline } from "./InlineSparkline";
 type Props = {
   headline: OverviewHeadline;
   sparkline_points: number[];
-  range: { from: string; to: string };
 };
 
-export function HeroSentence({ headline, sparkline_points, range }: Props) {
+export function HeroSentence({ headline, sparkline_points }: Props) {
   const { t } = useTranslation();
   const fmt = (n: number | null) => (n == null ? "—" : n.toFixed(1));
 
   return (
     <div>
       <div className="ov-eyebrow">
-        {t("overview.eyebrow", { from: range.from, to: range.to })}
+        {t("overview.eyebrow", {
+          from: headline.window_from,
+          to: headline.window_to,
+        })}
       </div>
       <h1 className="ov-hero">
         {t("overview.hero_avg_prefix")}{" "}

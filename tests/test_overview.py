@@ -16,6 +16,9 @@ async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aage
     body = r.json()
     assert body["headline"]["avg_min"] is None
     assert body["headline"]["baseline_avg_min"] is None
+    # Even with no data the headline echoes its 7-day window (last 7d of ctx).
+    assert body["headline"]["window_from"] == "2020-01-01"
+    assert body["headline"]["window_to"] == "2020-01-07"
     assert body["movers"]["worse"] == []
     assert body["movers"]["better"] == []
     assert body["concentration"]["top_routes"] == []
@@ -26,22 +29,28 @@ async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aage
 
 @pytest.mark.asyncio
 async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
-    """Three observations inside the range -> avg_min reflects them."""
+    """Three observations inside the range -> avg_min reflects them.
+
+    Each row uses a distinct ``stop_sequence`` so the dedup CTE (which
+    collapses on ``(route, svc, scheduled_time, trip_id, date, seq)``)
+    keeps all three as separate samples.
+    """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
-        ("pb1", base, 60),  # 1.0 min
-        ("pb2", base + timedelta(hours=1), 180),  # 3.0 min
-        ("pb3", base + timedelta(hours=2), 300),  # 5.0 min
+        ("pb1", base, 60, 1),  # 1.0 min
+        ("pb2", base + timedelta(hours=1), 180, 2),  # 3.0 min
+        ("pb3", base + timedelta(hours=2), 300, 3),  # 5.0 min
     ]
-    for fname, cap, dep in rows:
+    for fname, cap, dep, seq in rows:
         await aconn.execute(
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R1', 1, $4)",
+            "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R1', $4, $5)",
             aagency_id,
             fname,
             cap,
+            seq,
             dep,
         )
 
@@ -52,12 +61,20 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     h = out["headline"]
     assert h["samples"] == 3
     assert h["avg_min"] == pytest.approx(3.0, abs=0.01)
+    # Headline window is the last 7 days of ctx (= ctx itself, since ctx
+    # is exactly 7 days here).
+    assert h["window_from"] == "2026-05-18"
+    assert h["window_to"] == "2026-05-24"
 
 
 @pytest.mark.asyncio
 async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
     """This-week avg = 4.0 min; baseline-week avg = 2.0 min ->
-    delta = +2.0 min, +100%."""
+    delta = +2.0 min, +100%.
+
+    Each row uses a distinct ``stop_sequence`` so the shared dedup CTE
+    keeps it as a separate sample.
+    """
     this_week = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     last_week = this_week - timedelta(days=7)
     # last week: two rows averaging 2 min
@@ -66,10 +83,11 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_p', '平日', '10:00', 'R1', 1, $4)",
+            "VALUES ($1, $2, $3, 'trip_p', '平日', '10:00', 'R1', $4, $5)",
             aagency_id,
             f"pb_prev_{i}",
             last_week + timedelta(hours=i),
+            i + 1,
             dep,
         )
     # this week: two rows averaging 4 min
@@ -78,10 +96,11 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "
             " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_t', '平日', '10:00', 'R1', 1, $4)",
+            "VALUES ($1, $2, $3, 'trip_t', '平日', '10:00', 'R1', $4, $5)",
             aagency_id,
             f"pb_cur_{i}",
             this_week + timedelta(hours=i),
+            i + 1,
             dep,
         )
 
@@ -124,7 +143,12 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
     """Five routes with varied this-week vs prior-week deltas;
-    top 3 worsened + top 3 improved come out sorted by |delta_min|."""
+    top 3 worsened + top 3 improved come out sorted by |delta_min|.
+
+    Each route seeds 10 rows per side (above the >= 10 sample gate in
+    ``_movers``) with distinct ``stop_sequence`` values so the shared
+    dedup CTE keeps each row as a separate sample.
+    """
     cur = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     prv = cur - timedelta(days=7)
     # (route, prior_avg_sec, current_avg_sec)
@@ -138,22 +162,33 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
         ("R_G", 360, 60),  # -5 min
         ("R_H", 120, 60),  # -1 min
     ]
-    rows_to_insert = []
+    SAMPLES_PER_SIDE = 10
     for code, prior_dep, cur_dep in routes:
-        rows_to_insert.append(("rs_prv_" + code, prv, prior_dep, code))
-        rows_to_insert.append(("rs_cur_" + code, cur, cur_dep, code))
-    for fname, when, dep, code in rows_to_insert:
-        await aconn.execute(
-            "INSERT INTO updates "
-            "(agency_id, file_name, captured_at, trip_id, service_type, "
-            " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
-            aagency_id,
-            fname,
-            when,
-            code,
-            dep,
-        )
+        for i in range(SAMPLES_PER_SIDE):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"rs_prv_{code}_{i}",
+                prv + timedelta(minutes=i),
+                code,
+                i + 1,
+                prior_dep,
+            )
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"rs_cur_{code}_{i}",
+                cur + timedelta(minutes=i),
+                code,
+                i + 1,
+                cur_dep,
+            )
 
     from pipeline.reports import compute_overview_summary
 
@@ -168,21 +203,30 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     """A route worsening for 3 of the past 4 weeks reports streak=3
-    and 4 ascending sparkline points (oldest-first)."""
+    and 4 ascending sparkline points (oldest-first).
+
+    Each weekly bucket seeds 10 rows so the route clears the >= 10
+    sample gate in ``_movers`` for both the current and baseline
+    7-day windows; distinct ``stop_sequence`` keeps each one through the
+    dedup CTE.
+    """
     base_anchor = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     weekly = [60, 120, 240, 360]
+    SAMPLES_PER_WEEK = 10
     for weeks_back, dep in enumerate(reversed(weekly)):
         when = base_anchor - timedelta(days=7 * weeks_back)
-        await aconn.execute(
-            "INSERT INTO updates "
-            "(agency_id, file_name, captured_at, trip_id, service_type, "
-            " scheduled_time, route_code, stop_sequence, dep_delay) "
-            "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R_STR', 1, $4)",
-            aagency_id,
-            f"pb_str_{weeks_back}",
-            when,
-            dep,
-        )
+        for i in range(SAMPLES_PER_WEEK):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_x', '平日', '10:00', 'R_STR', $4, $5)",
+                aagency_id,
+                f"pb_str_{weeks_back}_{i}",
+                when + timedelta(minutes=i),
+                i + 1,
+                dep,
+            )
 
     from pipeline.reports import compute_overview_summary
 
@@ -198,7 +242,12 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
-    """4 routes; top 3 absorb ~87.5%; the 4th absorbs ~12.5%."""
+    """4 routes; top 3 absorb ~87.5%; the 4th absorbs ~12.5%.
+
+    Distinct ``stop_sequence`` per row so the shared dedup CTE keeps
+    each row as a separate sample (concentration sums dep_delay across
+    all kept rows).
+    """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
         ("R_X", [300, 300, 300]),
@@ -212,11 +261,12 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
                 "INSERT INTO updates "
                 "(agency_id, file_name, captured_at, trip_id, service_type, "
                 " scheduled_time, route_code, stop_sequence, dep_delay) "
-                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, 1, $5)",
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
                 aagency_id,
                 f"cn_{code}_{i}",
                 base + timedelta(minutes=i),
                 code,
+                i + 1,
                 dep,
             )
 
