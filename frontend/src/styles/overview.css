@@ -357,6 +357,161 @@
   }
 }
 
+/* ---------- Click-to-expand modal ---------- */
+.ov-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .ov-modal { animation: ov-modal-in 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+}
+.ov-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  width: min(900px, 100%);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+}
+.ov-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ov-modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.ov-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  color: #6e6e73;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.ov-modal-close:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #1d1d1f;
+}
+.ov-modal-body { padding: 32px; overflow-y: auto; }
+
+/* Card hover affordance — applied to .ov-card and the .ov-hero wrapper */
+.ov-card.ov-clickable,
+.ov-hero.ov-clickable {
+  cursor: pointer;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.ov-card.ov-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.ov-hero.ov-clickable:hover { transform: translateY(-1px); }
+.ov-card.ov-clickable:focus-visible,
+.ov-hero.ov-clickable:focus-visible {
+  outline: 2px solid #475569;
+  outline-offset: 2px;
+}
+
+/* Stat pill row used in modal expansions (hero modal summary stats) */
+.ov-stat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+.ov-stat-pill {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(71, 85, 105, 0.05);
+  min-width: 90px;
+}
+.ov-stat-pill-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8e8e93;
+  font-weight: 600;
+}
+.ov-stat-pill-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1d1d1f;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Peak-hour modal: stacked DOW panels */
+.ov-peak-dow-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.ov-peak-dow-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin: 0 0 8px;
+}
+.ov-peak-dow-empty {
+  font-size: 13px;
+  color: #8e8e93;
+  margin: 4px 0;
+}
+
+/* Service-split daily line chart */
+.ov-svc-daily-wrap {
+  position: relative;
+  width: 100%;
+  margin-top: 20px;
+}
+.ov-svc-daily-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #6e6e73;
+  margin-bottom: 8px;
+}
+.ov-svc-daily-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  vertical-align: middle;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+/* Lorenz curve overlay (concentration modal) */
+.ov-lorenz-wrap { margin-top: 24px; }
+.ov-lorenz-caption {
+  font-size: 13px;
+  color: #1d1d1f;
+  margin: 10px 0 0;
+}
+
 /* ---------- Mobile ---------- */
 @media (max-width: 600px) {
   .ov-page { padding: 24px 16px 60px; }
@@ -377,4 +532,12 @@
   }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
   .ov-pareto-label { white-space: normal; }
+  .ov-modal-backdrop { padding: 0; }
+  .ov-modal {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .ov-modal-header { padding: 18px 20px; }
+  .ov-modal-body { padding: 20px; }
 }

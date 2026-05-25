@@ -30,7 +30,11 @@
     },
     "hero": {
       "label": "This week's average delay",
-      "baseline_label": "Last week avg"
+      "baseline_label": "Last week avg",
+      "stat_max": "Max",
+      "stat_min": "Min",
+      "stat_mean": "Mean",
+      "stat_days": "Days"
     },
     "story": {
       "better": "Better than last week.",
@@ -43,17 +47,34 @@
       "improved": "{{val}} min better"
     },
     "concentration": {
-      "single_route": "{{name}} accounts for 100% — only 1 route observed."
+      "single_route": "{{name}} accounts for 100% — only 1 route observed.",
+      "lorenz_label": "Lorenz curve — cumulative share of delay",
+      "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
     },
     "service_split": {
       "diff": "Δ: {{diff}} min ({{pct}}%)",
       "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
       "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
-      "story_same": "Weekday and weekend nearly identical."
+      "story_same": "Weekday and weekend nearly identical.",
+      "weekday_label": "Weekday",
+      "weekend_label": "Weekend/Holiday",
+      "daily_label": "Daily weekday vs weekend trend"
     },
     "peak_hour": {
       "max_label": "Max {{avg}} min",
-      "avg_label": "Avg"
+      "avg_label": "Avg",
+      "weekday_label": "Weekday",
+      "weekend_label": "Weekend/Holiday",
+      "weekday_empty": "No weekday data.",
+      "weekend_empty": "No weekend data."
+    },
+    "modal": {
+      "hero": "This week's trend",
+      "movers_worse": "Most-worsened routes (top 10)",
+      "movers_better": "Most-improved routes (top 10)",
+      "concentration": "Delay concentration (top 20)",
+      "peak_hour": "Worst hour (Weekday vs Weekend)",
+      "service_split": "Service-day trend"
     },
     "empty": "No observations in this range. Try a wider window."
   },

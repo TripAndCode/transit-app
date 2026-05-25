@@ -630,7 +630,7 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 
 
 async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
-    """Top-5 routes by total positive delay contribution + rest share.
+    """Top-20 routes by total positive delay contribution + rest share.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
     approximates ``SUM(GREATEST(dep_delay, 0))`` as
@@ -673,7 +673,7 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
     grand_total = sum(float(r["total_late_min"] or 0.0) for r in rows)
     if grand_total == 0:
         return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
-    top_n = rows[:5]
+    top_n = rows[:20]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
     top_n_sum = sum(float(r["total_late_min"] or 0.0) for r in top_n)
@@ -743,8 +743,108 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     }
 
 
+async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str) -> dict | None:
+    """24-hour avg delay restricted to weekday (``'weekday'``) or weekend
+    (``'weekend'``) only.
+
+    Uses the live ``updates`` path because ``agg_route_hour`` has no
+    date column and so cannot answer a DOW-restricted query. The cost
+    is one extra dedup-CTE query per modal open per locale — bounded by
+    the existing 5-min cache on ``compute_overview_summary``.
+    """
+    overridden = RangeCtx(
+        from_date=ctx.from_date,
+        to_date=ctx.to_date,
+        dow=dow_group,  # type: ignore[arg-type]
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+    where, params, _ = build_updates_filter(overridden, next_param=2)
+    sql = (
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
+        "       AVG(dep_delay)/60.0::numeric AS avg_min\n"
+        "FROM deduped\n"
+        "WHERE scheduled_time IS NOT NULL\n"
+        "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
+    )
+    rows = await conn.fetch(sql, agency_id, *params)
+    if not rows:
+        return None
+    by_hour: list[float | None] = [None] * 24
+    for r in rows:
+        if r["avg_min"] is None:
+            continue
+        h = int(r["h"])
+        if 0 <= h < 24:
+            by_hour[h] = round(float(r["avg_min"]), 2)
+    valid = [h for h in range(24) if by_hour[h] is not None]
+    if not valid:
+        return None
+    peak_h = max(valid, key=lambda h: by_hour[h])  # type: ignore[arg-type, return-value]
+    return {
+        "by_hour": by_hour,
+        "peak_hour": peak_h,
+        "peak_avg_min": float(by_hour[peak_h]),  # type: ignore[arg-type]
+    }
+
+
+async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn) -> list[dict]:
+    """Per-day breakdown of 平日 vs 土日祝 avg delay over ``ctx``.
+
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
+    a sample-weighted per-(date, service_type) average. Slow path falls
+    back to live ``updates`` so the hour-of-day filter is honored.
+
+    Returns a list of ``{date: ISO str, weekday: float|None, weekend:
+    float|None}`` rows sorted by date. Dates with neither service_type
+    are silently dropped.
+    """
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        sql = (
+            "SELECT date, service_type,\n"
+            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY date, service_type\n"
+            "ORDER BY date"
+        )
+    else:
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        sql = (
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT date, service_type,\n"
+            "       AVG(dep_delay)/60.0::numeric AS avg\n"
+            "FROM deduped\n"
+            "GROUP BY date, service_type\n"
+            "ORDER BY date"
+        )
+    rows = await conn.fetch(sql, agency_id, *params)
+    by_date: dict[str, dict[str, float | None]] = {}
+    for r in rows:
+        d_raw = r["date"]
+        d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
+        st = r["service_type"]
+        avg = float(r["avg"]) if r["avg"] is not None else None
+        by_date.setdefault(d, {})[st] = avg
+    out: list[dict] = []
+    for d in sorted(by_date):
+        bucket = by_date[d]
+        out.append(
+            {
+                "date": d,
+                "weekday": bucket.get("平日"),
+                "weekend": bucket.get("土日祝"),
+            }
+        )
+    return out
+
+
 async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -> dict:
-    """Top-3 worsened + top-3 improved routes by signed delta_min.
+    """Top-10 worsened + top-10 improved routes by signed delta_min.
 
     Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
     ``compute_overview_summary`` so the comparison is a true 7-day
@@ -752,6 +852,9 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
     >= 10 samples in BOTH windows for a route to enter the ranking — a
     route with a handful of obs can swing a huge delta_pct and would
     otherwise dominate top-3 with low statistical confidence.
+
+    Frontend card variant slices :code:`.slice(0, 3)`; modal variant
+    uses the full 10.
     """
     cur = await _per_route_avg(agency_id, cur_ctx, conn)
     prv = await _per_route_avg(agency_id, base_ctx, conn)
@@ -769,11 +872,15 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
         d_pct = (d_min / prv_avg) * 100.0
         deltas.append((code, round(d_min, 2), round(d_pct, 1)))
     deltas.sort(key=lambda x: x[1])
-    better = deltas[:3]  # smallest (most negative) first, [0] is best
-    worse = list(reversed(deltas[-3:]))  # largest positive first
-    # Avoid duplicates when there are fewer than 6 routes
-    worse_codes = {c for c, _, _ in worse}
-    better = [item for item in better if item[0] not in worse_codes]
+    # Partition by sign so "worse" only contains routes with positive
+    # delta_min and "better" only routes with negative delta_min. With
+    # the wider top-10 limit, sign-partitioning is the right way to
+    # prevent the two lists from overlapping (a route can't both
+    # improve and worsen at once).
+    worse_all = [d for d in deltas if d[1] > 0]
+    better_all = [d for d in deltas if d[1] < 0]
+    worse = list(reversed(worse_all[-10:]))  # largest positive first
+    better = better_all[:10]  # most-negative first
     codes = [c for c, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
     history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4)
@@ -831,7 +938,11 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float
 
 
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
-    """Up to 7 daily avg_min points (oldest first) inside ``ctx``.
+    """Daily avg_min points (oldest first) over ``ctx``.
+
+    Returns the FULL daily series. The frontend hero card slices the
+    trailing 7 days for the inline sparkline; the modal variant uses the
+    full series (typically 30+ points for a 30-day default range).
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
     a sample-weighted average per date. Slow path falls back to live
@@ -863,7 +974,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
             *params,
         )
     pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
-    return pts[-7:]
+    return pts
 
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
@@ -922,8 +1033,12 @@ async def compute_overview_summary(
     movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
     concentration = await _concentration(agency_id, ctx, conn)
     peak = await _peak_hour(agency_id, ctx, conn)
+    peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
+    peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend")
     service_split = await _service_split(agency_id, ctx, conn)
-    sparkline_points = await _daily_sparkline(agency_id, cur_ctx, conn)
+    service_split_daily = await _service_split_daily(agency_id, ctx, conn)
+    # Hero card slices `.slice(-7)`; modal shows full series.
+    sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
 
     return {
         "headline": {
@@ -938,6 +1053,9 @@ async def compute_overview_summary(
         "movers": movers,
         "concentration": concentration,
         "peak_hour": peak,
+        "peak_hour_weekday": peak_weekday,
+        "peak_hour_weekend": peak_weekend,
         "service_split": service_split,
+        "service_split_daily": service_split_daily,
         "sparkline_points": sparkline_points,
     }

@@ -212,12 +212,14 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
+async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
     """Eight routes with varied this-week vs prior-week deltas;
-    top 3 worsened + top 3 improved come out sorted by |delta_min|.
+    worsened + improved come out sorted by |delta_min|.
 
     Each route seeds 10 samples per side (>= 10 sample gate in ``_movers``).
     Current week is anchored to ctx.to_date so it matches the latest data.
+    Backend now returns up to 10 entries per side; the card variant on
+    the frontend slices to 3, the modal variant uses all 10.
     """
     cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     prv = cur - timedelta(days=7)
@@ -269,8 +271,12 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     worse_codes = [m["route_code"] for m in out["movers"]["worse"]]
     better_codes = [m["route_code"] for m in out["movers"]["better"]]
-    assert worse_codes == ["R_A", "R_B", "R_C"]
-    assert better_codes == ["R_E", "R_F", "R_G"]
+    # All four worsened routes are surfaced (limit is now 10), sorted by
+    # signed delta_min descending.
+    assert worse_codes == ["R_A", "R_B", "R_C", "R_D"]
+    # All four improved routes are surfaced, sorted by signed delta_min
+    # ascending (most negative first).
+    assert better_codes == ["R_E", "R_F", "R_G", "R_H"]
 
 
 @pytest.mark.asyncio
@@ -318,12 +324,13 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
-    """6 routes; top 5 absorb the bulk, the 6th is the rest share.
+async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
+    """6 routes all surfaced (limit is now 20); rest_share is 0%.
 
     Concentration is computed as ``SUM(GREATEST(avg_min, 0) * samples)``
     per route on ``agg_daily_trend`` — directly proportional to total
-    positive delay minutes.
+    positive delay minutes. The card variant on the frontend slices the
+    top 5; the modal variant uses all 20.
     """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
@@ -357,15 +364,14 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     conc = out["concentration"]
     codes = [r["route_code"] for r in conc["top_routes"]]
-    assert len(codes) == 5
-    # Top 5 are X, Y, Z, V, W; rest is U (4 min of a 52-min grand total ≈ 7.7%).
-    assert set(codes) == {"R_X", "R_Y", "R_Z", "R_V", "R_W"}
+    # All 6 routes are within the top-20 limit.
+    assert len(codes) == 6
+    assert set(codes) == {"R_X", "R_Y", "R_Z", "R_V", "R_W", "R_U"}
     total_pct = sum(r["share_pct"] for r in conc["top_routes"]) + conc["rest_share_pct"]
     assert total_pct == pytest.approx(100.0, abs=0.5)
-    grand_total = 15 + 10 + 10 + 5 + 8 + 4
-    expected_rest = (4 / grand_total) * 100.0
-    assert conc["rest_share_pct"] == pytest.approx(expected_rest, abs=0.5)
-    assert conc["rest_route_count"] == 1
+    # No routes outside top-20 -> rest_share is 0%.
+    assert conc["rest_share_pct"] == pytest.approx(0.0, abs=0.1)
+    assert conc["rest_route_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -522,3 +528,97 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
     # Morning-only avg = (10 + 5) / 2 = 7.5 min over 2 samples.
     assert out["headline"]["samples"] == 2
     assert out["headline"]["avg_min"] == pytest.approx(7.5, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_weekday_weekend_split_uses_live_path(aconn, aagency_id):
+    """``peak_hour_weekday`` / ``peak_hour_weekend`` partition the same
+    rows by ISO day-of-week. Tuesday rows feed the weekday bucket;
+    Saturday rows feed the weekend bucket; the two buckets agree on
+    nothing.
+
+    2026-05-19 is a Tuesday (weekday); 2026-05-23 is a Saturday (weekend).
+    """
+    weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
+    weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
+    rows = [
+        (weekday_dt, "08:00", 600),  # weekday morning peak (10 min)
+        (weekday_dt + timedelta(minutes=1), "08:00", 480),  # 8 min
+        (weekend_dt, "17:00", 300),  # weekend evening peak (5 min)
+        (weekend_dt + timedelta(minutes=1), "17:00", 360),  # 6 min
+    ]
+    for i, (cap, sched, dep) in enumerate(rows):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_pw_' || $4, '平日', ($5::text)::time, 'R_PW', $6, $7)",
+            aagency_id,
+            f"pw_{i}",
+            cap,
+            str(i),
+            sched,
+            i + 1,
+            dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    pk_we = out["peak_hour_weekend"]
+    assert pk_wd is not None
+    assert pk_we is not None
+    assert pk_wd["peak_hour"] == 8
+    assert pk_we["peak_hour"] == 17
+    # Weekday peak averages the two weekday rows at 08:00 -> 9.0 min.
+    assert pk_wd["by_hour"][8] == pytest.approx(9.0, abs=0.1)
+    # Weekend peak averages the two weekend rows at 17:00 -> 5.5 min.
+    assert pk_we["by_hour"][17] == pytest.approx(5.5, abs=0.1)
+    # Cross-bucket cells stay None.
+    assert pk_wd["by_hour"][17] is None
+    assert pk_we["by_hour"][8] is None
+
+
+@pytest.mark.asyncio
+async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
+    """``service_split_daily`` returns one row per date with weekday +
+    weekend slots populated independently."""
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    inserts = [
+        (date(2026, 5, 18), "平日", 60),  # 1 min weekday
+        (date(2026, 5, 19), "平日", 180),  # 3 min weekday
+        (date(2026, 5, 19), "土日祝", 300),  # 5 min weekend (same date)
+        (date(2026, 5, 20), "土日祝", 240),  # 4 min weekend
+    ]
+    for i, (d, svc, dep) in enumerate(inserts):
+        when = datetime.combine(d, time(12, 0), tzinfo=timezone.utc)
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_ssd_' || $4, $5, '10:00', 'R_SSD', 1, $6)",
+            aagency_id,
+            f"ssd_{i}",
+            when,
+            str(i),
+            svc,
+            dep,
+        )
+        await _seed_agg_daily(aconn, aagency_id, d, "R_SSD", svc, dep / 60.0, 1)
+    # Silence unused-variable lints; `base` documents the wall-clock anchor.
+    assert base.year == 2026
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    daily = out["service_split_daily"]
+    by_date = {row["date"]: row for row in daily}
+    assert by_date["2026-05-18"]["weekday"] == pytest.approx(1.0, abs=0.05)
+    assert by_date["2026-05-18"]["weekend"] is None
+    assert by_date["2026-05-19"]["weekday"] == pytest.approx(3.0, abs=0.05)
+    assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
+    assert by_date["2026-05-20"]["weekday"] is None
+    assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)

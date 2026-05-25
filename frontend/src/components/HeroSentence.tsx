@@ -7,6 +7,11 @@ import type { OverviewHeadline } from "../api/types";
 type Props = {
   headline: OverviewHeadline;
   sparkline_points: number[];
+  /** "card" (default) uses the latest 7 days of ``sparkline_points``;
+   *  "modal" uses the full series for a longer-form trend view. */
+  variant?: "card" | "modal";
+  /** When set, the hero is rendered as a button-like region. */
+  onClick?: () => void;
 };
 
 type HoverState = {
@@ -35,16 +40,6 @@ function fmtNum(n: number | null | undefined): string {
   return n == null ? "—" : n.toFixed(1);
 }
 
-function buildDateLabels(windowFrom: string, count: number): string[] {
-  const start = new Date(windowFrom + "T00:00:00");
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    out.push(`${d.getMonth() + 1}/${d.getDate()}`);
-  }
-  return out;
-}
 
 function storyKey(delta: number | null | undefined): string {
   if (delta == null) return "overview.story.no_baseline";
@@ -53,7 +48,12 @@ function storyKey(delta: number | null | undefined): string {
   return "overview.story.same";
 }
 
-export function HeroSentence({ headline, sparkline_points }: Props) {
+export function HeroSentence({
+  headline,
+  sparkline_points,
+  variant = "card",
+  onClick,
+}: Props) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<HoverState>({
     visible: false,
@@ -65,13 +65,36 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     value: "",
   });
 
-  const dateLabels = useMemo(
-    () => buildDateLabels(headline.window_from, sparkline_points.length),
-    [headline.window_from, sparkline_points.length],
-  );
+  // Card variant only shows the last 7 days for a compact glance; modal
+  // shows the full series. The eyebrow date label is anchored at the
+  // start of whatever slice we ended up rendering.
+  const pts =
+    variant === "modal" ? sparkline_points : sparkline_points.slice(-7);
+  const ptsStart = useMemo(() => {
+    const dropped = Math.max(sparkline_points.length - pts.length, 0);
+    const start = new Date(headline.window_from + "T00:00:00");
+    // For the card view, window_from already matches the 7-day slice
+    // (cur_ctx). For the modal view with a wider full series, shift the
+    // labels back by the number of leading points that the modal adds.
+    if (variant === "modal" && dropped === 0 && pts.length > 7) {
+      start.setDate(start.getDate() - (pts.length - 7));
+    }
+    return start;
+  }, [headline.window_from, pts.length, sparkline_points.length, variant]);
+
+  const dateLabels = useMemo(() => {
+    const out: string[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const d = new Date(ptsStart);
+      d.setDate(ptsStart.getDate() + i);
+      out.push(`${d.getMonth() + 1}/${d.getDate()}`);
+    }
+    return out;
+  }, [ptsStart, pts.length]);
+
+  const chartH = variant === "modal" ? 220 : SPARK_H;
 
   const chart = useMemo(() => {
-    const pts = sparkline_points;
     if (pts.length < 2) return null;
     const baseline = headline.baseline_avg_min;
     const dataMin = Math.min(...pts);
@@ -81,7 +104,7 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     const span = (yMax - yMin) || 1;
 
     const usableW = SPARK_W - PAD_LEFT - PAD_RIGHT;
-    const usableH = SPARK_H - PAD_TOP - PAD_BOTTOM;
+    const usableH = chartH - PAD_TOP - PAD_BOTTOM;
     const stepX = pts.length > 1 ? usableW / (pts.length - 1) : 0;
     const toX = (i: number) => PAD_LEFT + i * stepX;
     const toY = (v: number) =>
@@ -90,11 +113,11 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     const coords = pts.map((v, i) => ({ x: toX(i), y: toY(v), v }));
     const line = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
     const area =
-      `M ${coords[0].x.toFixed(1)},${SPARK_H - PAD_BOTTOM} ` +
+      `M ${coords[0].x.toFixed(1)},${chartH - PAD_BOTTOM} ` +
       coords
         .map((c) => `L ${c.x.toFixed(1)},${c.y.toFixed(1)}`)
         .join(" ") +
-      ` L ${coords[coords.length - 1].x.toFixed(1)},${SPARK_H - PAD_BOTTOM} Z`;
+      ` L ${coords[coords.length - 1].x.toFixed(1)},${chartH - PAD_BOTTOM} Z`;
 
     const baselineY = baseline != null ? toY(baseline) : null;
 
@@ -107,7 +130,7 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     const lastIdx = pts.length - 1;
 
     return { coords, line, area, baselineY, minIdx, maxIdx, lastIdx, stepX };
-  }, [sparkline_points, headline.baseline_avg_min]);
+  }, [pts, headline.baseline_avg_min, chartH]);
 
   const isImprovement =
     headline.delta_min != null && headline.delta_min < 0;
@@ -118,7 +141,7 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     const scaleX = rect.width / SPARK_W;
-    const scaleY = rect.height / SPARK_H;
+    const scaleY = rect.height / chartH;
     const localX = (e.clientX - rect.left) / scaleX;
     let best = 0;
     let bestDist = Infinity;
@@ -147,8 +170,36 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
 
   const story = t(storyKey(headline.delta_min));
 
+  // Summary stats shown only in the modal variant.
+  const summaryStats = useMemo(() => {
+    if (variant !== "modal" || pts.length === 0) return null;
+    const sum = pts.reduce((s, v) => s + v, 0);
+    return {
+      max: Math.max(...pts),
+      min: Math.min(...pts),
+      mean: sum / pts.length,
+      count: pts.length,
+    };
+  }, [variant, pts]);
+
+  const clickable = !!onClick;
+  const sectionClass = `ov-hero${clickable ? " ov-clickable" : ""}`;
+  const interactiveProps = clickable
+    ? {
+        tabIndex: 0,
+        role: "button",
+        onClick,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick?.();
+          }
+        },
+      }
+    : {};
+
   return (
-    <section className="ov-hero">
+    <section className={sectionClass} {...interactiveProps}>
       <p className="ov-hero-eyebrow">
         {t("overview.eyebrow", {
           from: headline.window_from,
@@ -189,8 +240,8 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
           <>
             <svg
               width="100%"
-              height={SPARK_H}
-              viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+              height={chartH}
+              viewBox={`0 0 ${SPARK_W} ${chartH}`}
               preserveAspectRatio="none"
               role="img"
               aria-label={t("overview.hero.label")}
@@ -269,26 +320,33 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
                   </g>
                 );
               })}
-              {/* x-axis date labels under each dot */}
-              {chart.coords.map((c, i) => (
-                <text
-                  key={`x-${i}`}
-                  x={c.x}
-                  y={SPARK_H - 6}
-                  fontSize="10"
-                  fill="#94a3b8"
-                  textAnchor="middle"
-                >
-                  {dateLabels[i]}
-                </text>
-              ))}
+              {/* x-axis date labels under each dot. For dense (modal)
+                  charts, thin them out so labels don't overlap. */}
+              {chart.coords.map((c, i) => {
+                if (variant === "modal" && pts.length > 10) {
+                  const step = Math.ceil(pts.length / 10);
+                  if (i % step !== 0 && i !== chart.lastIdx) return null;
+                }
+                return (
+                  <text
+                    key={`x-${i}`}
+                    x={c.x}
+                    y={chartH - 6}
+                    fontSize="10"
+                    fill="#94a3b8"
+                    textAnchor="middle"
+                  >
+                    {dateLabels[i]}
+                  </text>
+                );
+              })}
               {/* hover guide */}
               {hover.visible && (
                 <line
                   x1={hover.svgX}
                   y1={PAD_TOP - 4}
                   x2={hover.svgX}
-                  y2={SPARK_H - PAD_BOTTOM + 2}
+                  y2={chartH - PAD_BOTTOM + 2}
                   stroke="rgba(71,85,105,0.30)"
                   strokeWidth="1"
                 />
@@ -305,6 +363,43 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
           </>
         )}
       </div>
+      {summaryStats && (
+        <div className="ov-stat-pills">
+          <div className="ov-stat-pill">
+            <span className="ov-stat-pill-label">
+              {t("overview.hero.stat_max")}
+            </span>
+            <span className="ov-stat-pill-value">
+              {summaryStats.max.toFixed(1)}
+              {t("overview.hero_unit_min")}
+            </span>
+          </div>
+          <div className="ov-stat-pill">
+            <span className="ov-stat-pill-label">
+              {t("overview.hero.stat_min")}
+            </span>
+            <span className="ov-stat-pill-value">
+              {summaryStats.min.toFixed(1)}
+              {t("overview.hero_unit_min")}
+            </span>
+          </div>
+          <div className="ov-stat-pill">
+            <span className="ov-stat-pill-label">
+              {t("overview.hero.stat_mean")}
+            </span>
+            <span className="ov-stat-pill-value">
+              {summaryStats.mean.toFixed(1)}
+              {t("overview.hero_unit_min")}
+            </span>
+          </div>
+          <div className="ov-stat-pill">
+            <span className="ov-stat-pill-label">
+              {t("overview.hero.stat_days")}
+            </span>
+            <span className="ov-stat-pill-value">{summaryStats.count}</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
