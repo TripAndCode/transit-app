@@ -3,7 +3,7 @@ import os
 import pytest
 
 from api.range import RangeCtx
-from pipeline.query.meta_tools import describe_data
+from pipeline.query.meta_tools import describe_data, capabilities
 from datetime import date, datetime
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -170,3 +170,40 @@ async def test_describe_data_invalid_kind(conn_with_observations):
         )
     assert result.kind == "empty"
     assert "nope" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_capabilities_all_categories(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await capabilities({}, _ctx(), conn, agency_id, locale="ja")
+    assert result.kind == "kv"
+    cats = {k for k, _ in result.pairs}
+    assert cats >= {
+        "single_route", "ranking", "comparison",
+        "trend", "on_time", "stop_level", "meta",
+    }
+
+
+@pytest.mark.asyncio
+async def test_capabilities_specific_category(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await capabilities(
+            {"category": "ranking"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "kv"
+    assert len(result.pairs) == 1
+    key, examples = result.pairs[0]
+    assert key == "ranking"
+    assert "ワースト" in examples or "TOP" in examples
+
+
+@pytest.mark.asyncio
+async def test_capabilities_unknown_category_returns_all(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await capabilities(
+            {"category": "nope"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert len(result.pairs) >= 7

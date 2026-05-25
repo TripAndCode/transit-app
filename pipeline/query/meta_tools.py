@@ -228,3 +228,48 @@ async def describe_data(
 
     # Unreachable — VALID_KINDS gate caught it.
     return ToolResult(kind="empty", summary="impossible")
+
+
+_CAPABILITY_EXAMPLES_JP = {
+    "single_route":  "系統22171の遅延 / 系統16071のp90 / A1の運行情報",
+    "ranking":       "遅延ワースト10 / 定時率TOP5 / 5分超過の多い系統",
+    "comparison":    "平日と土日祝の比較 / 22171の種別比較 / 系統間の差",
+    "trend":         "直近2週間の傾向 / 日次トレンド / 推移を見せて",
+    "on_time":       "5分以内の定時率 / 定時率ランキング / しきい値別の率",
+    "stop_level":    "(現状未対応:Phase 3) 停留所単位の集計",
+    "meta":          "どんな路線がある？ / いつからのデータ？ / サンプル数の多い系統",
+}
+
+_CAPABILITY_EXAMPLES_EN = {
+    "single_route":  "route 22171 delay / route 16071 p90 / route info for A1",
+    "ranking":       "worst-10 delays / on-time top-5 / most >5min delays",
+    "comparison":    "weekday vs weekend / service-type split for 22171 / route deltas",
+    "trend":         "last-14d trend / daily series / show the trend",
+    "on_time":       "on-time rate within 5min / on-time ranking / by threshold",
+    "stop_level":    "(not yet supported: Phase 3) per-stop aggregation",
+    "meta":          "what routes exist? / since when do we have data? / top routes by samples",
+}
+
+
+async def capabilities(
+    args: dict[str, Any],
+    ctx: RangeCtx,
+    conn,
+    agency_id: int,
+    locale: str = "ja",
+) -> ToolResult:
+    table = _CAPABILITY_EXAMPLES_EN if locale == "en" else _CAPABILITY_EXAMPLES_JP
+    requested = args.get("category")
+    if requested and requested in table:
+        pairs = [(requested, table[requested])]
+    else:
+        pairs = list(table.items())
+    return ToolResult(
+        kind="kv",
+        summary=_summary(
+            "答えられる質問の例（カテゴリ別）",
+            "example questions I can answer (by category)",
+            locale,
+        ),
+        pairs=pairs,
+    )
