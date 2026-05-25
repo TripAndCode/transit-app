@@ -98,7 +98,7 @@ async def chat_with_tools(
     ctx: RangeCtx,
     conn,
     agency_id: int,
-    model: str = "llama-3.3-70b-versatile",
+    model: str | None = None,
     locale: str = "ja",
 ) -> dict:
     """Run one round-trip Ask flow.
@@ -112,12 +112,11 @@ async def chat_with_tools(
     Model selection
     ---------------
     The ``model`` parameter is forwarded to the LLM adapter as a
-    per-call override. When the caller does not pin a model the adapter
-    falls back to each provider's own configured default
-    (``{PROVIDER}_MODEL`` env var, e.g. ``CEREBRAS_MODEL`` /
-    ``GROQ_MODEL``). Passing a vendor-specific model name (e.g.
-    ``"llama-3.3-70b-versatile"``) only works if every provider in the
-    fallback ladder accepts it.
+    per-call override. When ``model=None`` (the default), the adapter
+    uses each provider's own configured default (``{PROVIDER}_MODEL``
+    env var, e.g. ``CEREBRAS_MODEL`` / ``GROQ_MODEL``). Passing a
+    vendor-specific model name (e.g. ``"llama-3.3-70b-versatile"``) only
+    works if every provider in the fallback ladder accepts it.
     """
     client = _get_client()
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
