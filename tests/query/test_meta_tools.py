@@ -181,6 +181,20 @@ async def test_describe_data_metrics_locale_en(conn_with_observations):
 
 
 @pytest.mark.asyncio
+async def test_describe_data_invalid_limit_falls_back(conn_with_seed):
+    """A non-numeric `limit` from the LLM must not crash dispatch — coerce
+    to the default and return a valid table."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes", "limit": "abc"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    # Two seeded routes are well under the fallback default (50).
+    assert len(result.rows) == 2
+
+
+@pytest.mark.asyncio
 async def test_describe_data_invalid_kind(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
