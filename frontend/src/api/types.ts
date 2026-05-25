@@ -139,6 +139,12 @@ export type OverviewHeadline = {
   delta_min: number | null;
   delta_pct: number | null;
   samples: number;
+  /** ISO date of the start of the 7-day window the headline covers
+   *  (always anchored at ctx.to and 7 days wide, regardless of the
+   *  full ctx range). Use this for the eyebrow label. */
+  window_from: string;
+  /** ISO date of the end of the headline 7-day window (= ctx.to). */
+  window_to: string;
 };
 
 export type OverviewMover = {

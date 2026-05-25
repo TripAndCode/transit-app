@@ -19,13 +19,22 @@ router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
 
 class Headline(BaseModel):
-    """This-period avg + prior-service-week baseline + signed delta."""
+    """Last-7-day avg + prior-7-day baseline + signed delta.
+
+    ``window_from`` / ``window_to`` are the ISO dates of the 7-day window
+    the headline covers (always a 7-day slice anchored at ``ctx.to_date``,
+    even when the user has widened the filter to a longer range). Surfaces
+    them so the frontend eyebrow can show the actual headline window
+    instead of the full ctx range, which would be misleading.
+    """
 
     avg_min: float | None
     baseline_avg_min: float | None
     delta_min: float | None
     delta_pct: float | None
     samples: int
+    window_from: str  # ISO date
+    window_to: str  # ISO date
 
 
 class Mover(BaseModel):
