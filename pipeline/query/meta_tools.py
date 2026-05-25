@@ -166,9 +166,21 @@ async def describe_data(
         )
 
     if kind == "agencies":
-        rows = await conn.fetch(
-            "SELECT agency_id, agency_name FROM agencies ORDER BY agency_id"
-        )
+        # Multi-tenant data-isolation default: unless the caller explicitly
+        # opts in to cross-agency mode, only return the caller's own agency.
+        # The LLM might be tempted to list every tenant in response to
+        # "どんなエージェンシーがある?" — that's a leak waiting to happen.
+        cross_agency = bool(args.get("cross_agency", False))
+        if cross_agency:
+            rows = await conn.fetch(
+                "SELECT agency_id, agency_name FROM agencies ORDER BY agency_id"
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT agency_id, agency_name FROM agencies "
+                "WHERE agency_id = $1 ORDER BY agency_id",
+                agency_id,
+            )
         return _ToolResult(
             kind="table",
             summary=_summary(
@@ -332,6 +344,15 @@ META_TOOLS: list[dict] = [
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                     "filter_substring": {"type": "string"},
+                    "cross_agency": {
+                        "type": "boolean",
+                        "description": (
+                            "Only honored when kind='agencies'. Default false → return "
+                            "ONLY the caller's own agency. Set true to list every "
+                            "agency in the system; do this only when the user has "
+                            "explicit cross-tenant authority (very rare)."
+                        ),
+                    },
                 },
                 "required": ["kind"],
             },
