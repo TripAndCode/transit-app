@@ -15,7 +15,7 @@ ported to asyncpg-style ``$N`` placeholders + an injected WHERE fragment.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline.cache import async_lru_cache
@@ -353,6 +353,23 @@ async def compute_trend_series(
 # ---------------------------------------------------------------------------
 
 
+async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn) -> date | None:
+    """Most recent captured_at::date inside ctx with non-null dep_delay.
+
+    Used to anchor the headline's 7-day window to where data actually
+    exists. Keeps the "this week vs last week" semantics meaningful
+    when ingest is lagging or the user selects a wide historical range.
+    """
+    where, params, _ = build_updates_filter(ctx, next_param=2)
+    sql = (
+        "SELECT MAX((captured_at AT TIME ZONE 'UTC')::date) AS d "
+        "FROM updates "
+        f"WHERE agency_id=$1 AND dep_delay IS NOT NULL AND ({where})"
+    )
+    row = await conn.fetchrow(sql, agency_id, *params)
+    return row["d"] if row and row["d"] else None
+
+
 def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
     """Build the comparison-baseline ctx for the headline + movers.
 
@@ -367,19 +384,6 @@ def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
     return RangeCtx(
         from_date=baseline_start,
         to_date=baseline_end,
-        dow=ctx.dow,
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=ctx.routes,
-    )
-
-
-def _current_week_ctx(ctx: RangeCtx) -> RangeCtx:
-    """The most-recent 7-day window inside ``ctx``, for headline math."""
-    end = ctx.to_date
-    return RangeCtx(
-        from_date=end - timedelta(days=6),
-        to_date=end,
         dow=ctx.dow,
         time_band=ctx.time_band,
         service=ctx.service,
@@ -691,8 +695,33 @@ async def compute_overview_summary(
     Concentration / peak / service_split / sparkline still aggregate over
     the full ctx to surface broader patterns.
     """
-    cur_ctx = _current_week_ctx(ctx)
-    base_ctx = _baseline_ctx(ctx)
+    latest = await _latest_data_date(agency_id, ctx, conn)
+    # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
+    # still has a sensible window_to.
+    anchor = latest if latest is not None else ctx.to_date
+
+    # Build current + baseline 7-day windows anchored at `anchor`, but
+    # clamped inside ctx.
+    cur_to = anchor
+    cur_from = max(cur_to - timedelta(days=6), ctx.from_date)
+    cur_ctx = RangeCtx(
+        from_date=cur_from,
+        to_date=cur_to,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+    base_to = cur_from - timedelta(days=1)
+    base_from = base_to - timedelta(days=6)
+    base_ctx = RangeCtx(
+        from_date=base_from,
+        to_date=base_to,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
 
     avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
     baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)

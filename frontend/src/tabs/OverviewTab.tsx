@@ -28,32 +28,60 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
 
+  const hasAnyData =
+    !!data && (
+      data.headline.samples > 0 ||
+      data.concentration.top_routes.length > 0 ||
+      data.peak_hour != null ||
+      Object.keys(data.service_split).length > 0 ||
+      data.movers.worse.length > 0 ||
+      data.movers.better.length > 0
+    );
+
   return (
     <>
       <TabFilterBar />
       <div className="ov-page">
         {isPending && <Skeleton height={400} />}
         {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
-        {data && data.headline.samples === 0 && (
+        {data && !hasAnyData && (
           <EmptyState title={t("overview.empty")} />
         )}
-        {data && data.headline.samples > 0 && (
+        {data && hasAnyData && (
           <>
-            <HeroSentence
-              headline={data.headline}
-              sparkline_points={data.sparkline_points}
-            />
-            <hr className="ov-divider" />
-            <div className="ov-movers">
-              <MoversList direction="worse" movers={data.movers.worse} />
-              <MoversList direction="better" movers={data.movers.better} />
-            </div>
-            <hr className="ov-divider" />
-            <ConcentrationBar concentration={data.concentration} />
-            <hr className="ov-divider" />
-            <PeakHourRibbon peak_hour={data.peak_hour} />
-            <hr className="ov-divider" />
-            <ServiceSplit service_split={data.service_split} />
+            {data.headline.samples > 0 && (
+              <>
+                <HeroSentence
+                  headline={data.headline}
+                  sparkline_points={data.sparkline_points}
+                />
+                <hr className="ov-divider" />
+              </>
+            )}
+            {(data.movers.worse.length > 0 || data.movers.better.length > 0) && (
+              <>
+                <div className="ov-movers">
+                  <MoversList direction="worse" movers={data.movers.worse} />
+                  <MoversList direction="better" movers={data.movers.better} />
+                </div>
+                <hr className="ov-divider" />
+              </>
+            )}
+            {data.concentration.top_routes.length > 0 && (
+              <>
+                <ConcentrationBar concentration={data.concentration} />
+                <hr className="ov-divider" />
+              </>
+            )}
+            {data.peak_hour != null && (
+              <>
+                <PeakHourRibbon peak_hour={data.peak_hour} />
+                <hr className="ov-divider" />
+              </>
+            )}
+            {Object.keys(data.service_split).length > 0 && (
+              <ServiceSplit service_split={data.service_split} />
+            )}
           </>
         )}
       </div>
