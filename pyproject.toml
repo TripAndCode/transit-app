@@ -35,6 +35,9 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "requires_groq_key: tests that need a live GROQ_API_KEY and the dev API reachable (off by default)",
+]
 
 [tool.ruff]
 line-length = 120
