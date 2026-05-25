@@ -687,8 +687,6 @@ async def compute_overview_summary(
 ) -> dict:
     """Build the 概況 payload for one agency over ``ctx``.
 
-    See ``docs/superpowers/specs/2026-05-25-overview-tab-design.md``.
-
     Headline math uses the LAST 7 days of ``ctx`` and compares against
     the 7-day window immediately prior, so the "this week vs last week"
     copy is honest regardless of how the user has widened the ctx range.

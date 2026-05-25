@@ -1,8 +1,6 @@
 """概況 (Overview) tab endpoint.
 
 Returns the full magazine payload in a single locale-aware round-trip.
-See docs/superpowers/specs/2026-05-25-overview-tab-design.md for the
-information design rationale.
 """
 
 from __future__ import annotations
