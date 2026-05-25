@@ -476,3 +476,43 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
         assert key in body, f"missing key {key}"
     assert body["headline"]["samples"] == 5
     assert body["headline"]["avg_min"] is not None
+
+
+@pytest.mark.asyncio
+async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
+    """When ``ctx.time_band != 'all'``, the headline must read from live
+    ``updates`` so the hour-of-day filter actually applies. The four
+    seeded rows span morning / noon / evening; ``time_band='morning'``
+    must keep only the two scheduled inside 05:00-09:00."""
+    base = datetime.combine(date(2026, 5, 6), time(12, 0), tzinfo=timezone.utc)
+    rows = [
+        ("06:00", 600),  # morning — included (10 min)
+        ("07:30", 300),  # morning — included (5 min)
+        ("13:00", 60),  # noon — excluded
+        ("19:00", 120),  # evening — excluded
+    ]
+    for i, (sched, dep) in enumerate(rows):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_tb_' || $4, '平日', ($5::text)::time, 'R_TB', 1, $6)",
+            aagency_id,
+            f"tb_{i}",
+            base + timedelta(minutes=i),
+            str(i),
+            sched,
+            dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(
+        from_date=date(2026, 5, 6),
+        to_date=date(2026, 5, 6),
+        time_band="morning",
+    )
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    # Morning-only avg = (10 + 5) / 2 = 7.5 min over 2 samples.
+    assert out["headline"]["samples"] == 2
+    assert out["headline"]["avg_min"] == pytest.approx(7.5, abs=0.1)

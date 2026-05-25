@@ -40,9 +40,9 @@ def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     filter shape.
 
     The ``time_band`` filter is silently dropped — the agg tables roll up to
-    (date, route, service) granularity and have no hour-of-day column. Callers
-    filtering by ``time_band`` will see the unfiltered headline. See the
-    docstring of each helper for the caveat.
+    (date, route, service) granularity and have no hour-of-day column. When
+    ``ctx.time_band != 'all'`` callers must fall back to the live-updates path
+    so the filter actually applies.
     """
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param)
     parts: list[str] = [frag] if frag else []
@@ -55,6 +55,36 @@ def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
         params.append(list(ctx.routes))
         n += 1
     return " AND ".join(parts), params, n
+
+
+# Mirrors api/range._TIME_BAND_RANGES. Duplicated locally so this module
+# doesn't reach into a private name in another package.
+_TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
+    "morning": ("05:00", "09:00"),
+    "forenoon": ("09:00", "12:00"),
+    "noon": ("12:00", "14:00"),
+    "afternoon": ("14:00", "17:00"),
+    "evening": ("17:00", "20:00"),
+    "night": ("20:00", "24:00"),
+    "late_night": ("00:00", "05:00"),
+}
+
+
+def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str, list, int]:
+    """Optional WHERE fragment filtering ``column`` (a TIME column) to a
+    named time-band window.
+
+    Returns ``('', [], next_param)`` when ``time_band == 'all'`` or an
+    unknown band name. Matches the asyncpg ``::text)::time`` cast pattern
+    that :func:`api.range.time_band_clause` uses for ``updates``.
+    """
+    if time_band == "all":
+        return "", [], next_param
+    if time_band not in _TIME_BAND_RANGES:
+        return "", [], next_param
+    start, end = _TIME_BAND_RANGES[time_band]
+    frag = f"{column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time"
+    return frag, [start, end], next_param + 2
 
 
 # ---------------------------------------------------------------------------
@@ -380,18 +410,25 @@ async def compute_trend_series(
 
 
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn) -> date | None:
-    """Most recent date inside ctx that has any aggregated samples.
+    """Most recent date inside ctx that has any samples.
 
     Used to anchor the headline's 7-day window to where data actually
     exists. Keeps the "this week vs last week" semantics meaningful
     when ingest is lagging or the user selects a wide historical range.
 
-    Reads from ``agg_daily_trend`` for sub-millisecond response. The
-    ``time_band`` filter is dropped here — see :func:`_agg_filter`.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` for
+    sub-millisecond response. Slow path (any other time band) falls back
+    to live ``updates`` via the dedup CTE so the filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
-    sql = f"SELECT MAX(date::date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        sql = f"SELECT MAX(date::date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
+        row = await conn.fetchrow(sql, agency_id, *params)
+        return row["d"] if row and row["d"] else None
+
+    where, params, _ = build_updates_filter(ctx, next_param=2)
+    sql = f"WITH {_dedup_cte(where)}\nSELECT MAX(date) AS d FROM deduped"
     row = await conn.fetchrow(sql, agency_id, *params)
     return row["d"] if row and row["d"] else None
 
@@ -420,23 +457,32 @@ def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
 async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | None, int]:
     """Return (avg_min, samples) for the headline over ``ctx``.
 
-    Reads from ``agg_daily_trend``. The aggregate is a sample-weighted
-    average so days with more observations weigh proportionally — this
-    matches the row-level mean the dedup CTE used to compute.
-
-    The ``time_band`` filter is silently dropped — ``agg_daily_trend``
-    has no hour-of-day dimension. Callers using ``time_band`` see the
-    unfiltered headline. ``service`` and ``routes`` filters still apply.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` as a
+    sample-weighted average so days with more observations weigh
+    proportionally. Slow path (any other time band) falls back to live
+    ``updates`` via the dedup CTE so the hour-of-day filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        sql = (
+            "SELECT CASE WHEN SUM(samples) > 0\n"
+            "            THEN ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2)\n"
+            "            ELSE NULL END AS avg_min,\n"
+            "       COALESCE(SUM(samples), 0)::int AS samples\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}"
+        )
+        row = await conn.fetchrow(sql, agency_id, *params)
+        avg = float(row["avg_min"]) if row["avg_min"] is not None else None
+        return avg, int(row["samples"] or 0)
+
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = (
-        "SELECT CASE WHEN SUM(samples) > 0\n"
-        "            THEN ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2)\n"
-        "            ELSE NULL END AS avg_min,\n"
-        "       COALESCE(SUM(samples), 0)::int AS samples\n"
-        "FROM agg_daily_trend\n"
-        f"WHERE agency_id=$1{where_clause}"
+        f"WITH {_dedup_cte(where)}\n"
+        "SELECT ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+        "       COUNT(*) AS samples\n"
+        "FROM deduped"
     )
     row = await conn.fetchrow(sql, agency_id, *params)
     avg = float(row["avg_min"]) if row["avg_min"] is not None else None
@@ -446,19 +492,34 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn) -> tuple[float | 
 async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn) -> dict[str, tuple[float, int]]:
     """Per-route avg_min + samples for ``ctx``. Keyed by route_code.
 
-    Reads from ``agg_daily_trend`` and computes a sample-weighted average.
-    The ``time_band`` filter is silently dropped — see :func:`_agg_filter`.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
+    a sample-weighted average. Slow path falls back to live ``updates`` so
+    the hour-of-day filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        sql = (
+            "SELECT route_code,\n"
+            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min,\n"
+            "       SUM(samples)::int AS samples\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY route_code\n"
+            "HAVING SUM(samples) > 0 AND SUM(avg_min * samples) IS NOT NULL"
+        )
+        rows = await conn.fetch(sql, agency_id, *params)
+        return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
+
+    where, params, _ = build_updates_filter(ctx, next_param=2)
     sql = (
+        f"WITH {_dedup_cte(where)}\n"
         "SELECT route_code,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min,\n"
-        "       SUM(samples)::int AS samples\n"
-        "FROM agg_daily_trend\n"
-        f"WHERE agency_id=$1{where_clause}\n"
+        "       AVG(dep_delay)/60.0::numeric AS avg_min,\n"
+        "       COUNT(*)::int AS samples\n"
+        "FROM deduped\n"
         "GROUP BY route_code\n"
-        "HAVING SUM(samples) > 0 AND SUM(avg_min * samples) IS NOT NULL"
+        "HAVING AVG(dep_delay) IS NOT NULL"
     )
     rows = await conn.fetch(sql, agency_id, *params)
     return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -493,10 +554,11 @@ async def _route_weekly_history(
     weeks_back: int = 4,
 ) -> dict[str, list[float | None]]:
     """Per-route weekly avg_min for the last ``weeks_back`` true 7-day
-    buckets ending at ``ctx.to_date``. Honors DOW / service / routes via
-    :func:`_agg_filter` and reads from ``agg_daily_trend``.
+    buckets ending at ``ctx.to_date``. Honors DOW / service / routes.
 
-    The ``time_band`` filter is silently dropped — see :func:`_agg_filter`.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``. Slow
+    path falls back to live ``updates`` via the dedup CTE so the
+    hour-of-day filter is honored.
     """
     if not route_codes:
         return {}
@@ -513,19 +575,33 @@ async def _route_weekly_history(
             service=ctx.service,
             routes=ctx.routes,
         )
-        where, params, n = _agg_filter(window_ctx, next_param=2)
-        where_clause = f" AND ({where})" if where else ""
-        rows = await conn.fetch(
-            "SELECT route_code,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
-            "FROM agg_daily_trend\n"
-            f"WHERE agency_id=$1{where_clause}\n"
-            f"  AND route_code = ANY(${n}::text[])\n"
-            "GROUP BY route_code",
-            agency_id,
-            *params,
-            list(route_codes),
-        )
+        if ctx.time_band == "all":
+            where, params, n = _agg_filter(window_ctx, next_param=2)
+            where_clause = f" AND ({where})" if where else ""
+            rows = await conn.fetch(
+                "SELECT route_code,\n"
+                "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+                "FROM agg_daily_trend\n"
+                f"WHERE agency_id=$1{where_clause}\n"
+                f"  AND route_code = ANY(${n}::text[])\n"
+                "GROUP BY route_code",
+                agency_id,
+                *params,
+                list(route_codes),
+            )
+        else:
+            where, params, n = build_updates_filter(window_ctx, next_param=2)
+            rows = await conn.fetch(
+                f"WITH {_dedup_cte(where)}\n"
+                "SELECT route_code,\n"
+                "       AVG(dep_delay)/60.0::numeric AS avg_min\n"
+                "FROM deduped\n"
+                f"WHERE route_code = ANY(${n}::text[])\n"
+                "GROUP BY route_code",
+                agency_id,
+                *params,
+                list(route_codes),
+            )
         wk_map = {r["route_code"]: float(r["avg_min"]) for r in rows if r["avg_min"] is not None}
         for code in route_codes:
             out[code].append(wk_map.get(code))
@@ -556,27 +632,42 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Top-3 routes by total positive delay contribution + rest share.
 
-    Reads from ``agg_daily_trend`` and approximates the per-row
-    ``SUM(GREATEST(dep_delay, 0))`` of the old implementation as
-    ``SUM(GREATEST(avg_min, 0) * samples)`` per route, working in minutes
-    instead of seconds. Routes that ran early on net (negative ``avg_min``
-    for a given date) contribute zero — same intent as the original
-    metric: contribution to LATENESS, not to the signed sum.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
+    approximates ``SUM(GREATEST(dep_delay, 0))`` as
+    ``SUM(GREATEST(avg_min, 0) * samples)`` per route, in minutes. Routes
+    that ran early on net (negative ``avg_min``) contribute zero — same
+    intent as the per-row metric: contribution to LATENESS, not the
+    signed sum.
 
-    The ``time_band`` filter is silently dropped — see :func:`_agg_filter`.
+    Slow path (any non-default time band) falls back to live ``updates``
+    and computes the per-row ``SUM(GREATEST(dep_delay, 0)) / 60`` exactly,
+    so the hour-of-day filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
-    rows = await conn.fetch(
-        "SELECT route_code,\n"
-        "       SUM(GREATEST(avg_min, 0) * samples)::float AS total_late_min\n"
-        "FROM agg_daily_trend\n"
-        f"WHERE agency_id=$1{where_clause}\n"
-        "GROUP BY route_code\n"
-        "ORDER BY total_late_min DESC NULLS LAST",
-        agency_id,
-        *params,
-    )
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        rows = await conn.fetch(
+            "SELECT route_code,\n"
+            "       SUM(GREATEST(avg_min, 0) * samples)::float AS total_late_min\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY route_code\n"
+            "ORDER BY total_late_min DESC NULLS LAST",
+            agency_id,
+            *params,
+        )
+    else:
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        rows = await conn.fetch(
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT route_code,\n"
+            "       (SUM(GREATEST(dep_delay, 0)) / 60.0)::float AS total_late_min\n"
+            "FROM deduped\n"
+            "GROUP BY route_code\n"
+            "ORDER BY total_late_min DESC NULLS LAST",
+            agency_id,
+            *params,
+        )
     if not rows:
         return {"top_routes": [], "rest_share_pct": 0.0}
     grand_total = sum(float(r["total_late_min"] or 0.0) for r in rows)
@@ -603,9 +694,9 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
 
     Reads from ``agg_route_hour``, which is a fixed analyze-period rollup
-    (no date column). Consequence: the date range, DOW, and ``time_band``
-    in ``ctx`` are all ignored — only ``service`` and ``routes`` apply.
-    The frontend can flag this caveat if needed.
+    (no date column). Consequence: the date range and DOW in ``ctx`` are
+    ignored — but ``service``, ``routes``, AND ``time_band`` all apply,
+    because ``agg_route_hour`` does carry a TIME column.
     """
     n = 2
     params: list = []
@@ -618,6 +709,10 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
         parts.append(f"route_code = ANY(${n}::text[])")
         params.append(list(ctx.routes))
         n += 1
+    tb_frag, tb_params, n = _time_band_sql_on("scheduled_time", ctx.time_band, n)
+    if tb_frag:
+        parts.append(tb_frag)
+        params.extend(tb_params)
     where_clause = (" AND " + " AND ".join(parts)) if parts else ""
     sql = (
         "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
@@ -702,20 +797,33 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
 async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float]:
     """avg_min per service_type (typically '平日' / '土日祝').
 
-    Reads from ``agg_daily_trend`` with a sample-weighted average. The
-    ``time_band`` filter is silently dropped — see :func:`_agg_filter`.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
+    a sample-weighted average. Slow path falls back to live ``updates``
+    so the hour-of-day filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
-    rows = await conn.fetch(
-        "SELECT service_type,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
-        "FROM agg_daily_trend\n"
-        f"WHERE agency_id=$1{where_clause}\n"
-        "GROUP BY service_type",
-        agency_id,
-        *params,
-    )
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        rows = await conn.fetch(
+            "SELECT service_type,\n"
+            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY service_type",
+            agency_id,
+            *params,
+        )
+    else:
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        rows = await conn.fetch(
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT service_type,\n"
+            "       AVG(dep_delay)/60.0::numeric AS avg_min\n"
+            "FROM deduped\n"
+            "GROUP BY service_type",
+            agency_id,
+            *params,
+        )
     return {
         r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"] and r["avg_min"] is not None
     }
@@ -724,22 +832,35 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn) -> dict[str, float
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
     """Up to 7 daily avg_min points (oldest first) inside ``ctx``.
 
-    Reads from ``agg_daily_trend`` with a sample-weighted average per
-    date. The ``time_band`` filter is silently dropped — see
-    :func:`_agg_filter`.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
+    a sample-weighted average per date. Slow path falls back to live
+    ``updates`` so the hour-of-day filter is honored.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
-    where_clause = f" AND ({where})" if where else ""
-    rows = await conn.fetch(
-        "SELECT date AS day,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
-        "FROM agg_daily_trend\n"
-        f"WHERE agency_id=$1{where_clause}\n"
-        "GROUP BY date\n"
-        "ORDER BY date ASC",
-        agency_id,
-        *params,
-    )
+    if ctx.time_band == "all":
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        rows = await conn.fetch(
+            "SELECT date AS day,\n"
+            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY date\n"
+            "ORDER BY date ASC",
+            agency_id,
+            *params,
+        )
+    else:
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        rows = await conn.fetch(
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT date AS day,\n"
+            "       AVG(dep_delay)/60.0::numeric AS avg_min\n"
+            "FROM deduped\n"
+            "GROUP BY date\n"
+            "ORDER BY date ASC",
+            agency_id,
+            *params,
+        )
     pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
     return pts[-7:]
 
