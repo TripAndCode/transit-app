@@ -1,9 +1,82 @@
 {
   "nav": {
+    "overview": "Overview",
     "map": "Map",
     "ask": "Ask",
     "live": "Live",
     "reports": "Reports"
+  },
+  "overview": {
+    "eyebrow": "Overview — {{from}} – {{to}}",
+    "hero_avg_prefix": "This week's average delay is",
+    "hero_avg_suffix": " min.",
+    "hero_compared": "vs last week",
+    "hero_unit_min": " min",
+    "hero_no_baseline": "No baseline data",
+    "hero_samples": "{{count}} observations",
+    "section_movers_worse": "Most-worsened routes",
+    "section_movers_better": "Most-improved routes",
+    "streak_worse": "worse {{count}} weeks running",
+    "streak_better": "better {{count}} weeks running",
+    "section_concentration": "Delay concentration",
+    "concentration_legend": "Top {{count}} routes carry {{pct}}% of the delay.",
+    "concentration_rest": "Remaining {{count}} routes: {{rest}}%",
+    "section_peak_hour": "Worst hour of day",
+    "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
+    "section_service_split": "By service day",
+    "service_split_label": {
+      "平日": "Weekday",
+      "土日祝": "Weekend/Holiday"
+    },
+    "hero": {
+      "label": "This week's average delay",
+      "baseline_label": "Last week avg",
+      "stat_max": "Max",
+      "stat_min": "Min",
+      "stat_mean": "Mean",
+      "stat_days": "Days"
+    },
+    "story": {
+      "better": "Better than last week.",
+      "worse": "Worse than last week.",
+      "same": "About the same as last week.",
+      "no_baseline": "This week at a glance."
+    },
+    "mover": {
+      "worsened": "{{val}} min worse",
+      "improved": "{{val}} min better"
+    },
+    "concentration": {
+      "single_route": "{{name}} accounts for 100% — only 1 route observed.",
+      "lorenz_label": "Lorenz curve — cumulative share of delay",
+      "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
+    },
+    "service_split": {
+      "diff": "Δ: {{diff}} min ({{pct}}%)",
+      "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
+      "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
+      "story_same": "Weekday and weekend nearly identical.",
+      "weekday_label": "Weekday",
+      "weekend_label": "Weekend/Holiday",
+      "daily_label": "Daily weekday vs weekend trend"
+    },
+    "peak_hour": {
+      "max_label": "Max {{avg}} min",
+      "avg_label": "Avg",
+      "weekday_label": "Weekday",
+      "weekend_label": "Weekend/Holiday",
+      "weekday_empty": "No weekday data.",
+      "weekend_empty": "No weekend data."
+    },
+    "modal": {
+      "hero": "This week's trend",
+      "movers_worse": "Most-worsened routes (top 10)",
+      "movers_better": "Most-improved routes (top 10)",
+      "concentration": "Delay concentration (top 20)",
+      "peak_hour": "Worst hour (Weekday vs Weekend)",
+      "service_split": "Service-day trend"
+    },
+    "empty": "No observations in this range. Try a wider window."
   },
   "header": {
     "app_title": "Delay Dashboard",

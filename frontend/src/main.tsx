@@ -5,6 +5,7 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 import { useTranslation } from "react-i18next";
 import "./i18n";
 import App from "./App";
+import { OverviewTab } from "./tabs/OverviewTab";
 import { MapTab } from "./tabs/MapTab";
 import { AskTab } from "./tabs/AskTab";
 import { LiveTab } from "./tabs/LiveTab";
@@ -37,10 +38,11 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       // Index has no static target — AgencyPicker (in Header) auto-redirects
-      // to /agencies/<first>/map once agencies load. Sending Navigate to="map"
-      // here loops with the catch-all because /map is not a registered route.
+      // to /agencies/<first>/overview once agencies load. Sending Navigate to="overview"
+      // here loops with the catch-all because /overview is not a registered route.
       { index: true, element: <IndexLoadingPlaceholder /> },
-      { path: "agencies/:agencyId", element: <Navigate to="map" replace /> },
+      { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },
+      { path: "agencies/:agencyId/overview", element: <OverviewTab /> },
       { path: "agencies/:agencyId/map", element: <MapTab /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },
       { path: "agencies/:agencyId/live", element: <LiveTab /> },

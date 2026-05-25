@@ -11,6 +11,7 @@ import type {
   Agency,
   AskResponse,
   HeatmapCollection,
+  OverviewSummary,
   ReportMeta,
   ReportResponse,
   Route,
@@ -64,6 +65,18 @@ export function useReport(
     queryFn: () =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`),
     enabled: agencyId != null && !!reportType,
+  });
+}
+
+export function useOverviewSummary(
+  agencyId: number | null,
+  ctx: RangeCtx,
+): UseQueryResult<OverviewSummary> {
+  return useQuery({
+    queryKey: ["overview-summary", agencyId, ...ctxKey(ctx)],
+    queryFn: () =>
+      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`),
+    enabled: agencyId != null,
   });
 }
 

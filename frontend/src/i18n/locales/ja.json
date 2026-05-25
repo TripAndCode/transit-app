@@ -1,9 +1,82 @@
 {
   "nav": {
+    "overview": "概況",
     "map": "地図",
     "ask": "質問",
     "live": "リアルタイム",
     "reports": "レポート"
+  },
+  "overview": {
+    "eyebrow": "概況 — {{from}} 〜 {{to}}",
+    "hero_avg_prefix": "今週の平均遅延は",
+    "hero_avg_suffix": "分。",
+    "hero_compared": "先週比",
+    "hero_unit_min": "分",
+    "hero_no_baseline": "比較データなし",
+    "hero_samples": "観測 {{count}}件",
+    "section_movers_worse": "最も悪化した系統",
+    "section_movers_better": "最も改善した系統",
+    "streak_worse": "{{count}}週連続悪化",
+    "streak_better": "{{count}}週連続改善",
+    "section_concentration": "遅延の集中度",
+    "concentration_legend": "上位{{count}}系統が遅延全体の {{pct}}% を占める。",
+    "concentration_rest": "残り {{count}} 系統で {{rest}}%",
+    "section_peak_hour": "時間帯別の悪化",
+    "peak_hour_callout": "ピーク時間帯は {{hour}}-{{next_hour}} 時 (平均 {{avg}} 分)。",
+    "section_service_split": "サービス日別",
+    "service_split_label": {
+      "平日": "平日",
+      "土日祝": "土日祝"
+    },
+    "hero": {
+      "label": "今週の平均遅延",
+      "baseline_label": "先週平均",
+      "stat_max": "最大",
+      "stat_min": "最小",
+      "stat_mean": "平均",
+      "stat_days": "日数"
+    },
+    "story": {
+      "better": "今週は先週より良くなった。",
+      "worse": "今週は先週より悪化した。",
+      "same": "今週は先週とほぼ同じ。",
+      "no_baseline": "今週の状況。"
+    },
+    "mover": {
+      "worsened": "{{val}}分 悪化",
+      "improved": "{{val}}分 改善"
+    },
+    "concentration": {
+      "single_route": "{{name}} が全体の 100% を占める。1系統のみの観測。",
+      "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
+      "lorenz_caption": "上位 20% の系統が遅延の {{pct}}% を占める。"
+    },
+    "service_split": {
+      "diff": "差: {{diff}}分 ({{pct}}%)",
+      "story_weekday_higher": "平日は土日祝の {{ratio}}倍 遅延。",
+      "story_weekend_higher": "土日祝は平日の {{ratio}}倍 遅延。",
+      "story_same": "平日と土日祝はほぼ同じ。",
+      "weekday_label": "平日",
+      "weekend_label": "土日祝",
+      "daily_label": "平日 vs 土日祝の日次推移"
+    },
+    "peak_hour": {
+      "max_label": "最大 {{avg}}分",
+      "avg_label": "平均",
+      "weekday_label": "平日",
+      "weekend_label": "土日祝",
+      "weekday_empty": "平日のデータがありません。",
+      "weekend_empty": "土日祝のデータがありません。"
+    },
+    "modal": {
+      "hero": "今週の傾向",
+      "movers_worse": "最も悪化した系統 (上位10)",
+      "movers_better": "最も改善した系統 (上位10)",
+      "concentration": "遅延の集中度 (上位20)",
+      "peak_hour": "時間帯別の悪化 (平日 vs 土日祝)",
+      "service_split": "サービス日別の推移"
+    },
+    "empty": "この期間の観測データがありません。期間を広げてください。"
   },
   "header": {
     "app_title": "遅延ダッシュボード",
