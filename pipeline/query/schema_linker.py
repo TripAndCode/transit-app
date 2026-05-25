@@ -21,6 +21,12 @@ N_BAN_RE = re.compile(r"^(\d{1,3})番$")
 
 _TRGM_THRESHOLD = 0.30
 _TRGM_CONFIDENT = 0.60
+# Minimum gap between the top trigram score and the runner-up needed to
+# claim a "confident" single-row resolve when more than one candidate is
+# above the confident floor. Without a margin, ties (e.g. three
+# '中央大橋線'-prefixed rows scoring identically) would arbitrarily pick
+# one row and silently mis-route the user's question.
+_TRGM_MARGIN = 0.15
 
 
 @dataclass
@@ -118,8 +124,15 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
         return RouteResolution(route_code=None, reason="none")
 
     top_score = rows[0]["score"]
+    second_score = rows[1]["score"] if len(rows) > 1 else 0.0
     candidates = [(r["code"], r["route_short_name"]) for r in rows]
-    if top_score >= _TRGM_CONFIDENT and len(rows) == 1:
+    # Confident only if the top match dominates: either it's the lone
+    # candidate above the threshold, OR the next best is clearly behind
+    # by at least _TRGM_MARGIN. Multiple equally-strong candidates fall
+    # through to "fuzzy" so the user gets a "did you mean" prompt.
+    if top_score >= _TRGM_CONFIDENT and (
+        len(rows) == 1 or top_score - second_score >= _TRGM_MARGIN
+    ):
         return RouteResolution(
             route_code=rows[0]["code"],
             reason="alias",

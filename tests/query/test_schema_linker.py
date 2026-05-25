@@ -23,6 +23,7 @@ async def conn_with_routes(apply_schema):
                 (agency_id, "国道線(1021)",       "A1 国道・古川線",       None),
                 (agency_id, "中央大橋線(12211)",  "L21 中央大橋線",        None),
                 (agency_id, "中央大橋線(16021)",  "L31 中央大橋線",        None),
+                (agency_id, "中央大橋線(17091)",  "L30 中央大橋線",        None),
                 (agency_id, "新町線(3021)",       "B1 新町線",            None),
             ],
         )
@@ -67,17 +68,20 @@ async def test_resolve_route_n_ban_unresolved_but_candidates(conn_with_routes):
 
 @pytest.mark.asyncio
 async def test_resolve_route_line_fragment_alias(conn_with_routes):
-    """'中央大橋線' matches two routes; trigram returns the top by similarity."""
+    """'中央大橋線' matches three routes with near-identical names.
+
+    The margin-based confident-resolve gate must surface candidates as
+    ``reason='fuzzy'`` rather than silently pick one — the top scores are
+    too close for a confident single-row resolve, even though every row
+    is above the confident floor.
+    """
     pool, agency_id = conn_with_routes
     async with pool.acquire() as conn:
         result = await resolve_route("中央大橋線", conn, agency_id)
-    # Two rows have '中央大橋線' as substring of route_short_name. Either is fine
-    # as the resolved code; the *reason* must be 'alias' or 'fuzzy' (single
-    # confident match would short-circuit; multiple equally-strong matches
-    # surface candidates).
-    assert result.reason in ("alias", "fuzzy")
+    assert result.reason == "fuzzy"
+    assert result.route_code is None
     codes = {c[0] for c in result.candidates}
-    assert "12211" in codes or "16021" in codes
+    assert codes >= {"12211", "16021", "17091"}
 
 
 @pytest.mark.asyncio
