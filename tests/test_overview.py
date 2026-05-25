@@ -34,8 +34,10 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     Each row uses a distinct ``stop_sequence`` so the dedup CTE (which
     collapses on ``(route, svc, scheduled_time, trip_id, date, seq)``)
     keeps all three as separate samples.
+
+    Data spans the full ctx range so the latest-date anchor matches ctx.to_date.
     """
-    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    base = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     rows = [
         ("pb1", base, 60, 1),  # 1.0 min
         ("pb2", base + timedelta(hours=1), 180, 2),  # 3.0 min
@@ -61,8 +63,8 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     h = out["headline"]
     assert h["samples"] == 3
     assert h["avg_min"] == pytest.approx(3.0, abs=0.01)
-    # Headline window is the last 7 days of ctx (= ctx itself, since ctx
-    # is exactly 7 days here).
+    # Headline window is anchored to the latest data (2026-05-24), which
+    # equals ctx.to_date in this test, so window is last 7 days of ctx.
     assert h["window_from"] == "2026-05-18"
     assert h["window_to"] == "2026-05-24"
 
@@ -74,8 +76,10 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
 
     Each row uses a distinct ``stop_sequence`` so the shared dedup CTE
     keeps it as a separate sample.
+
+    "This week" is anchored to ctx.to_date so it matches the latest data.
     """
-    this_week = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    this_week = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     last_week = this_week - timedelta(days=7)
     # last week: two rows averaging 2 min
     for i, dep in enumerate([60, 180]):
@@ -148,8 +152,10 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
     Each route seeds 10 rows per side (above the >= 10 sample gate in
     ``_movers``) with distinct ``stop_sequence`` values so the shared
     dedup CTE keeps each row as a separate sample.
+
+    Current week is anchored to ctx.to_date so it matches the latest data.
     """
-    cur = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     prv = cur - timedelta(days=7)
     # (route, prior_avg_sec, current_avg_sec)
     routes = [
@@ -209,8 +215,10 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     sample gate in ``_movers`` for both the current and baseline
     7-day windows; distinct ``stop_sequence`` keeps each one through the
     dedup CTE.
+
+    Base anchor is ctx.to_date so the latest-data anchor matches it.
     """
-    base_anchor = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+    base_anchor = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     weekly = [60, 120, 240, 360]
     SAMPLES_PER_WEEK = 10
     for weeks_back, dep in enumerate(reversed(weekly)):
