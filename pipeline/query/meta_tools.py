@@ -60,7 +60,16 @@ async def describe_data(
     locale: str = "ja",
 ) -> ToolResult:
     kind = args.get("kind")
-    limit = max(1, min(int(args.get("limit", 50) or 50), 200))
+    # Defensive coercion: the LLM occasionally hands back ``limit`` as a
+    # string ("abc", "50") or even ``None`` despite the JSON-schema
+    # constraint. Coerce to int, fall back to the default rather than
+    # raising — a free-text refusal would be far worse than a slightly
+    # wider result set.
+    raw_limit = args.get("limit", 50)
+    try:
+        limit = max(1, min(int(raw_limit) if raw_limit is not None else 50, 200))
+    except (TypeError, ValueError):
+        limit = 50
 
     if kind not in VALID_KINDS:
         return _ToolResult(
