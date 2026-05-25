@@ -1,10 +1,73 @@
-"""Tests for the 概況 (Overview) tab endpoint."""
+"""Tests for the 概況 (Overview) tab endpoint.
+
+The Overview backend reads from the pre-aggregated ``agg_daily_trend`` and
+``agg_route_hour`` tables (not the row-level ``updates`` table) so cold
+loads stay sub-second on multi-month windows. Tests seed both layers:
+``updates`` is kept around so any future helpers that still touch it
+stay covered, while ``agg_*`` is what the Overview reads.
+"""
 
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
 from api.range import RangeCtx
+
+
+async def _seed_agg_daily(
+    aconn,
+    agency_id: int,
+    date_,
+    route_code: str,
+    service_type: str,
+    avg_min: float,
+    samples: int,
+):
+    """Insert (or upsert) one ``agg_daily_trend`` row.
+
+    ``date_`` may be a :class:`datetime.date` or an ISO string;
+    ``agg_daily_trend.date`` is TEXT per schema, so we coerce both shapes.
+    """
+    iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples) "
+        "VALUES ($1, $2, $3, $4, $5, $6) "
+        "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        agency_id,
+        iso,
+        route_code,
+        service_type,
+        float(avg_min),
+        int(samples),
+    )
+
+
+async def _seed_agg_route_hour(
+    aconn,
+    agency_id: int,
+    route_code: str,
+    service_type: str,
+    scheduled_time: str,
+    avg_min: float,
+    samples: int,
+):
+    """Insert one ``agg_route_hour`` row. ``scheduled_time`` is HH:MM text;
+    schema column is TIME (post 0011), so we cast on the server side."""
+    await aconn.execute(
+        "INSERT INTO agg_route_hour "
+        "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples) "
+        "VALUES ($1, $2, $3, ($4::text)::time, $5, NULL, NULL, $6) "
+        "ON CONFLICT (agency_id, route_code, service_type, scheduled_time) DO UPDATE "
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        agency_id,
+        route_code,
+        service_type,
+        scheduled_time,
+        float(avg_min),
+        int(samples),
+    )
 
 
 @pytest.mark.asyncio
@@ -29,13 +92,10 @@ async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aage
 
 @pytest.mark.asyncio
 async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
-    """Three observations inside the range -> avg_min reflects them.
+    """Three observations on 2026-05-24 -> agg row with avg=3.0 min, samples=3.
 
-    Each row uses a distinct ``stop_sequence`` so the dedup CTE (which
-    collapses on ``(route, svc, scheduled_time, trip_id, date, seq)``)
-    keeps all three as separate samples.
-
-    Data spans the full ctx range so the latest-date anchor matches ctx.to_date.
+    The ``updates`` inserts mirror what the live pipeline would emit; the
+    matching ``agg_daily_trend`` row is what the Overview actually reads.
     """
     base = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     rows = [
@@ -56,6 +116,9 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
             dep,
         )
 
+    # Aggregated mirror: one row per (date, route, service).
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), "R1", "平日", 3.0, 3)
+
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
@@ -73,9 +136,6 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
 async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
     """This-week avg = 4.0 min; baseline-week avg = 2.0 min ->
     delta = +2.0 min, +100%.
-
-    Each row uses a distinct ``stop_sequence`` so the shared dedup CTE
-    keeps it as a separate sample.
 
     "This week" is anchored to ctx.to_date so it matches the latest data.
     """
@@ -108,6 +168,10 @@ async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
             dep,
         )
 
+    # Aggregated mirror.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 17), "R1", "平日", 2.0, 2)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), "R1", "平日", 4.0, 2)
+
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
@@ -133,6 +197,9 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
         cur,
     )
 
+    # Aggregated mirror — only "current"-window data, no baseline.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R1", "平日", 2.0, 1)
+
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
@@ -146,13 +213,10 @@ async def test_baseline_missing_returns_null_delta(aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
-    """Five routes with varied this-week vs prior-week deltas;
+    """Eight routes with varied this-week vs prior-week deltas;
     top 3 worsened + top 3 improved come out sorted by |delta_min|.
 
-    Each route seeds 10 rows per side (above the >= 10 sample gate in
-    ``_movers``) with distinct ``stop_sequence`` values so the shared
-    dedup CTE keeps each row as a separate sample.
-
+    Each route seeds 10 samples per side (>= 10 sample gate in ``_movers``).
     Current week is anchored to ctx.to_date so it matches the latest data.
     """
     cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
@@ -195,6 +259,9 @@ async def test_movers_ranks_top_3_worse_and_top_3_better(aconn, aagency_id):
                 i + 1,
                 cur_dep,
             )
+        # Aggregated mirror — one row per (date, route, service) per side.
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 17), code, "平日", prior_dep / 60.0, SAMPLES_PER_SIDE)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), code, "平日", cur_dep / 60.0, SAMPLES_PER_SIDE)
 
     from pipeline.reports import compute_overview_summary
 
@@ -211,16 +278,14 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     """A route worsening for 3 of the past 4 weeks reports streak=3
     and 4 ascending sparkline points (oldest-first).
 
-    Each weekly bucket seeds 10 rows so the route clears the >= 10
-    sample gate in ``_movers`` for both the current and baseline
-    7-day windows; distinct ``stop_sequence`` keeps each one through the
-    dedup CTE.
-
     Base anchor is ctx.to_date so the latest-data anchor matches it.
     """
     base_anchor = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
-    weekly = [60, 120, 240, 360]
+    weekly = [60, 120, 240, 360]  # oldest-first; current week is the last
     SAMPLES_PER_WEEK = 10
+    # The helper iterates with weeks_back = 0..3, where weeks_back=0 corresponds
+    # to the current 7-day window and reverses ``weekly`` so the LATEST dep
+    # value lands on the latest week.
     for weeks_back, dep in enumerate(reversed(weekly)):
         when = base_anchor - timedelta(days=7 * weeks_back)
         for i in range(SAMPLES_PER_WEEK):
@@ -235,6 +300,10 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
                 i + 1,
                 dep,
             )
+        # Aggregated mirror — one row per week, parked on the canonical
+        # within-window date for that week.
+        d = (base_anchor - timedelta(days=7 * weeks_back)).date()
+        await _seed_agg_daily(aconn, aagency_id, d, "R_STR", "平日", dep / 60.0, SAMPLES_PER_WEEK)
 
     from pipeline.reports import compute_overview_summary
 
@@ -252,16 +321,16 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
     """4 routes; top 3 absorb ~87.5%; the 4th absorbs ~12.5%.
 
-    Distinct ``stop_sequence`` per row so the shared dedup CTE keeps
-    each row as a separate sample (concentration sums dep_delay across
-    all kept rows).
+    Concentration is computed as ``SUM(GREATEST(avg_min, 0) * samples)``
+    per route on ``agg_daily_trend`` — directly proportional to total
+    positive delay minutes.
     """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
-        ("R_X", [300, 300, 300]),
-        ("R_Y", [600]),
-        ("R_Z", [300, 300]),
-        ("R_W", [150, 150]),
+        ("R_X", [300, 300, 300]),  # avg=5.0, n=3 -> total=15
+        ("R_Y", [600]),  # avg=10.0, n=1 -> total=10
+        ("R_Z", [300, 300]),  # avg=5.0, n=2 -> total=10
+        ("R_W", [150, 150]),  # avg=2.5, n=2 -> total=5
     ]
     for code, deps in rows:
         for i, dep in enumerate(deps):
@@ -277,6 +346,8 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
                 i + 1,
                 dep,
             )
+        avg_min = sum(deps) / len(deps) / 60.0
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), code, "平日", avg_min, len(deps))
 
     from pipeline.reports import compute_overview_summary
 
@@ -293,7 +364,12 @@ async def test_concentration_top_3_and_rest_share(aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
-    """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg."""
+    """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg.
+
+    Peak hour reads from ``agg_route_hour``; one row per (route, svc,
+    scheduled_time). Two rows at 08:00 collapse to one agg row with the
+    weighted mean (9.0 min, samples=2).
+    """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
         ("06:00", 60),
@@ -314,6 +390,10 @@ async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
             sched,
             dep,
         )
+    # Aggregated mirror in agg_route_hour: one row per scheduled_time.
+    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "06:00", 1.0, 1)
+    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "08:00", 9.0, 2)
+    await _seed_agg_route_hour(aconn, aagency_id, "R_P", "平日", "17:00", 2.0, 1)
 
     from pipeline.reports import compute_overview_summary
 
@@ -347,6 +427,8 @@ async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
             svc,
             60 * (i + 1),
         )
+        d = (base + timedelta(days=i)).date()
+        await _seed_agg_daily(aconn, aagency_id, d, "R_S", svc, (i + 1) * 1.0, 1)
 
     from pipeline.reports import compute_overview_summary
 
@@ -375,6 +457,17 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
             str(i),
             60 + i * 30,
         )
+    # Aggregated mirror: 5 samples on 2026-05-18 averaging ~2 min.
+    deps = [60 + i * 30 for i in range(5)]
+    await _seed_agg_daily(
+        aconn,
+        aagency_id,
+        date(2026, 5, 18),
+        "R_F",
+        "平日",
+        sum(deps) / len(deps) / 60.0,
+        len(deps),
+    )
 
     r = await client.get(f"/api/{aagency_id}/overview/summary?from=2026-05-18&to=2026-05-24")
     assert r.status_code == 200
