@@ -21,19 +21,21 @@ type HoverState = {
   value: string;
 };
 
-const SPARK_W = 240;
+// Full-width editorial sparkline. The viewBox uses preserveAspectRatio="none"
+// so it stretches across the available content width — width here is just a
+// reference unit for the coordinate system.
+const SPARK_W = 820;
 const SPARK_H = 96;
 const PAD_TOP = 16;
-const PAD_BOTTOM = 18;
+const PAD_BOTTOM = 22;
 const PAD_LEFT = 8;
-const PAD_RIGHT = 30; // space for baseline label
+const PAD_RIGHT = 56; // space for baseline label
 
 function fmtNum(n: number | null | undefined): string {
   return n == null ? "—" : n.toFixed(1);
 }
 
 function buildDateLabels(windowFrom: string, count: number): string[] {
-  // window_from is ISO date; produce "M/D" labels for `count` consecutive days.
   const start = new Date(windowFrom + "T00:00:00");
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
@@ -42,6 +44,13 @@ function buildDateLabels(windowFrom: string, count: number): string[] {
     out.push(`${d.getMonth() + 1}/${d.getDate()}`);
   }
   return out;
+}
+
+function storyKey(delta: number | null | undefined): string {
+  if (delta == null) return "overview.story.no_baseline";
+  if (delta < -0.05) return "overview.story.better";
+  if (delta > 0.05) return "overview.story.worse";
+  return "overview.story.same";
 }
 
 export function HeroSentence({ headline, sparkline_points }: Props) {
@@ -61,7 +70,6 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     [headline.window_from, sparkline_points.length],
   );
 
-  // Build chart geometry
   const chart = useMemo(() => {
     const pts = sparkline_points;
     if (pts.length < 2) return null;
@@ -110,8 +118,8 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     const scaleX = rect.width / SPARK_W;
+    const scaleY = rect.height / SPARK_H;
     const localX = (e.clientX - rect.left) / scaleX;
-    // Find nearest data index
     let best = 0;
     let bestDist = Infinity;
     chart.coords.forEach((c, i) => {
@@ -122,7 +130,6 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
       }
     });
     const target = chart.coords[best];
-    const scaleY = rect.height / SPARK_H;
     setHover({
       visible: true,
       svgX: target.x,
@@ -138,21 +145,23 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
     setHover((h) => ({ ...h, visible: false }));
   }
 
+  const story = t(storyKey(headline.delta_min));
+
   return (
-    <div className="ov-card ov-hero-card">
-      <div className="ov-hero-left">
-        <p className="ov-card-eyebrow">
-          {t("overview.eyebrow", {
-            from: headline.window_from,
-            to: headline.window_to,
-          })}
-        </p>
-        <p className="ov-hero-label">{t("overview.hero.label")}</p>
-        <div className="ov-hero-value-row">
-          <span className="ov-hero-value ov-anim-fade">
-            {fmtNum(headline.avg_min)}
-            {t("overview.hero_unit_min")}
-          </span>
+    <section className="ov-hero">
+      <p className="ov-hero-eyebrow">
+        {t("overview.eyebrow", {
+          from: headline.window_from,
+          to: headline.window_to,
+        })}
+      </p>
+      <h1 className="ov-hero-story">{story}</h1>
+      <div className="ov-hero-row">
+        <span className="ov-hero-number ov-anim-fade">
+          {fmtNum(headline.avg_min)}
+          {t("overview.hero_unit_min")}
+        </span>
+        <div className="ov-hero-meta">
           {headline.delta_min != null && (
             <span className={`ov-chip ${deltaChipClass}`}>
               {isImprovement ? "▼" : "▲"}{" "}
@@ -168,134 +177,134 @@ export function HeroSentence({ headline, sparkline_points }: Props) {
               {t("overview.hero_no_baseline")}
             </span>
           )}
+          <span className="sep" aria-hidden>·</span>
+          <span className="ov-hero-samples">
+            {t("overview.hero_samples", { count: headline.samples })}
+          </span>
         </div>
-        <p className="ov-hero-meta">
-          {t("overview.hero_samples", { count: headline.samples })}
-        </p>
       </div>
 
-      <div className="ov-hero-right">
-        <div className="ov-hero-spark">
-          {chart && (
-            <>
-              <svg
-                width="100%"
-                viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
-                preserveAspectRatio="none"
-                role="img"
-                aria-label={t("overview.hero.label")}
-                style={{ display: "block", overflow: "visible" }}
-                onMouseMove={handleMove}
-                onMouseLeave={handleLeave}
-              >
-                <defs>
-                  <linearGradient id="ovHeroFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="rgba(71,85,105,0.12)" />
-                    <stop offset="100%" stopColor="rgba(71,85,105,0)" />
-                  </linearGradient>
-                </defs>
-                <path d={chart.area} fill="url(#ovHeroFill)" stroke="none" />
-                {chart.baselineY != null && (
-                  <>
-                    <line
-                      x1={PAD_LEFT}
-                      y1={chart.baselineY}
-                      x2={SPARK_W - PAD_RIGHT}
-                      y2={chart.baselineY}
-                      stroke="#cbd5e1"
-                      strokeWidth="1"
-                      strokeDasharray="2 4"
-                    />
-                    <text
-                      x={SPARK_W - PAD_RIGHT + 3}
-                      y={chart.baselineY + 3}
-                      fontSize="9"
-                      fill="#94a3b8"
-                      textAnchor="start"
-                    >
-                      {t("overview.hero.baseline_label")}
-                    </text>
-                  </>
-                )}
-                <polyline
-                  className="ov-spark-line"
-                  fill="none"
-                  stroke="#475569"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={chart.line}
-                />
-                {/* min/max/last annotations */}
-                {chart.coords.map((c, i) => {
-                  const isMin = i === chart.minIdx;
-                  const isMax = i === chart.maxIdx;
-                  const isLast = i === chart.lastIdx;
-                  if (!isMin && !isMax && !isLast) return null;
-                  return (
-                    <g key={`ann-${i}`}>
-                      {isLast ? (
-                        <>
-                          <circle
-                            cx={c.x}
-                            cy={c.y}
-                            r="5"
-                            fill="rgba(71,85,105,0.20)"
-                          />
-                          <circle cx={c.x} cy={c.y} r="2.5" fill="#475569" />
-                        </>
-                      ) : (
-                        <circle cx={c.x} cy={c.y} r="2" fill="#94a3b8" />
-                      )}
-                      <text
-                        x={c.x}
-                        y={c.y - 7}
-                        fontSize="10"
-                        fill="#6e6e73"
-                        textAnchor="middle"
-                      >
-                        {c.v.toFixed(1)}
-                      </text>
-                    </g>
-                  );
-                })}
-                {/* x-axis date labels */}
-                {chart.coords.map((c, i) => (
-                  <text
-                    key={`x-${i}`}
-                    x={c.x}
-                    y={SPARK_H - 4}
-                    fontSize="9"
-                    fill="#94a3b8"
-                    textAnchor="middle"
-                  >
-                    {dateLabels[i]}
-                  </text>
-                ))}
-                {/* hover guide */}
-                {hover.visible && (
+      <div className="ov-hero-spark">
+        {chart && (
+          <>
+            <svg
+              width="100%"
+              height={SPARK_H}
+              viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={t("overview.hero.label")}
+              style={{ display: "block", overflow: "visible" }}
+              onMouseMove={handleMove}
+              onMouseLeave={handleLeave}
+            >
+              <defs>
+                <linearGradient id="ovHeroFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(71,85,105,0.10)" />
+                  <stop offset="100%" stopColor="rgba(71,85,105,0)" />
+                </linearGradient>
+              </defs>
+              <path d={chart.area} fill="url(#ovHeroFill)" stroke="none" />
+              {chart.baselineY != null && (
+                <>
                   <line
-                    x1={hover.svgX}
-                    y1={PAD_TOP - 4}
-                    x2={hover.svgX}
-                    y2={SPARK_H - PAD_BOTTOM + 2}
-                    stroke="rgba(71,85,105,0.30)"
+                    x1={PAD_LEFT}
+                    y1={chart.baselineY}
+                    x2={SPARK_W - PAD_RIGHT}
+                    y2={chart.baselineY}
+                    stroke="#cbd5e1"
                     strokeWidth="1"
+                    strokeDasharray="2 4"
                   />
-                )}
-              </svg>
-              {hover.visible && (
-                <div
-                  className="ov-tooltip"
-                  style={{ left: hover.px, top: hover.py }}
-                >
-                  {hover.label} — {hover.value}
-                </div>
+                  <text
+                    x={SPARK_W - PAD_RIGHT + 4}
+                    y={chart.baselineY + 3}
+                    fontSize="10"
+                    fill="#94a3b8"
+                    textAnchor="start"
+                  >
+                    {t("overview.hero.baseline_label")}
+                  </text>
+                </>
               )}
-            </>
-          )}
-        </div>
+              <polyline
+                className="ov-spark-line"
+                fill="none"
+                stroke="#475569"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={chart.line}
+              />
+              {/* min/max/last annotations */}
+              {chart.coords.map((c, i) => {
+                const isMin = i === chart.minIdx;
+                const isMax = i === chart.maxIdx;
+                const isLast = i === chart.lastIdx;
+                if (!isMin && !isMax && !isLast) return null;
+                return (
+                  <g key={`ann-${i}`}>
+                    {isLast ? (
+                      <>
+                        <circle
+                          cx={c.x}
+                          cy={c.y}
+                          r="5"
+                          fill="rgba(71,85,105,0.20)"
+                        />
+                        <circle cx={c.x} cy={c.y} r="2.5" fill="#475569" />
+                      </>
+                    ) : (
+                      <circle cx={c.x} cy={c.y} r="2" fill="#94a3b8" />
+                    )}
+                    <text
+                      x={c.x}
+                      y={c.y - 8}
+                      fontSize="10"
+                      fill="#6e6e73"
+                      textAnchor="middle"
+                    >
+                      {c.v.toFixed(1)}
+                    </text>
+                  </g>
+                );
+              })}
+              {/* x-axis date labels under each dot */}
+              {chart.coords.map((c, i) => (
+                <text
+                  key={`x-${i}`}
+                  x={c.x}
+                  y={SPARK_H - 6}
+                  fontSize="10"
+                  fill="#94a3b8"
+                  textAnchor="middle"
+                >
+                  {dateLabels[i]}
+                </text>
+              ))}
+              {/* hover guide */}
+              {hover.visible && (
+                <line
+                  x1={hover.svgX}
+                  y1={PAD_TOP - 4}
+                  x2={hover.svgX}
+                  y2={SPARK_H - PAD_BOTTOM + 2}
+                  stroke="rgba(71,85,105,0.30)"
+                  strokeWidth="1"
+                />
+              )}
+            </svg>
+            {hover.visible && (
+              <div
+                className="ov-tooltip"
+                style={{ left: hover.px, top: hover.py }}
+              >
+                {hover.label} — {hover.value}
+              </div>
+            )}
+          </>
+        )}
       </div>
-    </div>
+    </section>
   );
 }

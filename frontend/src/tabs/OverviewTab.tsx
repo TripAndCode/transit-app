@@ -66,7 +66,10 @@ export function OverviewTab() {
               </div>
             )}
             {data.concentration.top_routes.length > 0 && (
-              <ConcentrationBar concentration={data.concentration} />
+              <ConcentrationBar
+                concentration={data.concentration}
+                movers={data.movers}
+              />
             )}
             {data.peak_hour != null && (
               <PeakHourRibbon peak_hour={data.peak_hour} />
