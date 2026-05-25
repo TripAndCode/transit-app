@@ -4,14 +4,21 @@ import pytest
 
 from api.range import RangeCtx
 from pipeline.query.meta_tools import describe_data
-from datetime import date
+from datetime import date, datetime
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
+async def _setup_jst(conn):
+    # asyncpg resets session state between pool acquires, so use ``setup``
+    # (per-acquire) rather than ``init`` (once on creation) to mirror
+    # api/main.py's per-acquire JST guarantee.
+    await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
+
+
 @pytest.fixture
 async def conn_with_seed(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') "
@@ -47,3 +54,119 @@ async def test_describe_data_routes(conn_with_seed):
     codes = {row[0] for row in result.rows}
     assert codes == {"1021", "12211"}
     assert "2" in result.summary  # summary mentions the count
+
+
+@pytest.fixture
+async def conn_with_observations(conn_with_seed):
+    """Extends conn_with_seed: also inserts stops + updates so date_range/sample_counts work."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) "
+            "VALUES ($1, $2, $3, 40.0, 140.0)",
+            [(agency_id, f"S{i}", f"停留所{i}") for i in range(5)],
+        )
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, $4, 1, $5, '08:00'::time, '平日', 60)",
+            [
+                (
+                    agency_id,
+                    f"pb_{i}",
+                    f"T{i}",
+                    "1021",
+                    datetime(2026, 5, (i % 26) + 1, 8, 0, 0),
+                )
+                for i in range(30)
+            ],
+        )
+    yield pool, agency_id
+
+
+@pytest.mark.asyncio
+async def test_describe_data_stops(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "stops", "limit": 10}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    assert len(result.rows) == 5
+    assert result.columns == ["stop_id", "stop_name"]
+
+
+@pytest.mark.asyncio
+async def test_describe_data_date_range(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "kv"
+    keys = dict(result.pairs)
+    assert "first_observed" in keys
+    assert "last_observed" in keys
+    assert "distinct_days" in keys
+
+
+@pytest.mark.asyncio
+async def test_describe_data_agencies(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "agencies"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    assert result.columns == ["agency_id", "agency_name"]
+    assert any(row[0] == agency_id for row in result.rows)
+
+
+@pytest.mark.asyncio
+async def test_describe_data_sample_counts(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    assert result.columns == ["route_code", "samples"]
+    assert result.rows[0][0] == "1021"
+    assert result.rows[0][1] == 30
+
+
+@pytest.mark.asyncio
+async def test_describe_data_overview(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "overview"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "kv"
+    keys = dict(result.pairs)
+    assert keys.get("routes")
+    assert keys.get("stops")
+    assert keys.get("observations")
+
+
+@pytest.mark.asyncio
+async def test_describe_data_metrics(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "metrics"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "kv"
+    assert any(k == "avg_delay" for k, _ in result.pairs)
+
+
+@pytest.mark.asyncio
+async def test_describe_data_invalid_kind(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "nope"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "empty"
+    assert "nope" in result.summary
