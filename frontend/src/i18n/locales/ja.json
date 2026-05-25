@@ -28,6 +28,17 @@
       "平日": "平日",
       "土日祝": "土日祝"
     },
+    "hero": {
+      "label": "今週の平均遅延",
+      "baseline_label": "先週平均"
+    },
+    "service_split": {
+      "diff": "差: {{diff}}分 ({{pct}}%)"
+    },
+    "peak_hour": {
+      "max_label": "最大 {{avg}}分",
+      "avg_label": "平均"
+    },
     "empty": "この期間の観測データがありません。期間を広げてください。"
   },
   "header": {

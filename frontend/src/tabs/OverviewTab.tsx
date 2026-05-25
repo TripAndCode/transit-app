@@ -50,34 +50,26 @@ export function OverviewTab() {
         {data && hasAnyData && (
           <>
             {data.headline.samples > 0 && (
-              <>
-                <HeroSentence
-                  headline={data.headline}
-                  sparkline_points={data.sparkline_points}
-                />
-                <hr className="ov-divider" />
-              </>
+              <HeroSentence
+                headline={data.headline}
+                sparkline_points={data.sparkline_points}
+              />
             )}
             {(data.movers.worse.length > 0 || data.movers.better.length > 0) && (
-              <>
-                <div className="ov-movers">
+              <div className="ov-movers">
+                {data.movers.worse.length > 0 && (
                   <MoversList direction="worse" movers={data.movers.worse} />
+                )}
+                {data.movers.better.length > 0 && (
                   <MoversList direction="better" movers={data.movers.better} />
-                </div>
-                <hr className="ov-divider" />
-              </>
+                )}
+              </div>
             )}
             {data.concentration.top_routes.length > 0 && (
-              <>
-                <ConcentrationBar concentration={data.concentration} />
-                <hr className="ov-divider" />
-              </>
+              <ConcentrationBar concentration={data.concentration} />
             )}
             {data.peak_hour != null && (
-              <>
-                <PeakHourRibbon peak_hour={data.peak_hour} />
-                <hr className="ov-divider" />
-              </>
+              <PeakHourRibbon peak_hour={data.peak_hour} />
             )}
             {Object.keys(data.service_split).length > 0 && (
               <ServiceSplit service_split={data.service_split} />
