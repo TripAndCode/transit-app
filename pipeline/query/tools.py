@@ -588,7 +588,13 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
 
 
 async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
-    series = await compute_trend_series(agency_id, ctx, conn)
+    # When the LLM scopes to a single route, push it into ctx so the
+    # compute function narrows the trend to that route only. Without this
+    # the dispatch shim resolves the route alias but the compute call
+    # ignores it (compute_trend_series doesn't take a route arg directly).
+    route = args.get("route")
+    series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
+    series = await compute_trend_series(agency_id, series_ctx, conn)
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
