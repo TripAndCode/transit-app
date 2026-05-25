@@ -5,7 +5,7 @@ Some LLMs occasionally emit ``arguments`` as a non-object JSON value —
 rather than the documented JSON object. Until the chat normaliser was
 hardened, any of those crashed the downstream ``args.get(...)`` call in
 the tool handler and surfaced a 500. This test pins the orchestrator's
-real behaviour end-to-end by monkeypatching the Groq client so we
+real behaviour end-to-end by monkeypatching the LLM adapter so we
 control the exact ``arguments`` string the model returns.
 """
 
@@ -37,23 +37,19 @@ def _fake_message(arguments: str, tool_name: str = "capabilities"):
 
 
 class _FakeClient:
-    """Stand-in for the Groq SDK client used by ``chat._get_client``.
+    """Stand-in for :class:`pipeline.query.llm_client.LLMClient`.
 
-    We construct the message in advance so each invocation just returns a
-    canned response; the ``messages`` / ``tools`` kwargs are ignored.
+    ``chat_with_tools`` calls ``client.chat_completions(...)`` on whatever
+    ``_get_client()`` returns; this fake skips the provider ladder and
+    returns a canned message directly.
     """
 
     def __init__(self, arguments: str, tool_name: str = "capabilities"):
         self._arguments = arguments
         self._tool_name = tool_name
 
-        class _Completions:
-            def create(inner_self, **kwargs):  # noqa: N805 — sdk-like signature
-                return SimpleNamespace(
-                    choices=[SimpleNamespace(message=_fake_message(self._arguments, self._tool_name))]
-                )
-
-        self.chat = SimpleNamespace(completions=_Completions())
+    def chat_completions(self, **kwargs):  # noqa: D401 — adapter shape
+        return _fake_message(self._arguments, self._tool_name)
 
 
 def _ctx() -> RangeCtx:
