@@ -113,14 +113,38 @@ async def test_describe_data_date_range(conn_with_observations):
 
 @pytest.mark.asyncio
 async def test_describe_data_agencies(conn_with_observations):
+    """Default behavior must single-tenant: only the caller's own agency."""
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
+        # Seed a second tenant the caller shouldn't see by default.
+        await conn.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')"
+        )
         result = await describe_data(
             {"kind": "agencies"}, _ctx(), conn, agency_id, locale="ja"
         )
     assert result.kind == "table"
     assert result.columns == ["agency_id", "agency_name"]
-    assert any(row[0] == agency_id for row in result.rows)
+    # Only the caller's own row — the OTHER agency must be hidden.
+    assert len(result.rows) == 1
+    assert result.rows[0][0] == agency_id
+
+
+@pytest.mark.asyncio
+async def test_describe_data_agencies_cross(conn_with_observations):
+    """When cross_agency=True, every agency is returned (admin path)."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')"
+        )
+        result = await describe_data(
+            {"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    names = {row[1] for row in result.rows}
+    assert "OTHER" in names
+    assert len(result.rows) >= 2
 
 
 @pytest.mark.asyncio
