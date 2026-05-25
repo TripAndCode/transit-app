@@ -320,6 +320,11 @@ TOOLS: list[dict] = [
 ]
 
 
+from pipeline.query.meta_tools import META_HANDLERS, META_TOOLS  # noqa: E402
+
+TOOLS = TOOLS + META_TOOLS
+
+
 SYSTEM_PROMPT = """\
 あなたは青森市バスの遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
 
@@ -338,6 +343,9 @@ SYSTEM_PROMPT = """\
    - 「先月の定時率」→ on_time_rate(days_back=30) (シンプルに30日と解釈)
    - 「過去3日の遅延」→ top_n(metric='avg_delay', n=10, days_back=3)
 5. 曜日/時間帯フィルタはツール引数で上書きする必要はない(UIで適用済み)。
+7. **ツールに合わない質問** → まず `describe_data`(データ範囲・路線・停留所など) または
+   `capabilities`(答えられる質問の例) を呼ぶ。自然文での拒否は本当にデータ範囲外
+   (天気・運賃・事故など) の場合のみ。
 
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 系統の遅延統計
@@ -640,6 +648,8 @@ _HANDLERS = {
     "route_meta": _tool_route_meta,
 }
 
+_HANDLERS = {**_HANDLERS, **META_HANDLERS}
+
 
 async def dispatch(
     tool_name: str,
@@ -660,6 +670,24 @@ async def dispatch(
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
+
+    from pipeline.query.schema_linker import resolve_route
+
+    if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
+        raw_route = arguments.get("route")
+        if raw_route:
+            resolution = await resolve_route(str(raw_route), conn, agency_id)
+            if resolution.route_code is not None:
+                arguments = {**arguments, "route": resolution.route_code}
+            elif resolution.candidates:
+                cand_txt = " / ".join(
+                    f"系統{code}({name})" for code, name in resolution.candidates[:5]
+                )
+                return ToolResult(
+                    kind="empty",
+                    summary=f"'{raw_route}' は見つかりません。もしかして: {cand_txt}",
+                )
+
     effective_ctx = _apply_date_overrides(ctx, arguments)
     return await handler(arguments, effective_ctx, conn, agency_id, locale)
 
