@@ -7,11 +7,25 @@ import { InlineSparkline } from "./InlineSparkline";
 type Props = {
   direction: "worse" | "better";
   movers: OverviewMover[];
+  /** Maximum rows to render. Card variant: 3 (default). Modal: 10. */
+  limit?: number;
+  /** "card" (default) styles the wrapper as a clickable card; "modal"
+   *  drops the .ov-card chrome so the modal body owns layout. */
+  variant?: "card" | "modal";
+  /** When set, the card becomes clickable and opens the modal. */
+  onClick?: () => void;
 };
 
-export function MoversList({ direction, movers }: Props) {
+export function MoversList({
+  direction,
+  movers,
+  limit = 3,
+  variant = "card",
+  onClick,
+}: Props) {
   const { t } = useTranslation();
   if (movers.length === 0) return null;
+  const visible = movers.slice(0, limit);
   const sectionKey =
     direction === "worse" ? "overview.section_movers_worse" : "overview.section_movers_better";
   const streakKey =
@@ -27,11 +41,32 @@ export function MoversList({ direction, movers }: Props) {
   const streakDotClass = direction === "worse" ? "" : "good";
   const arrow = direction === "worse" ? "▲" : "▼";
 
+  const clickable = !!onClick;
+  const wrapperClass =
+    variant === "modal"
+      ? "ov-mover-list-modal"
+      : `ov-card${clickable ? " ov-clickable" : ""}`;
+  const interactiveProps = clickable
+    ? {
+        tabIndex: 0,
+        role: "button",
+        onClick,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick?.();
+          }
+        },
+      }
+    : {};
+
   return (
-    <div className="ov-card">
-      <p className="ov-card-eyebrow">{t(sectionKey)}</p>
+    <div className={wrapperClass} {...interactiveProps}>
+      {variant !== "modal" && (
+        <p className="ov-card-eyebrow">{t(sectionKey)}</p>
+      )}
       <div className="ov-mover-list">
-        {movers.map((m, idx) => {
+        {visible.map((m, idx) => {
           const pctText = `${Math.abs(m.delta_pct).toFixed(0)}%`;
           const minText = t(perfKey, {
             val: Math.abs(m.delta_min).toFixed(1),

@@ -62,7 +62,11 @@ class ConcentrationTopRoute(BaseModel):
 
 
 class Concentration(BaseModel):
-    """Top-5 routes plus aggregate "rest" share and rest route count."""
+    """Top-20 routes plus aggregate "rest" share and rest route count.
+
+    Card variant on the frontend uses the first 5; modal variant draws
+    a Pareto bar list across all 20 plus a Lorenz-curve overlay.
+    """
 
     top_routes: list[ConcentrationTopRoute]
     rest_share_pct: float
@@ -77,14 +81,30 @@ class PeakHour(BaseModel):
     peak_avg_min: float
 
 
+class ServiceSplitDay(BaseModel):
+    """One day's weekday vs weekend avg_min split."""
+
+    date: str  # ISO date
+    weekday: float | None
+    weekend: float | None
+
+
 class OverviewSummary(BaseModel):
-    """Magazine payload — 5 modules + sparkline + range echo."""
+    """Magazine payload — 5 modules + sparkline + range echo.
+
+    ``peak_hour_weekday`` / ``peak_hour_weekend`` and
+    ``service_split_daily`` are additive fields used by the modal
+    drill-downs; existing card consumers ignore them.
+    """
 
     headline: Headline
     movers: Movers
     concentration: Concentration
     peak_hour: PeakHour | None
+    peak_hour_weekday: PeakHour | None = None
+    peak_hour_weekend: PeakHour | None = None
     service_split: dict[str, float]
+    service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
 
 

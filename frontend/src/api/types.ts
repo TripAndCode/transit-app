@@ -179,11 +179,23 @@ export type OverviewPeakHour = {
   peak_avg_min: number;
 };
 
+export type OverviewServiceSplitDay = {
+  date: string;
+  weekday: number | null;
+  weekend: number | null;
+};
+
 export type OverviewSummary = {
   headline: OverviewHeadline;
   movers: OverviewMovers;
   concentration: OverviewConcentration;
   peak_hour: OverviewPeakHour | null;
+  /** Weekday-only 24-hour profile, used by the peak-hour modal split. */
+  peak_hour_weekday?: OverviewPeakHour | null;
+  /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
+  peak_hour_weekend?: OverviewPeakHour | null;
   service_split: Record<string, number>;
+  /** Per-date weekday/weekend split, used by the service-split modal. */
+  service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
 };
