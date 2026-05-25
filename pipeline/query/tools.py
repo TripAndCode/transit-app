@@ -326,7 +326,12 @@ TOOLS: list[dict] = [
 
 from pipeline.query.meta_tools import META_HANDLERS, META_TOOLS  # noqa: E402
 
-TOOLS = TOOLS + META_TOOLS
+# Mutate the existing list/dict in place rather than rebinding the names.
+# Any module that imported ``TOOLS`` or ``_HANDLERS`` before meta-tools
+# wired in (e.g. ``from pipeline.query.tools import TOOLS`` cached at
+# import time) keeps seeing the same object — and therefore the merged
+# entries — instead of holding a stale reference to the pre-merge list.
+TOOLS.extend(META_TOOLS)
 
 
 SYSTEM_PROMPT = """\
@@ -673,7 +678,10 @@ _HANDLERS = {
     "route_meta": _tool_route_meta,
 }
 
-_HANDLERS = {**_HANDLERS, **META_HANDLERS}
+# Same identity-preserving pattern as TOOLS above: mutate the existing
+# dict so callers holding a pre-merge reference still see the meta
+# handlers without re-importing.
+_HANDLERS.update(META_HANDLERS)
 
 
 async def dispatch(
