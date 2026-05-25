@@ -39,7 +39,13 @@ export function MoversList({ direction, movers }: Props) {
           {m.sparkline_points.length >= 2 && (
             <>
               {" "}
-              <InlineSparkline points={m.sparkline_points} width={60} height={16} accent={accent} />
+              <InlineSparkline
+                points={m.sparkline_points}
+                width={60}
+                height={16}
+                accent={accent}
+                showLabels={false}
+              />
             </>
           )}
         </p>

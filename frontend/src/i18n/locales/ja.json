@@ -20,6 +20,7 @@
     "streak_better": "{{count}}週連続改善",
     "section_concentration": "遅延の集中度",
     "concentration_legend": "上位{{count}}系統が遅延全体の {{pct}}% を占める。",
+    "concentration_rest": "残り {{count}} 系統で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
     "peak_hour_callout": "ピーク時間帯は {{hour}}-{{next_hour}} 時 (平均 {{avg}} 分)。",
     "section_service_split": "サービス日別",

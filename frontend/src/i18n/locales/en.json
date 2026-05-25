@@ -20,6 +20,7 @@
     "streak_better": "better {{count}} weeks running",
     "section_concentration": "Delay concentration",
     "concentration_legend": "Top {{count}} routes carry {{pct}}% of the delay.",
+    "concentration_rest": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
     "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
     "section_service_split": "By service day",
