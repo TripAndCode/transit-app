@@ -396,18 +396,6 @@ LOCALE_LANGUAGE_NAME = {"ja": "日本語", "en": "English"}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _route_name_lookup(route: str | None, locale: str = "ja") -> str:
-    """Human-facing label for a route_code in summary strings."""
-    if route:
-        return _summary("route_prefix", lang=locale, route=route)
-    return "（系統指定なし）" if locale == "ja" else "(no route specified)"
-
-
-# ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
 

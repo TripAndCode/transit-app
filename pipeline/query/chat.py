@@ -33,7 +33,7 @@ import json
 import logging
 
 from api.range import RangeCtx
-from pipeline.query.llm_client import get_client, reset_client_for_tests
+from pipeline.query.llm_client import get_client
 from pipeline.query.tools import (
     LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
@@ -86,11 +86,6 @@ def _get_client():
     still works while production code goes through ``llm_client``.
     """
     return get_client()
-
-
-def _reset_client_for_tests() -> None:
-    """Reset the LLM singleton — used in tests via monkeypatch."""
-    reset_client_for_tests()
 
 
 async def chat_with_tools(

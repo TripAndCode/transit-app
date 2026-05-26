@@ -44,7 +44,6 @@ async def test_live_delays_empty(map_client):
     resp = await client.get(f"/api/{agency_id}/delays/live")
     assert resp.status_code == 200
     payload = resp.json()
-    # v2 shape: dict with latest_captured_at + rows[]
     assert payload == {"latest_captured_at": None, "rows": []}
 
 
@@ -89,7 +88,6 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
     app, agency_id = map_app
     pool = app.state.pool
     async with pool.acquire() as conn:
-        # Static trips: two trips on route_id "R1", both pointing at shape "S1"
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
             "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1')",
@@ -116,7 +114,6 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
             "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
             agency_id,
         )
-        # The matching shape geometry — small 2-point line near the stops
         await conn.execute(
             "INSERT INTO static_shapes (agency_id, shape_id, geom) "
             "VALUES ($1, 'S1', "
