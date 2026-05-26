@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies verify-secrets
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies build-rag-index verify-secrets
 
 # Default target — first-run setup.
 all: bootstrap
@@ -137,6 +137,10 @@ analyze:
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
+
+# Idempotent: re-runnable, upserts on content_hash uniqueness.
+build-rag-index:
+	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
 
 .PHONY: frontend-install frontend-dev frontend-build
 
