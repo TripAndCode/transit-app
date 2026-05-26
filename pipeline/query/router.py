@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -239,8 +239,6 @@ def _get_embedder():
 
 def _enrich(raw, golden):
     """Join raw :class:`Match` rows to their golden_set tool/args."""
-    from dataclasses import replace
-
     enriched = []
     for m in raw:
         if m.chunk_id in golden:
