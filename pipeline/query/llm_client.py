@@ -27,19 +27,19 @@ _log = logging.getLogger(__name__)
 # env-var name that holds the provider's API key.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "cerebras": {
-        "key_env":  "CEREBRAS_API_KEY",
+        "key_env": "CEREBRAS_API_KEY",
         "base_url": "https://api.cerebras.ai/v1",
-        "model":    "llama-3.3-70b",
+        "model": "llama-3.3-70b",
     },
     "groq": {
-        "key_env":  "GROQ_API_KEY",
+        "key_env": "GROQ_API_KEY",
         "base_url": "https://api.groq.com/openai/v1",
-        "model":    "llama-3.3-70b-versatile",
+        "model": "llama-3.3-70b-versatile",
     },
     "ollama": {
-        "key_env":  "OLLAMA_API_KEY",
+        "key_env": "OLLAMA_API_KEY",
         "base_url": "http://localhost:11434/v1",
-        "model":    "qwen2.5:7b-instruct",
+        "model": "qwen2.5:7b-instruct",
     },
 }
 

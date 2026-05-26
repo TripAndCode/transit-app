@@ -21,7 +21,6 @@ from typing import Any
 from api.range import RangeCtx
 from pipeline.query.tools import ToolResult
 
-
 VALID_KINDS = (
     "routes",
     "stops",
@@ -77,9 +76,7 @@ async def describe_data(
             agency_id,
             limit,
         )
-        total = await conn.fetchval(
-            "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id
-        )
+        total = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         return ToolResult(
             kind="table",
             summary=_summary(
@@ -98,17 +95,17 @@ async def describe_data(
                 "SELECT stop_id, stop_name FROM static_stops "
                 "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
                 "ORDER BY stop_id LIMIT $3",
-                agency_id, substring, limit,
+                agency_id,
+                substring,
+                limit,
             )
         else:
             rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops "
-                "WHERE agency_id = $1 ORDER BY stop_id LIMIT $2",
-                agency_id, limit,
+                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_id LIMIT $2",
+                agency_id,
+                limit,
             )
-        total = await conn.fetchval(
-            "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id
-        )
+        total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         return ToolResult(
             kind="table",
             summary=_summary(
@@ -157,13 +154,10 @@ async def describe_data(
         # "どんなエージェンシーがある?" — that's a leak waiting to happen.
         cross_agency = bool(args.get("cross_agency", False))
         if cross_agency:
-            rows = await conn.fetch(
-                "SELECT agency_id, agency_name FROM agencies ORDER BY agency_id"
-            )
+            rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
         else:
             rows = await conn.fetch(
-                "SELECT agency_id, agency_name FROM agencies "
-                "WHERE agency_id = $1 ORDER BY agency_id",
+                "SELECT agency_id, agency_name FROM agencies WHERE agency_id = $1 ORDER BY agency_id",
                 agency_id,
             )
         return ToolResult(
@@ -186,7 +180,10 @@ async def describe_data(
             "GROUP BY route_code "
             "ORDER BY samples DESC "
             "LIMIT $4",
-            agency_id, ctx.from_date, ctx.to_date, limit,
+            agency_id,
+            ctx.from_date,
+            ctx.to_date,
+            limit,
         )
         return ToolResult(
             kind="table",
@@ -200,12 +197,8 @@ async def describe_data(
         )
 
     if kind == "overview":
-        route_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id
-        )
-        stop_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id
-        )
+        route_count = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
+        stop_count = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         obs_row = await conn.fetchrow(
             "SELECT COUNT(*) AS n, MIN(captured_at) AS first_obs, MAX(captured_at) AS last_obs "
             "FROM updates WHERE agency_id = $1",
@@ -233,27 +226,25 @@ async def describe_data(
     if kind == "metrics":
         if locale == "en":
             metric_list = [
-                ("avg_delay",   "average delay (min)"),
-                ("p50_min",     "median delay (min)"),
-                ("p90_min",     "90th percentile delay (min)"),
+                ("avg_delay", "average delay (min)"),
+                ("p50_min", "median delay (min)"),
+                ("p90_min", "90th percentile delay (min)"),
                 ("on_time_pct", "on-time rate (%) — default threshold 60 s"),
-                ("late5_pct",   "share of >5-minute delays (%)"),
-                ("samples",     "observation sample count"),
+                ("late5_pct", "share of >5-minute delays (%)"),
+                ("samples", "observation sample count"),
             ]
         else:
             metric_list = [
-                ("avg_delay",   "平均遅延 (分)"),
-                ("p50_min",     "中央値遅延 (分)"),
-                ("p90_min",     "90 パーセンタイル遅延 (分)"),
+                ("avg_delay", "平均遅延 (分)"),
+                ("p50_min", "中央値遅延 (分)"),
+                ("p90_min", "90 パーセンタイル遅延 (分)"),
                 ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
-                ("late5_pct",   "5分超過率 (%)"),
-                ("samples",     "観測サンプル数"),
+                ("late5_pct", "5分超過率 (%)"),
+                ("samples", "観測サンプル数"),
             ]
         return ToolResult(
             kind="kv",
-            summary=_summary(
-                "計算可能な指標の一覧", "available metrics", locale
-            ),
+            summary=_summary("計算可能な指標の一覧", "available metrics", locale),
             pairs=metric_list,
         )
 
@@ -262,23 +253,23 @@ async def describe_data(
 
 
 _CAPABILITY_EXAMPLES_JP = {
-    "single_route":  "系統22171の遅延 / 系統16071のp90 / A1の運行情報",
-    "ranking":       "遅延ワースト10 / 定時率TOP5 / 5分超過の多い系統",
-    "comparison":    "平日と土日祝の比較 / 22171の種別比較 / 系統間の差",
-    "trend":         "直近2週間の傾向 / 日次トレンド / 推移を見せて",
-    "on_time":       "5分以内の定時率 / 定時率ランキング / しきい値別の率",
-    "stop_level":    "(現状未対応:Phase 3) 停留所単位の集計",
-    "meta":          "どんな路線がある？ / いつからのデータ？ / サンプル数の多い系統",
+    "single_route": "系統22171の遅延 / 系統16071のp90 / A1の運行情報",
+    "ranking": "遅延ワースト10 / 定時率TOP5 / 5分超過の多い系統",
+    "comparison": "平日と土日祝の比較 / 22171の種別比較 / 系統間の差",
+    "trend": "直近2週間の傾向 / 日次トレンド / 推移を見せて",
+    "on_time": "5分以内の定時率 / 定時率ランキング / しきい値別の率",
+    "stop_level": "(現状未対応:Phase 3) 停留所単位の集計",
+    "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い系統",
 }
 
 _CAPABILITY_EXAMPLES_EN = {
-    "single_route":  "route 22171 delay / route 16071 p90 / route info for A1",
-    "ranking":       "worst-10 delays / on-time top-5 / most >5min delays",
-    "comparison":    "weekday vs weekend / service-type split for 22171 / route deltas",
-    "trend":         "last-14d trend / daily series / show the trend",
-    "on_time":       "on-time rate within 5min / on-time ranking / by threshold",
-    "stop_level":    "(not yet supported: Phase 3) per-stop aggregation",
-    "meta":          "what routes exist? / since when do we have data? / top routes by samples",
+    "single_route": "route 22171 delay / route 16071 p90 / route info for A1",
+    "ranking": "worst-10 delays / on-time top-5 / most >5min delays",
+    "comparison": "weekday vs weekend / service-type split for 22171 / route deltas",
+    "trend": "last-14d trend / daily series / show the trend",
+    "on_time": "on-time rate within 5min / on-time ranking / by threshold",
+    "stop_level": "(not yet supported: Phase 3) per-stop aggregation",
+    "meta": "what routes exist? / since when do we have data? / top routes by samples",
 }
 
 
@@ -359,8 +350,13 @@ META_TOOLS: list[dict] = [
                     "category": {
                         "type": "string",
                         "enum": [
-                            "single_route", "ranking", "comparison", "trend",
-                            "on_time", "stop_level", "meta",
+                            "single_route",
+                            "ranking",
+                            "comparison",
+                            "trend",
+                            "on_time",
+                            "stop_level",
+                            "meta",
                         ],
                     },
                 },

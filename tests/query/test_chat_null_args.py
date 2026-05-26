@@ -20,7 +20,6 @@ from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
 
-
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
@@ -63,13 +62,11 @@ async def conn_with_minimal_seed(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') "
-            "RETURNING agency_id"
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
         )
         agency_id = row["agency_id"]
         await conn.execute(
-            "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
-            "VALUES ($1, '国道線(1021)', 'A1')",
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, '国道線(1021)', 'A1')",
             agency_id,
         )
     yield pool, agency_id
@@ -78,24 +75,22 @@ async def conn_with_minimal_seed(apply_schema):
     await pool.close()
 
 
-@pytest.mark.parametrize("bad_args", ['null', '"foo"', '[]', '42'])
+@pytest.mark.parametrize("bad_args", ["null", '"foo"', "[]", "42"])
 @pytest.mark.asyncio
 async def test_chat_with_tools_survives_non_dict_arguments(
-    bad_args, conn_with_minimal_seed, monkeypatch,
+    bad_args,
+    conn_with_minimal_seed,
+    monkeypatch,
 ):
     """The orchestrator must coerce any non-dict ``arguments`` JSON to ``{}``
     and still dispatch the tool — no AttributeError, no 500, no crash."""
     pool, agency_id = conn_with_minimal_seed
     # capabilities has no required args, so an empty dict is a valid
     # invocation and the dispatch path returns kind='kv' (not an error).
-    monkeypatch.setattr(
-        chat_module, "_get_client", lambda: _FakeClient(bad_args, "capabilities")
-    )
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(bad_args, "capabilities"))
 
     async with pool.acquire() as conn:
-        result = await chat_with_tools(
-            "なんでもいい", _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await chat_with_tools("なんでもいい", _ctx(), conn, agency_id, locale="ja")
 
     # No exception, structured response, and the recorded args are a dict.
     assert result["tool_call"] is not None
