@@ -214,6 +214,23 @@ async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded
 
 
 @pytest.mark.asyncio
+async def test_route_or_examples_single_path(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    from pipeline.query.router import route_or_examples
+
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        # rule hit: decision, no examples
+        dec, ex = await route_or_examples("どんな路線がある？", conn, agency_id)
+        assert dec is not None and dec.stage == "rules" and ex == []
+        # embedding hit
+        dec, ex = await route_or_examples("中央大橋線の遅延", conn, agency_id)
+        assert dec is not None and dec.stage == "embedding"
+        # miss → examples
+        dec, ex = await route_or_examples("全然関係ない質問", conn, agency_id)
+        assert dec is None and isinstance(ex, list)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
     pool, agency_id = conn_with_embedded_chunks
 

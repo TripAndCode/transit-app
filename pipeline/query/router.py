@@ -218,56 +218,89 @@ def _get_embedder():
     return get_embedder()
 
 
-async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:
-    """Stage 1 + Stage 2 dispatch. Returns ``None`` if no direct dispatch."""
+def _enrich(raw, golden):
+    """Join raw :class:`Match` rows to their golden_set tool/args."""
+    from dataclasses import replace
+
+    enriched = []
+    for m in raw:
+        if m.chunk_id in golden:
+            tool, args = golden[m.chunk_id]
+            enriched.append(replace(m, tool=tool, args=dict(args)))
+    return enriched
+
+
+async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
+    """Single embed+search. Returns (decision_or_None, examples_list).
+
+    If the top match is within threshold+margin → (RouterDecision, []).
+    Otherwise → (None, top-k enriched examples for the LLM).
+
+    Rules are checked first: a rule hit returns ``(decision, [])`` with no
+    embed at all. The router is additive — any failure (empty question,
+    embedder down, nearest error, empty index) returns ``(None, [])``.
+    """
     if not question or not question.strip():
-        return None
+        return None, []
 
     decision = _match_rules(question)
     if decision is not None:
-        return decision
+        return decision, []
 
     embedder = _get_embedder()
     if not getattr(embedder, "available", False):
-        return None
+        return None, []
 
     try:
         # encode() is CPU-bound — keep it off the shared event loop.
         qvec = await asyncio.to_thread(embedder.embed, question, mode="query")
     except Exception as exc:
         _log.warning("Stage 2 embed failed: %s — falling through to LLM", exc.__class__.__name__)
-        return None
+        return None, []
 
     try:
         from pipeline.query.rag_index import nearest
 
-        matches = await nearest(conn, agency_id, qvec, k=2)
+        # Fetch enough rows to both decide dispatch (needs top-2 for the
+        # margin guard) and serve the few-shot examples on fall-through.
+        matches = await nearest(conn, agency_id, qvec, k=max(2, k))
     except Exception as exc:
         _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
-        return None
+        return None, []
 
     if not matches:
-        return None
-    top = matches[0]
-    if top.distance > _EMBED_DISPATCH_THRESHOLD:
-        return None
-    # Margin guard: an ambiguous top hit (runner-up nearly as close) is
-    # not safe to dispatch on — fall through to the LLM instead.
-    if len(matches) > 1 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
-        return None
+        return None, []
 
     golden = _load_golden()
-    if top.chunk_id not in golden:
-        _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
-        return None
-    tool, args = golden[top.chunk_id]
-    return RouterDecision(
-        stage="embedding",
-        tool=tool,
-        args=dict(args),
-        score=1.0 - top.distance,
-        matched_pattern=top.chunk_id,
+    top = matches[0]
+    dispatch_ok = top.distance <= _EMBED_DISPATCH_THRESHOLD and (
+        len(matches) < 2 or (matches[1].distance - top.distance) >= _EMBED_MARGIN
     )
+    if dispatch_ok:
+        if top.chunk_id not in golden:
+            _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
+        else:
+            tool, args = golden[top.chunk_id]
+            decision = RouterDecision(
+                stage="embedding",
+                tool=tool,
+                args=dict(args),
+                score=1.0 - top.distance,
+                matched_pattern=top.chunk_id,
+            )
+            return decision, []
+
+    # Fall-through: serve top-k enriched examples for the LLM few-shot.
+    return None, _enrich(matches[:k], golden)
+
+
+async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:
+    """Stage 1 + Stage 2 dispatch. Returns ``None`` if no direct dispatch.
+
+    Thin wrapper over :func:`route_or_examples` for backward-compat.
+    """
+    decision, _ = await route_or_examples(question, conn, agency_id)
+    return decision
 
 
 async def retrieve_examples(question: str, conn, agency_id: int, k: int = _RAG_TOP_K):
@@ -276,33 +309,9 @@ async def retrieve_examples(question: str, conn, agency_id: int, k: int = _RAG_T
     Used by the API layer to inject few-shot context into the LLM prompt
     when ``route_question`` returns ``None``. Tolerates an unavailable
     embedder or empty index by returning ``[]`` — caller must handle.
+
+    Thin wrapper over :func:`route_or_examples`; returns ``[]`` whenever a
+    direct dispatch was possible (rule hit or embedding hit).
     """
-    if not question or not question.strip():
-        return []
-    embedder = _get_embedder()
-    if not getattr(embedder, "available", False):
-        return []
-    try:
-        # encode() is CPU-bound — keep it off the shared event loop.
-        qvec = await asyncio.to_thread(embedder.embed, question, mode="query")
-    except Exception as exc:
-        _log.warning("retrieve_examples embed failed: %s", exc.__class__.__name__)
-        return []
-
-    from pipeline.query.rag_index import nearest
-
-    try:
-        raw = await nearest(conn, agency_id, qvec, k=k)
-    except Exception as exc:
-        _log.warning("retrieve_examples nearest failed: %s", exc.__class__.__name__)
-        return []
-
-    golden = _load_golden()
-    enriched = []
-    for m in raw:
-        if m.chunk_id in golden:
-            tool, args = golden[m.chunk_id]
-            from dataclasses import replace
-
-            enriched.append(replace(m, tool=tool, args=dict(args)))
-    return enriched
+    _, examples = await route_or_examples(question, conn, agency_id, k=k)
+    return examples

@@ -21,7 +21,7 @@ from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
 from pipeline.query.chat import chat_with_tools
-from pipeline.query.router import retrieve_examples, route_question
+from pipeline.query.router import route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
@@ -111,7 +111,11 @@ async def ask(
         "routes": list(ctx.routes),
     }
 
-    decision = await route_question(body.question, conn, agency_id) if router_enabled else None
+    # Single embed+search: dispatch decision and few-shot examples share
+    # one embedding so the fall-through path doesn't re-embed the question.
+    decision, examples = (
+        await route_or_examples(body.question, conn, agency_id, k=3) if router_enabled else (None, [])
+    )
     if decision is not None:
         result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
         return AskResponse(
@@ -129,7 +133,6 @@ async def ask(
             router_stage=decision.stage,
         )
 
-    examples = await retrieve_examples(body.question, conn, agency_id, k=3) if router_enabled else []
     payload = await chat_with_tools(
         body.question,
         ctx,
