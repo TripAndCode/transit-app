@@ -24,7 +24,6 @@ from pipeline.ingest import _ts, parse_pb  # noqa: E402  (sys.path injection abo
 
 
 def main() -> None:
-    """Parse aomori_sample.pb and write golden JSON to tests/fixtures."""
     parser = argparse.ArgumentParser(description="Capture Aomori golden fixture from aomori_sample.pb")
     parser.add_argument(
         "--date",
