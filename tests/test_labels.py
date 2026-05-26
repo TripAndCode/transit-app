@@ -1,9 +1,4 @@
-"""Display helpers shared across the query layer.
-
-Mirrors the coverage previously hosted in tests/test_formatter.py for
-_dow_label and _time_label, against the new pipeline/query/labels.py
-home.
-"""
+"""Display helpers shared across the query layer: dow_label and time_label."""
 
 from datetime import time
 
@@ -33,7 +28,6 @@ def test_dow_label_unknown_int_falls_back_to_str():
 
 
 def test_time_label_time_object_renders_hhmm():
-    """Post-migration 0011: TIME columns return datetime.time."""
     assert time_label(time(8, 0)) == "08:00"
     assert time_label(time(17, 35, 12)) == "17:35"
 

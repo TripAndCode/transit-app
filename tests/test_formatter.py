@@ -1,7 +1,6 @@
 """Tests for pipeline/query/formatter.py.
 
-After the post-/query-retire trim, formatter.py renders only the 5
-query_types that api/routers/reports.py dispatches:
+Covers the 5 query_types api/routers/reports.py dispatches:
 ranking / on_time / worst_5min / compare_ranking / dow_ranking.
 
 Label-helper coverage (dow_label / time_label) lives in
