@@ -39,20 +39,24 @@ jobs:
         run: poetry install
 
       # postgis/postgis:14-3.2 doesn't ship pgvector; the schema's
-      # `CREATE EXTENSION vector` then errors with UndefinedFile. Install
-      # the apt package into the running service container before migrate.
-      #
-      # `apt-mark hold postgresql-14` is required: apt would otherwise
-      # upgrade postgresql-14 to a newer minor as a transitive dep of
-      # postgresql-14-pgvector, overwriting pg_trgm.so with a build
-      # against newer libpostgres (`pg_mblen_unbounded` from PG 16) while
-      # the running server stays on the original binary. The mismatch
-      # surfaces as `UndefinedFile` when CREATE EXTENSION pg_trgm fires
-      # in migration 0012.
-      - name: Install pgvector in Postgres service
+      # `CREATE EXTENSION vector` then errors with UndefinedFile. Build
+      # pgvector from source pinned to a tag known to work with PG 14
+      # contrib (avoids the apt dep cascade where current pgvector
+      # `Breaks: postgresql-14-jit-llvm (< 16)` would upgrade core PG
+      # packages and ABI-mismatch pg_trgm.so → `pg_mblen_unbounded`
+      # symbol errors on `CREATE EXTENSION pg_trgm` in migration 0012).
+      - name: Build pgvector from source in Postgres service
         run: |
           CID=$(docker ps -q --filter ancestor=postgis/postgis:14-3.2 | head -n1)
-          docker exec "$CID" sh -c "apt-get update && apt-mark hold postgresql-14 postgresql-client-14 && apt-get install -y --no-install-recommends postgresql-14-pgvector"
+          docker exec "$CID" sh -c '
+            set -e
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential git ca-certificates postgresql-server-dev-14
+            git clone --depth 1 --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
+            cd /tmp/pgvector && make OPTFLAGS= && make install
+            rm -rf /tmp/pgvector
+          '
 
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
