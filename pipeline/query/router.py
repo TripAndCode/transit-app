@@ -123,6 +123,21 @@ _RULES: list[Rule] = [
 ]
 
 
+def _validate_rules() -> None:
+    from pipeline.query.tools import _HANDLERS
+
+    known = set(_HANDLERS.keys())
+    bad = [r.name for r in _RULES if r.tool not in known]
+    if bad:
+        raise RuntimeError(
+            f"Phase 2 router has rules pointing at unknown tools: {bad}. "
+            f"Known tools: {sorted(known)}"
+        )
+
+
+_validate_rules()
+
+
 def _match_rules(question: str) -> RouterDecision | None:
     """Return the first matching rule's decision, or ``None``."""
     if not question:

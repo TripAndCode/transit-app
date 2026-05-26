@@ -43,3 +43,12 @@ def test_rule_decision_records_pattern_name():
     decision = _match_rules("どんな路線がある？")
     assert decision is not None
     assert decision.matched_pattern  # non-empty rule name
+
+
+def test_all_rules_map_to_known_tools():
+    """Every rule's `tool` must exist in the dispatcher's _HANDLERS."""
+    from pipeline.query.router import _RULES
+    from pipeline.query.tools import _HANDLERS
+    known = set(_HANDLERS.keys())
+    bad = [r.name for r in _RULES if r.tool not in known]
+    assert not bad, f"rules with unknown tool name: {bad}"
