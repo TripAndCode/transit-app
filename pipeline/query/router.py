@@ -91,7 +91,9 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="meta-metrics",
-        pattern=re.compile(r"(指標|メトリクス|計算できる)"),
+        # Require enumeration intent so definition questions
+        # ("〜という指標の意味") don't over-fire into describe_data.
+        pattern=re.compile(r"(指標|メトリクス).*?(一覧|何|計算でき)|計算できる.*?(指標|メトリクス)"),
         tool="describe_data",
         args={"kind": "metrics"},
     ),
@@ -126,7 +128,18 @@ _RULES: list[Rule] = [
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
         name="capabilities-help",
-        pattern=re.compile(r"(何ができ|使い方|どう使う|使える機能)"),
+        # Anchor at start or after a delimiter so "何ができ" doesn't fire
+        # mid-sentence inside an unrelated question.
+        pattern=re.compile(r"(^|[、。\s])(何ができ|使い方|どう使う|使える機能)"),
+        tool="capabilities",
+        args={},
+    ),
+    # ---- deterministic out-of-scope guard (lowest priority) ----
+    # Clearly out-of-scope topics route to capabilities so refusals stay
+    # deterministic even when the LLM is unavailable.
+    Rule(
+        name="oos-guard",
+        pattern=re.compile(r"(天気|気温|降水|運賃|料金|定期券|事故|遅延証明|駐車場|忘れ物|時刻表のPDF)"),
         tool="capabilities",
         args={},
     ),

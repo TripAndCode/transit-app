@@ -112,10 +112,11 @@ async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embe
 
 @pytest.mark.asyncio
 async def test_route_question_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
-    """Distant query → distance > threshold → returns None."""
+    """Distant query (no rule hit) → distance > threshold → returns None."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        decision = await route_question("天気はどう？", conn, agency_id)
+        # Avoid OOS-guard keywords (e.g. 天気) so this exercises Stage 2 only.
+        decision = await route_question("なんとなく気になる", conn, agency_id)
     assert decision is None
 
 
@@ -162,6 +163,19 @@ def test_rule_meta_dispatch(question, expected_tool, expected_kind):
 def test_rule_no_match(question):
     """Questions outside the rule set return None — fall through to Stage 2."""
     assert _match_rules(question) is None
+
+
+def test_oos_guard_routes_to_capabilities():
+    for q in ["今日の天気は？", "運賃はいくら？", "事故情報を教えて"]:
+        d = _match_rules(q)
+        assert d is not None and d.tool == "capabilities", q
+
+
+def test_metrics_rule_does_not_overfire_on_definition():
+    # A definition question should NOT hit meta-metrics
+    d = _match_rules("定時率という指標の意味を教えて")
+    # acceptable: either None (falls through) or capabilities — but NOT describe_data/metrics
+    assert d is None or d.tool != "describe_data"
 
 
 def test_rule_5min_not_shadowed_by_worst():
@@ -225,7 +239,8 @@ async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded
     """Even when route_question returns None, retrieve_examples should give top-3."""
     pool, agency_id = conn_with_embedded_chunks
     async with pool.acquire() as conn:
-        matches = await retrieve_examples("天気はどう？", conn, agency_id, k=3)
+        # Non-OOS, non-rule phrase so we exercise the Stage 2 fall-through.
+        matches = await retrieve_examples("なんとなく気になる", conn, agency_id, k=3)
     # Two chunks in fixture, so we get 2 (capped by available data).
     assert len(matches) == 2
     # Tool/args populated from the golden_set dict.
