@@ -249,3 +249,40 @@ async def route_question(question: str, conn, agency_id: int) -> RouterDecision 
         score=1.0 - top.distance,
         matched_pattern=top.chunk_id,
     )
+
+
+async def retrieve_examples(question: str, conn, agency_id: int, k: int = _RAG_TOP_K):
+    """Top-``k`` golden-set matches joined to their tool/args.
+
+    Used by the API layer to inject few-shot context into the LLM prompt
+    when ``route_question`` returns ``None``. Tolerates an unavailable
+    embedder or empty index by returning ``[]`` — caller must handle.
+    """
+    if not question or not question.strip():
+        return []
+    embedder = _get_embedder()
+    if not getattr(embedder, "available", False):
+        return []
+    try:
+        qvec = embedder.embed(question, mode="query")
+    except Exception as exc:
+        _log.warning("retrieve_examples embed failed: %s", exc.__class__.__name__)
+        return []
+
+    from pipeline.query.rag_index import nearest
+
+    try:
+        raw = await nearest(conn, agency_id, qvec, k=k)
+    except Exception as exc:
+        _log.warning("retrieve_examples nearest failed: %s", exc.__class__.__name__)
+        return []
+
+    golden = _load_golden()
+    enriched = []
+    for m in raw:
+        if m.chunk_id in golden:
+            tool, args = golden[m.chunk_id]
+            from dataclasses import replace
+
+            enriched.append(replace(m, tool=tool, args=dict(args)))
+    return enriched

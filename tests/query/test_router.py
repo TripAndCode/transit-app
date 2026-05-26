@@ -159,3 +159,38 @@ def test_all_rules_map_to_known_tools():
     known = set(_HANDLERS.keys())
     bad = [r.name for r in _RULES if r.tool not in known]
     assert not bad, f"rules with unknown tool name: {bad}"
+
+
+from pipeline.query.router import retrieve_examples
+
+
+@pytest.mark.asyncio
+async def test_retrieve_examples_returns_top_k_with_tool_args(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """Even when route_question returns None, retrieve_examples should give top-3."""
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        matches = await retrieve_examples("天気はどう？", conn, agency_id, k=3)
+    # Two chunks in fixture, so we get 2 (capped by available data).
+    assert len(matches) == 2
+    # Tool/args populated from the golden_set dict.
+    tools = {m.tool for m in matches}
+    assert tools == {"route_stats", "time_series"}
+    assert all(m.args is not None for m in matches)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embedded_chunks, monkeypatch, golden_jsonl):
+    pool, agency_id = conn_with_embedded_chunks
+
+    class _Down:
+        available = False
+
+        def embed(self, *a, **kw):
+            raise RuntimeError("down")
+
+    from pipeline.query import router
+
+    monkeypatch.setattr(router, "_get_embedder", lambda: _Down())
+    async with pool.acquire() as conn:
+        matches = await retrieve_examples("anything", conn, agency_id, k=3)
+    assert matches == []
