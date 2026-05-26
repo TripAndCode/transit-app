@@ -38,6 +38,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "requires_groq_key: tests that need a live GROQ_API_KEY and the dev API reachable (off by default)",
+    "slow = \"Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1\"",
 ]
 
 [tool.ruff]
