@@ -91,7 +91,7 @@ async def describe_data(
                 "       route_short_name "
                 "FROM static_routes "
                 "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
-                "ORDER BY route_id "
+                "ORDER BY route_short_name "
                 "LIMIT $3",
                 agency_id,
                 substring,
@@ -130,12 +130,21 @@ async def describe_data(
             "       route_short_name "
             "FROM static_routes "
             "WHERE agency_id = $1 "
-            "ORDER BY route_id "
+            "ORDER BY route_short_name "
             "LIMIT $2",
             agency_id,
             limit,
         )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
+        if total == 0:
+            return _ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "このエージェンシーには路線が登録されていません。",
+                    "no routes registered for this agency.",
+                    locale,
+                ),
+            )
         return _ToolResult(
             kind="table",
             summary=_summary(
@@ -153,18 +162,27 @@ async def describe_data(
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
                 "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
-                "ORDER BY stop_id LIMIT $3",
+                "ORDER BY stop_name LIMIT $3",
                 agency_id,
                 substring,
                 limit,
             )
         else:
             rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_id LIMIT $2",
+                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_name LIMIT $2",
                 agency_id,
                 limit,
             )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
+        if total == 0:
+            return _ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "このエージェンシーには停留所が登録されていません。",
+                    "no stops registered for this agency.",
+                    locale,
+                ),
+            )
         return _ToolResult(
             kind="table",
             summary=_summary(
@@ -251,6 +269,15 @@ async def describe_data(
             ctx.to_date,
             limit,
         )
+        if not rows:
+            return _ToolResult(
+                kind="empty",
+                summary=_summary(
+                    f"選択期間 ({ctx.from_date}〜{ctx.to_date}) にサンプルデータがありません。",
+                    f"no sample data in the selected window ({ctx.from_date} – {ctx.to_date}).",
+                    locale,
+                ),
+            )
         # Clamp the DISPLAYED window so the summary never claims coverage past
         # where data actually exists. The BETWEEN above is unchanged; we only
         # adjust the text. MAX(captured_at) is over the requested window so a

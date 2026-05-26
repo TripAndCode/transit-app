@@ -78,6 +78,18 @@ async def test_describe_data_routes_filter_no_match_is_empty(conn_with_seed):
     assert len(result.rows) == 0
 
 
+@pytest.mark.asyncio
+async def test_describe_data_routes_empty_agency_message(conn_with_seed):
+    # Use an agency_id with no routes
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes"}, _ctx(), conn, agency_id + 99999, locale="ja"
+        )
+    assert result.kind in ("empty", "table")
+    assert "0 路線" not in result.summary  # no awkward "0 路線あります"
+
+
 @pytest.fixture
 async def conn_with_observations(conn_with_seed):
     """Extends conn_with_seed: also inserts stops + updates so date_range/sample_counts work."""
