@@ -54,6 +54,30 @@ async def test_describe_data_routes(conn_with_seed):
     assert "2" in result.summary  # summary mentions the count
 
 
+@pytest.mark.asyncio
+async def test_describe_data_routes_filter_substring_matches(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes", "filter_substring": "国道"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    # conn_with_seed has "A1 国道・古川線" — should match exactly 1
+    assert result.kind == "table"
+    assert len(result.rows) == 1
+    assert result.rows[0][0] == "1021"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_routes_filter_no_match_is_empty(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes", "filter_substring": "存在しない路線XYZ"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    # Must NOT dump all rows. Either empty kind or 0 rows with a clear message.
+    assert len(result.rows) == 0
+
+
 @pytest.fixture
 async def conn_with_observations(conn_with_seed):
     """Extends conn_with_seed: also inserts stops + updates so date_range/sample_counts work."""

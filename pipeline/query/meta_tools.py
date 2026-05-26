@@ -84,6 +84,47 @@ async def describe_data(
         )
 
     if kind == "routes":
+        substring = args.get("filter_substring")
+        if substring:
+            rows = await conn.fetch(
+                "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
+                "       route_short_name "
+                "FROM static_routes "
+                "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
+                "ORDER BY route_id "
+                "LIMIT $3",
+                agency_id,
+                substring,
+                limit,
+            )
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM static_routes "
+                "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%'",
+                agency_id,
+                substring,
+            )
+            # A non-empty filter that matches nothing must NOT fall through to
+            # a full dump (the original bug) nor claim "0件表示" beside a high
+            # unfiltered total. Return an unambiguous empty result instead.
+            if total == 0:
+                return _ToolResult(
+                    kind="empty",
+                    summary=_summary(
+                        f"「{substring}」に該当する路線がありません。",
+                        f"no matching routes for '{substring}'.",
+                        locale,
+                    ),
+                )
+            return _ToolResult(
+                kind="table",
+                summary=_summary(
+                    f"「{substring}」に一致する路線: {total} 件（先頭 {len(rows)} 件を表示）",
+                    f"routes matching '{substring}': {total} (showing first {len(rows)})",
+                    locale,
+                ),
+                rows=[[r["code"], r["route_short_name"]] for r in rows],
+                columns=["route_code", "route_short_name"],
+            )
         rows = await conn.fetch(
             "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
             "       route_short_name "
