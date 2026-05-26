@@ -585,7 +585,6 @@ async def test_peak_hour_weekday_weekend_split_uses_live_path(aconn, aagency_id)
 async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
     """``service_split_daily`` returns one row per date with weekday +
     weekend slots populated independently."""
-    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     inserts = [
         (date(2026, 5, 18), "平日", 60),  # 1 min weekday
         (date(2026, 5, 19), "平日", 180),  # 3 min weekday
@@ -607,8 +606,6 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
             dep,
         )
         await _seed_agg_daily(aconn, aagency_id, d, "R_SSD", svc, dep / 60.0, 1)
-    # Silence unused-variable lints; `base` documents the wall-clock anchor.
-    assert base.year == 2026
 
     from pipeline.reports import compute_overview_summary
 
