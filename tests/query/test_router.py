@@ -155,6 +155,13 @@ def test_rule_no_match(question):
     assert _match_rules(question) is None
 
 
+def test_rule_5min_not_shadowed_by_worst():
+    d = _match_rules("5分以上の遅れが多い系統TOP10")
+    assert d is not None
+    assert d.tool == "top_n"
+    assert d.args["metric"] == "worst_5min"
+
+
 def test_rule_decision_records_pattern_name():
     decision = _match_rules("どんな路線がある？")
     assert decision is not None
