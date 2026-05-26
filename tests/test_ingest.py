@@ -1,4 +1,3 @@
-# tests/test_ingest.py
 import io
 import tarfile
 from unittest.mock import patch

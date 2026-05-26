@@ -23,8 +23,6 @@ def get_ingest_strategy(name: str):
     single existing production agency that predates the strategy column).
     """
     if not name:
-        # back-compat: empty / NULL falls back to Aomori for the single
-        # existing production agency.
         name = "aomori_regex"
     return importlib.import_module(f"pipeline.strategies.{name}")
 

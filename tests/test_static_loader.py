@@ -1,4 +1,3 @@
-# tests/test_static_loader.py
 import io
 import pathlib
 import zipfile
