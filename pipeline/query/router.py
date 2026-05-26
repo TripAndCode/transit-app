@@ -153,3 +153,99 @@ def _match_rules(question: str) -> RouterDecision | None:
                 matched_pattern=rule.name,
             )
     return None
+
+
+from pathlib import Path
+
+# Default lives in tests/ask_eval/. Tests override via set_golden_set_path.
+_DEFAULT_GOLDEN_SET = Path(__file__).resolve().parents[2] / "tests" / "ask_eval" / "golden_set.jsonl"
+_golden_path: Path = _DEFAULT_GOLDEN_SET
+_golden_cache: dict[str, tuple[str, dict]] | None = None
+
+
+def set_golden_set_path(path: Path | None) -> None:
+    """Test hook: point the golden-set loader at a different file."""
+    global _golden_path, _golden_cache
+    _golden_path = path if path is not None else _DEFAULT_GOLDEN_SET
+    _golden_cache = None
+
+
+def _load_golden() -> dict[str, tuple[str, dict]]:
+    """``chunk_id → (tool, args)`` mapping from golden_set.jsonl."""
+    global _golden_cache
+    if _golden_cache is not None:
+        return _golden_cache
+    import json as _json
+
+    mapping: dict[str, tuple[str, dict]] = {}
+    if not _golden_path.exists():
+        _log.warning("golden_set.jsonl not found at %s — Stage 2 will produce empty examples", _golden_path)
+        _golden_cache = mapping
+        return mapping
+    with _golden_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = _json.loads(line)
+            cid = entry.get("id")
+            tool = entry.get("expected_tool")
+            args = entry.get("expected_args") or {}
+            if cid and tool:
+                mapping[cid] = (tool, args)
+    _golden_cache = mapping
+    return mapping
+
+
+def _get_embedder():
+    """Indirection so tests can monkeypatch."""
+    from pipeline.query.embeddings import get_embedder
+
+    return get_embedder()
+
+
+async def route_question(question: str, conn, agency_id: int) -> RouterDecision | None:
+    """Stage 1 + Stage 2 dispatch. Returns ``None`` if no direct dispatch."""
+    if not question or not question.strip():
+        return None
+
+    decision = _match_rules(question)
+    if decision is not None:
+        return decision
+
+    embedder = _get_embedder()
+    if not getattr(embedder, "available", False):
+        return None
+
+    try:
+        qvec = embedder.embed(question, mode="query")
+    except Exception as exc:
+        _log.warning("Stage 2 embed failed: %s — falling through to LLM", exc.__class__.__name__)
+        return None
+
+    try:
+        from pipeline.query.rag_index import nearest
+
+        matches = await nearest(conn, agency_id, qvec, k=1)
+    except Exception as exc:
+        _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
+        return None
+
+    if not matches:
+        return None
+    top = matches[0]
+    if top.distance > _EMBED_DISPATCH_THRESHOLD:
+        return None
+
+    golden = _load_golden()
+    if top.chunk_id not in golden:
+        _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
+        return None
+    tool, args = golden[top.chunk_id]
+    return RouterDecision(
+        stage="embedding",
+        tool=tool,
+        args=dict(args),
+        score=1.0 - top.distance,
+        matched_pattern=top.chunk_id,
+    )

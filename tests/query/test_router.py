@@ -2,6 +2,113 @@ import pytest
 
 from pipeline.query.router import RouterDecision, _match_rules
 
+import asyncpg
+import json as _json
+import os
+
+from pathlib import Path
+
+import pytest_asyncio
+
+from pipeline.query.router import (
+    RouterDecision,
+    route_question,
+    set_golden_set_path,
+)
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+
+class _FakeEmbedder:
+    available = True
+
+    def embed(self, text: str, *, mode: str) -> list[float]:
+        # Deterministic small vectors keyed on text content.
+        if "中央大橋" in text:
+            return [1.0] + [0.0] * 383
+        if "国道" in text:
+            return [0.0, 1.0] + [0.0] * 382
+        return [0.5, 0.5] + [0.0] * 382
+
+
+@pytest.fixture
+def fake_embedder(monkeypatch):
+    e = _FakeEmbedder()
+    from pipeline.query import router
+
+    monkeypatch.setattr(router, "_get_embedder", lambda: e)
+    yield e
+
+
+@pytest.fixture
+def golden_jsonl(tmp_path, monkeypatch):
+    p = tmp_path / "golden.jsonl"
+    p.write_text("\n".join([
+        _json.dumps({"id": "g-1", "question": "中央大橋線の遅延", "expected_tool": "route_stats", "expected_args": {"route": "12211"}}),
+        _json.dumps({"id": "g-2", "question": "国道線の傾向", "expected_tool": "time_series", "expected_args": {}}),
+    ]))
+    set_golden_set_path(p)
+    yield p
+    set_golden_set_path(None)
+
+
+@pytest_asyncio.fixture
+async def conn_with_embedded_chunks(apply_schema):
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+        # Insert chunks whose embeddings match _FakeEmbedder's responses.
+        v_a = "[" + ",".join(["1.0"] + ["0.0"] * 383) + "]"
+        v_b = "[" + ",".join(["0.0", "1.0"] + ["0.0"] * 382) + "]"
+        await conn.executemany(
+            "INSERT INTO rag_chunks (chunk_id, agency_id, content, embedding, content_hash) "
+            "VALUES ($1, $2, $3, $4::vector, $5)",
+            [
+                ("g-1", agency_id, "中央大橋線の遅延", v_a, "h-a"),
+                ("g-2", agency_id, "国道線の傾向", v_b, "h-b"),
+            ],
+        )
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_route_question_rule_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """Rule path beats Stage 2 even when chunks exist."""
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        decision = await route_question("どんな路線がある？", conn, agency_id)
+    assert decision is not None
+    assert decision.stage == "rules"
+    assert decision.tool == "describe_data"
+    assert decision.args["kind"] == "routes"
+
+
+@pytest.mark.asyncio
+async def test_route_question_embedding_hit(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """No rule matches → embedding finds g-1 with distance ~0 → dispatch."""
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        decision = await route_question("中央大橋線の遅延", conn, agency_id)
+    assert decision is not None
+    assert decision.stage == "embedding"
+    assert decision.tool == "route_stats"
+    assert decision.args == {"route": "12211"}
+
+
+@pytest.mark.asyncio
+async def test_route_question_no_match(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    """Distant query → distance > threshold → returns None."""
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        decision = await route_question("天気はどう？", conn, agency_id)
+    assert decision is None
+
 
 @pytest.mark.parametrize(
     "question,expected_tool,expected_kind",
