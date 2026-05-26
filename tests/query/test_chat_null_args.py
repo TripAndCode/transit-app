@@ -100,3 +100,35 @@ async def test_chat_with_tools_survives_non_dict_arguments(
     # ran the dispatch path (not the refusal fallback).
     assert result["result"] is not None
     assert result["result"]["kind"] == "kv"
+
+
+@pytest.mark.asyncio
+async def test_rag_examples_appended_to_system_prompt(monkeypatch):
+    """When chat_with_tools receives rag_examples, the system prompt includes them."""
+    from pipeline.query import chat
+    from pipeline.query.rag_index import Match
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None)
+
+    monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+    from datetime import date
+
+    examples = [
+        Match(chunk_id="g-1", content="中央大橋線の遅延", tool="route_stats", args={"route": "12211"}, distance=0.05),
+        Match(chunk_id="g-2", content="国道線の傾向", tool="time_series", args={}, distance=0.10),
+    ]
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    await chat.chat_with_tools("もっと変な質問", ctx, conn=None, agency_id=1, model=None, locale="ja", rag_examples=examples)
+
+    system = captured["messages"][0]["content"]
+    assert "中央大橋線の遅延" in system
+    assert "route_stats" in system
+    assert "国道線の傾向" in system
