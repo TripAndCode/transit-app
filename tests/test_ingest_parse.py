@@ -20,7 +20,6 @@ def test_parse_trip_id_no_match_returns_none():
 
 
 def test_parse_trip_id_default_is_aomori_pattern():
-    # Verify the default still works for Aomori format
     result = parse_trip_id("土日祝_14時05分_系統12")
     assert result is not None
     assert result["service"] == "土日祝"

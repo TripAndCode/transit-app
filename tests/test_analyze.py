@@ -63,7 +63,6 @@ def test_analyze_creates_agg_route_dow(pg_conn, agency_id):
             (agency_id,),
         )
         dows = {r[0] for r in cur.fetchall()}
-    # Updated 2026-05-22: dow column is SMALLINT ISODOW (was Japanese chars).
     assert dows <= {1, 2, 3, 4, 5, 6, 7}
     assert len(dows) > 0
 

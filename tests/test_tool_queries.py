@@ -1,10 +1,4 @@
-"""SQL helpers backing the LLM tool surface.
-
-These exist because pipeline/query/tools.py used to call _legacy_execute
-on the now-deleted executor.py. Lifted minimal subsets of the three
-intents tools still needs (by_dow per route, compare per route,
-route_info static metadata).
-"""
+"""SQL helpers backing the LLM tool surface: by_dow per route, compare per route, route_info static metadata."""
 
 from datetime import date, datetime, time, timedelta, timezone
 
