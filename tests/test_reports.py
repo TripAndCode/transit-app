@@ -91,7 +91,7 @@ async def test_reports_get_ranking_with_seeded_updates(reports_client):
                 f"trip-{i}",
                 "44",
                 "平日",
-                time(10, 0),  # Updated 2026-05-22: TIME column (was "10:00:00" text).
+                time(10, 0),
                 1,
                 300,
                 datetime.fromisoformat(f"{today}T10:0{i % 10}:00"),
