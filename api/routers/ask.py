@@ -10,6 +10,7 @@ The request body now carries the global :class:`~api.range.RangeCtx`
 user's chosen window without having to mention it in the prompt.
 """
 
+import os as _os
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Request
@@ -20,6 +21,8 @@ from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
 from pipeline.query.chat import chat_with_tools
+from pipeline.query.router import retrieve_examples, route_question
+from pipeline.query.tools import dispatch, render_tool_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
 
@@ -48,6 +51,7 @@ class AskResponse(BaseModel):
     tool_call: dict | None = None
     result: dict | None = None
     ctx: dict
+    router_stage: str | None = None
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
@@ -96,17 +100,44 @@ async def ask(
     """
     csrf_guard(request)
     ctx = _resolve_ctx(body.ctx)
-    payload = await chat_with_tools(body.question, ctx, conn, agency_id, model=body.model, locale=locale)
+
+    router_enabled = _os.environ.get("ASK_ROUTER_ENABLED", "true").lower() != "false"
+    ctx_dict = {
+        "from": ctx.from_date.isoformat(),
+        "to": ctx.to_date.isoformat(),
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "routes": list(ctx.routes),
+    }
+
+    decision = await route_question(body.question, conn, agency_id) if router_enabled else None
+    if decision is not None:
+        result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
+        return AskResponse(
+            answer=render_tool_result(result, locale=locale),
+            tool_call={"name": decision.tool, "arguments": decision.args},
+            result={
+                "kind": result.kind,
+                "summary": result.summary,
+                "rows": result.rows,
+                "columns": result.columns,
+                "series": result.series,
+                "pairs": result.pairs,
+            },
+            ctx=ctx_dict,
+            router_stage=decision.stage,
+        )
+
+    examples = await retrieve_examples(body.question, conn, agency_id, k=3) if router_enabled else []
+    payload = await chat_with_tools(
+        body.question, ctx, conn, agency_id,
+        model=body.model, locale=locale, rag_examples=examples,
+    )
     return AskResponse(
         answer=payload["answer"],
         tool_call=payload["tool_call"],
         result=payload["result"],
-        ctx={
-            "from": ctx.from_date.isoformat(),
-            "to": ctx.to_date.isoformat(),
-            "dow": ctx.dow,
-            "time_band": ctx.time_band,
-            "service": ctx.service,
-            "routes": list(ctx.routes),
-        },
+        ctx=ctx_dict,
+        router_stage="llm",
     )
