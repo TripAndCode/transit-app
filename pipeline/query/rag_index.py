@@ -72,6 +72,7 @@ async def build_index(conn, agency_id: int, golden_set_path: Path, embedder=None
     """
     if embedder is None:
         from pipeline.query.embeddings import get_embedder
+
         embedder = get_embedder()
     if not embedder.available:
         raise RuntimeError("Embedder unavailable — cannot build index")
@@ -91,7 +92,8 @@ async def build_index(conn, agency_id: int, golden_set_path: Path, embedder=None
             new_hash = _content_hash(question)
             existing = await conn.fetchrow(
                 "SELECT content_hash FROM rag_chunks WHERE agency_id=$1 AND chunk_id=$2",
-                agency_id, chunk_id,
+                agency_id,
+                chunk_id,
             )
             if existing is not None and existing["content_hash"] == new_hash:
                 skipped += 1
@@ -101,14 +103,22 @@ async def build_index(conn, agency_id: int, golden_set_path: Path, embedder=None
                 await conn.execute(
                     "INSERT INTO rag_chunks (chunk_id, agency_id, content, embedding, content_hash) "
                     "VALUES ($1, $2, $3, $4::vector, $5)",
-                    chunk_id, agency_id, question, _format_vec(vec), new_hash,
+                    chunk_id,
+                    agency_id,
+                    question,
+                    _format_vec(vec),
+                    new_hash,
                 )
                 inserted += 1
             else:
                 await conn.execute(
                     "UPDATE rag_chunks SET content=$3, embedding=$4::vector, content_hash=$5, embedded_at=now() "
                     "WHERE agency_id=$1 AND chunk_id=$2",
-                    agency_id, chunk_id, question, _format_vec(vec), new_hash,
+                    agency_id,
+                    chunk_id,
+                    question,
+                    _format_vec(vec),
+                    new_hash,
                 )
                 updated += 1
     return {"inserted": inserted, "updated": updated, "skipped": skipped}

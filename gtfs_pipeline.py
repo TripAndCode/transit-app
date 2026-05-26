@@ -248,7 +248,10 @@ def cmd_build_rag_index(args):
         for aid, name in ids:
             async with pool.acquire() as conn:
                 counts = await build_index(conn, aid, golden)
-            print(f"  {aid:>3} {name}: inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}")
+            print(
+                f"  {aid:>3} {name}: "
+                f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
+            )
 
         await pool.close()
 

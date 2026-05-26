@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 _log = logging.getLogger(__name__)
@@ -129,10 +130,7 @@ def _validate_rules() -> None:
     known = set(_HANDLERS.keys())
     bad = [r.name for r in _RULES if r.tool not in known]
     if bad:
-        raise RuntimeError(
-            f"Phase 2 router has rules pointing at unknown tools: {bad}. "
-            f"Known tools: {sorted(known)}"
-        )
+        raise RuntimeError(f"Phase 2 router has rules pointing at unknown tools: {bad}. Known tools: {sorted(known)}")
 
 
 _validate_rules()
@@ -154,8 +152,6 @@ def _match_rules(question: str) -> RouterDecision | None:
             )
     return None
 
-
-from pathlib import Path
 
 # Default lives in tests/ask_eval/. Tests override via set_golden_set_path.
 _DEFAULT_GOLDEN_SET = Path(__file__).resolve().parents[2] / "tests" / "ask_eval" / "golden_set.jsonl"

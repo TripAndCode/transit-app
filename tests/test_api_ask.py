@@ -127,7 +127,8 @@ async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, '国道線(1021)', 'A1 国道線')",
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
+            "VALUES ($1, '国道線(1021)', 'A1 国道線')",
             agency_id,
         )
     await pool.close()
