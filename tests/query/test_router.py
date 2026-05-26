@@ -189,6 +189,27 @@ def test_rule_decision_records_pattern_name():
     assert decision.matched_pattern  # non-empty rule name
 
 
+def test_load_golden_skips_malformed_lines(tmp_path):
+    from pipeline.query.router import _load_golden, set_golden_set_path
+
+    p = tmp_path / "golden.jsonl"
+    p.write_text(
+        "\n".join(
+            [
+                _json.dumps({"id": "ok-1", "expected_tool": "top_n", "expected_args": {}}),
+                "{ this is not valid json",
+                _json.dumps({"id": "ok-2", "expected_tool": "describe_data", "expected_args": {}}),
+            ]
+        )
+    )
+    set_golden_set_path(p)
+    try:
+        mapping = _load_golden()
+        assert set(mapping.keys()) == {"ok-1", "ok-2"}
+    finally:
+        set_golden_set_path(None)
+
+
 def test_all_rules_map_to_known_tools():
     """Every rule's `tool` must exist in the dispatcher's _HANDLERS."""
     from pipeline.query.router import _RULES

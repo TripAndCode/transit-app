@@ -201,7 +201,13 @@ def _load_golden() -> dict[str, tuple[str, dict]]:
             line = line.strip()
             if not line:
                 continue
-            entry = _json.loads(line)
+            try:
+                entry = _json.loads(line)
+            except ValueError as exc:
+                # A malformed line must not break the "always degrade"
+                # contract — log and skip so routing still works.
+                _log.warning("golden_set.jsonl: skipping malformed line: %s", exc)
+                continue
             cid = entry.get("id")
             tool = entry.get("expected_tool")
             args = entry.get("expected_args") or {}
