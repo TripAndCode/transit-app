@@ -119,6 +119,15 @@ async def test_route_question_no_match(conn_with_embedded_chunks, fake_embedder,
     assert decision is None
 
 
+@pytest.mark.asyncio
+async def test_route_question_rejects_above_threshold(conn_with_embedded_chunks, fake_embedder, golden_jsonl):
+    # _FakeEmbedder returns [0.5,0.5,0,...] for unknown text → distance ~0.29 from both axis chunks → no dispatch
+    pool, agency_id = conn_with_embedded_chunks
+    async with pool.acquire() as conn:
+        d = await route_question("全然関係ない質問", conn, agency_id)
+    assert d is None
+
+
 @pytest.mark.parametrize(
     "question,expected_tool,expected_kind",
     [

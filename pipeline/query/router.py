@@ -25,9 +25,14 @@ from typing import Any, Literal
 _log = logging.getLogger(__name__)
 
 # Distance below which Stage 2 will dispatch directly (cosine distance;
-# smaller = closer). The eval target is ≥0.85 cosine similarity, i.e.
-# distance ≤ 0.15.
-_EMBED_DISPATCH_THRESHOLD = 0.15
+# smaller = closer). Genuine paraphrases cluster ≤0.13; confirmed false
+# dispatches landed at 0.13–0.15, so the threshold is tightened to 0.12.
+_EMBED_DISPATCH_THRESHOLD = 0.12
+
+# Minimum gap between the top match and the runner-up. When two golden Qs
+# are nearly equidistant the top hit is ambiguous, so we decline to
+# dispatch and fall through to the LLM (with the same rows as few-shot).
+_EMBED_MARGIN = 0.02
 
 # How many golden examples to retrieve for Stage 3 RAG injection.
 _RAG_TOP_K = 3
@@ -234,7 +239,7 @@ async def route_question(question: str, conn, agency_id: int) -> RouterDecision 
     try:
         from pipeline.query.rag_index import nearest
 
-        matches = await nearest(conn, agency_id, qvec, k=1)
+        matches = await nearest(conn, agency_id, qvec, k=2)
     except Exception as exc:
         _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
         return None
@@ -243,6 +248,10 @@ async def route_question(question: str, conn, agency_id: int) -> RouterDecision 
         return None
     top = matches[0]
     if top.distance > _EMBED_DISPATCH_THRESHOLD:
+        return None
+    # Margin guard: an ambiguous top hit (runner-up nearly as close) is
+    # not safe to dispatch on — fall through to the LLM instead.
+    if len(matches) > 1 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
         return None
 
     golden = _load_golden()
