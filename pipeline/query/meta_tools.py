@@ -231,26 +231,47 @@ async def describe_data(
         )
 
     if kind == "sample_counts":
+        # "サンプルが少ない系統" wants the least-sampled routes, so allow an
+        # ascending order. Validate against an allowlist — never interpolate
+        # raw LLM input into the ORDER BY clause.
+        order = str(args.get("order", "desc")).lower()
+        if order not in ("desc", "asc"):
+            order = "desc"
+        direction = "ASC" if order == "asc" else "DESC"
         rows = await conn.fetch(
             "SELECT route_code, COUNT(*) AS samples "
             "FROM updates "
             "WHERE agency_id = $1 "
             "  AND captured_at::date BETWEEN $2 AND $3 "
             "GROUP BY route_code "
-            "ORDER BY samples DESC "
+            f"ORDER BY samples {direction} "
             "LIMIT $4",
             agency_id,
             ctx.from_date,
             ctx.to_date,
             limit,
         )
+        # Clamp the DISPLAYED window so the summary never claims coverage past
+        # where data actually exists. The BETWEEN above is unchanged; we only
+        # adjust the text. MAX(captured_at) is over the requested window so a
+        # NULL means no data fell in range.
+        data_end = await conn.fetchval(
+            "SELECT MAX(captured_at)::date FROM updates "
+            "WHERE agency_id = $1 AND captured_at::date BETWEEN $2 AND $3",
+            agency_id,
+            ctx.from_date,
+            ctx.to_date,
+        )
+        window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
+        if order == "asc":
+            jp = f"サンプル数の少ない順 {len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
+        else:
+            jp = f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            en = f"sample count top-{len(rows)} ({ctx.from_date} – {window_end})"
         return _ToolResult(
             kind="table",
-            summary=_summary(
-                f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{ctx.to_date})",
-                f"sample count top-{len(rows)} ({ctx.from_date} – {ctx.to_date})",
-                locale,
-            ),
+            summary=_summary(jp, en, locale),
             rows=[[r["route_code"], int(r["samples"])] for r in rows],
             columns=["route_code", "samples"],
         )
@@ -379,6 +400,15 @@ META_TOOLS: list[dict] = [
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                     "filter_substring": {"type": "string"},
+                    "order": {
+                        "type": "string",
+                        "enum": ["desc", "asc"],
+                        "description": (
+                            "Only honored when kind='sample_counts'. Default 'desc' → "
+                            "most-sampled routes first. Use 'asc' for the LEAST-sampled "
+                            "routes (e.g. 「サンプル数の少ない系統」/「データが薄い系統」)."
+                        ),
+                    },
                     "cross_agency": {
                         "type": "boolean",
                         "description": (
