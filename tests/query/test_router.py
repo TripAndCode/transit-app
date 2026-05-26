@@ -282,3 +282,52 @@ async def test_retrieve_examples_empty_when_embedder_unavailable(conn_with_embed
     async with pool.acquire() as conn:
         matches = await retrieve_examples("anything", conn, agency_id, k=3)
     assert matches == []
+
+
+@pytest.mark.asyncio
+async def test_margin_guard_ignores_same_tool_runnerup(monkeypatch, tmp_path):
+    """Two close same-tool matches must dispatch; close different-tool matches fall through."""
+    import json as _json
+
+    from pipeline.query import router as _router
+    from pipeline.query.rag_index import Match
+
+    p = tmp_path / "g.jsonl"
+    p.write_text(
+        "\n".join(
+            [
+                _json.dumps(
+                    {"id": "a", "question": "x", "expected_tool": "route_stats", "expected_args": {"route": "1"}}
+                ),
+                _json.dumps(
+                    {"id": "b", "question": "y", "expected_tool": "route_stats", "expected_args": {"route": "1"}}
+                ),
+                _json.dumps({"id": "c", "question": "z", "expected_tool": "time_series", "expected_args": {}}),
+            ]
+        )
+    )
+    _router.set_golden_set_path(p)
+
+    class _E:
+        available = True
+
+        def embed(self, *a, **k):
+            return [0.0] * 384
+
+    monkeypatch.setattr(_router, "_get_embedder", lambda: _E())
+
+    async def near_same(conn, agency_id, qvec, k):
+        return [Match("a", "x", "", {}, 0.05), Match("b", "y", "", {}, 0.055)]
+
+    monkeypatch.setattr("pipeline.query.rag_index.nearest", near_same)
+    dec, _ex = await _router.route_or_examples("ある質問", None, 1)
+    assert dec is not None and dec.tool == "route_stats"  # same tool → dispatch despite 0.005 margin
+
+    async def near_diff(conn, agency_id, qvec, k):
+        return [Match("a", "x", "", {}, 0.05), Match("c", "z", "", {}, 0.055)]
+
+    monkeypatch.setattr("pipeline.query.rag_index.nearest", near_diff)
+    dec2, _ex2 = await _router.route_or_examples("ある質問", None, 1)
+    assert dec2 is None  # different tools within margin → ambiguous → fall through
+
+    _router.set_golden_set_path(None)

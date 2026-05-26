@@ -290,9 +290,17 @@ async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
 
     golden = _load_golden()
     top = matches[0]
-    dispatch_ok = top.distance <= _EMBED_DISPATCH_THRESHOLD and (
-        len(matches) < 2 or (matches[1].distance - top.distance) >= _EMBED_MARGIN
-    )
+    within_threshold = top.distance <= _EMBED_DISPATCH_THRESHOLD
+    # The margin guard only matters under genuine TOOL ambiguity — when the
+    # runner-up maps to a *different* tool and sits within _EMBED_MARGIN of
+    # the top. Two near-identical paraphrases of the SAME tool (e.g. several
+    # "<route>の遅延" route_stats chunks) must not be blocked by a tiny gap.
+    ambiguous = False
+    if within_threshold and len(matches) >= 2 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
+        top_tool = golden.get(top.chunk_id, (None, None))[0]
+        second_tool = golden.get(matches[1].chunk_id, (None, None))[0]
+        ambiguous = top_tool != second_tool
+    dispatch_ok = within_threshold and not ambiguous
     if dispatch_ok:
         if top.chunk_id not in golden:
             _log.warning("rag_chunks has chunk_id=%s but golden_set doesn't — falling through", top.chunk_id)
