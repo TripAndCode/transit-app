@@ -44,7 +44,6 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 if now - ts <= ttl_seconds:
                     cache.move_to_end(key)
                     return value
-                # expired
                 del cache[key]
             value = await fn(*args, **kwargs)
             cache[key] = (now, value)
