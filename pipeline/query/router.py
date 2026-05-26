@@ -96,11 +96,14 @@ _RULES: list[Rule] = [
         args={"kind": "sample_counts"},
     ),
     # ---- top_n ----
+    # NOTE: more-specific ranking rules MUST precede the generic
+    # `ranking-worst` rule (first-match-wins) — otherwise e.g.
+    # "5分以上の遅れが多い系統TOP10" would be eaten by `ranking-worst`.
     Rule(
-        name="ranking-worst",
-        pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP).*?(\d+)?"),
+        name="ranking-worst-5min",
+        pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
         tool="top_n",
-        args={"metric": "avg_delay", "n": 10},
+        args={"metric": "worst_5min", "n": 10},
     ),
     Rule(
         name="ranking-on-time",
@@ -109,10 +112,10 @@ _RULES: list[Rule] = [
         args={"metric": "on_time_rate", "n": 10},
     ),
     Rule(
-        name="ranking-worst-5min",
-        pattern=re.compile(r"5分.*?(超|以上).*?(多い|TOP)"),
+        name="ranking-worst",
+        pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP).*?(\d+)?"),
         tool="top_n",
-        args={"metric": "worst_5min", "n": 10},
+        args={"metric": "avg_delay", "n": 10},
     ),
     # ---- capabilities fallback for app-help-y phrasings ----
     Rule(
