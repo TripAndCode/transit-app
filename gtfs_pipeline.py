@@ -219,6 +219,42 @@ def cmd_migrate(args):
     conn.close()
 
 
+def cmd_build_rag_index(args):
+    """Embed every (id, question) line from tests/ask_eval/golden_set.jsonl
+    into rag_chunks for the named agency (or every agency in `agencies` if
+    --all-agencies is set). Idempotent via content_hash."""
+    import asyncio
+    from pathlib import Path
+
+    import asyncpg
+
+    from pipeline.query.rag_index import build_index
+
+    golden = Path(__file__).resolve().parent / "tests" / "ask_eval" / "golden_set.jsonl"
+    if not golden.exists():
+        raise SystemExit(f"golden set not found: {golden}")
+
+    async def run():
+        pool = await asyncpg.create_pool(DATABASE_URL)
+        if args.all_agencies:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
+            ids = [(r["agency_id"], r["agency_name"]) for r in rows]
+        else:
+            if args.agency_id is None:
+                raise SystemExit("--agency-id or --all-agencies required")
+            ids = [(args.agency_id, f"agency {args.agency_id}")]
+
+        for aid, name in ids:
+            async with pool.acquire() as conn:
+                counts = await build_index(conn, aid, golden)
+            print(f"  {aid:>3} {name}: inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}")
+
+        await pool.close()
+
+    asyncio.run(run())
+
+
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
@@ -261,6 +297,10 @@ def main():
         help="Roll back to (not including) this version, e.g. --target 0002",
     )
 
+    p_rag = sub.add_parser("build_rag_index", help="Embed golden_set.jsonl into rag_chunks")
+    p_rag.add_argument("--agency-id", type=int, default=None)
+    p_rag.add_argument("--all-agencies", action="store_true")
+
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
@@ -278,6 +318,8 @@ def main():
         cmd_refresh_static(args)
     elif args.command == "migrate":
         cmd_migrate(args)
+    elif args.command == "build_rag_index":
+        cmd_build_rag_index(args)
     else:
         parser.print_help()
 
