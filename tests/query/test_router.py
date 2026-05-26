@@ -162,6 +162,18 @@ def test_rule_5min_not_shadowed_by_worst():
     assert d.args["metric"] == "worst_5min"
 
 
+def test_rule_honors_captured_n():
+    d = _match_rules("遅延ワースト3")
+    assert d is not None
+    assert d.tool == "top_n"
+    assert d.args["n"] == 3
+
+
+def test_rule_default_n_when_no_digit():
+    d = _match_rules("遅延ワースト")
+    assert d.args["n"] == 10
+
+
 def test_rule_decision_records_pattern_name():
     decision = _match_rules("どんな路線がある？")
     assert decision is not None
