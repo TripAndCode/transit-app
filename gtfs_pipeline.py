@@ -11,7 +11,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 def _get_conn():
-    """Open and return a psycopg2 connection using DATABASE_URL."""
     return psycopg2.connect(DATABASE_URL)
 
 
