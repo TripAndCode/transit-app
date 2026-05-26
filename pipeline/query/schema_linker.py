@@ -14,7 +14,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 ROUTE_CODE_RE = re.compile(r"^\d{3,5}$")
 LETTER_PREFIX_RE = re.compile(r"^[A-Za-z]\d{1,2}$")
 N_BAN_RE = re.compile(r"^(\d{1,3})番$")
@@ -130,9 +129,7 @@ async def resolve_route(raw: str, conn, agency_id: int) -> RouteResolution:
     # candidate above the threshold, OR the next best is clearly behind
     # by at least _TRGM_MARGIN. Multiple equally-strong candidates fall
     # through to "fuzzy" so the user gets a "did you mean" prompt.
-    if top_score >= _TRGM_CONFIDENT and (
-        len(rows) == 1 or top_score - second_score >= _TRGM_MARGIN
-    ):
+    if top_score >= _TRGM_CONFIDENT and (len(rows) == 1 or top_score - second_score >= _TRGM_MARGIN):
         return RouteResolution(
             route_code=rows[0]["code"],
             reason="alias",

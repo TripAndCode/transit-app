@@ -71,8 +71,10 @@ def test_golden_set_aggregate_score():
             actual_tool = tc.get("name")
             actual_args = tc.get("arguments") or {}
             s = _score(
-                case["expected_tool"], case.get("expected_args"),
-                actual_tool, actual_args,
+                case["expected_tool"],
+                case.get("expected_args"),
+                actual_tool,
+                actual_args,
             )
             scores.append(s)
             if s < 1.0:
@@ -81,8 +83,7 @@ def test_golden_set_aggregate_score():
     agg = sum(scores) / len(scores)
     if agg < SCORE_TARGET:
         report = "\n".join(
-            f"  {cid:20s} score={s:.1f}  expected={want}  got={got}  q={q!r}"
-            for cid, q, want, got, s in failures
+            f"  {cid:20s} score={s:.1f}  expected={want}  got={got}  q={q!r}" for cid, q, want, got, s in failures
         )
         pytest.fail(
             f"golden-set aggregate {agg:.2f} below target {SCORE_TARGET:.2f}\n"

@@ -1,10 +1,11 @@
-import asyncpg
 import os
+from datetime import date, datetime
+
+import asyncpg
 import pytest
 
 from api.range import RangeCtx
-from pipeline.query.meta_tools import describe_data, capabilities
-from datetime import date, datetime
+from pipeline.query.meta_tools import capabilities, describe_data
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -21,14 +22,13 @@ async def conn_with_seed(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') "
-            "RETURNING agency_id"
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
         )
         agency_id = row["agency_id"]
         await conn.executemany(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,$2,$3)",
             [
-                (agency_id, "国道線(1021)",     "A1 国道・古川線"),
+                (agency_id, "国道線(1021)", "A1 国道・古川線"),
                 (agency_id, "中央大橋線(12211)", "L21 中央大橋線"),
             ],
         )
@@ -46,9 +46,7 @@ def _ctx():
 async def test_describe_data_routes(conn_with_seed):
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "routes", "limit": 10}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "routes", "limit": 10}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     assert result.columns == ["route_code", "route_short_name"]
     codes = {row[0] for row in result.rows}
@@ -89,9 +87,7 @@ async def conn_with_observations(conn_with_seed):
 async def test_describe_data_stops(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "stops", "limit": 10}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "stops", "limit": 10}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     assert len(result.rows) == 5
     assert result.columns == ["stop_id", "stop_name"]
@@ -101,9 +97,7 @@ async def test_describe_data_stops(conn_with_observations):
 async def test_describe_data_date_range(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "kv"
     keys = dict(result.pairs)
     assert "first_observed" in keys
@@ -117,12 +111,8 @@ async def test_describe_data_agencies(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
         # Seed a second tenant the caller shouldn't see by default.
-        await conn.execute(
-            "INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')"
-        )
-        result = await describe_data(
-            {"kind": "agencies"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        await conn.execute("INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')")
+        result = await describe_data({"kind": "agencies"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     assert result.columns == ["agency_id", "agency_name"]
     # Only the caller's own row — the OTHER agency must be hidden.
@@ -135,12 +125,8 @@ async def test_describe_data_agencies_cross(conn_with_observations):
     """When cross_agency=True, every agency is returned (admin path)."""
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')"
-        )
-        result = await describe_data(
-            {"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja"
-        )
+        await conn.execute("INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')")
+        result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     names = {row[1] for row in result.rows}
     assert "OTHER" in names
@@ -151,9 +137,7 @@ async def test_describe_data_agencies_cross(conn_with_observations):
 async def test_describe_data_sample_counts(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     assert result.columns == ["route_code", "samples"]
     assert result.rows[0][0] == "1021"
@@ -164,9 +148,7 @@ async def test_describe_data_sample_counts(conn_with_observations):
 async def test_describe_data_overview(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "overview"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "overview"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "kv"
     keys = dict(result.pairs)
     assert keys.get("routes")
@@ -178,9 +160,7 @@ async def test_describe_data_overview(conn_with_observations):
 async def test_describe_data_metrics(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "metrics"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "metrics"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "kv"
     assert any(k == "avg_delay" for k, _ in result.pairs)
     # JP labels include 遅延.
@@ -193,9 +173,7 @@ async def test_describe_data_metrics_locale_en(conn_with_observations):
     """The metric-list value strings must switch to English when locale='en'."""
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "metrics"}, _ctx(), conn, agency_id, locale="en"
-        )
+        result = await describe_data({"kind": "metrics"}, _ctx(), conn, agency_id, locale="en")
     assert result.kind == "kv"
     pairs = dict(result.pairs)
     assert "avg_delay" in pairs
@@ -210,9 +188,7 @@ async def test_describe_data_invalid_limit_falls_back(conn_with_seed):
     to the default and return a valid table."""
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "routes", "limit": "abc"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "routes", "limit": "abc"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "table"
     # Two seeded routes are well under the fallback default (50).
     assert len(result.rows) == 2
@@ -222,9 +198,7 @@ async def test_describe_data_invalid_limit_falls_back(conn_with_seed):
 async def test_describe_data_invalid_kind(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "nope"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await describe_data({"kind": "nope"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "empty"
     assert "nope" in result.summary
 
@@ -237,8 +211,13 @@ async def test_capabilities_all_categories(conn_with_seed):
     assert result.kind == "kv"
     cats = {k for k, _ in result.pairs}
     assert cats >= {
-        "single_route", "ranking", "comparison",
-        "trend", "on_time", "stop_level", "meta",
+        "single_route",
+        "ranking",
+        "comparison",
+        "trend",
+        "on_time",
+        "stop_level",
+        "meta",
     }
 
 
@@ -246,9 +225,7 @@ async def test_capabilities_all_categories(conn_with_seed):
 async def test_capabilities_specific_category(conn_with_seed):
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
-        result = await capabilities(
-            {"category": "ranking"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await capabilities({"category": "ranking"}, _ctx(), conn, agency_id, locale="ja")
     assert result.kind == "kv"
     assert len(result.pairs) == 1
     key, examples = result.pairs[0]
@@ -260,7 +237,5 @@ async def test_capabilities_specific_category(conn_with_seed):
 async def test_capabilities_unknown_category_returns_all(conn_with_seed):
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
-        result = await capabilities(
-            {"category": "nope"}, _ctx(), conn, agency_id, locale="ja"
-        )
+        result = await capabilities({"category": "nope"}, _ctx(), conn, agency_id, locale="ja")
     assert len(result.pairs) >= 7
