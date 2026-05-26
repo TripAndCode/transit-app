@@ -113,9 +113,7 @@ async def ask(
 
     # Single embed+search: dispatch decision and few-shot examples share
     # one embedding so the fall-through path doesn't re-embed the question.
-    decision, examples = (
-        await route_or_examples(body.question, conn, agency_id, k=3) if router_enabled else (None, [])
-    )
+    decision, examples = await route_or_examples(body.question, conn, agency_id, k=3) if router_enabled else (None, [])
     if decision is not None:
         result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
         return AskResponse(
