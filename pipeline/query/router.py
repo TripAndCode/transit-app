@@ -16,6 +16,7 @@ empty examples. Phase 1's behavior continues to work end-to-end.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -231,7 +232,8 @@ async def route_question(question: str, conn, agency_id: int) -> RouterDecision 
         return None
 
     try:
-        qvec = embedder.embed(question, mode="query")
+        # encode() is CPU-bound — keep it off the shared event loop.
+        qvec = await asyncio.to_thread(embedder.embed, question, mode="query")
     except Exception as exc:
         _log.warning("Stage 2 embed failed: %s — falling through to LLM", exc.__class__.__name__)
         return None
@@ -281,7 +283,8 @@ async def retrieve_examples(question: str, conn, agency_id: int, k: int = _RAG_T
     if not getattr(embedder, "available", False):
         return []
     try:
-        qvec = embedder.embed(question, mode="query")
+        # encode() is CPU-bound — keep it off the shared event loop.
+        qvec = await asyncio.to_thread(embedder.embed, question, mode="query")
     except Exception as exc:
         _log.warning("retrieve_examples embed failed: %s", exc.__class__.__name__)
         return []
