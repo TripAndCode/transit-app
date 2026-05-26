@@ -48,13 +48,19 @@ jobs:
       - name: Build pgvector from source in Postgres service
         run: |
           CID=$(docker ps -q --filter ancestor=postgis/postgis:14-3.2 | head -n1)
+          # NO_JIT=1 skips the LLVM bytecode targets — the container
+          # doesn't ship clang and we don't need JIT for the test
+          # workload. Without this flag the bitcode build fails and
+          # `make install` short-circuits before copying vector.control
+          # to /usr/share/postgresql/14/extension/.
           docker exec "$CID" sh -c '
             set -e
             apt-get update
             apt-get install -y --no-install-recommends \
               build-essential git ca-certificates postgresql-server-dev-14
             git clone --depth 1 --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
-            cd /tmp/pgvector && make OPTFLAGS= && make install
+            cd /tmp/pgvector && make NO_JIT=1 && make NO_JIT=1 install
+            test -f /usr/share/postgresql/14/extension/vector.control
             rm -rf /tmp/pgvector
           '
 
