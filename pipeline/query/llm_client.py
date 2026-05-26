@@ -1,0 +1,172 @@
+"""Provider-agnostic LLM adapter with ordered fallback.
+
+Lets the Ask tab try Cerebras first (1M tokens/day free), fall back to
+Groq (100K/day) on rate-limit, and optionally bounce to a local Ollama
+instance for offline safety. All three speak OpenAI-compatible REST, so
+the openai-python SDK works with each by swapping ``base_url`` and
+``api_key``. Falling back lets a single .env file work locally and
+remotely without code-path divergence.
+
+Configuration is fully env-driven; see ``.env.example`` for the keys.
+``chat_completions`` is intentionally a thin wrapper around
+``openai.OpenAI(...).chat.completions.create(...)`` so calling code in
+``pipeline/query/chat.py`` doesn't have to know which provider answered.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from typing import Any
+
+_log = logging.getLogger(__name__)
+
+# Built-in defaults for the three providers we support. Operator overrides
+# any field via env (e.g. CEREBRAS_BASE_URL=...). The "key_env" is the
+# env-var name that holds the provider's API key.
+_PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    "cerebras": {
+        "key_env": "CEREBRAS_API_KEY",
+        "base_url": "https://api.cerebras.ai/v1",
+        "model": "llama-3.3-70b",
+    },
+    "groq": {
+        "key_env": "GROQ_API_KEY",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "llama-3.3-70b-versatile",
+    },
+    "ollama": {
+        "key_env": "OLLAMA_API_KEY",
+        "base_url": "http://localhost:11434/v1",
+        "model": "qwen2.5:7b-instruct",
+    },
+}
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    name: str
+    api_key: str | None
+    base_url: str
+    model: str
+
+    @property
+    def is_usable(self) -> bool:
+        # Ollama doesn't require a key (any string works). For the others
+        # we need a real key — operators who haven't set it shouldn't have
+        # the provider in the ladder.
+        return bool(self.api_key) or self.name == "ollama"
+
+
+def _load_provider(name: str) -> ProviderConfig | None:
+    """Resolve env-vars for one provider; return None if missing entirely."""
+    defaults = _PROVIDER_DEFAULTS.get(name)
+    if defaults is None:
+        _log.warning("CHAT_PROVIDERS lists unknown provider %r — skipping", name)
+        return None
+    upper = name.upper()
+    key = os.environ.get(defaults["key_env"]) or ("ollama" if name == "ollama" else None)
+    base = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
+    model = os.environ.get(f"{upper}_MODEL", defaults["model"])
+    cfg = ProviderConfig(name=name, api_key=key, base_url=base, model=model)
+    if not cfg.is_usable:
+        _log.info("provider %s skipped — no api key configured", name)
+        return None
+    return cfg
+
+
+def _load_providers() -> list[ProviderConfig]:
+    """Read CHAT_PROVIDERS and return usable, ordered configs."""
+    raw = os.environ.get("CHAT_PROVIDERS", "groq")  # back-compat default
+    names = [n.strip().lower() for n in raw.split(",") if n.strip()]
+    cfgs = [c for c in (_load_provider(n) for n in names) if c is not None]
+    if not cfgs:
+        _log.error("CHAT_PROVIDERS=%r resolves to zero usable providers", raw)
+    return cfgs
+
+
+class LLMClient:
+    """Tries each configured provider in order until one succeeds.
+
+    Use :meth:`chat_completions` exactly like
+    ``openai.OpenAI().chat.completions.create``. Returned message object
+    is the SDK's response shape.
+    """
+
+    def __init__(self) -> None:
+        self._providers = _load_providers()
+
+    def providers(self) -> list[ProviderConfig]:
+        return list(self._providers)
+
+    def chat_completions(
+        self,
+        *,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
+        temperature: float = 0.0,
+        model_override: str | None = None,
+    ) -> Any | None:
+        """Return the first non-erroring provider's message, or None.
+
+        On rate-limit (429) or connection error, walks down the provider
+        ladder. The returned object is the OpenAI-compatible
+        ``response.choices[0].message`` — pre-extracted so callers stay
+        provider-agnostic.
+        """
+        from openai import (
+            APIConnectionError,
+            APITimeoutError,
+            OpenAI,
+            RateLimitError,
+        )
+
+        last_exc: Exception | None = None
+        for cfg in self._providers:
+            try:
+                client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+                resp = client.chat.completions.create(
+                    model=model_override or cfg.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=tool_choice if tools else "none",
+                    temperature=temperature,
+                )
+                return resp.choices[0].message
+            except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+                _log.warning(
+                    "LLM provider %s failed (%s); trying next in ladder",
+                    cfg.name,
+                    exc.__class__.__name__,
+                )
+                last_exc = exc
+                continue
+            except Exception as exc:
+                _log.warning(
+                    "LLM provider %s raised unexpected %s: %r — skipping",
+                    cfg.name,
+                    exc.__class__.__name__,
+                    exc,
+                )
+                last_exc = exc
+                continue
+        if last_exc is not None:
+            _log.error("all LLM providers exhausted; last error %s", last_exc.__class__.__name__)
+        return None
+
+
+_singleton: LLMClient | None = None
+
+
+def get_client() -> LLMClient:
+    global _singleton
+    if _singleton is None:
+        _singleton = LLMClient()
+    return _singleton
+
+
+def reset_client_for_tests() -> None:
+    global _singleton
+    _singleton = None

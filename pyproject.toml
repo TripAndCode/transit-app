@@ -14,6 +14,7 @@ python = ">=3.11,<4.0"
 psycopg2-binary = ">=2.9"
 pandas = ">=2.2"
 groq = ">=0.11"
+openai = ">=1.50"
 slowapi = ">=0.1"
 sentence-transformers = ">=2.7"
 asyncpg = ">=0.29"
@@ -35,6 +36,9 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "requires_groq_key: tests that need a live GROQ_API_KEY and the dev API reachable (off by default)",
+]
 
 [tool.ruff]
 line-length = 120
