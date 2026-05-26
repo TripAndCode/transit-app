@@ -1,17 +1,13 @@
-import pytest
-
-from pipeline.query.router import RouterDecision, _match_rules
-
-import asyncpg
 import json as _json
 import os
 
-from pathlib import Path
-
+import asyncpg
+import pytest
 import pytest_asyncio
 
 from pipeline.query.router import (
-    RouterDecision,
+    _match_rules,
+    retrieve_examples,
     route_question,
     set_golden_set_path,
 )
@@ -43,10 +39,23 @@ def fake_embedder(monkeypatch):
 @pytest.fixture
 def golden_jsonl(tmp_path, monkeypatch):
     p = tmp_path / "golden.jsonl"
-    p.write_text("\n".join([
-        _json.dumps({"id": "g-1", "question": "中央大橋線の遅延", "expected_tool": "route_stats", "expected_args": {"route": "12211"}}),
-        _json.dumps({"id": "g-2", "question": "国道線の傾向", "expected_tool": "time_series", "expected_args": {}}),
-    ]))
+    p.write_text(
+        "\n".join(
+            [
+                _json.dumps(
+                    {
+                        "id": "g-1",
+                        "question": "中央大橋線の遅延",
+                        "expected_tool": "route_stats",
+                        "expected_args": {"route": "12211"},
+                    }
+                ),
+                _json.dumps(
+                    {"id": "g-2", "question": "国道線の傾向", "expected_tool": "time_series", "expected_args": {}}
+                ),
+            ]
+        )
+    )
     set_golden_set_path(p)
     yield p
     set_golden_set_path(None)
@@ -156,12 +165,10 @@ def test_all_rules_map_to_known_tools():
     """Every rule's `tool` must exist in the dispatcher's _HANDLERS."""
     from pipeline.query.router import _RULES
     from pipeline.query.tools import _HANDLERS
+
     known = set(_HANDLERS.keys())
     bad = [r.name for r in _RULES if r.tool not in known]
     assert not bad, f"rules with unknown tool name: {bad}"
-
-
-from pipeline.query.router import retrieve_examples
 
 
 @pytest.mark.asyncio

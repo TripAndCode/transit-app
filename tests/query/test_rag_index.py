@@ -1,8 +1,10 @@
-import asyncpg
 import hashlib
+import json as _json
 import os
+import tempfile
 from pathlib import Path
 
+import asyncpg
 import pytest
 
 from pipeline.query.rag_index import Match, build_index, nearest
@@ -18,6 +20,7 @@ async def conn_with_chunks(apply_schema):
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"
         )
         agency_id = row["agency_id"]
+
         # Three chunks with synthetic 384-dim vectors. The first vector is
         # close to query [1,0,0,...]; the second to [0,1,0,...]; third to
         # [0,0,1,...]. pgvector cosine should return them in that order.
@@ -62,10 +65,6 @@ async def test_nearest_scopes_by_agency(conn_with_chunks):
     assert rows == []
 
 
-import json as _json
-import tempfile
-
-
 class _FakeEmbedder:
     """Deterministic embedder for build_index tests — avoids the real model."""
 
@@ -74,6 +73,7 @@ class _FakeEmbedder:
     def embed(self, text: str, *, mode: str) -> list[float]:
         # Hash text to 384-d vector: each dim is sin(hash_byte + i).
         import math
+
         h = hashlib.sha256(text.encode()).digest()
         return [math.sin((h[i % 32] / 255.0) + i * 0.001) for i in range(384)]
 

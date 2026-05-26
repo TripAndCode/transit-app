@@ -131,8 +131,13 @@ async def ask(
 
     examples = await retrieve_examples(body.question, conn, agency_id, k=3) if router_enabled else []
     payload = await chat_with_tools(
-        body.question, ctx, conn, agency_id,
-        model=body.model, locale=locale, rag_examples=examples,
+        body.question,
+        ctx,
+        conn,
+        agency_id,
+        model=body.model,
+        locale=locale,
+        rag_examples=examples,
     )
     return AskResponse(
         answer=payload["answer"],

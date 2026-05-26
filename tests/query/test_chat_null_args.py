@@ -105,9 +105,10 @@ async def test_chat_with_tools_survives_non_dict_arguments(
 @pytest.mark.asyncio
 async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     """When chat_with_tools receives rag_examples, the system prompt includes them."""
+    from types import SimpleNamespace
+
     from pipeline.query import chat
     from pipeline.query.rag_index import Match
-    from types import SimpleNamespace
 
     captured = {}
 
@@ -118,15 +119,18 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
 
     monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
 
-    from api.range import RangeCtx
     from datetime import date
+
+    from api.range import RangeCtx
 
     examples = [
         Match(chunk_id="g-1", content="中央大橋線の遅延", tool="route_stats", args={"route": "12211"}, distance=0.05),
         Match(chunk_id="g-2", content="国道線の傾向", tool="time_series", args={}, distance=0.10),
     ]
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools("もっと変な質問", ctx, conn=None, agency_id=1, model=None, locale="ja", rag_examples=examples)
+    await chat.chat_with_tools(
+        "もっと変な質問", ctx, conn=None, agency_id=1, model=None, locale="ja", rag_examples=examples
+    )
 
     system = captured["messages"][0]["content"]
     assert "中央大橋線の遅延" in system
