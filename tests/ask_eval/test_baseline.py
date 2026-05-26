@@ -1,0 +1,91 @@
+"""Live-LLM regression test.
+
+Replays ``golden_set.jsonl`` against the running API and scores
+tool-selection accuracy. Off by default — set ``RUN_LLM_EVAL=1`` plus a
+valid ``GROQ_API_KEY`` to run. Requires the dev API to be reachable at
+``EVAL_API_BASE`` (default ``http://localhost:8000``) with at least one
+seeded agency (``EVAL_AGENCY_ID``, default ``1``).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import httpx
+import pytest
+
+GOLDEN = Path(__file__).parent / "golden_set.jsonl"
+EVAL_API_BASE = os.environ.get("EVAL_API_BASE", "http://localhost:8000")
+EVAL_AGENCY_ID = int(os.environ.get("EVAL_AGENCY_ID", "1"))
+SCORE_TARGET = float(os.environ.get("EVAL_SCORE_TARGET", "0.70"))
+
+pytestmark = [
+    pytest.mark.requires_groq_key,
+    pytest.mark.skipif(
+        os.environ.get("RUN_LLM_EVAL") != "1",
+        reason="RUN_LLM_EVAL=1 not set",
+    ),
+]
+
+
+def _load_cases():
+    with GOLDEN.open() as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def _score(expected_tool, expected_args, actual_tool, actual_args):
+    if expected_tool is None:
+        return 1.0 if actual_tool is None else 0.0
+    if actual_tool != expected_tool:
+        return 0.0
+    for k, want in (expected_args or {}).items():
+        got = (actual_args or {}).get(k)
+        if isinstance(want, str) and isinstance(got, str):
+            if want.lower() != got.lower():
+                return 0.5
+        elif got != want:
+            return 0.5
+    return 1.0
+
+
+def test_golden_set_aggregate_score():
+    cases = list(_load_cases())
+    assert cases, "golden_set.jsonl is empty"
+    scores = []
+    failures = []
+    with httpx.Client(base_url=EVAL_API_BASE, timeout=60.0) as client:
+        for case in cases:
+            resp = client.post(
+                f"/api/{EVAL_AGENCY_ID}/ask",
+                json={"question": case["question"]},
+                headers={"Origin": EVAL_API_BASE},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            tc = data.get("tool_call") or {}
+            actual_tool = tc.get("name")
+            actual_args = tc.get("arguments") or {}
+            s = _score(
+                case["expected_tool"],
+                case.get("expected_args"),
+                actual_tool,
+                actual_args,
+            )
+            scores.append(s)
+            if s < 1.0:
+                failures.append((case["id"], case["question"], case["expected_tool"], actual_tool, s))
+
+    agg = sum(scores) / len(scores)
+    if agg < SCORE_TARGET:
+        report = "\n".join(
+            f"  {cid:20s} score={s:.1f}  expected={want}  got={got}  q={q!r}" for cid, q, want, got, s in failures
+        )
+        pytest.fail(
+            f"golden-set aggregate {agg:.2f} below target {SCORE_TARGET:.2f}\n"
+            f"failing cases ({len(failures)}/{len(cases)}):\n{report}"
+        )

@@ -150,6 +150,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dash", "en"): "—",
     ("unsupported_tool", "ja"): "未対応のツール: {name}",
     ("unsupported_tool", "en"): "Unsupported tool: {name}",
+    ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
+    ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
+    ("did_you_mean_candidate", "ja"): "系統{code}({name})",
+    ("did_you_mean_candidate", "en"): "route {code} ({name})",
     # render_tool_result decorations
     ("series_top_offenders", "ja"): " (悪化: {routes})",
     ("series_top_offenders", "en"): " (worst: {routes})",
@@ -320,15 +324,27 @@ TOOLS: list[dict] = [
 ]
 
 
+from pipeline.query.meta_tools import META_HANDLERS, META_TOOLS  # noqa: E402
+
+# Mutate the existing list/dict in place rather than rebinding the names.
+# Any module that imported ``TOOLS`` or ``_HANDLERS`` before meta-tools
+# wired in (e.g. ``from pipeline.query.tools import TOOLS`` cached at
+# import time) keeps seeing the same object — and therefore the merged
+# entries — instead of holding a stale reference to the pre-merge list.
+TOOLS.extend(META_TOOLS)
+
+
 SYSTEM_PROMPT = """\
 あなたは青森市バスの遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
 
 == 重要なルール ==
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
-2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')のみ。**
-   ユーザーが '系統5' のような短い数字や '雨天' のような単語を route として渡してきた場合、
-   ツールを呼ばず、ユーザーのUI言語で「'<入力>' は系統コードではない可能性があります」と説明し、
-   類似の答えられる質問を 2〜3 件提案する。
+2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')を渡す。**
+   ユーザーが '系統5' のような短い別名や 'A1'・'中央大橋線' のような日本語名で route を
+   指定してきた場合も、そのまま route に渡してよい。dispatch 層の schema_linker が別名を
+   解決する。それでも解決できない曖昧な入力(例: '雨天')の場合は、route 引数を埋めて
+   ツールを呼ぶのではなく、データ可用性を確かめるなら `describe_data`、
+   答えられる質問例を見せるなら `capabilities` を呼ぶ。
 3. データの提供範囲外の質問(天気、運賃、事故、車両情報など)はツールを呼ばず、
    利用できるデータを伝え、関連する答えられる質問を 2〜3 件提案する。
 4. **期間の上書き**: ユーザーが「直近X日/週/月」「過去N日」「先週」「先月」「昨日」など
@@ -338,6 +354,9 @@ SYSTEM_PROMPT = """\
    - 「先月の定時率」→ on_time_rate(days_back=30) (シンプルに30日と解釈)
    - 「過去3日の遅延」→ top_n(metric='avg_delay', n=10, days_back=3)
 5. 曜日/時間帯フィルタはツール引数で上書きする必要はない(UIで適用済み)。
+6. **ツールに合わない質問・データ可用性の質問** → まず `describe_data`
+   (データ範囲・路線・停留所など) または `capabilities`(答えられる質問の例) を呼ぶ。
+   自然文での拒否は本当にデータ範囲外(天気・運賃・事故など) の場合のみ。
 
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 系統の遅延統計
@@ -346,6 +365,13 @@ SYSTEM_PROMPT = """\
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
 - route_meta(route): 系統の路線情報
+- describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
+  (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
+  例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
+     「サンプル数の多い系統」→ kind=sample_counts /「全体感」→ kind=overview
+- capabilities(category?): 答えられる質問例(カテゴリ別)を返す。
+  ユーザーの質問が漠然としていたり範囲外の時に使う。
+  例:「やばい系統」「いつものやつ」「何ができる?」
 
 == 例 ==
 - "今日の遅延ランキング" → top_n(metric='avg_delay', n=10)
@@ -354,6 +380,12 @@ SYSTEM_PROMPT = """\
 - "過去3日で5分超が一番多い系統" → top_n(metric='worst_5min', n=10, days_back=3)
 - "雨天時の比較" → ツール呼ばず、「天気データはありません。
   代わりに『22171の平日と土日祝の比較』が答えられます」と返す
+- "どんな路線がある?" → describe_data(kind='routes')
+- "いつからのデータ?" → describe_data(kind='date_range')
+- "サンプル数の多い系統は?" → describe_data(kind='sample_counts')
+- "データセット全体の概要" → describe_data(kind='overview')
+- "何ができる?" / "やばい系統" → capabilities()
+- "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
 """
 
 
@@ -565,7 +597,13 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
 
 
 async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
-    series = await compute_trend_series(agency_id, ctx, conn)
+    # When the LLM scopes to a single route, push it into ctx so the
+    # compute function narrows the trend to that route only. Without this
+    # the dispatch shim resolves the route alias but the compute call
+    # ignores it (compute_trend_series doesn't take a route arg directly).
+    route = args.get("route")
+    series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
+    series = await compute_trend_series(agency_id, series_ctx, conn)
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
@@ -640,6 +678,11 @@ _HANDLERS = {
     "route_meta": _tool_route_meta,
 }
 
+# Same identity-preserving pattern as TOOLS above: mutate the existing
+# dict so callers holding a pre-merge reference still see the meta
+# handlers without re-importing.
+_HANDLERS.update(META_HANDLERS)
+
 
 async def dispatch(
     tool_name: str,
@@ -660,6 +703,30 @@ async def dispatch(
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
+
+    from pipeline.query.schema_linker import resolve_route
+
+    if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
+        raw_route = arguments.get("route")
+        if raw_route:
+            resolution = await resolve_route(str(raw_route), conn, agency_id)
+            if resolution.route_code is not None:
+                arguments = {**arguments, "route": resolution.route_code}
+            elif resolution.candidates:
+                cand_txt = " / ".join(
+                    _summary("did_you_mean_candidate", lang=locale, code=code, name=name)
+                    for code, name in resolution.candidates[:5]
+                )
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary(
+                        "route_did_you_mean",
+                        lang=locale,
+                        raw=raw_route,
+                        candidates=cand_txt,
+                    ),
+                )
+
     effective_ctx = _apply_date_overrides(ctx, arguments)
     return await handler(arguments, effective_ctx, conn, agency_id, locale)
 

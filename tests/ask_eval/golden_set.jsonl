@@ -1,0 +1,134 @@
+{"id": "meta-001", "category": "A_meta", "question": "どんな路線がデータにあるの？", "expected_tool": "describe_data", "expected_args": {"kind": "routes"}}
+{"id": "meta-002", "category": "A_meta", "question": "路線一覧見せて", "expected_tool": "describe_data", "expected_args": {"kind": "routes"}}
+{"id": "meta-003", "category": "A_meta", "question": "いつからのデータ？", "expected_tool": "describe_data", "expected_args": {"kind": "date_range"}}
+{"id": "meta-004", "category": "A_meta", "question": "最新の観測はいつ？", "expected_tool": "describe_data", "expected_args": {"kind": "date_range"}}
+{"id": "meta-005", "category": "A_meta", "question": "一番古い観測日は？", "expected_tool": "describe_data", "expected_args": {"kind": "date_range"}}
+{"id": "meta-006", "category": "A_meta", "question": "観測データの件数は何件くらいある？", "expected_tool": "describe_data", "expected_args": {"kind": "date_range"}}
+{"id": "meta-007", "category": "A_meta", "question": "何社の事業者が入ってる？", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
+{"id": "meta-008", "category": "A_meta", "question": "事業者一覧をください", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
+{"id": "meta-009", "category": "A_meta", "question": "サンプル数の多い系統トップ", "expected_tool": "describe_data", "expected_args": {"kind": "sample_counts"}}
+{"id": "meta-010", "category": "A_meta", "question": "データ密度ってどんな感じ？", "expected_tool": "describe_data", "expected_args": {"kind": "sample_counts"}}
+{"id": "meta-011", "category": "A_meta", "question": "全部で何路線あるの？", "expected_tool": "describe_data", "expected_args": {"kind": "routes"}}
+{"id": "meta-012", "category": "A_meta", "question": "停留所はいくつくらい登録されてる？", "expected_tool": "describe_data", "expected_args": {"kind": "stops"}}
+{"id": "meta-013", "category": "A_meta", "question": "どんな指標が出せるの？", "expected_tool": "describe_data", "expected_args": {"kind": "metrics"}}
+{"id": "meta-014", "category": "A_meta", "question": "計算できる指標を教えて", "expected_tool": "describe_data", "expected_args": {"kind": "metrics"}}
+{"id": "meta-015", "category": "A_meta", "question": "データセットの概要を要約して", "expected_tool": "describe_data", "expected_args": {"kind": "overview"}}
+{"id": "meta-016", "category": "A_meta", "question": "全体感をざっくり教えて", "expected_tool": "describe_data", "expected_args": {"kind": "overview"}}
+{"id": "meta-017", "category": "A_meta", "question": "データの新鮮さはどう？", "expected_tool": "describe_data", "expected_args": {"kind": "date_range"}}
+{"id": "schedule-001", "category": "B_schedule", "question": "系統22171の停留所一覧を見せて", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "schedule-002", "category": "B_schedule", "question": "系統5の便数は1日何便ある？", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-003", "category": "B_schedule", "question": "22171の始発時刻は？", "expected_tool": "route_meta", "expected_args": {"route": "22171"}}
+{"id": "schedule-004", "category": "B_schedule", "question": "16071の終バスは何時？", "expected_tool": "route_meta", "expected_args": {"route": "16071"}}
+{"id": "schedule-005", "category": "B_schedule", "question": "最終便の発車時間を教えて", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "schedule-006", "category": "B_schedule", "question": "全便の総走行距離はいくつ？", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-007", "category": "B_schedule", "question": "始発バスは何時から走ってる？", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "schedule-008", "category": "B_schedule", "question": "日曜は運休する系統はある？", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-009", "category": "B_schedule", "question": "祝日ダイヤってどう運用されてる？", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-010", "category": "B_schedule", "question": "全ヘッドサイン(行き先表示)の一覧が欲しい", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-011", "category": "B_schedule", "question": "営業所ごとの便数を教えて", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-012", "category": "B_schedule", "question": "どの曜日に運行している路線が多い？", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-013", "category": "B_schedule", "question": "22171の運行情報を教えて", "expected_tool": "route_meta", "expected_args": {"route": "22171"}}
+{"id": "schedule-014", "category": "B_schedule", "question": "土曜運行のみの便を知りたい", "expected_tool": null, "expected_args": {}}
+{"id": "schedule-015", "category": "B_schedule", "question": "深夜便はあるの？", "expected_tool": null, "expected_args": {}}
+{"id": "geo-001", "category": "C_geo", "question": "青森駅で一番待たされる系統は？", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "geo-002", "category": "C_geo", "question": "半径3km以内の停留所を出して", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "geo-003", "category": "C_geo", "question": "県庁前停を通る系統はどれ？", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "geo-004", "category": "C_geo", "question": "海沿いを走る路線を教えて", "expected_tool": null, "expected_args": {}}
+{"id": "geo-005", "category": "C_geo", "question": "新青森駅から徒歩何分？", "expected_tool": null, "expected_args": {}}
+{"id": "geo-006", "category": "C_geo", "question": "停留所の緯度経度を見たい", "expected_tool": null, "expected_args": {}}
+{"id": "geo-007", "category": "C_geo", "question": "アスパムを通る系統はどれですか？", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "geo-008", "category": "C_geo", "question": "市内中心部の停留所だけ抽出して", "expected_tool": null, "expected_args": {}}
+{"id": "geo-009", "category": "C_geo", "question": "ループ橋を通過する路線は？", "expected_tool": null, "expected_args": {}}
+{"id": "ontime-001", "category": "D_ontime", "question": "5分以内の定時率を出して", "expected_tool": "on_time_rate", "expected_args": {"threshold_min": 5}}
+{"id": "ontime-002", "category": "D_ontime", "question": "10分以内の定時率は？", "expected_tool": "on_time_rate", "expected_args": {"threshold_min": 10}}
+{"id": "ontime-003", "category": "D_ontime", "question": "15分以内に収まってる割合", "expected_tool": "on_time_rate", "expected_args": {"threshold_min": 15}}
+{"id": "ontime-004", "category": "D_ontime", "question": "定時率TOP10を教えて", "expected_tool": "on_time_rate", "expected_args": {"n": 10}}
+{"id": "ontime-005", "category": "D_ontime", "question": "オンタイム率のランキング上位5", "expected_tool": "on_time_rate", "expected_args": {"n": 5}}
+{"id": "ontime-006", "category": "D_ontime", "question": "信頼度スコアを出して", "expected_tool": null, "expected_args": {}}
+{"id": "ontime-007", "category": "D_ontime", "question": "p90の遅延を見せて", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay"}}
+{"id": "ontime-008", "category": "D_ontime", "question": "p95、p99の遅延はわかる？", "expected_tool": null, "expected_args": {}}
+{"id": "ontime-009", "category": "D_ontime", "question": "標準偏差はどれくらい？", "expected_tool": null, "expected_args": {}}
+{"id": "ontime-010", "category": "D_ontime", "question": "遅延のIQRを計算して", "expected_tool": null, "expected_args": {}}
+{"id": "ontime-011", "category": "D_ontime", "question": "定時率のワーストは？", "expected_tool": "on_time_rate", "expected_args": {}}
+{"id": "trend-001", "category": "E_trend", "question": "直近2週間の傾向を見せて", "expected_tool": "time_series", "expected_args": {"days_back": 14}}
+{"id": "trend-002", "category": "E_trend", "question": "ここ1週間の推移", "expected_tool": "time_series", "expected_args": {"days_back": 7}}
+{"id": "trend-003", "category": "E_trend", "question": "月別の推移を教えて", "expected_tool": null, "expected_args": {}}
+{"id": "trend-004", "category": "E_trend", "question": "先週と今週を比較して", "expected_tool": "time_series", "expected_args": {}}
+{"id": "trend-005", "category": "E_trend", "question": "朝ラッシュの推移だけ抽出できる？", "expected_tool": null, "expected_args": {}}
+{"id": "trend-006", "category": "E_trend", "question": "桜の時期の遅延を分析して", "expected_tool": null, "expected_args": {}}
+{"id": "trend-007", "category": "E_trend", "question": "過去30日の日次トレンド", "expected_tool": "time_series", "expected_args": {"days_back": 30}}
+{"id": "trend-008", "category": "E_trend", "question": "最近の傾向ってどう？", "expected_tool": "time_series", "expected_args": {}}
+{"id": "trend-009", "category": "E_trend", "question": "GW期間中の動きを比較したい", "expected_tool": null, "expected_args": {}}
+{"id": "anomaly-001", "category": "F_anomaly", "question": "急に悪化した路線はある？", "expected_tool": "time_series", "expected_args": {}}
+{"id": "anomaly-002", "category": "F_anomaly", "question": "普段と違う動きをしている系統は？", "expected_tool": null, "expected_args": {}}
+{"id": "anomaly-003", "category": "F_anomaly", "question": "異常値が出てる便を抽出して", "expected_tool": null, "expected_args": {}}
+{"id": "anomaly-004", "category": "F_anomaly", "question": "統計的な外れ値を教えて", "expected_tool": null, "expected_args": {}}
+{"id": "anomaly-005", "category": "F_anomaly", "question": "突発的なスパイクってあった？", "expected_tool": null, "expected_args": {}}
+{"id": "anomaly-006", "category": "F_anomaly", "question": "急にダイヤが乱れた日は？", "expected_tool": "time_series", "expected_args": {}}
+{"id": "vague-001", "category": "G_vague", "question": "やばい系統教えて", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay"}}
+{"id": "vague-002", "category": "G_vague", "question": "いつものやつ出して", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "vague-003", "category": "G_vague", "question": "何ができるの？", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "vague-004", "category": "G_vague", "question": "使い方教えて", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "vague-005", "category": "G_vague", "question": "ピンポイントで悪い系統だけ知りたい", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay"}}
+{"id": "vague-006", "category": "G_vague", "question": "ザックリ全体感を", "expected_tool": "describe_data", "expected_args": {"kind": "overview"}}
+{"id": "vague-007", "category": "G_vague", "question": "ヘルプ", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "vague-008", "category": "G_vague", "question": "なんでもいいから見せて", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "vague-009", "category": "G_vague", "question": "ヤバめのワースト", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay"}}
+{"id": "oos-001", "category": "H_oos", "question": "天気で絞り込んで遅延出して", "expected_tool": null, "expected_args": {}}
+{"id": "oos-002", "category": "H_oos", "question": "運賃はいくら？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-003", "category": "H_oos", "question": "今日の事故情報はある？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-004", "category": "H_oos", "question": "駐車場ある停留所どこ？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-005", "category": "H_oos", "question": "路線図のPDFを送って", "expected_tool": null, "expected_args": {}}
+{"id": "oos-006", "category": "H_oos", "question": "アラート設定したいんだけど", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "oos-007", "category": "H_oos", "question": "ログインの方法を教えて", "expected_tool": null, "expected_args": {}}
+{"id": "oos-008", "category": "H_oos", "question": "APIから直接叩ける？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-009", "category": "H_oos", "question": "車両の整備記録ある？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-010", "category": "H_oos", "question": "乗務員の勤務時間データ", "expected_tool": null, "expected_args": {}}
+{"id": "alias-001", "category": "I_alias", "question": "A1の遅延を教えて", "expected_tool": "route_stats", "expected_args": {"route": "1021"}}
+{"id": "alias-002", "category": "I_alias", "question": "L21の運行情報", "expected_tool": "route_meta", "expected_args": {"route": "12211"}}
+{"id": "alias-003", "category": "I_alias", "question": "B1系統について", "expected_tool": "route_stats", "expected_args": {"route": "3021"}}
+{"id": "alias-004", "category": "I_alias", "question": "中央大橋線の傾向を見せて", "expected_tool": "time_series", "expected_args": {}}
+{"id": "alias-005", "category": "I_alias", "question": "1番系統のp90はどう？", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-006", "category": "I_alias", "question": "国道線のサンプル数を教えて", "expected_tool": "describe_data", "expected_args": {"kind": "sample_counts"}}
+{"id": "alias-007", "category": "I_alias", "question": "バスNo.9999の状態", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-008", "category": "I_alias", "question": "系統5を見せて", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-009", "category": "I_alias", "question": "古川線の遅延を見たい", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-010", "category": "I_alias", "question": "22171はどう？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "alias-011", "category": "I_alias", "question": "16071のメタ情報をください", "expected_tool": "route_meta", "expected_args": {"route": "16071"}}
+{"id": "alias-012", "category": "I_alias", "question": "おおまち線について", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-013", "category": "I_alias", "question": "中心部循環の遅延", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-014", "category": "I_alias", "question": "雨天系統の遅延", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "alias-015", "category": "I_alias", "question": "東部線の運行情報", "expected_tool": "route_meta", "expected_args": {}}
+{"id": "compound-001", "category": "J_compound", "question": "平日朝のワースト3を土日と比較して", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay", "n": 3}}
+{"id": "compound-002", "category": "J_compound", "question": "ワースト10をCSVでダウンロードしたい", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay", "n": 10}}
+{"id": "compound-003", "category": "J_compound", "question": "上位5が全体の何%を占めてる？", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay", "n": 5}}
+{"id": "compound-004", "category": "J_compound", "question": "悪化系統と改善系統を同時に出して", "expected_tool": "top_n", "expected_args": {"metric": "avg_delay"}}
+{"id": "compound-005", "category": "J_compound", "question": "22171の傾向と他社平均を比べて", "expected_tool": "time_series", "expected_args": {"route": "22171"}}
+{"id": "def-001", "category": "K_definition", "question": "定時率の定義って何？", "expected_tool": null, "expected_args": {}}
+{"id": "def-002", "category": "K_definition", "question": "ISODOWって何ですか？", "expected_tool": null, "expected_args": {}}
+{"id": "def-003", "category": "K_definition", "question": "5分以内の基準は出発時刻と到着時刻どっち？", "expected_tool": null, "expected_args": {}}
+{"id": "def-004", "category": "K_definition", "question": "パーセンタイルって何のこと？", "expected_tool": null, "expected_args": {}}
+{"id": "def-005", "category": "K_definition", "question": "avg_delayの単位は分？秒？", "expected_tool": "describe_data", "expected_args": {"kind": "metrics"}}
+{"id": "def-006", "category": "K_definition", "question": "サービスタイプとは", "expected_tool": null, "expected_args": {}}
+{"id": "neg-001", "category": "L_negation", "question": "観光バスを除外した平均を出して", "expected_tool": null, "expected_args": {}}
+{"id": "neg-002", "category": "L_negation", "question": "もし朝ラッシュがなかったらどうなる？", "expected_tool": null, "expected_args": {}}
+{"id": "neg-003", "category": "L_negation", "question": "雨の日を除いた遅延の平均は？", "expected_tool": null, "expected_args": {}}
+{"id": "neg-004", "category": "L_negation", "question": "土日を抜いた数字でお願い", "expected_tool": null, "expected_args": {}}
+{"id": "neg-005", "category": "L_negation", "question": "22171を除いた残り全部のワースト", "expected_tool": null, "expected_args": {}}
+{"id": "num-001", "category": "M_numerical", "question": "全部足すと観測件数いくつ？", "expected_tool": null, "expected_args": {}}
+{"id": "num-002", "category": "M_numerical", "question": "上位5の遅延合計は？", "expected_tool": null, "expected_args": {}}
+{"id": "num-003", "category": "M_numerical", "question": "平均と中央値の差はどれくらい？", "expected_tool": null, "expected_args": {}}
+{"id": "num-004", "category": "M_numerical", "question": "ワースト10とベスト10の差を計算して", "expected_tool": null, "expected_args": {}}
+{"id": "followup-001", "category": "N_followup", "question": "もっと詳しく教えて", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "followup-002", "category": "N_followup", "question": "じゃあ別の系統で同じこと", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "followup-003", "category": "N_followup", "question": "それをグラフにして", "expected_tool": null, "expected_args": {}}
+{"id": "followup-004", "category": "N_followup", "question": "前のと逆順で並べて", "expected_tool": null, "expected_args": {}}
+{"id": "followup-005", "category": "N_followup", "question": "さっきの続きを", "expected_tool": "capabilities", "expected_args": {}}
+{"id": "external-001", "category": "O_external", "question": "全国平均と比べてどうなの？", "expected_tool": null, "expected_args": {}}
+{"id": "external-002", "category": "O_external", "question": "同規模都市と比較できる？", "expected_tool": null, "expected_args": {}}
+{"id": "external-003", "category": "O_external", "question": "東京都営バスと比べて遅れてる？", "expected_tool": null, "expected_args": {}}
+{"id": "external-004", "category": "O_external", "question": "他県のバスと比較してみたい", "expected_tool": null, "expected_args": {}}
+{"id": "agency-001", "category": "P_agency", "question": "青森と広島どっちが遅れる？", "expected_tool": null, "expected_args": {}}
+{"id": "agency-002", "category": "P_agency", "question": "広島電鉄のデータも見られる？", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
+{"id": "agency-003", "category": "P_agency", "question": "今このシステムに何社入ってるの？", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
+{"id": "agency-004", "category": "P_agency", "question": "広島バスと広島電鉄の違いを教えて", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
