@@ -113,7 +113,7 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="ranking-worst",
-        pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP).*?(\d+)?"),
+        pattern=re.compile(r"(遅延|遅れ).*?(ワースト|TOP)\s*(\d+)?"),
         tool="top_n",
         args={"metric": "avg_delay", "n": 10},
     ),
@@ -145,11 +145,20 @@ def _match_rules(question: str) -> RouterDecision | None:
         return None
     text = question.strip()
     for rule in _RULES:
-        if rule.pattern.search(text):
+        m = rule.pattern.search(text)
+        if m:
+            args = dict(rule.args)
+            # Honor a captured count: if the rule carries an "n" arg and the
+            # match captured an all-digit group, override the hardcoded n.
+            if "n" in args:
+                for g in m.groups():
+                    if g is not None and g.isdigit():
+                        args["n"] = int(g)
+                        break
             return RouterDecision(
                 stage="rules",
                 tool=rule.tool,
-                args=dict(rule.args),
+                args=args,
                 score=1.0,
                 matched_pattern=rule.name,
             )
