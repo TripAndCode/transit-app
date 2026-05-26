@@ -169,6 +169,19 @@ async def test_describe_data_sample_counts(conn_with_observations):
 
 
 @pytest.mark.asyncio
+async def test_sample_counts_ascending(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "sample_counts", "order": "asc", "limit": 5}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    # ascending → smallest sample count first
+    counts = [row[1] for row in result.rows]
+    assert counts == sorted(counts)
+
+
+@pytest.mark.asyncio
 async def test_describe_data_overview(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
