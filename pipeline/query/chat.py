@@ -95,6 +95,7 @@ async def chat_with_tools(
     agency_id: int,
     model: str | None = None,
     locale: str = "ja",
+    rag_examples: list | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -126,6 +127,19 @@ async def chat_with_tools(
         question=question,
     )
 
+    # Few-shot block: when the upstream router supplied nearest-neighbour
+    # examples from the golden-set RAG index, append them to the system
+    # prompt so the model can pattern-match similar questions onto the
+    # right tool + arg shape. Kept off the static SYSTEM_PROMPT because
+    # the block is per-request and varies with retrieval.
+    system_prompt = SYSTEM_PROMPT
+    if rag_examples:
+        lines = ["\n", "== 類似質問の例 (参考) =="]
+        for m in rag_examples:
+            args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
+            lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
+        system_prompt = system_prompt + "\n" + "\n".join(lines)
+
     def _sync():
         # The adapter handles per-provider retries, rate-limit fallback,
         # and logging internally; on total failure (or zero configured
@@ -133,7 +147,7 @@ async def chat_with_tools(
         # "service_unreachable" message below.
         return client.chat_completions(
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "system", "content": locale_addendum},
                 {"role": "user", "content": user_prelude},
             ],
