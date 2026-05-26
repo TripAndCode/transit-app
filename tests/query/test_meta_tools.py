@@ -83,9 +83,7 @@ async def test_describe_data_routes_empty_agency_message(conn_with_seed):
     # Use an agency_id with no routes
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "routes"}, _ctx(), conn, agency_id + 99999, locale="ja"
-        )
+        result = await describe_data({"kind": "routes"}, _ctx(), conn, agency_id + 99999, locale="ja")
     assert result.kind in ("empty", "table")
     assert "0 路線" not in result.summary  # no awkward "0 路線あります"
 
