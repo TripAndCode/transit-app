@@ -7,6 +7,7 @@ at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
 """
 
+import logging
 import os
 import os.path
 from contextlib import asynccontextmanager
@@ -36,6 +37,8 @@ from api.routers.me import router as me_router
 from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
+
+_log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -102,6 +105,16 @@ async def lifespan(app: FastAPI):
             f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
         )
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection)
+
+    # Phase 2: warm the embedding model so first request doesn't pay the
+    # load cost. Non-fatal: if the model can't load, the router will fall
+    # through to the LLM path (Phase 1 behavior).
+    from pipeline.query.embeddings import get_embedder
+
+    embedder = get_embedder()
+    if not embedder.available:
+        _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+
     yield
     await app.state.pool.close()
 
