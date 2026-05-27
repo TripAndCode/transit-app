@@ -158,6 +158,22 @@ def _validate_rules() -> None:
 _validate_rules()
 
 
+_FOLLOW_UP_RE = re.compile(
+    r"(もっと|もう少し|続き|つづき|次の|前の|さっき|同じ(条件|系統|の)|"
+    r"逆順|並べ替え|並び替え|別の|詳しく|more|next|again|continue|previous|same)"
+)
+
+
+def is_follow_up(question: str) -> bool:
+    """True when a question only makes sense against the previous turn.
+
+    Stateless Stages 1-2 cannot resolve these (a bare "もっと" has no
+    standalone tool mapping), so the API routes them straight to the LLM
+    stage with conversation history attached.
+    """
+    return bool(_FOLLOW_UP_RE.search((question or "").strip()))
+
+
 def _match_rules(question: str) -> RouterDecision | None:
     """Return the first matching rule's decision, or ``None``."""
     if not question:
