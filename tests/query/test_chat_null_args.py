@@ -210,3 +210,46 @@ async def test_chat_returns_success_flag(monkeypatch):
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
     out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1)
     assert out["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_rate_limited(monkeypatch):
+    """Quota exhaustion (429) shows the steer-to-free-questions message, not the generic one."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        last_error_kind = "rate_limit"
+
+        def chat_completions(self, **k):
+            return None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert "上限" in out["answer"]
+    assert out["answer"] != chat._chat_str("service_unreachable", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_connection(monkeypatch):
+    """A transient/connection exhaustion keeps the existing generic message."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        last_error_kind = "connection"
+
+        def chat_completions(self, **k):
+            return None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert out["answer"] == chat._chat_str("service_unreachable", "ja")
