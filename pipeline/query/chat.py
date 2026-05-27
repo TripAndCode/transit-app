@@ -63,8 +63,12 @@ _CHAT_STRINGS = {
     ("user_prelude", "en"): "Range: {from_date} to {to_date} DOW={dow} time_band={time_band}\nQuestion: {question}",
     ("service_unreachable", "ja"): "AI サービスに接続できませんでした。後ほど再試行してください。",
     ("service_unreachable", "en"): "Could not reach the AI service. Please retry later.",
-    ("llm_rate_limited", "ja"): "本日のAIの利用が上限に達しました。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。",
-    ("llm_rate_limited", "en"): "Today's AI usage limit is reached. Questions like route lists, delay rankings, and stop counts still work.",
+    ("llm_rate_limited", "ja"): (
+        "本日のAIの利用が上限に達しました。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。"
+    ),
+    ("llm_rate_limited", "en"): (
+        "Today's AI usage limit is reached. Questions like route lists, delay rankings, and stop counts still work."
+    ),
     ("llm_unconfigured", "ja"): "AIプロバイダーが設定されていません。",
     ("llm_unconfigured", "en"): "No AI provider is configured.",
     ("refusal_fallback", "ja"): "ご質問の内容を理解できませんでした。",
