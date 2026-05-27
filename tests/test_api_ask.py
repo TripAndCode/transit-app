@@ -45,7 +45,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
 
-    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja"):
+    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None):
         return {
             "answer": "テスト回答",
             "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
@@ -109,3 +109,60 @@ async def test_ask_rejects_cross_origin(ask_client, monkeypatch):
         headers={"Origin": "https://evil.example.com"},
     )
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text[:200]}"
+
+
+@pytest.mark.asyncio
+async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
+    """A rule-match question should dispatch directly without calling chat_with_tools."""
+    client, agency_id = ask_client
+
+    async def must_not_be_called(*a, **kw):
+        raise AssertionError("chat_with_tools should not be called on rule-hit")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", must_not_be_called)
+
+    # Seed at least one route so describe_data(kind=routes) has data.
+    import asyncpg
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
+            "VALUES ($1, '国道線(1021)', 'A1 国道線')",
+            agency_id,
+        )
+    await pool.close()
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "どんな路線がある？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_call"]["name"] == "describe_data"
+    assert data["tool_call"]["arguments"]["kind"] == "routes"
+    assert data.get("router_stage") == "rules"
+
+
+@pytest.mark.asyncio
+async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
+    """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""
+    client, agency_id = ask_client
+
+    captured = {}
+
+    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None):
+        captured["rag_examples"] = rag_examples
+        return {"answer": "stub", "tool_call": None, "result": None}
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "雨の日とそうでない日を比べたいです"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    # rag_examples is a list (possibly empty if rag_chunks is empty for this agency).
+    assert isinstance(captured["rag_examples"], list)

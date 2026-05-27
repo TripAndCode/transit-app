@@ -27,12 +27,13 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any, Literal
 
 from api.range import MAX_RANGE_DAYS, RangeCtx
 from pipeline.query.labels import dow_label
+from pipeline.query.results import ToolResult
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
@@ -47,23 +48,6 @@ from pipeline.reports import (
 )
 
 TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
-
-
-# ---------------------------------------------------------------------------
-# Result type
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ToolResult:
-    """Discriminated union (by ``kind``) returned to the API layer."""
-
-    kind: Literal["table", "series", "kv", "empty", "text"]
-    summary: str
-    rows: list = field(default_factory=list)
-    columns: list[str] = field(default_factory=list)
-    series: list = field(default_factory=list)
-    pairs: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

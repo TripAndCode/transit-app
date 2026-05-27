@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from api.range import RangeCtx
-from pipeline.query.tools import ToolResult
+from pipeline.query.results import ToolResult
 
 VALID_KINDS = (
     "routes",
@@ -66,17 +66,66 @@ async def describe_data(
         )
 
     if kind == "routes":
+        substring = args.get("filter_substring")
+        if substring:
+            rows = await conn.fetch(
+                "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
+                "       route_short_name "
+                "FROM static_routes "
+                "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
+                "ORDER BY route_short_name "
+                "LIMIT $3",
+                agency_id,
+                substring,
+                limit,
+            )
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%'",
+                agency_id,
+                substring,
+            )
+            # A non-empty filter that matches nothing must NOT fall through to
+            # a full dump (the original bug) nor claim "0件表示" beside a high
+            # unfiltered total. Return an unambiguous empty result instead.
+            if total == 0:
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary(
+                        f"「{substring}」に該当する路線がありません。",
+                        f"no matching routes for '{substring}'.",
+                        locale,
+                    ),
+                )
+            return ToolResult(
+                kind="table",
+                summary=_summary(
+                    f"「{substring}」に一致する路線: {total} 件（先頭 {len(rows)} 件を表示）",
+                    f"routes matching '{substring}': {total} (showing first {len(rows)})",
+                    locale,
+                ),
+                rows=[[r["code"], r["route_short_name"]] for r in rows],
+                columns=["route_code", "route_short_name"],
+            )
         rows = await conn.fetch(
             "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS code, "
             "       route_short_name "
             "FROM static_routes "
             "WHERE agency_id = $1 "
-            "ORDER BY route_id "
+            "ORDER BY route_short_name "
             "LIMIT $2",
             agency_id,
             limit,
         )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
+        if total == 0:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "このエージェンシーには路線が登録されていません。",
+                    "no routes registered for this agency.",
+                    locale,
+                ),
+            )
         return ToolResult(
             kind="table",
             summary=_summary(
@@ -94,18 +143,27 @@ async def describe_data(
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
                 "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
-                "ORDER BY stop_id LIMIT $3",
+                "ORDER BY stop_name LIMIT $3",
                 agency_id,
                 substring,
                 limit,
             )
         else:
             rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_id LIMIT $2",
+                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_name LIMIT $2",
                 agency_id,
                 limit,
             )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
+        if total == 0:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "このエージェンシーには停留所が登録されていません。",
+                    "no stops registered for this agency.",
+                    locale,
+                ),
+            )
         return ToolResult(
             kind="table",
             summary=_summary(
@@ -172,26 +230,55 @@ async def describe_data(
         )
 
     if kind == "sample_counts":
+        # "サンプルが少ない系統" wants the least-sampled routes, so allow an
+        # ascending order. Validate against an allowlist — never interpolate
+        # raw LLM input into the ORDER BY clause.
+        order = str(args.get("order", "desc")).lower()
+        if order not in ("desc", "asc"):
+            order = "desc"
+        direction = "ASC" if order == "asc" else "DESC"
         rows = await conn.fetch(
             "SELECT route_code, COUNT(*) AS samples "
             "FROM updates "
             "WHERE agency_id = $1 "
             "  AND captured_at::date BETWEEN $2 AND $3 "
             "GROUP BY route_code "
-            "ORDER BY samples DESC "
+            f"ORDER BY samples {direction} "
             "LIMIT $4",
             agency_id,
             ctx.from_date,
             ctx.to_date,
             limit,
         )
+        if not rows:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    f"選択期間 ({ctx.from_date}〜{ctx.to_date}) にサンプルデータがありません。",
+                    f"no sample data in the selected window ({ctx.from_date} – {ctx.to_date}).",
+                    locale,
+                ),
+            )
+        # Clamp the DISPLAYED window so the summary never claims coverage past
+        # where data actually exists. The BETWEEN above is unchanged; we only
+        # adjust the text. MAX(captured_at) is over the requested window so a
+        # NULL means no data fell in range.
+        data_end = await conn.fetchval(
+            "SELECT MAX(captured_at)::date FROM updates WHERE agency_id = $1 AND captured_at::date BETWEEN $2 AND $3",
+            agency_id,
+            ctx.from_date,
+            ctx.to_date,
+        )
+        window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
+        if order == "asc":
+            jp = f"サンプル数の少ない順 {len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
+        else:
+            jp = f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            en = f"sample count top-{len(rows)} ({ctx.from_date} – {window_end})"
         return ToolResult(
             kind="table",
-            summary=_summary(
-                f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{ctx.to_date})",
-                f"sample count top-{len(rows)} ({ctx.from_date} – {ctx.to_date})",
-                locale,
-            ),
+            summary=_summary(jp, en, locale),
             rows=[[r["route_code"], int(r["samples"])] for r in rows],
             columns=["route_code", "samples"],
         )
@@ -320,6 +407,15 @@ META_TOOLS: list[dict] = [
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                     "filter_substring": {"type": "string"},
+                    "order": {
+                        "type": "string",
+                        "enum": ["desc", "asc"],
+                        "description": (
+                            "Only honored when kind='sample_counts'. Default 'desc' → "
+                            "most-sampled routes first. Use 'asc' for the LEAST-sampled "
+                            "routes (e.g. 「サンプル数の少ない系統」/「データが薄い系統」)."
+                        ),
+                    },
                     "cross_agency": {
                         "type": "boolean",
                         "description": (
