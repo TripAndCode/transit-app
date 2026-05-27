@@ -268,9 +268,7 @@ def cmd_prune_query_log(args):
 
     async def run():
         conn = await asyncpg.connect(DATABASE_URL)
-        result = await conn.execute(
-            f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'"
-        )
+        result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
         print(f"prune_query_log: {result}")
         await conn.close()
 

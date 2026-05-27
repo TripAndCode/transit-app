@@ -1,6 +1,6 @@
-import asyncpg
 import os
 
+import asyncpg
 import pytest
 
 from pipeline.query.query_log import log_query

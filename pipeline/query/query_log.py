@@ -18,8 +18,7 @@ async def log_query(conn, agency_id: int, question: str, router_stage: str, tool
     """Insert one anonymized query-log row. Swallows all errors."""
     try:
         await conn.execute(
-            "INSERT INTO ask_query_log (agency_id, question, router_stage, tool, success) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO ask_query_log (agency_id, question, router_stage, tool, success) VALUES ($1, $2, $3, $4, $5)",
             agency_id,
             (question or "")[:_MAX_QUESTION_CHARS],
             router_stage,
