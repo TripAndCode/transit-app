@@ -160,10 +160,20 @@ class LLMClient:
     ) -> Any | None:
         """Return the first non-erroring provider's message, or None.
 
-        On rate-limit (429) or connection error, walks down the provider
-        ladder. The returned object is the OpenAI-compatible
+        Per provider: retries ONCE on a transient connection/timeout error
+        (no backoff — a refused socket retries instantly), descends the
+        ladder on rate-limit (429) without retrying, and on a Groq
+        ``tool_use_failed`` 400 salvages the call via ``_recover_tool_call``
+        instead of failing over. When every provider is exhausted, returns
+        None and sets ``self.last_error_kind`` (rate_limit / connection /
+        bad_request / unexpected / no_providers) so the caller can pick an
+        honest user-facing message. The returned object is the OpenAI
         ``response.choices[0].message`` — pre-extracted so callers stay
         provider-agnostic.
+
+        Note: an immediate retry on ``APITimeoutError`` could double-dispatch
+        if the first request is still in-flight server-side; acceptable here
+        because Stage-3 calls are temperature-0 and idempotent.
         """
         from openai import (
             APIConnectionError,
@@ -179,7 +189,7 @@ class LLMClient:
             _log.error("CHAT_PROVIDERS resolves to zero usable providers")
             return None
 
-        last_kind: str | None = None
+        last_kind: str | None = None  # accumulator; copied to self.last_error_kind only on exhaustion
         for cfg in self._providers:
             for attempt in (1, 2):
                 try:
