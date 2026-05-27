@@ -40,7 +40,7 @@ class _FakeClient:
 
     ``chat_with_tools`` calls ``client.chat_completions(...)`` on whatever
     ``_get_client()`` returns; this fake skips the provider ladder and
-    returns a canned message directly.
+    returns ``(message, None)`` matching the real adapter's tuple contract.
     """
 
     def __init__(self, arguments: str, tool_name: str = "capabilities"):
@@ -48,7 +48,7 @@ class _FakeClient:
         self._tool_name = tool_name
 
     def chat_completions(self, **kwargs):  # noqa: D401 — adapter shape
-        return _fake_message(self._arguments, self._tool_name)
+        return _fake_message(self._arguments, self._tool_name), None
 
 
 def _ctx() -> RangeCtx:
@@ -115,7 +115,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
             captured["messages"] = messages
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
 
@@ -150,7 +150,7 @@ async def test_history_injected_into_prompt(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
             captured["messages"] = messages
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -179,7 +179,7 @@ async def test_empty_history_matches_no_history(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, **k):
             seen.append([m["content"] for m in messages])
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -201,7 +201,7 @@ async def test_chat_returns_success_flag(monkeypatch):
     # Service unreachable (client returns None) → success False
     class _DownClient:
         def chat_completions(self, **k):
-            return None
+            return None, "connection"
 
     monkeypatch.setattr(chat, "_get_client", lambda: _DownClient())
 
@@ -218,10 +218,8 @@ async def test_degradation_message_rate_limited(monkeypatch):
     from pipeline.query import chat
 
     class _FakeClient:
-        last_error_kind = "rate_limit"
-
         def chat_completions(self, **k):
-            return None
+            return None, "rate_limit"
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -240,10 +238,8 @@ async def test_degradation_message_connection(monkeypatch):
     from pipeline.query import chat
 
     class _FakeClient:
-        last_error_kind = "connection"
-
         def chat_completions(self, **k):
-            return None
+            return None, "connection"
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -261,10 +257,8 @@ async def test_degradation_message_no_providers(monkeypatch):
     from pipeline.query import chat
 
     class _FakeClient:
-        last_error_kind = "no_providers"
-
         def chat_completions(self, **k):
-            return None
+            return None, "no_providers"
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
