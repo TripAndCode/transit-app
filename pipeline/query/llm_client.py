@@ -90,13 +90,17 @@ def _load_providers() -> list[ProviderConfig]:
     return cfgs
 
 
+# The ``(\{.*\})`` group is intentionally greedy so it spans nested objects in
+# a single attempted call. Groq's ``failed_generation`` documents one call, so
+# the greedy match is correct; the ``json.loads`` guard below is the safety net
+# that rejects any mis-capture — do not remove it.
 _FAILED_FN_RE = re.compile(
     r"<function=([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(\{.*\})\s*\)\s*</function>",
     re.DOTALL,
 )
 
 
-def _recover_tool_call(exc) -> object | None:
+def _recover_tool_call(exc: Exception) -> SimpleNamespace | None:
     """Salvage a malformed tool call from a Groq ``tool_use_failed`` 400.
 
     Groq returns the model's attempted call in ``error.failed_generation``,
