@@ -30,6 +30,22 @@ type Msg =
       ctx: AskCtxLite;
     };
 
+type HistTurn = { question: string; tool?: string | null; args?: Record<string, unknown> | null };
+
+function buildHistory(msgs: Msg[]): HistTurn[] {
+  const turns: HistTurn[] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    // a user message followed by an assistant message = one turn
+    if (m.role === "user") {
+      const next = msgs[i + 1];
+      const tc = next && next.role === "assistant" ? next.tool_call : null;
+      turns.push({ question: m.text, tool: tc?.name ?? null, args: tc?.arguments ?? null });
+    }
+  }
+  return turns.slice(-3);
+}
+
 export function AskTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
@@ -58,7 +74,8 @@ export function AskTab() {
   async function ask_(question: string) {
     if (ask.isPending) return;
     try {
-      const r = await ask.mutateAsync({ question, ctx });
+      const history = buildHistory(msgs);
+      const r = await ask.mutateAsync({ question, ctx, history });
       setMsgs((m) => [
         ...m,
         {

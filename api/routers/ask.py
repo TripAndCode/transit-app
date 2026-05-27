@@ -21,7 +21,8 @@ from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
 from pipeline.query.chat import chat_with_tools
-from pipeline.query.router import route_or_examples
+from pipeline.query.query_log import log_query
+from pipeline.query.router import is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
@@ -40,10 +41,17 @@ class AskCtx(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class Turn(BaseModel):
+    question: str
+    tool: str | None = None
+    args: dict | None = None
+
+
 class AskRequest(BaseModel):
     question: str
     model: str | None = None
     ctx: AskCtx | None = None
+    history: list[Turn] = []
 
 
 class AskResponse(BaseModel):
@@ -101,7 +109,6 @@ async def ask(
     csrf_guard(request)
     ctx = _resolve_ctx(body.ctx)
 
-    router_enabled = _os.environ.get("ASK_ROUTER_ENABLED", "true").lower() != "false"
     ctx_dict = {
         "from": ctx.from_date.isoformat(),
         "to": ctx.to_date.isoformat(),
@@ -111,12 +118,43 @@ async def ask(
         "routes": list(ctx.routes),
     }
 
+    history_enabled = _os.environ.get("ASK_HISTORY_ENABLED", "true").lower() != "false"
+    log_enabled = _os.environ.get("ASK_QUERY_LOG_ENABLED", "true").lower() != "false"
+    router_enabled = _os.environ.get("ASK_ROUTER_ENABLED", "true").lower() != "false"
+
+    # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
+    # they skip the stateless router and go straight to the LLM with the
+    # last few turns attached. History is capped at 3 turns.
+    history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
+    follow_up = history_enabled and bool(history) and is_follow_up(body.question)
+
+    # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
+    # continue: short-circuit to a gentle prompt. Otherwise the question
+    # falls to the open LLM with no examples, which hallucinates a page the
+    # user never asked for (e.g. describe_data(routes, offset=100)).
+    if history_enabled and not history and is_follow_up(body.question):
+        msg = (
+            "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+            if locale != "en"
+            else "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+        )
+        resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
+        if log_enabled:
+            await log_query(conn, agency_id, body.question, "no_history", None, False)
+        return resp
+
     # Single embed+search: dispatch decision and few-shot examples share
     # one embedding so the fall-through path doesn't re-embed the question.
-    decision, examples = await route_or_examples(body.question, conn, agency_id, k=3) if router_enabled else (None, [])
+    decision, examples = (None, [])
+    if router_enabled and not follow_up:
+        decision, examples = await route_or_examples(body.question, conn, agency_id, k=3)
+
     if decision is not None:
         result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
-        return AskResponse(
+        stage = decision.stage
+        tool_name = decision.tool
+        success = result.kind != "empty"
+        resp = AskResponse(
             answer=render_tool_result(result, locale=locale),
             tool_call={"name": decision.tool, "arguments": decision.args},
             result={
@@ -128,22 +166,31 @@ async def ask(
                 "pairs": result.pairs,
             },
             ctx=ctx_dict,
-            router_stage=decision.stage,
+            router_stage=stage,
+        )
+    else:
+        payload = await chat_with_tools(
+            body.question,
+            ctx,
+            conn,
+            agency_id,
+            model=body.model,
+            locale=locale,
+            rag_examples=examples,
+            history=history,
+        )
+        stage = "llm"
+        tool_name = (payload.get("tool_call") or {}).get("name")
+        success = payload["success"]
+        resp = AskResponse(
+            answer=payload["answer"],
+            tool_call=payload["tool_call"],
+            result=payload["result"],
+            ctx=ctx_dict,
+            router_stage=stage,
         )
 
-    payload = await chat_with_tools(
-        body.question,
-        ctx,
-        conn,
-        agency_id,
-        model=body.model,
-        locale=locale,
-        rag_examples=examples,
-    )
-    return AskResponse(
-        answer=payload["answer"],
-        tool_call=payload["tool_call"],
-        result=payload["result"],
-        ctx=ctx_dict,
-        router_stage="llm",
-    )
+    if log_enabled:
+        await log_query(conn, agency_id, body.question, stage, tool_name, success)
+
+    return resp

@@ -158,6 +158,40 @@ def _validate_rules() -> None:
 _validate_rules()
 
 
+# Phrasings that only make sense against the previous turn (pagination,
+# re-sort, "show me more"). Tightened to avoid two classes of false
+# positives that forced needless/failing LLM calls:
+#   * もっと must not swallow もっとも ("most" — a superlative, not "more").
+#   * 次の/前の must not catch literal "next/previous stop" data questions.
+#     They only count as follow-ups before continuation/pagination words.
+#   * bare English words must be whole words (\b), so they don't fire inside
+#     content words like "same-day" or "next stop".
+_FOLLOW_UP_RE = re.compile(
+    r"もっと(?!も)"  # もっと but NOT もっとも (superlative "most")
+    r"|もう少し|続き|つづき|さらに|残り|他には|さっき"
+    r"|次の(?:\d+件|\d*ページ|やつ|分(?!.*停留所)|ぶん)|次のページ|\d+ページ目"  # 次の<page-ish>, not 次の停留所
+    r"|前の(?:\d+件|やつ|結果|に戻)"  # 前の<continuation>, not 前の停留所
+    r"|同じ(?:条件|系統|の)"
+    r"|逆順|逆に|昇順|降順|並べ替え|並び替え|絞り込"
+    r"|別の(?!府)"  # 別の but NOT 別府 (place name)
+    r"|それを|そのまま"
+    # English follow-ups only when trailing (whole-word, end of query) — so
+    # "next"/"more" count but content words like "same-day comparison" or
+    # "next stop information" do not (favors false-negatives, which are safe).
+    r"|\b(?:more|next|again|continue|previous|same|reverse)\b\s*[.!?]?\s*$"
+)
+
+
+def is_follow_up(question: str) -> bool:
+    """True when a question only makes sense against the previous turn.
+
+    Stateless Stages 1-2 cannot resolve these (a bare "もっと" has no
+    standalone tool mapping), so the API routes them straight to the LLM
+    stage with conversation history attached.
+    """
+    return bool(_FOLLOW_UP_RE.search((question or "").strip()))
+
+
 def _match_rules(question: str) -> RouterDecision | None:
     """Return the first matching rule's decision, or ``None``."""
     if not question:

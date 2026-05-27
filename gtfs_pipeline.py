@@ -258,6 +258,23 @@ def cmd_build_rag_index(args):
     asyncio.run(run())
 
 
+def cmd_prune_query_log(args):
+    """Delete ask_query_log rows older than the retention window (default 90 days)."""
+    import asyncio
+
+    import asyncpg
+
+    days = int(args.days)
+
+    async def run():
+        conn = await asyncpg.connect(DATABASE_URL)
+        result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
+        print(f"prune_query_log: {result}")
+        await conn.close()
+
+    asyncio.run(run())
+
+
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
@@ -304,6 +321,9 @@ def main():
     p_rag.add_argument("--agency-id", type=int, default=None)
     p_rag.add_argument("--all-agencies", action="store_true")
 
+    p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
+    p_prune.add_argument("--days", type=int, default=90)
+
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
@@ -323,6 +343,8 @@ def main():
         cmd_migrate(args)
     elif args.command == "build_rag_index":
         cmd_build_rag_index(args)
+    elif args.command == "prune_query_log":
+        cmd_prune_query_log(args)
     else:
         parser.print_help()
 

@@ -124,7 +124,11 @@ export function useTodayRouteSummary(
 export function useAsk(agencyId: number | null) {
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: (vars: { question: string; ctx: RangeCtx }) => {
+    mutationFn: (vars: {
+      question: string;
+      ctx: RangeCtx;
+      history?: { question: string; tool?: string | null; args?: Record<string, unknown> | null }[];
+    }) => {
       if (agencyId == null) {
         return Promise.reject(new Error(t("ask.error_agency_not_selected")));
       }
@@ -138,6 +142,7 @@ export function useAsk(agencyId: number | null) {
           service: vars.ctx.service,
           routes: vars.ctx.routes,
         },
+        history: vars.history ?? [],
       });
     },
   });

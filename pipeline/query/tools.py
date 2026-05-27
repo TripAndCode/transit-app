@@ -341,6 +341,8 @@ SYSTEM_PROMPT = """\
 6. **ツールに合わない質問・データ可用性の質問** → まず `describe_data`
    (データ範囲・路線・停留所など) または `capabilities`(答えられる質問の例) を呼ぶ。
    自然文での拒否は本当にデータ範囲外(天気・運賃・事故など) の場合のみ。
+7. **リスト表示の後に「もっと」「次の50件」などと聞かれたら、同じツールを `offset` を
+   `limit` 分増やして再呼び出しする（例: 停留所一覧の続き → describe_data(kind=stops, offset=50)）。
 
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 系統の遅延統計

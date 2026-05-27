@@ -45,7 +45,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
 
-    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None):
+    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None):
         return {
             "answer": "テスト回答",
             "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
@@ -57,6 +57,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
                 "series": [],
                 "pairs": [],
             },
+            "success": True,
         }
 
     # Patch the symbol in the module that imports it (api.routers.ask)
@@ -152,9 +153,9 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
 
     captured = {}
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None):
+    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
         captured["rag_examples"] = rag_examples
-        return {"answer": "stub", "tool_call": None, "result": None}
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
 
@@ -166,3 +167,96 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
     assert resp.status_code == 200
     # rag_examples is a list (possibly empty if rag_chunks is empty for this agency).
     assert isinstance(captured["rag_examples"], list)
+
+
+@pytest.mark.asyncio
+async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
+    """A follow-up question skips the router and reaches chat_with_tools with history."""
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+        captured["history"] = history
+        return {
+            "answer": "stub",
+            "tool_call": {"name": "describe_data", "arguments": {"kind": "stops", "offset": 50}},
+            "result": None,
+            "success": True,
+        }
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for follow-ups")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "次の50件",
+            "history": [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["history"] and captured["history"][0]["question"] == "停留所はいくつ？"
+    assert resp.json().get("router_stage") == "llm"
+
+
+@pytest.mark.asyncio
+async def test_followup_without_history_does_not_hallucinate(ask_client, monkeypatch):
+    """A follow-up phrasing with no history returns a gentle prompt, not an LLM-invented page."""
+    client, agency_id = ask_client
+
+    async def boom_chat(*a, **k):
+        raise AssertionError("chat_with_tools must NOT be called for a no-history follow-up")
+
+    async def boom_router(*a, **k):
+        raise AssertionError("router must NOT be called for a no-history follow-up")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", boom_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom_router)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "もっと見せて"},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("router_stage") == "no_history"
+    assert data["tool_call"] is None
+
+
+@pytest.mark.asyncio
+async def test_ask_writes_query_log_row(ask_client, monkeypatch):
+    client, agency_id = ask_client
+
+    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+        return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "なにか珍しい質問XYZ"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+
+    import asyncpg
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT question, router_stage FROM ask_query_log WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
+            agency_id,
+        )
+    await pool.close()
+    assert row is not None
+    assert row["question"] == "なにか珍しい質問XYZ"
+    assert row["router_stage"] == "llm"
