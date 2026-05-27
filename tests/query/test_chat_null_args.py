@@ -40,7 +40,7 @@ class _FakeClient:
 
     ``chat_with_tools`` calls ``client.chat_completions(...)`` on whatever
     ``_get_client()`` returns; this fake skips the provider ladder and
-    returns a canned message directly.
+    returns ``(message, None)`` matching the real adapter's tuple contract.
     """
 
     def __init__(self, arguments: str, tool_name: str = "capabilities"):
@@ -48,7 +48,7 @@ class _FakeClient:
         self._tool_name = tool_name
 
     def chat_completions(self, **kwargs):  # noqa: D401 — adapter shape
-        return _fake_message(self._arguments, self._tool_name)
+        return _fake_message(self._arguments, self._tool_name), None
 
 
 def _ctx() -> RangeCtx:
@@ -115,7 +115,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
             captured["messages"] = messages
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
 
@@ -150,7 +150,7 @@ async def test_history_injected_into_prompt(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
             captured["messages"] = messages
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -179,7 +179,7 @@ async def test_empty_history_matches_no_history(monkeypatch):
     class _FakeClient:
         def chat_completions(self, *, messages, **k):
             seen.append([m["content"] for m in messages])
-            return SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(content="ok", tool_calls=None), None
 
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
 
@@ -201,7 +201,7 @@ async def test_chat_returns_success_flag(monkeypatch):
     # Service unreachable (client returns None) → success False
     class _DownClient:
         def chat_completions(self, **k):
-            return None
+            return None, "connection"
 
     monkeypatch.setattr(chat, "_get_client", lambda: _DownClient())
 
@@ -210,3 +210,61 @@ async def test_chat_returns_success_flag(monkeypatch):
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
     out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1)
     assert out["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_rate_limited(monkeypatch):
+    """Quota exhaustion (429) shows the steer-to-free-questions message, not the generic one."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "rate_limit"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert "上限" in out["answer"]
+    assert out["answer"] != chat._chat_str("service_unreachable", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_connection(monkeypatch):
+    """A transient/connection exhaustion keeps the existing generic message."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "connection"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert out["answer"] == chat._chat_str("service_unreachable", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_no_providers(monkeypatch):
+    """Zero configured providers shows the unconfigured message."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "no_providers"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert out["answer"] == chat._chat_str("llm_unconfigured", "ja")

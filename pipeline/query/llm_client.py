@@ -15,9 +15,13 @@ Configuration is fully env-driven; see ``.env.example`` for the keys.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
+import uuid
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "cerebras": {
         "key_env": "CEREBRAS_API_KEY",
         "base_url": "https://api.cerebras.ai/v1",
-        "model": "llama-3.3-70b",
+        "model": "gpt-oss-120b",
     },
     "groq": {
         "key_env": "GROQ_API_KEY",
@@ -46,6 +50,13 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
 
 @dataclass(frozen=True)
 class ProviderConfig:
+    """Immutable configuration for one LLM provider entry in the fallback ladder.
+
+    Loaded once at startup from env-vars by :func:`_load_providers`.
+    ``is_usable`` gates whether the provider enters the ladder at all —
+    Ollama requires no API key; all others need one.
+    """
+
     name: str
     api_key: str | None
     base_url: str
@@ -53,9 +64,7 @@ class ProviderConfig:
 
     @property
     def is_usable(self) -> bool:
-        # Ollama doesn't require a key (any string works). For the others
-        # we need a real key — operators who haven't set it shouldn't have
-        # the provider in the ladder.
+        """Return True when this provider has enough config to attempt a call."""
         return bool(self.api_key) or self.name == "ollama"
 
 
@@ -86,18 +95,65 @@ def _load_providers() -> list[ProviderConfig]:
     return cfgs
 
 
+# Groq/llama leak a failed tool call in a few shapes: ``name({...})</function>``,
+# ``name>{...}</function>``, or bare ``name{...}``. Capture the function name,
+# skip any chars up to the first ``{``, then greedily grab to the last ``}`` so a
+# single call's nested objects are spanned. The ``json.loads`` guard below is the
+# safety net that rejects any mis-capture — do not remove it.
+_FAILED_FN_RE = re.compile(
+    r"<function=([A-Za-z_][A-Za-z0-9_]*)[^{}]*(\{.*\})",
+    re.DOTALL,
+)
+
+
+def _recover_tool_call(exc: Exception) -> SimpleNamespace | None:
+    """Salvage a malformed tool call from a Groq ``tool_use_failed`` 400.
+
+    Groq returns the model's attempted call in ``error.failed_generation``,
+    e.g. ``<function=top_n({"metric":"avg_delay","n":10})</function>``. Parse
+    the name + JSON args into a message object whose ``.tool_calls`` match the
+    OpenAI shape ``chat.py`` already consumes (``call.function.name`` /
+    ``call.function.arguments`` as a JSON string). Returns ``None`` if the
+    error is not a tool_use_failed or the payload can't be parsed — callers
+    must then fall through (never dispatch unparsed args).
+    """
+    body = getattr(exc, "body", None) or {}
+    err = body.get("error", {}) if isinstance(body, dict) else {}
+    if err.get("code") != "tool_use_failed":
+        return None
+    raw = err.get("failed_generation")
+    if not raw:
+        return None
+    m = _FAILED_FN_RE.search(raw)
+    if not m:
+        return None
+    name, args_json = m.group(1), m.group(2)
+    try:
+        json.loads(args_json)  # validate; keep original string form for downstream json.loads
+    except (json.JSONDecodeError, TypeError):
+        return None
+    call = SimpleNamespace(
+        id=f"recovered_{uuid.uuid4().hex[:8]}",
+        type="function",
+        function=SimpleNamespace(name=name, arguments=args_json),
+    )
+    return SimpleNamespace(content=None, tool_calls=[call])
+
+
 class LLMClient:
     """Tries each configured provider in order until one succeeds.
 
-    Use :meth:`chat_completions` exactly like
-    ``openai.OpenAI().chat.completions.create``. Returned message object
-    is the SDK's response shape.
+    :meth:`chat_completions` wraps ``openai.OpenAI().chat.completions.create``
+    and returns ``(message, error_kind)`` — the SDK message shape on success
+    (``error_kind`` None), or ``(None, kind)`` when the ladder is exhausted.
     """
 
     def __init__(self) -> None:
+        """Load providers from env at construction time."""
         self._providers = _load_providers()
 
     def providers(self) -> list[ProviderConfig]:
+        """Return a snapshot of the configured provider ladder (ordered)."""
         return list(self._providers)
 
     def chat_completions(
@@ -108,59 +164,105 @@ class LLMClient:
         tool_choice: str = "auto",
         temperature: float = 0.0,
         model_override: str | None = None,
-    ) -> Any | None:
-        """Return the first non-erroring provider's message, or None.
+    ) -> tuple[Any | None, str | None]:
+        """Attempt each provider in order and return ``(message, error_kind)``.
 
-        On rate-limit (429) or connection error, walks down the provider
-        ladder. The returned object is the OpenAI-compatible
-        ``response.choices[0].message`` — pre-extracted so callers stay
-        provider-agnostic.
+        ``message`` is the OpenAI ``response.choices[0].message`` on success,
+        or ``None`` when the ladder is fully exhausted.  ``error_kind`` is
+        ``None`` on success and one of ``"rate_limit"``, ``"connection"``,
+        ``"bad_request"``, ``"unexpected"``, or ``"no_providers"`` on failure,
+        letting the caller select an honest user-facing degradation message.
+
+        Per provider: retries ONCE on a refused/reset socket
+        (``APIConnectionError``, no backoff — it fails instantly), descends
+        the ladder immediately on a timeout (``APITimeoutError``, which already
+        waited the full deadline) and on rate-limit (429), and on a Groq
+        ``tool_use_failed`` 400 salvages the call via ``_recover_tool_call``
+        instead of failing over.
+
+        The client is built once per provider (reusing one connection pool
+        across the retry) with ``max_retries=0`` — the SDK's own retry would
+        otherwise block ~60s on a 429 before our ladder descent could fire,
+        making the fallback design illusory.
         """
         from openai import (
             APIConnectionError,
             APITimeoutError,
+            BadRequestError,
             OpenAI,
             RateLimitError,
         )
 
-        last_exc: Exception | None = None
+        if not self._providers:
+            _log.error("CHAT_PROVIDERS resolves to zero usable providers")
+            return None, "no_providers"
+
+        seen_rate_limit = False
+        last_kind: str | None = None
         for cfg in self._providers:
-            try:
-                client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
-                resp = client.chat.completions.create(
-                    model=model_override or cfg.model,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=tool_choice if tools else "none",
-                    temperature=temperature,
-                )
-                return resp.choices[0].message
-            except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
-                _log.warning(
-                    "LLM provider %s failed (%s); trying next in ladder",
-                    cfg.name,
-                    exc.__class__.__name__,
-                )
-                last_exc = exc
-                continue
-            except Exception as exc:
-                _log.warning(
-                    "LLM provider %s raised unexpected %s: %r — skipping",
-                    cfg.name,
-                    exc.__class__.__name__,
-                    exc,
-                )
-                last_exc = exc
-                continue
-        if last_exc is not None:
-            _log.error("all LLM providers exhausted; last error %s", last_exc.__class__.__name__)
-        return None
+            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
+            for attempt in (1, 2):
+                try:
+                    resp = client.chat.completions.create(
+                        model=model_override or cfg.model,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice=tool_choice if tools else "none",
+                        temperature=temperature,
+                    )
+                    return resp.choices[0].message, None
+                except APITimeoutError:
+                    # The request already waited the full timeout; retrying would
+                    # just wait it again and double tail latency. Descend instead.
+                    # (Caught before APIConnectionError — APITimeoutError subclasses it.)
+                    last_kind = "connection"
+                    _log.warning("provider %s timed out; next in ladder", cfg.name)
+                    break
+                except APIConnectionError as exc:
+                    # A refused/reset socket fails instantly, so one cheap retry
+                    # on the same provider is worthwhile before descending.
+                    last_kind = "connection"
+                    if attempt == 1:
+                        _log.info("transient %s on %s — retrying once", exc.__class__.__name__, cfg.name)
+                        continue
+                    _log.warning("provider %s connection-failed twice; next in ladder", cfg.name)
+                    break
+                except RateLimitError:
+                    seen_rate_limit = True
+                    last_kind = "rate_limit"
+                    _log.warning("provider %s rate-limited (429); next in ladder", cfg.name)
+                    break  # 429 won't clear in 1s — go to next provider
+                except BadRequestError as exc:
+                    recovered = _recover_tool_call(exc)
+                    if recovered is not None:
+                        _log.info("recovered tool_use_failed from %s via failed_generation", cfg.name)
+                        return recovered, None
+                    last_kind = "bad_request"
+                    _log.warning("provider %s BadRequestError (unrecoverable); next in ladder", cfg.name)
+                    break
+                except Exception as exc:
+                    last_kind = "unexpected"
+                    _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
+                    break
+
+        # Prefer the quota signal: if any provider was rate-limited, surface that
+        # even when a later provider failed differently — its steer-to-free-
+        # questions message is the most actionable thing we can show the user.
+        final_kind = "rate_limit" if seen_rate_limit else last_kind
+        _log.error("all LLM providers exhausted; error_kind=%s", final_kind)
+        return None, final_kind
 
 
 _singleton: LLMClient | None = None
 
 
 def get_client() -> LLMClient:
+    """Return the process-wide :class:`LLMClient` singleton.
+
+    Constructed lazily on first call so env-vars set after import are
+    picked up.  Use :func:`reset_client_for_tests` between test cases to
+    prevent provider-ladder state from leaking across tests.
+    """
     global _singleton
     if _singleton is None:
         _singleton = LLMClient()
@@ -168,5 +270,10 @@ def get_client() -> LLMClient:
 
 
 def reset_client_for_tests() -> None:
+    """Discard the singleton so the next :func:`get_client` call re-reads env.
+
+    Call this in test fixtures (``autouse=True``) that manipulate
+    ``CHAT_PROVIDERS`` or provider API-key env-vars.
+    """
     global _singleton
     _singleton = None
