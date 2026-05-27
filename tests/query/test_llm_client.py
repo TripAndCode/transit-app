@@ -326,6 +326,18 @@ def test_timeout_does_not_retry(monkeypatch):
     assert calls["n"] == 1  # NOT retried
 
 
+def test_openai_client_disables_sdk_retries(monkeypatch):
+    """We own retry/fallback; the SDK's internal retry must be off — else a 429
+    blocks ~60s before our ladder descent fires, making the fallback illusory."""
+    _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c")
+    fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.return_value = fake_response
+        llm_client.LLMClient().chat_completions(messages=[])
+    _, kwargs = mock_openai.call_args
+    assert kwargs.get("max_retries") == 0
+
+
 def test_rate_limit_preferred_over_later_connection(monkeypatch):
     """Earlier provider 429 + later provider connection-fail → surfaced kind is rate_limit."""
     from openai import APIConnectionError, RateLimitError
