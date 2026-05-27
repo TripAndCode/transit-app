@@ -144,6 +144,7 @@ class LLMClient:
 
     def __init__(self) -> None:
         self._providers = _load_providers()
+        self.last_error_kind: str | None = None
 
     def providers(self) -> list[ProviderConfig]:
         return list(self._providers)
@@ -167,41 +168,56 @@ class LLMClient:
         from openai import (
             APIConnectionError,
             APITimeoutError,
+            BadRequestError,
             OpenAI,
             RateLimitError,
         )
 
-        last_exc: Exception | None = None
+        self.last_error_kind = None
+        if not self._providers:
+            self.last_error_kind = "no_providers"
+            _log.error("CHAT_PROVIDERS resolves to zero usable providers")
+            return None
+
+        last_kind: str | None = None
         for cfg in self._providers:
-            try:
-                client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
-                resp = client.chat.completions.create(
-                    model=model_override or cfg.model,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=tool_choice if tools else "none",
-                    temperature=temperature,
-                )
-                return resp.choices[0].message
-            except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
-                _log.warning(
-                    "LLM provider %s failed (%s); trying next in ladder",
-                    cfg.name,
-                    exc.__class__.__name__,
-                )
-                last_exc = exc
-                continue
-            except Exception as exc:
-                _log.warning(
-                    "LLM provider %s raised unexpected %s: %r — skipping",
-                    cfg.name,
-                    exc.__class__.__name__,
-                    exc,
-                )
-                last_exc = exc
-                continue
-        if last_exc is not None:
-            _log.error("all LLM providers exhausted; last error %s", last_exc.__class__.__name__)
+            for attempt in (1, 2):
+                try:
+                    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+                    resp = client.chat.completions.create(
+                        model=model_override or cfg.model,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice=tool_choice if tools else "none",
+                        temperature=temperature,
+                    )
+                    return resp.choices[0].message
+                except (APIConnectionError, APITimeoutError) as exc:
+                    last_kind = "connection"
+                    if attempt == 1:
+                        _log.info("transient %s on %s — retrying once", exc.__class__.__name__, cfg.name)
+                        continue  # retry SAME provider once
+                    _log.warning("provider %s transient-failed twice; next in ladder", cfg.name)
+                    break
+                except RateLimitError:
+                    last_kind = "rate_limit"
+                    _log.warning("provider %s rate-limited (429); next in ladder", cfg.name)
+                    break  # 429 won't clear in 1s — go to next provider
+                except BadRequestError as exc:
+                    recovered = _recover_tool_call(exc)
+                    if recovered is not None:
+                        _log.info("recovered tool_use_failed from %s via failed_generation", cfg.name)
+                        return recovered
+                    last_kind = "bad_request"
+                    _log.warning("provider %s BadRequestError (unrecoverable); next in ladder", cfg.name)
+                    break
+                except Exception as exc:
+                    last_kind = "unexpected"
+                    _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
+                    break
+
+        self.last_error_kind = last_kind
+        _log.error("all LLM providers exhausted; last_error_kind=%s", last_kind)
         return None
 
 
