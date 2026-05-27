@@ -161,6 +161,41 @@ Set `ASK_ROUTER_ENABLED=false` in `.env` to disable the router entirely at
 runtime (no restart needed for in-flight requests; new requests pick up the
 new value).
 
+### Provider ladder & reliability
+
+Stage 3 calls the LLM through an ordered, env-driven provider ladder
+(`pipeline/query/llm_client.py`). Set `CHAT_PROVIDERS` to a comma list; each
+provider needs its `*_API_KEY`. All are OpenAI-compatible, so one adapter
+drives them:
+
+| Provider | Model | Free tier |
+|---|---|---|
+| `cerebras` | `gpt-oss-120b` | 1,000,000 tok/day, 2,400 req/day, 5/min |
+| `groq` | `llama-3.3-70b-versatile` | 100,000 tok/day |
+| `ollama` (local only) | `qwen2.5:7b-instruct` | unmetered, ~5–15s/call |
+
+Recommended: prod `CHAT_PROVIDERS=cerebras,groq`; local
+`CHAT_PROVIDERS=cerebras,groq,ollama`. Ollama is a **local-only** fallback —
+on a CPU box it's slow and a weaker tool-caller, so it's not advised as a prod
+rung. Stages 1 and 2 use **no LLM at all**, so route lists, rankings, and stop
+counts keep working even when every provider's quota is spent.
+
+How the adapter hardens that call:
+
+- **Malformed-tool-call recovery** — Groq intermittently returns a 400
+  `tool_use_failed` where the model emitted its tool call as text. The adapter
+  parses the attempted call out of `failed_generation` and dispatches it
+  instead of failing over (the `json.loads` guard rejects any mis-parse).
+- **Retry-once** on a transient connection/timeout error (same provider, no
+  backoff) before descending the ladder.
+- **Honest degradation** — when every provider is exhausted, the user-facing
+  message depends on *why*: a quota exhaustion (429) steers them to the
+  question types Stages 1–2 answer with no LLM; other failures show the
+  generic retry message.
+
+Local Ollama setup: `brew install ollama && ollama pull qwen2.5:7b-instruct`,
+then append `,ollama` to `CHAT_PROVIDERS`.
+
 ### Follow-ups & conversation memory
 
 The Ask tab is multi-turn. The frontend sends the **last 3 turns** in the
