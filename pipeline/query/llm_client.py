@@ -15,9 +15,13 @@ Configuration is fully env-driven; see ``.env.example`` for the keys.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
+import uuid
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -84,6 +88,46 @@ def _load_providers() -> list[ProviderConfig]:
     if not cfgs:
         _log.error("CHAT_PROVIDERS=%r resolves to zero usable providers", raw)
     return cfgs
+
+
+_FAILED_FN_RE = re.compile(
+    r"<function=([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(\{.*\})\s*\)\s*</function>",
+    re.DOTALL,
+)
+
+
+def _recover_tool_call(exc) -> object | None:
+    """Salvage a malformed tool call from a Groq ``tool_use_failed`` 400.
+
+    Groq returns the model's attempted call in ``error.failed_generation``,
+    e.g. ``<function=top_n({"metric":"avg_delay","n":10})</function>``. Parse
+    the name + JSON args into a message object whose ``.tool_calls`` match the
+    OpenAI shape ``chat.py`` already consumes (``call.function.name`` /
+    ``call.function.arguments`` as a JSON string). Returns ``None`` if the
+    error is not a tool_use_failed or the payload can't be parsed — callers
+    must then fall through (never dispatch unparsed args).
+    """
+    body = getattr(exc, "body", None) or {}
+    err = body.get("error", {}) if isinstance(body, dict) else {}
+    if err.get("code") != "tool_use_failed":
+        return None
+    raw = err.get("failed_generation")
+    if not raw:
+        return None
+    m = _FAILED_FN_RE.search(raw)
+    if not m:
+        return None
+    name, args_json = m.group(1), m.group(2)
+    try:
+        json.loads(args_json)  # validate; keep original string form for downstream json.loads
+    except (json.JSONDecodeError, TypeError):
+        return None
+    call = SimpleNamespace(
+        id=f"recovered_{uuid.uuid4().hex[:8]}",
+        type="function",
+        function=SimpleNamespace(name=name, arguments=args_json),
+    )
+    return SimpleNamespace(content=None, tool_calls=[call])
 
 
 class LLMClient:

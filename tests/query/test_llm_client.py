@@ -107,3 +107,58 @@ def test_per_provider_base_url_override(monkeypatch):
     _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c", CEREBRAS_BASE_URL="https://example.test/v1")
     client = llm_client.LLMClient()
     assert client.providers()[0].base_url == "https://example.test/v1"
+
+
+def test_recover_tool_call_valid():
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = {
+            "error": {
+                "code": "tool_use_failed",
+                "failed_generation": '<function=top_n({"metric": "avg_delay", "n": 10})</function>',
+            }
+        }
+
+    msg = _recover_tool_call(_Exc())
+    assert msg is not None
+    assert msg.tool_calls[0].function.name == "top_n"
+    import json
+    assert json.loads(msg.tool_calls[0].function.arguments) == {"metric": "avg_delay", "n": 10}
+    assert msg.content is None
+
+
+def test_recover_tool_call_not_tool_use_failed():
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = {"error": {"code": "context_length_exceeded", "message": "too long"}}
+
+    assert _recover_tool_call(_Exc()) is None
+
+
+def test_recover_tool_call_malformed_generation():
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = {"error": {"code": "tool_use_failed", "failed_generation": "garbage no function tag"}}
+
+    assert _recover_tool_call(_Exc()) is None
+
+
+def test_recover_tool_call_non_json_args():
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = {"error": {"code": "tool_use_failed", "failed_generation": "<function=top_n(not json)</function>"}}
+
+    assert _recover_tool_call(_Exc()) is None
+
+
+def test_recover_tool_call_no_body():
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = None
+
+    assert _recover_tool_call(_Exc()) is None
