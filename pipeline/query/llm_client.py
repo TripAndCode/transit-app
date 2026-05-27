@@ -143,6 +143,7 @@ class LLMClient:
     """
 
     def __init__(self) -> None:
+        """Load providers from env and initialise per-call error state."""
         self._providers = _load_providers()
         self.last_error_kind: str | None = None
 
