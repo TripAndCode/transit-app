@@ -96,6 +96,7 @@ async def chat_with_tools(
     model: str | None = None,
     locale: str = "ja",
     rag_examples: list | None = None,
+    history: list | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -140,17 +141,44 @@ async def chat_with_tools(
             lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
         system_prompt = system_prompt + "\n" + "\n".join(lines)
 
+    # Bounded conversation memory: when the API layer threads prior turns,
+    # fold the last few (question → tool(args)) into a dedicated system
+    # message so the model can resolve follow-ups ("the next 50", "that
+    # route") without re-stating context. Capped to the most recent three
+    # turns and truncated per-question to keep the prompt small and the
+    # behaviour deterministic. ``history=[]``/``None`` leaves the message
+    # list byte-identical to the no-memory path.
+    history_block = None
+    if history:
+        import json as _json
+
+        header = "== Conversation so far ==" if locale == "en" else "== これまでの会話 =="
+        lines = [header]
+        for i, turn in enumerate(history[-3:], 1):
+            q = str(turn.get("question", ""))[:200]
+            tool = turn.get("tool")
+            args = turn.get("args") or {}
+            if tool:
+                args_c = _json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+                lines.append(f"{i}. {q} → {tool}({args_c})")
+            else:
+                lines.append(f"{i}. {q}")
+        history_block = "\n".join(lines)
+
     def _sync():
         # The adapter handles per-provider retries, rate-limit fallback,
         # and logging internally; on total failure (or zero configured
         # providers) it returns None and we surface the standard
         # "service_unreachable" message below.
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": locale_addendum},
+        ]
+        if history_block:
+            messages.append({"role": "system", "content": history_block})
+        messages.append({"role": "user", "content": user_prelude})
         return client.chat_completions(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "system", "content": locale_addendum},
-                {"role": "user", "content": user_prelude},
-            ],
+            messages=messages,
             tools=TOOLS,
             tool_choice="auto",
             temperature=0.0,
