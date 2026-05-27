@@ -286,3 +286,31 @@ async def test_capabilities_unknown_category_returns_all(conn_with_seed):
     async with pool.acquire() as conn:
         result = await capabilities({"category": "nope"}, _ctx(), conn, agency_id, locale="ja")
     assert len(result.pairs) >= 7
+
+
+@pytest.mark.asyncio
+async def test_describe_data_stops_offset(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        page1 = await describe_data({"kind": "stops", "limit": 2, "offset": 0}, _ctx(), conn, agency_id, locale="ja")
+        page2 = await describe_data({"kind": "stops", "limit": 2, "offset": 2}, _ctx(), conn, agency_id, locale="ja")
+    ids1 = {r[0] for r in page1.rows}
+    ids2 = {r[0] for r in page2.rows}
+    assert ids1.isdisjoint(ids2)
+    assert len(page1.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_describe_data_offset_past_end_is_empty(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "stops", "limit": 10, "offset": 100000}, _ctx(), conn, agency_id, locale="ja")
+    assert len(result.rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_describe_data_offset_negative_clamped(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "stops", "limit": 2, "offset": -5}, _ctx(), conn, agency_id, locale="ja")
+    assert len(result.rows) == 2  # treated as offset 0
