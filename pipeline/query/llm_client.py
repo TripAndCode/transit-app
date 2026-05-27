@@ -33,7 +33,7 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "cerebras": {
         "key_env": "CEREBRAS_API_KEY",
         "base_url": "https://api.cerebras.ai/v1",
-        "model": "llama-3.3-70b",
+        "model": "gpt-oss-120b",
     },
     "groq": {
         "key_env": "GROQ_API_KEY",
