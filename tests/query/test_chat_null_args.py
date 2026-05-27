@@ -136,3 +136,58 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     assert "中央大橋線の遅延" in system
     assert "route_stats" in system
     assert "国道線の傾向" in system
+
+
+@pytest.mark.asyncio
+async def test_history_injected_into_prompt(monkeypatch):
+    """When history is supplied, prior turns appear in the prompt messages."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None)
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    history = [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}]
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history)
+
+    blob = " ".join(m["content"] for m in captured["messages"])
+    assert "停留所はいくつ？" in blob
+    assert "describe_data" in blob
+
+
+@pytest.mark.asyncio
+async def test_empty_history_matches_no_history(monkeypatch):
+    """history=[] must produce the same messages as history=None."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    seen = []
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, **k):
+            seen.append([m["content"] for m in messages])
+            return SimpleNamespace(content="ok", tool_calls=None)
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=None)
+    await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=[])
+    assert seen[0] == seen[1]
