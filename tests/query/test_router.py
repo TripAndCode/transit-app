@@ -336,7 +336,18 @@ async def test_margin_guard_ignores_same_tool_runnerup(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize(
     "q",
-    ["もっと見せて", "もう少し", "続き", "次の50件", "前のと逆順で", "同じ条件で先月", "それを詳しく", "show me more", "next", "again"],
+    [
+        "もっと見せて",
+        "もう少し",
+        "続き",
+        "次の50件",
+        "前のと逆順で",
+        "同じ条件で先月",
+        "それを詳しく",
+        "show me more",
+        "next",
+        "again",
+    ],
 )
 def test_is_follow_up_true(q):
     assert is_follow_up(q) is True

@@ -176,7 +176,11 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
 
     async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
         captured["history"] = history
-        return {"answer": "stub", "tool_call": {"name": "describe_data", "arguments": {"kind": "stops", "offset": 50}}, "result": None}
+        return {
+            "answer": "stub",
+            "tool_call": {"name": "describe_data", "arguments": {"kind": "stops", "offset": 50}},
+            "result": None,
+        }
 
     async def boom(*a, **k):
         raise AssertionError("router should be skipped for follow-ups")

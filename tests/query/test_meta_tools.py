@@ -304,7 +304,9 @@ async def test_describe_data_stops_offset(conn_with_observations):
 async def test_describe_data_offset_past_end_is_empty(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
-        result = await describe_data({"kind": "stops", "limit": 10, "offset": 100000}, _ctx(), conn, agency_id, locale="ja")
+        result = await describe_data(
+            {"kind": "stops", "limit": 10, "offset": 100000}, _ctx(), conn, agency_id, locale="ja"
+        )
     assert len(result.rows) == 0
 
 

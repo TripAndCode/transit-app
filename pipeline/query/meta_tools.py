@@ -110,7 +110,8 @@ async def describe_data(
                 shown_from = offset + 1
                 shown_to = offset + len(rows)
                 summary = _summary(
-                    f"「{substring}」に一致する全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+                    f"「{substring}」に一致する全{total}路線中 "
+                    f"{shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
                     f"routes matching '{substring}' {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
                     locale,
                 )
@@ -182,7 +183,8 @@ async def describe_data(
             )
         else:
             rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_name LIMIT $2 OFFSET $3",
+                "SELECT stop_id, stop_name FROM static_stops "
+                "WHERE agency_id = $1 ORDER BY stop_name LIMIT $2 OFFSET $3",
                 agency_id,
                 limit,
                 offset,
@@ -325,11 +327,23 @@ async def describe_data(
             shown_from = offset + 1
             shown_to = offset + len(rows)
             if order == "asc":
-                jp = f"サンプル数の少ない順 全{total}系統中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
-                en = f"sample count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({ctx.from_date} – {window_end})"
+                jp = (
+                    f"サンプル数の少ない順 全{total}系統中 {shown_from}–{shown_to}件を表示"
+                    f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
+                )
+                en = (
+                    f"sample count ascending {shown_from}–{shown_to} of {total} "
+                    f"(next: 'next {limit}') ({ctx.from_date} – {window_end})"
+                )
             else:
-                jp = f"サンプル数 全{total}系統中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
-                en = f"sample count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({ctx.from_date} – {window_end})"
+                jp = (
+                    f"サンプル数 全{total}系統中 {shown_from}–{shown_to}件を表示"
+                    f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
+                )
+                en = (
+                    f"sample count {shown_from}–{shown_to} of {total} "
+                    f"(next: 'next {limit}') ({ctx.from_date} – {window_end})"
+                )
         elif order == "asc":
             jp = f"サンプル数の少ない順 {len(rows)}系統 ({ctx.from_date}〜{window_end})"
             en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
@@ -476,7 +490,13 @@ META_TOOLS: list[dict] = [
                             "routes (e.g. 「サンプル数の少ない系統」/「データが薄い系統」)."
                         ),
                     },
-                    "offset": {"type": "integer", "minimum": 0, "description": "Row offset for pagination; for a 'next page' follow-up, re-call with offset += limit."},
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Row offset for pagination; for a 'next page' follow-up, re-call with offset += limit."
+                        ),
+                    },
                     "cross_agency": {
                         "type": "boolean",
                         "description": (
