@@ -168,19 +168,27 @@ def test_recovery_short_circuits_failover(monkeypatch):
     """A tool_use_failed 400 on the first provider is recovered, not failed-over."""
     from openai import BadRequestError
 
-    from pipeline.query import llm_client
-
     monkeypatch.setenv("CHAT_PROVIDERS", "cerebras,groq")
     monkeypatch.setenv("CEREBRAS_API_KEY", "c")
     monkeypatch.setenv("GROQ_API_KEY", "g")
     llm_client.reset_client_for_tests()
 
-    def raise_tool_use_failed(*a, **k):
-        exc = BadRequestError.__new__(BadRequestError)
-        exc.body = {"error": {"code": "tool_use_failed", "failed_generation": '<function=top_n({"n":5})</function>'}}
-        raise exc
+    # A real BadRequestError subclass so the type-filtered ``except`` in
+    # chat_completions catches it; bypass the SDK __init__ (needs an httpx
+    # response) and inject only the ``body`` _recover_tool_call reads.
+    class _FakeBadRequest(BadRequestError):
+        def __init__(self):
+            self.body = {
+                "error": {
+                    "code": "tool_use_failed",
+                    "failed_generation": '<function=top_n({"n":5})</function>',
+                }
+            }
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch("openai.OpenAI") as mock_openai:
+    def raise_tool_use_failed(*a, **k):
+        raise _FakeBadRequest()
+
+    with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = raise_tool_use_failed
         out = llm_client.LLMClient().chat_completions(messages=[], tools=[{"x": 1}])
     assert out is not None
@@ -189,15 +197,13 @@ def test_recovery_short_circuits_failover(monkeypatch):
 
 
 def test_retry_once_on_transient_then_success(monkeypatch):
-    from openai import APIConnectionError
+    from types import SimpleNamespace
 
-    from pipeline.query import llm_client
+    from openai import APIConnectionError
 
     monkeypatch.setenv("CHAT_PROVIDERS", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "g")
     llm_client.reset_client_for_tests()
-
-    from types import SimpleNamespace
 
     ok = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))])
     calls = {"n": 0}
@@ -208,26 +214,47 @@ def test_retry_once_on_transient_then_success(monkeypatch):
             raise APIConnectionError(request=None)
         return ok
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch("openai.OpenAI") as mock_openai:
+    with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = flaky
         out = llm_client.LLMClient().chat_completions(messages=[])
     assert out is not None and out.content == "ok"
     assert calls["n"] == 2
 
 
+def test_last_error_kind_connection_exhausted(monkeypatch):
+    """Transient error that never clears: retried once, then None with kind=connection."""
+    from openai import APIConnectionError
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    llm_client.reset_client_for_tests()
+
+    calls = {"n": 0}
+
+    def always_down(*a, **k):
+        calls["n"] += 1
+        raise APIConnectionError(request=None)
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.side_effect = always_down
+        client = llm_client.LLMClient()
+        out = client.chat_completions(messages=[])
+    assert out is None
+    assert client.last_error_kind == "connection"
+    assert calls["n"] == 2  # single provider, retried exactly once
+
+
 def test_last_error_kind_rate_limit(monkeypatch):
     from openai import RateLimitError
-
-    from pipeline.query import llm_client
 
     monkeypatch.setenv("CHAT_PROVIDERS", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "g")
     llm_client.reset_client_for_tests()
 
     def always_429(*a, **k):
-        raise RateLimitError(message="429", response=__import__("unittest.mock", fromlist=["MagicMock"]).MagicMock(status_code=429), body=None)
+        raise RateLimitError(message="429", response=MagicMock(status_code=429), body=None)
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch("openai.OpenAI") as mock_openai:
+    with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_429
         client = llm_client.LLMClient()
         out = client.chat_completions(messages=[])
@@ -236,8 +263,6 @@ def test_last_error_kind_rate_limit(monkeypatch):
 
 
 def test_last_error_kind_no_providers(monkeypatch):
-    from pipeline.query import llm_client
-
     monkeypatch.setenv("CHAT_PROVIDERS", "")
     llm_client.reset_client_for_tests()
     client = llm_client.LLMClient()
