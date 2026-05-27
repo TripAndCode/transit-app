@@ -174,11 +174,14 @@ async def chat_with_tools(
         history_block = "\n".join(lines)
 
     def _sync():
-        """Blocking LLM call (run via ``asyncio.to_thread``); returns ``(message, last_error_kind)``.
+        """Blocking LLM call executed via ``asyncio.to_thread``.
 
-        The adapter handles per-provider retries, rate-limit fallback, and
-        logging internally; on total failure it returns ``None`` and we surface
-        a kind-aware degradation message (see the msg-is-None branch below).
+        Returns ``(message, error_kind)`` where ``message`` is the provider
+        response on success and ``None`` on total failure; ``error_kind``
+        is ``None`` on success and a short string (``"rate_limit"``,
+        ``"connection"``, etc.) on failure.  Both values come directly from
+        :meth:`~pipeline.query.llm_client.LLMClient.chat_completions` — no
+        shared mutable state is read after the call returns.
         """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -187,32 +190,25 @@ async def chat_with_tools(
         if history_block:
             messages.append({"role": "system", "content": history_block})
         messages.append({"role": "user", "content": user_prelude})
-        result = client.chat_completions(
+        return client.chat_completions(
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
             temperature=0.0,
             model_override=model,
         )
-        # Snapshot last_error_kind inside the thread while we still own the
-        # call context — avoids a data race when two concurrent requests share
-        # the singleton and their threads write last_error_kind simultaneously.
-        return result, getattr(client, "last_error_kind", None)
 
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
-        # The LLM ladder is exhausted/unreachable — a hard failure, not a
-        # deliberate decline. success=False so analytics don't count it.
-        # Pick the message by WHY it failed: a quota exhaustion (429) steers
-        # the user to the question types the router answers with no LLM at
-        # all (route lists, rankings, stop counts) — those never hit a quota.
-        # Anything else keeps the generic retry message.
-        # None (old fakes / never-set) → "connection" → generic message.
-        kind = error_kind or "connection"
+        # The LLM ladder is exhausted — a hard failure, not a deliberate
+        # decline. success=False so analytics don't count it.
+        # Route by failure kind: quota exhaustion steers the user toward
+        # question types Stages 1-2 answer without any LLM; everything else
+        # falls back to the generic retry message.
         key = {
             "rate_limit": "llm_rate_limited",
             "no_providers": "llm_unconfigured",
-        }.get(kind, "service_unreachable")
+        }.get(error_kind or "", "service_unreachable")
         return {
             "answer": _chat_str(key, locale),
             "tool_call": None,

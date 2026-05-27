@@ -1,5 +1,6 @@
 """LLMClient provider-fallback unit tests."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,8 +29,9 @@ def test_no_providers_returns_none(monkeypatch):
     _set_providers(monkeypatch, providers="")
     client = llm_client.LLMClient()
     assert client.providers() == []
-    result = client.chat_completions(messages=[{"role": "user", "content": "hi"}])
-    assert result is None
+    msg, kind = client.chat_completions(messages=[{"role": "user", "content": "hi"}])
+    assert msg is None
+    assert kind == "no_providers"
 
 
 def test_missing_api_key_provider_skipped(monkeypatch):
@@ -49,8 +51,9 @@ def test_first_provider_success(monkeypatch):
     with patch("openai.OpenAI") as mock_openai:
         mock_client = mock_openai.return_value
         mock_client.chat.completions.create.return_value = fake_response
-        out = llm_client.LLMClient().chat_completions(messages=[])
-    assert out is fake_message
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is fake_message
+    assert kind is None
     assert mock_openai.call_count == 1
     args, kwargs = mock_openai.call_args
     assert kwargs.get("base_url") == "https://api.cerebras.ai/v1"
@@ -74,8 +77,9 @@ def test_first_provider_rate_limited_falls_back(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = fake_create
-        out = llm_client.LLMClient().chat_completions(messages=[])
-    assert out is fake_message
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is fake_message
+    assert kind is None
     assert call_count["n"] == 2  # cerebras failed, groq succeeded
 
 
@@ -89,8 +93,9 @@ def test_all_providers_rate_limited_returns_none(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_429
-        out = llm_client.LLMClient().chat_completions(messages=[])
-    assert out is None
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "rate_limit"
 
 
 def test_ollama_does_not_require_api_key(monkeypatch):
@@ -123,8 +128,6 @@ def test_recover_tool_call_valid():
     msg = _recover_tool_call(_Exc())
     assert msg is not None
     assert msg.tool_calls[0].function.name == "top_n"
-    import json
-
     assert json.loads(msg.tool_calls[0].function.arguments) == {"metric": "avg_delay", "n": 10}
     assert msg.content is None
 
@@ -191,9 +194,10 @@ def test_recovery_short_circuits_failover(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = raise_tool_use_failed
-        out = llm_client.LLMClient().chat_completions(messages=[], tools=[{"x": 1}])
-    assert out is not None
-    assert out.tool_calls[0].function.name == "top_n"
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[], tools=[{"x": 1}])
+    assert msg is not None
+    assert kind is None
+    assert msg.tool_calls[0].function.name == "top_n"
     assert mock_openai.return_value.chat.completions.create.call_count == 1
 
 
@@ -217,13 +221,14 @@ def test_retry_once_on_transient_then_success(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = flaky
-        out = llm_client.LLMClient().chat_completions(messages=[])
-    assert out is not None and out.content == "ok"
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is not None and msg.content == "ok"
+    assert kind is None
     assert calls["n"] == 2
 
 
 def test_last_error_kind_connection_exhausted(monkeypatch):
-    """Transient error that never clears: retried once, then None with kind=connection."""
+    """Transient error that never clears: retried once, then (None, 'connection')."""
     from openai import APIConnectionError
 
     monkeypatch.setenv("CHAT_PROVIDERS", "groq")
@@ -238,10 +243,9 @@ def test_last_error_kind_connection_exhausted(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_down
-        client = llm_client.LLMClient()
-        out = client.chat_completions(messages=[])
-    assert out is None
-    assert client.last_error_kind == "connection"
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "connection"
     assert calls["n"] == 2  # single provider, retried exactly once
 
 
@@ -257,19 +261,17 @@ def test_last_error_kind_rate_limit(monkeypatch):
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_429
-        client = llm_client.LLMClient()
-        out = client.chat_completions(messages=[])
-    assert out is None
-    assert client.last_error_kind == "rate_limit"
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "rate_limit"
 
 
 def test_last_error_kind_no_providers(monkeypatch):
     monkeypatch.setenv("CHAT_PROVIDERS", "")
     llm_client.reset_client_for_tests()
-    client = llm_client.LLMClient()
-    out = client.chat_completions(messages=[])
-    assert out is None
-    assert client.last_error_kind == "no_providers"
+    msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "no_providers"
 
 
 def test_cerebras_default_model_is_gpt_oss(monkeypatch):

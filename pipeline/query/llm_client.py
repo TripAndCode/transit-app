@@ -50,6 +50,13 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
 
 @dataclass(frozen=True)
 class ProviderConfig:
+    """Immutable configuration for one LLM provider entry in the fallback ladder.
+
+    Loaded once at startup from env-vars by :func:`_load_providers`.
+    ``is_usable`` gates whether the provider enters the ladder at all —
+    Ollama requires no API key; all others need one.
+    """
+
     name: str
     api_key: str | None
     base_url: str
@@ -57,9 +64,7 @@ class ProviderConfig:
 
     @property
     def is_usable(self) -> bool:
-        # Ollama doesn't require a key (any string works). For the others
-        # we need a real key — operators who haven't set it shouldn't have
-        # the provider in the ladder.
+        """Return True when this provider has enough config to attempt a call."""
         return bool(self.api_key) or self.name == "ollama"
 
 
@@ -137,17 +142,17 @@ def _recover_tool_call(exc: Exception) -> SimpleNamespace | None:
 class LLMClient:
     """Tries each configured provider in order until one succeeds.
 
-    Use :meth:`chat_completions` exactly like
-    ``openai.OpenAI().chat.completions.create``. Returned message object
-    is the SDK's response shape.
+    :meth:`chat_completions` wraps ``openai.OpenAI().chat.completions.create``
+    and returns ``(message, error_kind)`` — the SDK message shape on success
+    (``error_kind`` None), or ``(None, kind)`` when the ladder is exhausted.
     """
 
     def __init__(self) -> None:
-        """Load providers from env and initialise per-call error state."""
+        """Load providers from env at construction time."""
         self._providers = _load_providers()
-        self.last_error_kind: str | None = None
 
     def providers(self) -> list[ProviderConfig]:
+        """Return a snapshot of the configured provider ladder (ordered)."""
         return list(self._providers)
 
     def chat_completions(
@@ -158,19 +163,24 @@ class LLMClient:
         tool_choice: str = "auto",
         temperature: float = 0.0,
         model_override: str | None = None,
-    ) -> Any | None:
-        """Return the first non-erroring provider's message, or None.
+    ) -> tuple[Any | None, str | None]:
+        """Attempt each provider in order and return ``(message, error_kind)``.
+
+        ``message`` is the OpenAI ``response.choices[0].message`` on success,
+        or ``None`` when the ladder is fully exhausted.  ``error_kind`` is
+        ``None`` on success and one of ``"rate_limit"``, ``"connection"``,
+        ``"bad_request"``, ``"unexpected"``, or ``"no_providers"`` on failure,
+        letting the caller select an honest user-facing degradation message.
 
         Per provider: retries ONCE on a transient connection/timeout error
         (no backoff — a refused socket retries instantly), descends the
         ladder on rate-limit (429) without retrying, and on a Groq
         ``tool_use_failed`` 400 salvages the call via ``_recover_tool_call``
-        instead of failing over. When every provider is exhausted, returns
-        None and sets ``self.last_error_kind`` (rate_limit / connection /
-        bad_request / unexpected / no_providers) so the caller can pick an
-        honest user-facing message. The returned object is the OpenAI
-        ``response.choices[0].message`` — pre-extracted so callers stay
-        provider-agnostic.
+        instead of failing over.
+
+        The OpenAI client is constructed once per provider (not per retry
+        attempt) so the same connection pool is reused on the single-retry
+        path.
 
         Note: an immediate retry on ``APITimeoutError`` could double-dispatch
         if the first request is still in-flight server-side; acceptable here
@@ -184,17 +194,15 @@ class LLMClient:
             RateLimitError,
         )
 
-        self.last_error_kind = None
         if not self._providers:
-            self.last_error_kind = "no_providers"
             _log.error("CHAT_PROVIDERS resolves to zero usable providers")
-            return None
+            return None, "no_providers"
 
-        last_kind: str | None = None  # accumulator; copied to self.last_error_kind only on exhaustion
+        last_kind: str | None = None
         for cfg in self._providers:
+            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
             for attempt in (1, 2):
                 try:
-                    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
                     resp = client.chat.completions.create(
                         model=model_override or cfg.model,
                         messages=messages,
@@ -202,7 +210,7 @@ class LLMClient:
                         tool_choice=tool_choice if tools else "none",
                         temperature=temperature,
                     )
-                    return resp.choices[0].message
+                    return resp.choices[0].message, None
                 except (APIConnectionError, APITimeoutError) as exc:
                     last_kind = "connection"
                     if attempt == 1:
@@ -218,7 +226,7 @@ class LLMClient:
                     recovered = _recover_tool_call(exc)
                     if recovered is not None:
                         _log.info("recovered tool_use_failed from %s via failed_generation", cfg.name)
-                        return recovered
+                        return recovered, None
                     last_kind = "bad_request"
                     _log.warning("provider %s BadRequestError (unrecoverable); next in ladder", cfg.name)
                     break
@@ -227,15 +235,20 @@ class LLMClient:
                     _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
                     break
 
-        self.last_error_kind = last_kind
         _log.error("all LLM providers exhausted; last_error_kind=%s", last_kind)
-        return None
+        return None, last_kind
 
 
 _singleton: LLMClient | None = None
 
 
 def get_client() -> LLMClient:
+    """Return the process-wide :class:`LLMClient` singleton.
+
+    Constructed lazily on first call so env-vars set after import are
+    picked up.  Use :func:`reset_client_for_tests` between test cases to
+    prevent provider-ladder state from leaking across tests.
+    """
     global _singleton
     if _singleton is None:
         _singleton = LLMClient()
@@ -243,5 +256,10 @@ def get_client() -> LLMClient:
 
 
 def reset_client_for_tests() -> None:
+    """Discard the singleton so the next :func:`get_client` call re-reads env.
+
+    Call this in test fixtures (``autouse=True``) that manipulate
+    ``CHAT_PROVIDERS`` or provider API-key env-vars.
+    """
     global _singleton
     _singleton = None
