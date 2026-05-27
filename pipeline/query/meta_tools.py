@@ -55,6 +55,15 @@ async def describe_data(
     except (TypeError, ValueError):
         limit = 50
 
+    # Offset for "show me more" pagination. Same defensive coercion as limit:
+    # the LLM may pass a string or None. Negative offsets clamp to 0 rather
+    # than letting Postgres reject them.
+    raw_offset = args.get("offset", 0)
+    try:
+        offset = max(0, int(raw_offset) if raw_offset is not None else 0)
+    except (TypeError, ValueError):
+        offset = 0
+
     if kind not in VALID_KINDS:
         return ToolResult(
             kind="empty",
@@ -74,10 +83,11 @@ async def describe_data(
                 "FROM static_routes "
                 "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
                 "ORDER BY route_short_name "
-                "LIMIT $3",
+                "LIMIT $3 OFFSET $4",
                 agency_id,
                 substring,
                 limit,
+                offset,
             )
             total = await conn.fetchval(
                 "SELECT COUNT(*) FROM static_routes WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%'",
@@ -96,13 +106,23 @@ async def describe_data(
                         locale,
                     ),
                 )
-            return ToolResult(
-                kind="table",
-                summary=_summary(
+            if offset > 0:
+                shown_from = offset + 1
+                shown_to = offset + len(rows)
+                summary = _summary(
+                    f"「{substring}」に一致する全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+                    f"routes matching '{substring}' {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+                    locale,
+                )
+            else:
+                summary = _summary(
                     f"「{substring}」に一致する路線: {total} 件（先頭 {len(rows)} 件を表示）",
                     f"routes matching '{substring}': {total} (showing first {len(rows)})",
                     locale,
-                ),
+                )
+            return ToolResult(
+                kind="table",
+                summary=summary,
                 rows=[[r["code"], r["route_short_name"]] for r in rows],
                 columns=["route_code", "route_short_name"],
             )
@@ -112,9 +132,10 @@ async def describe_data(
             "FROM static_routes "
             "WHERE agency_id = $1 "
             "ORDER BY route_short_name "
-            "LIMIT $2",
+            "LIMIT $2 OFFSET $3",
             agency_id,
             limit,
+            offset,
         )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         if total == 0:
@@ -126,13 +147,23 @@ async def describe_data(
                     locale,
                 ),
             )
-        return ToolResult(
-            kind="table",
-            summary=_summary(
+        if offset > 0:
+            shown_from = offset + 1
+            shown_to = offset + len(rows)
+            summary = _summary(
+                f"全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+                f"routes {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+                locale,
+            )
+        else:
+            summary = _summary(
                 f"このエージェンシーには {total} 路線あります（先頭 {len(rows)} 件を表示）",
                 f"This agency has {total} routes (showing first {len(rows)})",
                 locale,
-            ),
+            )
+        return ToolResult(
+            kind="table",
+            summary=summary,
             rows=[[r["code"], r["route_short_name"]] for r in rows],
             columns=["route_code", "route_short_name"],
         )
@@ -143,16 +174,18 @@ async def describe_data(
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
                 "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
-                "ORDER BY stop_name LIMIT $3",
+                "ORDER BY stop_name LIMIT $3 OFFSET $4",
                 agency_id,
                 substring,
                 limit,
+                offset,
             )
         else:
             rows = await conn.fetch(
-                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_name LIMIT $2",
+                "SELECT stop_id, stop_name FROM static_stops WHERE agency_id = $1 ORDER BY stop_name LIMIT $2 OFFSET $3",
                 agency_id,
                 limit,
+                offset,
             )
         total = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         if total == 0:
@@ -164,13 +197,23 @@ async def describe_data(
                     locale,
                 ),
             )
-        return ToolResult(
-            kind="table",
-            summary=_summary(
+        if offset > 0:
+            shown_from = offset + 1
+            shown_to = offset + len(rows)
+            summary = _summary(
+                f"全{total}停留所中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+                f"stops {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+                locale,
+            )
+        else:
+            summary = _summary(
                 f"このエージェンシーには {total} 停留所あります（先頭 {len(rows)} 件）",
                 f"This agency has {total} stops (showing first {len(rows)})",
                 locale,
-            ),
+            )
+        return ToolResult(
+            kind="table",
+            summary=summary,
             rows=[[r["stop_id"], r["stop_name"]] for r in rows],
             columns=["stop_id", "stop_name"],
         )
@@ -244,11 +287,12 @@ async def describe_data(
             "  AND captured_at::date BETWEEN $2 AND $3 "
             "GROUP BY route_code "
             f"ORDER BY samples {direction} "
-            "LIMIT $4",
+            "LIMIT $4 OFFSET $5",
             agency_id,
             ctx.from_date,
             ctx.to_date,
             limit,
+            offset,
         )
         if not rows:
             return ToolResult(
@@ -270,7 +314,23 @@ async def describe_data(
             ctx.to_date,
         )
         window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
-        if order == "asc":
+        if offset > 0:
+            total = await conn.fetchval(
+                "SELECT COUNT(DISTINCT route_code) FROM updates "
+                "WHERE agency_id = $1 AND captured_at::date BETWEEN $2 AND $3",
+                agency_id,
+                ctx.from_date,
+                ctx.to_date,
+            )
+            shown_from = offset + 1
+            shown_to = offset + len(rows)
+            if order == "asc":
+                jp = f"サンプル数の少ない順 全{total}系統中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
+                en = f"sample count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({ctx.from_date} – {window_end})"
+            else:
+                jp = f"サンプル数 全{total}系統中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
+                en = f"sample count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({ctx.from_date} – {window_end})"
+        elif order == "asc":
             jp = f"サンプル数の少ない順 {len(rows)}系統 ({ctx.from_date}〜{window_end})"
             en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
         else:
