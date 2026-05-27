@@ -476,6 +476,7 @@ META_TOOLS: list[dict] = [
                             "routes (e.g. 「サンプル数の少ない系統」/「データが薄い系統」)."
                         ),
                     },
+                    "offset": {"type": "integer", "minimum": 0, "description": "Row offset for pagination; for a 'next page' follow-up, re-call with offset += limit."},
                     "cross_agency": {
                         "type": "boolean",
                         "description": (
