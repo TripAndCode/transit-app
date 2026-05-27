@@ -82,7 +82,7 @@ async def describe_data(
                 "       route_short_name "
                 "FROM static_routes "
                 "WHERE agency_id = $1 AND route_short_name ILIKE '%' || $2 || '%' "
-                "ORDER BY route_short_name "
+                "ORDER BY route_short_name, route_id "
                 "LIMIT $3 OFFSET $4",
                 agency_id,
                 substring,
@@ -106,7 +106,7 @@ async def describe_data(
                         locale,
                     ),
                 )
-            if offset > 0:
+            if offset > 0 and rows:
                 shown_from = offset + 1
                 shown_to = offset + len(rows)
                 summary = _summary(
@@ -132,7 +132,7 @@ async def describe_data(
             "       route_short_name "
             "FROM static_routes "
             "WHERE agency_id = $1 "
-            "ORDER BY route_short_name "
+            "ORDER BY route_short_name, route_id "
             "LIMIT $2 OFFSET $3",
             agency_id,
             limit,
@@ -148,7 +148,7 @@ async def describe_data(
                     locale,
                 ),
             )
-        if offset > 0:
+        if offset > 0 and rows:
             shown_from = offset + 1
             shown_to = offset + len(rows)
             summary = _summary(
@@ -175,7 +175,7 @@ async def describe_data(
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
                 "WHERE agency_id = $1 AND stop_name ILIKE '%' || $2 || '%' "
-                "ORDER BY stop_name LIMIT $3 OFFSET $4",
+                "ORDER BY stop_name, stop_id LIMIT $3 OFFSET $4",
                 agency_id,
                 substring,
                 limit,
@@ -184,7 +184,7 @@ async def describe_data(
         else:
             rows = await conn.fetch(
                 "SELECT stop_id, stop_name FROM static_stops "
-                "WHERE agency_id = $1 ORDER BY stop_name LIMIT $2 OFFSET $3",
+                "WHERE agency_id = $1 ORDER BY stop_name, stop_id LIMIT $2 OFFSET $3",
                 agency_id,
                 limit,
                 offset,
@@ -199,7 +199,7 @@ async def describe_data(
                     locale,
                 ),
             )
-        if offset > 0:
+        if offset > 0 and rows:
             shown_from = offset + 1
             shown_to = offset + len(rows)
             summary = _summary(
@@ -288,7 +288,7 @@ async def describe_data(
             "WHERE agency_id = $1 "
             "  AND captured_at::date BETWEEN $2 AND $3 "
             "GROUP BY route_code "
-            f"ORDER BY samples {direction} "
+            f"ORDER BY samples {direction}, route_code "
             "LIMIT $4 OFFSET $5",
             agency_id,
             ctx.from_date,
