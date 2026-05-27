@@ -96,6 +96,7 @@ async def chat_with_tools(
     model: str | None = None,
     locale: str = "ja",
     rag_examples: list | None = None,
+    history: list | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -140,17 +141,44 @@ async def chat_with_tools(
             lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
         system_prompt = system_prompt + "\n" + "\n".join(lines)
 
+    # Bounded conversation memory: when the API layer threads prior turns,
+    # fold the last few (question → tool(args)) into a dedicated system
+    # message so the model can resolve follow-ups ("the next 50", "that
+    # route") without re-stating context. Capped to the most recent three
+    # turns and truncated per-question to keep the prompt small and the
+    # behaviour deterministic. ``history=[]``/``None`` leaves the message
+    # list byte-identical to the no-memory path.
+    history_block = None
+    if history:
+        header = "== Conversation so far ==" if locale == "en" else "== これまでの会話 =="
+        lines = [header]
+        for i, turn in enumerate(history[-3:], 1):
+            q = str(turn.get("question", ""))[:200]
+            tool = turn.get("tool")
+            args = turn.get("args") or {}
+            if tool:
+                # Cap the serialized args: a client could send a huge nested
+                # args blob to bloat the prompt / attempt weak prompt injection.
+                args_c = json.dumps(args, ensure_ascii=False, separators=(",", ":"))[:200]
+                lines.append(f"{i}. {q} → {tool}({args_c})")
+            else:
+                lines.append(f"{i}. {q}")
+        history_block = "\n".join(lines)
+
     def _sync():
         # The adapter handles per-provider retries, rate-limit fallback,
         # and logging internally; on total failure (or zero configured
         # providers) it returns None and we surface the standard
         # "service_unreachable" message below.
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": locale_addendum},
+        ]
+        if history_block:
+            messages.append({"role": "system", "content": history_block})
+        messages.append({"role": "user", "content": user_prelude})
         return client.chat_completions(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "system", "content": locale_addendum},
-                {"role": "user", "content": user_prelude},
-            ],
+            messages=messages,
             tools=TOOLS,
             tool_choice="auto",
             temperature=0.0,
@@ -159,17 +187,30 @@ async def chat_with_tools(
 
     msg = await asyncio.to_thread(_sync)
     if msg is None:
+        # The LLM ladder is exhausted/unreachable — a hard failure, not a
+        # deliberate decline. success=False so analytics don't count it.
         return {
             "answer": _chat_str("service_unreachable", locale),
             "tool_call": None,
             "result": None,
+            "success": False,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
     if not tool_calls:
-        # Out-of-scope path: model returned plain text (refusal + suggestions).
-        text = (msg.content or "").strip() or _chat_str("refusal_fallback", locale)
-        return {"answer": text, "tool_call": None, "result": None}
+        # Out-of-scope path: model returned plain text. A non-empty body is a
+        # deliberate, helpful refusal/suggestion (the system worked → True).
+        # An empty body falls back to the generic "couldn't understand"
+        # string, which is a genuine failure to parse the question → False.
+        body = (msg.content or "").strip()
+        if body:
+            return {"answer": body, "tool_call": None, "result": None, "success": True}
+        return {
+            "answer": _chat_str("refusal_fallback", locale),
+            "tool_call": None,
+            "result": None,
+            "success": False,
+        }
 
     if len(tool_calls) > 1:
         _log.info("LLM emitted %d tool calls; using the first only", len(tool_calls))
@@ -198,16 +239,20 @@ async def chat_with_tools(
         result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
     except Exception as exc:
         _log.exception("Tool %s failed", name)
+        # A tool blowing up is a hard failure, not a deliberate decline.
         return {
             "answer": _chat_str("tool_error", locale, name=name, exc=exc),
             "tool_call": {"name": name, "arguments": args},
             "result": None,
+            "success": False,
         }
 
     return {
         "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
+        # Mirror the dispatch-path rule: an empty/no-data result is not success.
+        "success": result.kind != "empty",
     }
 
 

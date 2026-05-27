@@ -97,3 +97,31 @@ def test_golden_set_aggregate_score():
             f"stage tally: {stage_report}\n"
             f"failing cases ({len(failures)}/{len(cases)}):\n{report}"
         )
+
+
+@pytest.mark.requires_groq_key
+@pytest.mark.skipif(os.environ.get("RUN_LLM_EVAL") != "1", reason="RUN_LLM_EVAL=1 not set")
+def test_followup_pagination_two_turns():
+    """Turn 1 lists stops; turn 2 ('次の50件' with turn-1 in history) paginates."""
+    with httpx.Client(base_url=EVAL_API_BASE, timeout=60.0) as client:
+        r1 = client.post(
+            f"/api/{EVAL_AGENCY_ID}/ask",
+            json={"question": "停留所はいくつ？"},
+            headers={"Origin": EVAL_API_BASE},
+        )
+        r1.raise_for_status()
+        d1 = r1.json()
+        tc1 = d1.get("tool_call") or {}
+        assert tc1.get("name") == "describe_data", f"turn-1 tool was {tc1.get('name')}"
+
+        history = [{"question": "停留所はいくつ？", "tool": tc1.get("name"), "args": tc1.get("arguments")}]
+        r2 = client.post(
+            f"/api/{EVAL_AGENCY_ID}/ask",
+            json={"question": "次の50件", "history": history},
+            headers={"Origin": EVAL_API_BASE},
+        )
+        r2.raise_for_status()
+        d2 = r2.json()
+        tc2 = d2.get("tool_call") or {}
+        assert tc2.get("name") == "describe_data", f"turn-2 tool was {tc2.get('name')}"
+        assert (tc2.get("arguments") or {}).get("offset"), "turn-2 should paginate with an offset"

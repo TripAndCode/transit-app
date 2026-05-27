@@ -286,3 +286,76 @@ async def test_capabilities_unknown_category_returns_all(conn_with_seed):
     async with pool.acquire() as conn:
         result = await capabilities({"category": "nope"}, _ctx(), conn, agency_id, locale="ja")
     assert len(result.pairs) >= 7
+
+
+@pytest.mark.asyncio
+async def test_describe_data_stops_offset(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        page1 = await describe_data({"kind": "stops", "limit": 2, "offset": 0}, _ctx(), conn, agency_id, locale="ja")
+        page2 = await describe_data({"kind": "stops", "limit": 2, "offset": 2}, _ctx(), conn, agency_id, locale="ja")
+    ids1 = {r[0] for r in page1.rows}
+    ids2 = {r[0] for r in page2.rows}
+    assert ids1.isdisjoint(ids2)
+    assert len(page1.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_describe_data_offset_past_end_is_empty(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "stops", "limit": 10, "offset": 100000}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert len(result.rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_describe_data_offset_negative_clamped(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "stops", "limit": 2, "offset": -5}, _ctx(), conn, agency_id, locale="ja")
+    assert len(result.rows) == 2  # treated as offset 0
+
+
+@pytest.mark.asyncio
+async def test_stops_pagination_stable_under_name_ties(apply_schema):
+    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"
+        )
+        aid = row["agency_id"]
+        # 8 stops, only 3 distinct names → ties that would break naive ORDER BY stop_name
+        await conn.executemany(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) VALUES ($1,$2,$3,40.0,140.0)",
+            [
+                (aid, f"S{i}", name)
+                for i, name in enumerate(
+                    ["青森駅", "青森駅", "青森駅", "県庁前", "県庁前", "県庁前", "市役所", "市役所"]
+                )
+            ],
+        )
+    try:
+        async with pool.acquire() as conn:
+            p1 = await describe_data({"kind": "stops", "limit": 4, "offset": 0}, _ctx(), conn, aid, locale="ja")
+            p2 = await describe_data({"kind": "stops", "limit": 4, "offset": 4}, _ctx(), conn, aid, locale="ja")
+        ids1 = [r[0] for r in p1.rows]
+        ids2 = [r[0] for r in p2.rows]
+        assert len(ids1) == 4 and len(ids2) == 4
+        assert set(ids1).isdisjoint(set(ids2)), "pages overlap — pagination unstable"
+        assert len(set(ids1) | set(ids2)) == 8, "rows lost across pages"
+    finally:
+        async with pool.acquire() as c:
+            await c.execute("TRUNCATE agencies CASCADE")
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_stops_offset_past_end_summary_not_inverted(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        r = await describe_data({"kind": "stops", "limit": 10, "offset": 100000}, _ctx(), conn, agency_id, locale="ja")
+    assert len(r.rows) == 0
+    # the summary must not claim a positive range (e.g. "100001–100000件") when empty
+    assert "100001" not in r.summary
