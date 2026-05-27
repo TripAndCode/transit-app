@@ -16,7 +16,7 @@ pandas = ">=2.2"
 groq = ">=0.11"
 openai = ">=1.50"
 slowapi = ">=0.1"
-sentence-transformers = ">=2.7"
+sentence-transformers = "^3.0"
 asyncpg = ">=0.29"
 fastapi = ">=0.111"
 uvicorn = {version = ">=0.29", extras = ["standard"]}
@@ -38,6 +38,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "requires_groq_key: tests that need a live GROQ_API_KEY and the dev API reachable (off by default)",
+    "slow = \"Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1\"",
 ]
 
 [tool.ruff]

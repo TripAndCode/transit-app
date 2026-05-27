@@ -61,6 +61,106 @@ and the API sends `Access-Control-Allow-Credentials: true`. SSO
 end-to-end works on either origin; you just authenticate via `:8000`
 once per session.
 
+## Ask tab — how it works
+
+`POST /api/{agency_id}/ask` answers a Japanese (or English) natural-language
+question about delay data. It uses a 3-stage router so most common questions
+never reach the LLM, keeping the Cerebras/Groq free tiers comfortable.
+
+### Request flow
+
+```
+                     POST /api/{agency_id}/ask
+                                │
+                                ▼
+                  ┌─────────────────────────────┐
+                  │ Stage 1: rules router       │  pipeline/query/router.py
+                  │ regex/keyword → tool + args │
+                  └──────┬──────────────────────┘
+                         │ match?
+                  yes ◄──┴──► no
+                   │            │
+                   │            ▼
+                   │  ┌─────────────────────────────┐
+                   │  │ Stage 2: embedding router   │  pipeline/query/embeddings.py
+                   │  │ e5-small(Q) → top-1 in      │  pipeline/query/rag_index.py
+                   │  │ rag_chunks; cosine sim > 85%│
+                   │  └──────┬──────────────────────┘
+                   │         │
+                   │   yes ──┴── no
+                   │     │        │
+                   │     │        ▼
+                   │     │   ┌─────────────────────────────┐
+                   │     │   │ Stage 3: RAG-augmented LLM  │  pipeline/query/chat.py
+                   │     │   │ top-3 nearest examples →    │
+                   │     │   │ injected into system prompt │
+                   │     │   │ → LLM picks tool            │
+                   │     │   │ (Cerebras → Groq → Ollama)  │
+                   │     │   └──────┬──────────────────────┘
+                   │     │          │
+                   ▼     ▼          ▼
+            pipeline.query.tools.dispatch(...)
+```
+
+### The three stages
+
+1. **Rules router** — ~25 hand-written regex/keyword patterns. `どんな路線` →
+   `describe_data(kind=routes)`. `定時率TOP10` → `top_n(metric=on_time_rate, n=10)`.
+   Hits without calling the LLM. Add a rule by editing `_RULES` in
+   `pipeline/query/router.py` (PR-reviewed, restart required).
+
+2. **Embedding router** — if no rule matches, embed the question with
+   [`intfloat/multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small)
+   (loaded once at API startup, ~120MB, free), then nearest-neighbor against
+   `rag_chunks` (cosine distance). When `cosine_sim > 0.85`, dispatch the
+   matching golden question's tool directly. Still no LLM call.
+
+3. **RAG-augmented LLM** — long-tail questions. Top-3 nearest golden examples
+   are injected as few-shot into the system prompt before calling the LLM via
+   the Phase 1.5 provider adapter (Cerebras → Groq → Ollama). The examples
+   strongly bias the model toward the right tool even on novel phrasings.
+
+### "Chunk" = one indexed question
+
+`rag_chunks` stores **one row per question** from `tests/ask_eval/golden_set.jsonl`:
+
+| Column | Example | Why |
+|---|---|---|
+| `chunk_id` | `meta-001` | matches `golden_set.jsonl` line id |
+| `content` | `どんな路線がデータにあるの？` | canonical phrasing |
+| `embedding` | `vector(384)` | e5-small output, pgvector-indexed |
+| `content_hash` | `sha256(content)` | for idempotent rebuild |
+
+Tool + args are NOT stored in `rag_chunks` — they live in `golden_set.jsonl`
+(single source of truth), loaded into memory at API startup. Router looks up
+the matched `chunk_id` to recover them.
+
+### Building / rebuilding the index
+
+`rag_chunks` is populated by a one-shot CLI command — not by a migration:
+
+```bash
+# one agency
+poetry run python gtfs_pipeline.py build_rag_index --agency-id 1
+
+# every agency in agencies table
+make build-rag-index
+```
+
+Idempotent (re-running only re-embeds rows whose `question` text changed).
+Run after `make bootstrap` for new environments, and after any change to
+`golden_set.jsonl`.
+
+### Graceful degradation
+
+The router is **additive**. If any Phase 2 piece fails — model can't load,
+`rag_chunks` is empty, pgvector errors — the request falls through to the
+LLM path with no examples. Phase 1 behavior continues to work end-to-end.
+
+Set `ASK_ROUTER_ENABLED=false` in `.env` to disable the router entirely at
+runtime (no restart needed for in-flight requests; new requests pick up the
+new value).
+
 ### Load data
 
 `make bootstrap` doesn't pull any GTFS-RT data — the DB is empty until

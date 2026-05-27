@@ -54,6 +54,40 @@ async def test_describe_data_routes(conn_with_seed):
     assert "2" in result.summary  # summary mentions the count
 
 
+@pytest.mark.asyncio
+async def test_describe_data_routes_filter_substring_matches(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes", "filter_substring": "国道"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    # conn_with_seed has "A1 国道・古川線" — should match exactly 1
+    assert result.kind == "table"
+    assert len(result.rows) == 1
+    assert result.rows[0][0] == "1021"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_routes_filter_no_match_is_empty(conn_with_seed):
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "routes", "filter_substring": "存在しない路線XYZ"}, _ctx(), conn, agency_id, locale="ja"
+        )
+    # Must NOT dump all rows. Either empty kind or 0 rows with a clear message.
+    assert len(result.rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_describe_data_routes_empty_agency_message(conn_with_seed):
+    # Use an agency_id with no routes
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "routes"}, _ctx(), conn, agency_id + 99999, locale="ja")
+    assert result.kind in ("empty", "table")
+    assert "0 路線" not in result.summary  # no awkward "0 路線あります"
+
+
 @pytest.fixture
 async def conn_with_observations(conn_with_seed):
     """Extends conn_with_seed: also inserts stops + updates so date_range/sample_counts work."""
@@ -142,6 +176,19 @@ async def test_describe_data_sample_counts(conn_with_observations):
     assert result.columns == ["route_code", "samples"]
     assert result.rows[0][0] == "1021"
     assert result.rows[0][1] == 30
+
+
+@pytest.mark.asyncio
+async def test_sample_counts_ascending(conn_with_observations):
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "sample_counts", "order": "asc", "limit": 5}, _ctx(), conn, agency_id, locale="ja"
+        )
+    assert result.kind == "table"
+    # ascending → smallest sample count first
+    counts = [row[1] for row in result.rows]
+    assert counts == sorted(counts)
 
 
 @pytest.mark.asyncio

@@ -132,3 +132,17 @@
 {"id": "agency-002", "category": "P_agency", "question": "広島電鉄のデータも見られる？", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
 {"id": "agency-003", "category": "P_agency", "question": "今このシステムに何社入ってるの？", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
 {"id": "agency-004", "category": "P_agency", "question": "広島バスと広島電鉄の違いを教えて", "expected_tool": "describe_data", "expected_args": {"kind": "agencies"}}
+{"id": "rs-extra-001", "category": "I_alias", "question": "22171の遅延を教えて", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "rs-extra-002", "category": "I_alias", "question": "22171の遅延状況は？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "rs-extra-003", "category": "I_alias", "question": "系統22171はどれくらい遅れる？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "rs-extra-004", "category": "I_alias", "question": "22171のパフォーマンスは？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "rs-extra-005", "category": "I_alias", "question": "16071の遅延具合", "expected_tool": "route_stats", "expected_args": {"route": "16071"}}
+{"id": "rs-extra-006", "category": "I_alias", "question": "16071はどれくらい遅延してる", "expected_tool": "route_stats", "expected_args": {"route": "16071"}}
+{"id": "rs-extra-007", "category": "I_alias", "question": "この系統の平均遅延を知りたい", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "rs-extra-008", "category": "I_alias", "question": "路線の遅延統計を見せて", "expected_tool": "route_stats", "expected_args": {}}
+{"id": "rs-extra-009", "category": "I_alias", "question": "22171のp90遅延はどれくらい？", "expected_tool": "route_stats", "expected_args": {"route": "22171"}}
+{"id": "rs-extra-010", "category": "I_alias", "question": "16071の遅延を確認したい", "expected_tool": "route_stats", "expected_args": {"route": "16071"}}
+{"id": "oos-extra-001", "category": "H_oos", "question": "明日の遅延を予測して", "expected_tool": null, "expected_args": {}}
+{"id": "oos-extra-002", "category": "H_oos", "question": "未来の運行を予測できる？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-extra-003", "category": "C_geo", "question": "一番混む時間帯はいつ？", "expected_tool": null, "expected_args": {}}
+{"id": "oos-extra-004", "category": "C_geo", "question": "バスの混雑状況を教えて", "expected_tool": null, "expected_args": {}}
