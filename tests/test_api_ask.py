@@ -204,6 +204,31 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_followup_without_history_does_not_hallucinate(ask_client, monkeypatch):
+    """A follow-up phrasing with no history returns a gentle prompt, not an LLM-invented page."""
+    client, agency_id = ask_client
+
+    async def boom_chat(*a, **k):
+        raise AssertionError("chat_with_tools must NOT be called for a no-history follow-up")
+
+    async def boom_router(*a, **k):
+        raise AssertionError("router must NOT be called for a no-history follow-up")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", boom_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom_router)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "もっと見せて"},  # no history
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("router_stage") == "no_history"
+    assert data["tool_call"] is None
+
+
+@pytest.mark.asyncio
 async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 
