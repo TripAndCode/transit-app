@@ -173,19 +173,17 @@ class LLMClient:
         ``"bad_request"``, ``"unexpected"``, or ``"no_providers"`` on failure,
         letting the caller select an honest user-facing degradation message.
 
-        Per provider: retries ONCE on a transient connection/timeout error
-        (no backoff — a refused socket retries instantly), descends the
-        ladder on rate-limit (429) without retrying, and on a Groq
+        Per provider: retries ONCE on a refused/reset socket
+        (``APIConnectionError``, no backoff — it fails instantly), descends
+        the ladder immediately on a timeout (``APITimeoutError``, which already
+        waited the full deadline) and on rate-limit (429), and on a Groq
         ``tool_use_failed`` 400 salvages the call via ``_recover_tool_call``
         instead of failing over.
 
-        The OpenAI client is constructed once per provider (not per retry
-        attempt) so the same connection pool is reused on the single-retry
-        path.
-
-        Note: an immediate retry on ``APITimeoutError`` could double-dispatch
-        if the first request is still in-flight server-side; acceptable here
-        because Stage-3 calls are temperature-0 and idempotent.
+        The client is built once per provider (reusing one connection pool
+        across the retry) with ``max_retries=0`` — the SDK's own retry would
+        otherwise block ~60s on a 429 before our ladder descent could fire,
+        making the fallback design illusory.
         """
         from openai import (
             APIConnectionError,
@@ -202,7 +200,7 @@ class LLMClient:
         seen_rate_limit = False
         last_kind: str | None = None
         for cfg in self._providers:
-            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+            client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
             for attempt in (1, 2):
                 try:
                     resp = client.chat.completions.create(
