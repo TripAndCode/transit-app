@@ -161,6 +161,43 @@ Set `ASK_ROUTER_ENABLED=false` in `.env` to disable the router entirely at
 runtime (no restart needed for in-flight requests; new requests pick up the
 new value).
 
+### Follow-ups & conversation memory
+
+The Ask tab is multi-turn. The frontend sends the **last 3 turns** in the
+request; the server detects follow-up phrasings (もっと / 次の50件 / show me
+more / 前のと逆順で) and routes them straight to the LLM stage with that
+history attached, so the model continues from the prior turn — e.g.
+「停留所はいくつ？」 (first 50) then 「次の50件」 → `describe_data(kind=stops,
+offset=50)`. The list kinds (`routes` / `stops` / `sample_counts`) accept an
+`offset` for pagination.
+
+Memory is **client-supplied and ephemeral** — capped at 3 turns, gone on
+reload. Anonymous and logged-in users behave identically; there is no
+server-side conversation store. Set `ASK_HISTORY_ENABLED=false` to disable.
+
+### Query analytics log
+
+Every `/ask` writes one **anonymized** row to `ask_query_log`
+(`question, router_stage, tool, agency_id, success, created_at`) — fire-and-
+forget, never blocking the response. It has **no user id, session, or IP**: it
+answers "what is asked and how well is it served", for router / golden-set
+tuning and cost analysis (which questions burn the LLM). 90-day retention via
+`make prune-query-log`. A free-text box can capture PII a user types; we
+minimize (question + routing metadata only), do not link identity, and bound
+exposure with retention. Set `ASK_QUERY_LOG_ENABLED=false` to disable.
+
+Useful queries:
+
+```sql
+-- questions that fall to the LLM (candidates for new rules / golden entries)
+SELECT question, count(*) FROM ask_query_log
+WHERE router_stage = 'llm' GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
+
+-- unmet demand (failures)
+SELECT question, count(*) FROM ask_query_log
+WHERE success = false GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
+```
+
 ### Load data
 
 `make bootstrap` doesn't pull any GTFS-RT data — the DB is empty until
