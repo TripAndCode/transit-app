@@ -269,3 +269,12 @@ def test_last_error_kind_no_providers(monkeypatch):
     out = client.chat_completions(messages=[])
     assert out is None
     assert client.last_error_kind == "no_providers"
+
+
+def test_cerebras_default_model_is_gpt_oss(monkeypatch):
+    """No CEREBRAS_MODEL override → the account-available gpt-oss-120b."""
+    monkeypatch.delenv("CEREBRAS_MODEL", raising=False)
+    _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c")
+    providers = llm_client.LLMClient().providers()
+    assert providers[0].name == "cerebras"
+    assert providers[0].model == "gpt-oss-120b"
