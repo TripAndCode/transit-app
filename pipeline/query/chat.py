@@ -172,8 +172,8 @@ async def chat_with_tools(
     def _sync():
         # The adapter handles per-provider retries, rate-limit fallback,
         # and logging internally; on total failure (or zero configured
-        # providers) it returns None and we surface the standard
-        # "service_unreachable" message below.
+        # providers) it returns None, and we surface a kind-aware
+        # degradation message (see the msg-is-None branch below).
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "system", "content": locale_addendum},
@@ -197,6 +197,7 @@ async def chat_with_tools(
         # the user to the question types the router answers with no LLM at
         # all (route lists, rankings, stop counts) — those never hit a quota.
         # Anything else keeps the generic retry message.
+        # None (old fakes / never-set) → "connection" → generic message.
         kind = getattr(client, "last_error_kind", None) or "connection"
         key = {
             "rate_limit": "llm_rate_limited",
