@@ -181,8 +181,6 @@ async def ask(
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
-        # chat_with_tools now returns a structured success flag; consume it
-        # directly instead of string-matching the service-unreachable message.
         success = payload["success"]
         resp = AskResponse(
             answer=payload["answer"],
