@@ -128,6 +128,21 @@ async def ask(
     history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
 
+    # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
+    # continue: short-circuit to a gentle prompt. Otherwise the question
+    # falls to the open LLM with no examples, which hallucinates a page the
+    # user never asked for (e.g. describe_data(routes, offset=100)).
+    if history_enabled and not history and is_follow_up(body.question):
+        msg = (
+            "前の検索結果が見つかりませんでした。まず質問してから「もっと」「次の50件」などで続けてください。"
+            if locale != "en"
+            else "No previous result to continue. Ask a question first, then use 'more' / 'next 50' to page."
+        )
+        resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
+        if log_enabled:
+            await log_query(conn, agency_id, body.question, "no_history", None, False)
+        return resp
+
     # Single embed+search: dispatch decision and few-shot examples share
     # one embedding so the fall-through path doesn't re-embed the question.
     decision, examples = (None, [])
