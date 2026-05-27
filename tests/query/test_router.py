@@ -7,6 +7,7 @@ import pytest_asyncio
 
 from pipeline.query.router import (
     _match_rules,
+    is_follow_up,
     retrieve_examples,
     route_question,
     set_golden_set_path,
@@ -331,3 +332,19 @@ async def test_margin_guard_ignores_same_tool_runnerup(monkeypatch, tmp_path):
     assert dec2 is None  # different tools within margin → ambiguous → fall through
 
     _router.set_golden_set_path(None)
+
+
+@pytest.mark.parametrize(
+    "q",
+    ["もっと見せて", "もう少し", "続き", "次の50件", "前のと逆順で", "同じ条件で先月", "それを詳しく", "show me more", "next", "again"],
+)
+def test_is_follow_up_true(q):
+    assert is_follow_up(q) is True
+
+
+@pytest.mark.parametrize(
+    "q",
+    ["どんな路線がある？", "22171の遅延", "定時率TOP10", "停留所はいくつ？", ""],
+)
+def test_is_follow_up_false(q):
+    assert is_follow_up(q) is False
