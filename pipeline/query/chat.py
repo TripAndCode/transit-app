@@ -150,8 +150,6 @@ async def chat_with_tools(
     # list byte-identical to the no-memory path.
     history_block = None
     if history:
-        import json as _json
-
         header = "== Conversation so far ==" if locale == "en" else "== これまでの会話 =="
         lines = [header]
         for i, turn in enumerate(history[-3:], 1):
@@ -159,7 +157,9 @@ async def chat_with_tools(
             tool = turn.get("tool")
             args = turn.get("args") or {}
             if tool:
-                args_c = _json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+                # Cap the serialized args: a client could send a huge nested
+                # args blob to bloat the prompt / attempt weak prompt injection.
+                args_c = json.dumps(args, ensure_ascii=False, separators=(",", ":"))[:200]
                 lines.append(f"{i}. {q} → {tool}({args_c})")
             else:
                 lines.append(f"{i}. {q}")
@@ -187,17 +187,30 @@ async def chat_with_tools(
 
     msg = await asyncio.to_thread(_sync)
     if msg is None:
+        # The LLM ladder is exhausted/unreachable — a hard failure, not a
+        # deliberate decline. success=False so analytics don't count it.
         return {
             "answer": _chat_str("service_unreachable", locale),
             "tool_call": None,
             "result": None,
+            "success": False,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
     if not tool_calls:
-        # Out-of-scope path: model returned plain text (refusal + suggestions).
-        text = (msg.content or "").strip() or _chat_str("refusal_fallback", locale)
-        return {"answer": text, "tool_call": None, "result": None}
+        # Out-of-scope path: model returned plain text. A non-empty body is a
+        # deliberate, helpful refusal/suggestion (the system worked → True).
+        # An empty body falls back to the generic "couldn't understand"
+        # string, which is a genuine failure to parse the question → False.
+        body = (msg.content or "").strip()
+        if body:
+            return {"answer": body, "tool_call": None, "result": None, "success": True}
+        return {
+            "answer": _chat_str("refusal_fallback", locale),
+            "tool_call": None,
+            "result": None,
+            "success": False,
+        }
 
     if len(tool_calls) > 1:
         _log.info("LLM emitted %d tool calls; using the first only", len(tool_calls))
@@ -226,16 +239,20 @@ async def chat_with_tools(
         result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
     except Exception as exc:
         _log.exception("Tool %s failed", name)
+        # A tool blowing up is a hard failure, not a deliberate decline.
         return {
             "answer": _chat_str("tool_error", locale, name=name, exc=exc),
             "tool_call": {"name": name, "arguments": args},
             "result": None,
+            "success": False,
         }
 
     return {
         "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
+        # Mirror the dispatch-path rule: an empty/no-data result is not success.
+        "success": result.kind != "empty",
     }
 
 

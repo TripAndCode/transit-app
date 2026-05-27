@@ -57,6 +57,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
                 "series": [],
                 "pairs": [],
             },
+            "success": True,
         }
 
     # Patch the symbol in the module that imports it (api.routers.ask)
@@ -154,7 +155,7 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
 
     async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
         captured["rag_examples"] = rag_examples
-        return {"answer": "stub", "tool_call": None, "result": None}
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
 
@@ -180,6 +181,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
             "answer": "stub",
             "tool_call": {"name": "describe_data", "arguments": {"kind": "stops", "offset": 50}},
             "result": None,
+            "success": True,
         }
 
     async def boom(*a, **k):
@@ -206,7 +208,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 
     async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
-        return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None}
+        return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
     async def no_decision(*a, **k):
         return (None, [])
