@@ -191,3 +191,22 @@ async def test_empty_history_matches_no_history(monkeypatch):
     await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=None)
     await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=[])
     assert seen[0] == seen[1]
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_success_flag(monkeypatch):
+    """chat_with_tools includes a success bool: tool-result kind!=empty → True; service-unreachable → False."""
+    from pipeline.query import chat
+
+    # Service unreachable (client returns None) → success False
+    class _DownClient:
+        def chat_completions(self, **k):
+            return None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _DownClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1)
+    assert out["success"] is False

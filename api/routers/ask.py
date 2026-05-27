@@ -20,7 +20,7 @@ from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
-from pipeline.query.chat import _chat_str, chat_with_tools
+from pipeline.query.chat import chat_with_tools
 from pipeline.query.query_log import log_query
 from pipeline.query.router import is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
@@ -166,7 +166,9 @@ async def ask(
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
-        success = payload["answer"] != _chat_str("service_unreachable", locale)
+        # chat_with_tools now returns a structured success flag; consume it
+        # directly instead of string-matching the service-unreachable message.
+        success = payload["success"]
         resp = AskResponse(
             answer=payload["answer"],
             tool_call=payload["tool_call"],
