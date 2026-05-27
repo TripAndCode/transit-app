@@ -281,3 +281,70 @@ def test_cerebras_default_model_is_gpt_oss(monkeypatch):
     providers = llm_client.LLMClient().providers()
     assert providers[0].name == "cerebras"
     assert providers[0].model == "gpt-oss-120b"
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        '<function=top_n({"n": 5})</function>',  # paren form
+        '<function=top_n>{"n": 5}</function>',  # tag form, no parens
+        '<function=top_n{"n": 5}>',  # bare braces
+    ],
+)
+def test_recover_tool_call_format_variants(generation):
+    """Recovery must handle the paren / tag / bare shapes llama emits."""
+    from pipeline.query.llm_client import _recover_tool_call
+
+    class _Exc:
+        body = {"error": {"code": "tool_use_failed", "failed_generation": generation}}
+
+    msg = _recover_tool_call(_Exc())
+    assert msg is not None
+    assert msg.tool_calls[0].function.name == "top_n"
+    assert json.loads(msg.tool_calls[0].function.arguments) == {"n": 5}
+
+
+def test_timeout_does_not_retry(monkeypatch):
+    """APITimeoutError descends immediately (no retry — it already waited the deadline)."""
+    from openai import APITimeoutError
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    llm_client.reset_client_for_tests()
+
+    calls = {"n": 0}
+
+    def always_timeout(*a, **k):
+        calls["n"] += 1
+        raise APITimeoutError(request=None)
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.side_effect = always_timeout
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "connection"
+    assert calls["n"] == 1  # NOT retried
+
+
+def test_rate_limit_preferred_over_later_connection(monkeypatch):
+    """Earlier provider 429 + later provider connection-fail → surfaced kind is rate_limit."""
+    from openai import APIConnectionError, RateLimitError
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "cerebras,groq")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "c")
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    llm_client.reset_client_for_tests()
+
+    calls = {"n": 0}
+
+    def side(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:  # cerebras → 429
+            raise RateLimitError(message="429", response=MagicMock(status_code=429), body=None)
+        raise APIConnectionError(request=None)  # groq → connection (retried then descends)
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.side_effect = side
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "rate_limit"

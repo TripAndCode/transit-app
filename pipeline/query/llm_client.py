@@ -95,12 +95,13 @@ def _load_providers() -> list[ProviderConfig]:
     return cfgs
 
 
-# The ``(\{.*\})`` group is intentionally greedy so it spans nested objects in
-# a single attempted call. Groq's ``failed_generation`` documents one call, so
-# the greedy match is correct; the ``json.loads`` guard below is the safety net
-# that rejects any mis-capture — do not remove it.
+# Groq/llama leak a failed tool call in a few shapes: ``name({...})</function>``,
+# ``name>{...}</function>``, or bare ``name{...}``. Capture the function name,
+# skip any chars up to the first ``{``, then greedily grab to the last ``}`` so a
+# single call's nested objects are spanned. The ``json.loads`` guard below is the
+# safety net that rejects any mis-capture — do not remove it.
 _FAILED_FN_RE = re.compile(
-    r"<function=([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(\{.*\})\s*\)\s*</function>",
+    r"<function=([A-Za-z_][A-Za-z0-9_]*)[^{}]*(\{.*\})",
     re.DOTALL,
 )
 
@@ -198,6 +199,7 @@ class LLMClient:
             _log.error("CHAT_PROVIDERS resolves to zero usable providers")
             return None, "no_providers"
 
+        seen_rate_limit = False
         last_kind: str | None = None
         for cfg in self._providers:
             client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
@@ -211,14 +213,24 @@ class LLMClient:
                         temperature=temperature,
                     )
                     return resp.choices[0].message, None
-                except (APIConnectionError, APITimeoutError) as exc:
+                except APITimeoutError:
+                    # The request already waited the full timeout; retrying would
+                    # just wait it again and double tail latency. Descend instead.
+                    # (Caught before APIConnectionError — APITimeoutError subclasses it.)
+                    last_kind = "connection"
+                    _log.warning("provider %s timed out; next in ladder", cfg.name)
+                    break
+                except APIConnectionError as exc:
+                    # A refused/reset socket fails instantly, so one cheap retry
+                    # on the same provider is worthwhile before descending.
                     last_kind = "connection"
                     if attempt == 1:
                         _log.info("transient %s on %s — retrying once", exc.__class__.__name__, cfg.name)
-                        continue  # retry SAME provider once
-                    _log.warning("provider %s transient-failed twice; next in ladder", cfg.name)
+                        continue
+                    _log.warning("provider %s connection-failed twice; next in ladder", cfg.name)
                     break
                 except RateLimitError:
+                    seen_rate_limit = True
                     last_kind = "rate_limit"
                     _log.warning("provider %s rate-limited (429); next in ladder", cfg.name)
                     break  # 429 won't clear in 1s — go to next provider
@@ -235,8 +247,12 @@ class LLMClient:
                     _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
                     break
 
-        _log.error("all LLM providers exhausted; last_error_kind=%s", last_kind)
-        return None, last_kind
+        # Prefer the quota signal: if any provider was rate-limited, surface that
+        # even when a later provider failed differently — its steer-to-free-
+        # questions message is the most actionable thing we can show the user.
+        final_kind = "rate_limit" if seen_rate_limit else last_kind
+        _log.error("all LLM providers exhausted; error_kind=%s", final_kind)
+        return None, final_kind
 
 
 _singleton: LLMClient | None = None
