@@ -124,6 +124,7 @@ def test_recover_tool_call_valid():
     assert msg is not None
     assert msg.tool_calls[0].function.name == "top_n"
     import json
+
     assert json.loads(msg.tool_calls[0].function.arguments) == {"metric": "avg_delay", "n": 10}
     assert msg.content is None
 
