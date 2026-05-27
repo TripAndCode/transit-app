@@ -63,6 +63,10 @@ _CHAT_STRINGS = {
     ("user_prelude", "en"): "Range: {from_date} to {to_date} DOW={dow} time_band={time_band}\nQuestion: {question}",
     ("service_unreachable", "ja"): "AI サービスに接続できませんでした。後ほど再試行してください。",
     ("service_unreachable", "en"): "Could not reach the AI service. Please retry later.",
+    ("llm_rate_limited", "ja"): "本日のAIの利用が上限に達しました。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。",
+    ("llm_rate_limited", "en"): "Today's AI usage limit is reached. Questions like route lists, delay rankings, and stop counts still work.",
+    ("llm_unconfigured", "ja"): "AIプロバイダーが設定されていません。",
+    ("llm_unconfigured", "en"): "No AI provider is configured.",
     ("refusal_fallback", "ja"): "ご質問の内容を理解できませんでした。",
     ("refusal_fallback", "en"): "I couldn't understand your question.",
     ("tool_error", "ja"): "ツール {name} の実行中にエラーが発生しました: {exc}",
@@ -189,8 +193,17 @@ async def chat_with_tools(
     if msg is None:
         # The LLM ladder is exhausted/unreachable — a hard failure, not a
         # deliberate decline. success=False so analytics don't count it.
+        # Pick the message by WHY it failed: a quota exhaustion (429) steers
+        # the user to the question types the router answers with no LLM at
+        # all (route lists, rankings, stop counts) — those never hit a quota.
+        # Anything else keeps the generic retry message.
+        kind = getattr(client, "last_error_kind", None) or "connection"
+        key = {
+            "rate_limit": "llm_rate_limited",
+            "no_providers": "llm_unconfigured",
+        }.get(kind, "service_unreachable")
         return {
-            "answer": _chat_str("service_unreachable", locale),
+            "answer": _chat_str(key, locale),
             "tool_call": None,
             "result": None,
             "success": False,
