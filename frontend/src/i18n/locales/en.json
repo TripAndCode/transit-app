@@ -307,7 +307,19 @@
     },
     "more_rows": "…and {{count}} more",
     "chips": { "more": "More" },
-    "autocomplete": { "noResults": "" }
+    "autocomplete": { "noResults": "" },
+    "mode": {
+      "label": "Input mode",
+      "chat": "Free text",
+      "build": "Build"
+    },
+    "build": {
+      "tool": "Question type",
+      "run": "Run",
+      "cancel": "Cancel",
+      "loading": "Loading…",
+      "error": "Couldn't load the builder"
+    }
   },
   "live": {
     "title": "Latest observations",

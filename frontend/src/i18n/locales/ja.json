@@ -307,7 +307,19 @@
     },
     "more_rows": "…他{{count}}件",
     "chips": { "more": "もっと" },
-    "autocomplete": { "noResults": "" }
+    "autocomplete": { "noResults": "" },
+    "mode": {
+      "label": "入力モード",
+      "chat": "自由に",
+      "build": "組み立て"
+    },
+    "build": {
+      "tool": "質問の型",
+      "run": "実行",
+      "cancel": "キャンセル",
+      "loading": "読み込み中…",
+      "error": "ビルダーを読み込めませんでした"
+    }
   },
   "live": {
     "title": "最新観測",
