@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies build-rag-index prune-query-log verify-secrets
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
 
 # Default target — first-run setup.
 all: bootstrap
@@ -141,6 +141,10 @@ seed-agencies:
 # Idempotent: re-runnable, upserts on content_hash uniqueness.
 build-rag-index:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
+
+.PHONY: promote-intent-cache
+promote-intent-cache:
+	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
 
 prune-query-log:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py prune_query_log --days 90
