@@ -12,16 +12,19 @@ user's chosen window without having to mention it in the prompt.
 
 import os as _os
 from datetime import date, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
+from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
 from pipeline.query.query_log import log_query
+from pipeline.query.rag_index import nearest as rag_nearest
 from pipeline.query.router import is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
 
@@ -209,3 +212,253 @@ async def ask(
         )
 
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Build-schema metadata
+# ---------------------------------------------------------------------------
+
+# Tools that are useful in the guided builder UI.  capabilities and route_meta
+# are excluded: capabilities is a discovery tool, route_meta requires a route
+# arg that isn't meaningful as a standalone builder form.
+_BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", "describe_data")
+
+# Per-tool labels (ja / en) and field override metadata for the builder UI.
+# Enum options and defaults are derived from _TOOL_DEFAULTS where possible;
+# this dict supplies the human-readable labels and the enum option lists that
+# aren't captured in _TOOL_DEFAULTS.
+_BUILD_TOOL_META: dict[str, dict[str, Any]] = {
+    "top_n": {
+        "label_ja": "ランキング",
+        "label_en": "Ranking",
+        "fields": [
+            {
+                "key": "metric",
+                "type": "enum",
+                "options": ["avg_delay", "on_time_rate", "delay_count_5min"],
+            },
+            {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
+            {"key": "best_first", "type": "bool", "default": False},
+            {
+                "key": "service_type",
+                "type": "enum",
+                "options": ["weekday", "weekend", "all"],
+                "default": "all",
+            },
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "time_series": {
+        "label_ja": "トレンド",
+        "label_en": "Trend",
+        "fields": [
+            {"key": "route", "type": "string", "optional": True},
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "compare_segments": {
+        "label_ja": "セグメント比較",
+        "label_en": "Segment Comparison",
+        "fields": [
+            {"key": "route", "type": "string", "optional": True},
+            {
+                "key": "dimension",
+                "type": "enum",
+                "options": ["dow", "service_type"],
+                "default": "dow",
+            },
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "route_stats": {
+        "label_ja": "系統統計",
+        "label_en": "Route Stats",
+        "fields": [
+            {"key": "route", "type": "string"},
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "describe_data": {
+        "label_ja": "データ照会",
+        "label_en": "Data Info",
+        "fields": [
+            {
+                "key": "kind",
+                "type": "enum",
+                "options": [
+                    "routes",
+                    "stops",
+                    "date_range",
+                    "agencies",
+                    "sample_counts",
+                    "overview",
+                    "metrics",
+                ],
+            },
+            {"key": "limit", "type": "int", "min": 1, "max": 200, "default": 50},
+        ],
+    },
+}
+
+
+@router.get("/ask/build-schema")
+async def ask_build_schema(
+    agency_id: int = Depends(get_agency),
+):
+    """Return tool-form metadata for the frontend's guided build mode.
+
+    Driven by ``_BUILD_TOOL_META`` + ``_TOOL_DEFAULTS``. The
+    ``capabilities`` and ``route_meta`` tools are excluded as they are
+    not useful in a builder.
+    """
+    tools_out = []
+    for name in _BUILD_TOOL_NAMES:
+        meta = _BUILD_TOOL_META.get(name, {})
+        entry: dict[str, Any] = {
+            "name": name,
+            "label_ja": meta.get("label_ja", name),
+            "label_en": meta.get("label_en", name),
+            "fields": meta.get("fields", []),
+        }
+        tools_out.append(entry)
+    return {"tools": tools_out}
+
+
+# ---------------------------------------------------------------------------
+# Suggest endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ask/suggest")
+async def ask_suggest(
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    q: str = Query(default=""),
+    limit: int = Query(default=8),
+):
+    """Live autocomplete for the Ask input.
+
+    With a non-empty ``q``: e5-embed the query, nearest-neighbour against
+    ``rag_chunks``, return up to ``limit`` (max 12) results ordered by
+    ascending cosine distance.
+
+    With an empty ``q``: return top-N most-hit chunks as a starter chip
+    set, ordered by ``hit_count DESC``.
+    """
+    # Clamp limit to [1, 12] even if FastAPI validation lets something through.
+    limit = max(1, min(12, limit))
+
+    if not q or not q.strip():
+        # Empty query: return top-N most-hit chunks for this agency.
+        rows = await conn.fetch(
+            """
+            SELECT rc.chunk_id, rc.content
+            FROM rag_chunks rc
+            LEFT JOIN ask_intent_cache aic
+              ON aic.last_question = rc.content
+             AND aic.agency_id = rc.agency_id
+            WHERE rc.agency_id = $1
+            ORDER BY aic.hit_count DESC NULLS LAST, rc.chunk_id
+            LIMIT $2
+            """,
+            agency_id,
+            limit,
+        )
+        from pipeline.query.router import _load_golden
+
+        golden = _load_golden()
+        result = []
+        for row in rows:
+            cid = row["chunk_id"]
+            tool, args = golden.get(cid, ("", {}))
+            result.append(
+                {
+                    "question": row["content"],
+                    "tool": tool,
+                    "args": dict(args),
+                    "distance": None,
+                }
+            )
+        return result
+
+    # Non-empty query: embed + NN search.
+    import asyncio
+
+    from pipeline.query.embeddings import get_embedder
+    from pipeline.query.router import _load_golden
+
+    embedder = get_embedder()
+    if not getattr(embedder, "available", False):
+        return []
+
+    try:
+        qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
+    except Exception:
+        return []
+
+    try:
+        matches = await rag_nearest(conn, agency_id, qvec, k=limit)
+    except Exception:
+        return []
+
+    golden = _load_golden()
+    result = []
+    for m in matches:
+        tool, args = golden.get(m.chunk_id, ("", {}))
+        result.append(
+            {
+                "question": m.content,
+                "tool": tool,
+                "args": dict(args),
+                "distance": m.distance,
+            }
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Edit-action endpoint
+# ---------------------------------------------------------------------------
+
+
+class EditActionRequest(BaseModel):
+    signature_hash: str
+    action: str
+
+
+@router.post("/ask/edit-action")
+async def ask_edit_action(
+    body: EditActionRequest,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Record the user's verdict on a cached interpretation.
+
+    Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``
+    Returns ``{"ok": true}`` on success, 400 on unknown action.
+    """
+    try:
+        await _intent_cache.update_user_action(conn, body.signature_hash, agency_id, body.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
