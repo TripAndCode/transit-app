@@ -288,7 +288,22 @@ def _result_to_dict(r: ToolResult) -> dict:
     }
 
 
+def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
+    """Return the smallest cosine distance among RAG examples whose tool matches.
+
+    Each element of ``rag_examples`` is expected to have ``.tool`` and
+    ``.distance`` attributes (a :class:`~pipeline.query.rag_index.Match`
+    enriched by :func:`~pipeline.query.router._enrich`).
+
+    Returns ``None`` when ``rag_examples`` is empty or no example maps to
+    ``tool``. Used by Stage 3 to derive a confidence score without calling
+    the LLM a second time — the NN distance is already computed upstream.
+    """
+    distances = [m.distance for m in rag_examples if getattr(m, "tool", None) == tool]
+    return min(distances) if distances else None
+
+
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["chat_with_tools", "_summary"]
+__all__ = ["chat_with_tools", "_nn_distance_for_tool", "_summary"]

@@ -133,3 +133,43 @@ def test_date_object_args_serialize_to_iso():
         _ctx(),
     )
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
+
+
+# --- derive_confidence ---
+
+
+def test_derive_confidence_embedding_only():
+    """With no LLM self-reported value, the confidence is purely embedding-derived."""
+    from pipeline.query.intent import derive_confidence
+
+    # Strong NN match (cosine distance 0.05) → high confidence
+    assert derive_confidence(nn_distance_same_tool=0.05) == pytest.approx(0.95, abs=1e-6)
+    # Weak match (distance 0.6) → low
+    assert derive_confidence(nn_distance_same_tool=0.6) == pytest.approx(0.4, abs=1e-6)
+    # Floor at 0.0
+    assert derive_confidence(nn_distance_same_tool=1.5) == 0.0
+
+
+def test_derive_confidence_no_same_tool_match_floor():
+    """If no chunk with the same tool exists in the NN window, default to 0.4 floor."""
+    from pipeline.query.intent import derive_confidence
+
+    assert derive_confidence(nn_distance_same_tool=None) == 0.4
+
+
+def test_derive_confidence_llm_caps_embedding():
+    """LLM self-reported confidence caps the embedding-derived score (min of the two)."""
+    from pipeline.query.intent import derive_confidence
+
+    # Strong embedding (0.95) but LLM only 0.3 → result 0.3
+    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=0.3) == pytest.approx(0.3, abs=1e-6)
+    # Weak embedding (0.4 floor) and high LLM (0.9) → result 0.4 (the lower wins)
+    assert derive_confidence(nn_distance_same_tool=None, llm_self_reported=0.9) == 0.4
+
+
+def test_derive_confidence_clamps_to_unit_interval():
+    """LLM > 1.0 or < 0.0 must clamp before the min."""
+    from pipeline.query.intent import derive_confidence
+
+    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=1.5) == pytest.approx(0.95, abs=1e-6)
+    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=-0.5) == 0.0

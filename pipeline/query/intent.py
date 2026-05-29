@@ -101,3 +101,29 @@ def signature_hash(tool: str, canonical_args: dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def derive_confidence(
+    nn_distance_same_tool: float | None,
+    llm_self_reported: float | None = None,
+) -> float:
+    """Blend the embedding NN distance and the LLM's self-report into a 0..1 confidence.
+
+    - ``nn_distance_same_tool``: cosine distance to the nearest RAG chunk that
+      maps to the same tool the LLM chose. ``None`` means no same-tool match
+      was found in the NN window — falls back to a conservative 0.4 floor.
+    - ``llm_self_reported``: the model's own confidence (0..1). Clamped to
+      [0, 1] before use. ``None`` means no signal — embedding wins.
+
+    Returns the minimum of the two — the lower signal caps the higher one
+    (we don't trust the model's self-report alone; the literature is loud on
+    that). Embedding-derived = max(0, 1 - distance) when present, else 0.4.
+    """
+    if nn_distance_same_tool is None:
+        embedding_conf = 0.4
+    else:
+        embedding_conf = max(0.0, 1.0 - float(nn_distance_same_tool))
+    if llm_self_reported is None:
+        return embedding_conf
+    llm_clamped = max(0.0, min(1.0, float(llm_self_reported)))
+    return min(embedding_conf, llm_clamped)
