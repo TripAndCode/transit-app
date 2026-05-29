@@ -91,10 +91,10 @@ def test_best_first_true_does_not_collapse_with_default():
 
 
 def test_route_id_case_preserved():
-    """Identifiers must NOT be lowercased (route IDs are case-sensitive in the data)."""
-    a = canonicalize("route_stats", {"route_id": "16071"}, _ctx())
-    b = canonicalize("route_stats", {"route_id": "16071"}, _ctx())
-    assert signature_hash("route_stats", a) == signature_hash("route_stats", b)
+    """Identifiers must NOT be lowercased — different-case route IDs must NOT collapse."""
+    a = canonicalize("route_stats", {"route_id": "ROUTE_ABC"}, _ctx())
+    b = canonicalize("route_stats", {"route_id": "route_abc"}, _ctx())
+    assert signature_hash("route_stats", a) != signature_hash("route_stats", b)
 
 
 def test_hash_is_16_hex_chars():
