@@ -134,9 +134,17 @@ export function AskTab() {
     await submit(q);
   }
 
-  /** Build mode form submit: send a humanized structured query as a regular question */
+  /**
+   * Build-mode form submit.
+   *
+   * Encodes the structured intent as a compact question string that the
+   * backend will parse as a JSON-mode signature directly.  The ``__build__``
+   * sentinel prefix prevents the backend from storing the machine-generated
+   * string as a human-readable ``last_question`` in the intent cache, so it
+   * never surfaces as a chip or autocomplete suggestion.
+   */
   async function submitStructured(tool: string, args: Record<string, unknown>) {
-    const question = `[build] ${tool} ${JSON.stringify(args)}`;
+    const question = `__build__ ${tool} ${JSON.stringify(args)}`;
     setMode("chat");
     setBuildInitial(null);
     await submit(question);

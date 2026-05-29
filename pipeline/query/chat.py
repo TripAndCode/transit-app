@@ -141,6 +141,10 @@ async def chat_with_tools(
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
     question = question.strip()
+    # Build-mode synthetic questions (sent by the guided form with an ``__build__``
+    # prefix) must never be written to the intent cache as last_question, otherwise
+    # machine-generated strings surface as chips / autocomplete suggestions.
+    _skip_cache_write = question.startswith("__build__")
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -242,7 +246,8 @@ async def chat_with_tools(
             args = pre_row["args"] if isinstance(pre_row["args"], dict) else {}
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
-            await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
+            if not _skip_cache_write:
+                await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
             nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
             final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
             try:
@@ -386,7 +391,10 @@ async def chat_with_tools(
             cache_outcome = "miss"
 
         # Upsert regardless of hit/miss (bumps hit_count on hit).
-        await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
+        # Skip writes for build-mode synthetic questions so machine-generated
+        # strings never appear as last_question in the cache.
+        if not _skip_cache_write:
+            await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
         # Compute final confidence blending NN distance + LLM self-report.
         nn_dist = _nn_distance_for_tool(rag_examples or [], name)

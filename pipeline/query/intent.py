@@ -42,6 +42,13 @@ _REL_TIME: dict[str, callable] = {
 
 @dataclass(frozen=True)
 class IntentSignature:
+    """Immutable representation of the LLM's intent classification.
+
+    Produced by Stage-3 JSON-mode output and carried through the cache
+    layer.  ``tool`` + ``args`` drive dispatch; ``confidence`` and
+    ``rationale`` are advisory and never affect routing.
+    """
+
     tool: str
     args: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0
@@ -72,8 +79,16 @@ def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[s
             out["to_date"] = v.isoformat() if isinstance(v, date) else str(v)
 
     # 2. Copy remaining args, lowercasing string enums and sorting list values.
+    # ``from_date`` / ``to_date`` were already handled in step 1.
+    # ``time_window`` is skipped only when it was a recognised relative-time
+    # token (already resolved above); an *unrecognised* value is preserved so
+    # that e.g. a typo like ``"last_60_days"`` doesn't silently collapse to
+    # the same hash as a query with no time_window at all.
+    resolved_time_window = args.get("time_window") in _REL_TIME
     for k, v in args.items():
-        if k in ("time_window", "from_date", "to_date"):
+        if k in ("from_date", "to_date"):
+            continue
+        if k == "time_window" and resolved_time_window:
             continue
         if v is None:
             continue  # treat None and missing as equivalent
