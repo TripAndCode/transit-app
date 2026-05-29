@@ -73,7 +73,7 @@ async def upsert(
         INSERT INTO ask_intent_cache
           (signature_hash, tool, args, confidence, hit_count, last_question, agency_id)
         VALUES ($1, $2, $3::jsonb, $4, 1, $5, $6)
-        ON CONFLICT (signature_hash) DO UPDATE
+        ON CONFLICT (signature_hash, agency_id) DO UPDATE
           SET hit_count = ask_intent_cache.hit_count + 1,
               last_question = EXCLUDED.last_question,
               last_used_at = now(),

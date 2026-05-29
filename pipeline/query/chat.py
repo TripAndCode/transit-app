@@ -137,6 +137,10 @@ async def chat_with_tools(
     client = _get_client()
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
     locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    # Normalize once so leading/trailing whitespace doesn't cause cache misses
+    # or visible prompt differences; downstream uses (prompt, cache key, log) all
+    # benefit. The frontend keeps its own copy of the user's raw input.
+    question = question.strip()
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -203,16 +207,22 @@ async def chat_with_tools(
         if history_block:
             messages.append({"role": "system", "content": history_block})
         messages.append({"role": "user", "content": user_prelude})
-        extra: dict = {}
         if use_cache:
-            extra["response_format"] = {"type": "json_object"}
+            # JSON-mode emits the signature in message.content directly.
+            # Don't send tools+tool_choice with response_format=json_object —
+            # OpenAI rejects that combo (400) and providers behave inconsistently.
+            return client.chat_completions(
+                messages=messages,
+                temperature=0.0,
+                model_override=model,
+                response_format={"type": "json_object"},
+            )
         return client.chat_completions(
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
             temperature=0.0,
             model_override=model,
-            **extra,
         )
 
     # -----------------------------------------------------------------------

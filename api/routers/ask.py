@@ -149,6 +149,10 @@ async def ask(
     if router_enabled and not follow_up:
         decision, examples = await route_or_examples(body.question, conn, agency_id, k=3)
 
+    # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
+    sig_hash: str | None = None
+    cache_outcome: str | None = None
+
     if decision is not None:
         result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
         stage = decision.stage
@@ -182,6 +186,8 @@ async def ask(
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
         success = payload["success"]
+        sig_hash = payload.get("signature_hash")
+        cache_outcome = payload.get("cache_outcome")
         resp = AskResponse(
             answer=payload["answer"],
             tool_call=payload["tool_call"],
@@ -191,7 +197,6 @@ async def ask(
         )
 
     if log_enabled:
-        _payload = locals().get("payload")
         await log_query(
             conn,
             agency_id,
@@ -199,8 +204,8 @@ async def ask(
             stage,
             tool_name,
             success,
-            signature_hash=(_payload or {}).get("signature_hash"),
-            cache_outcome=(_payload or {}).get("cache_outcome"),
+            signature_hash=sig_hash,
+            cache_outcome=cache_outcome,
         )
 
     return resp
