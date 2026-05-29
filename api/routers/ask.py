@@ -191,6 +191,16 @@ async def ask(
         )
 
     if log_enabled:
-        await log_query(conn, agency_id, body.question, stage, tool_name, success)
+        _payload = locals().get("payload")
+        await log_query(
+            conn,
+            agency_id,
+            body.question,
+            stage,
+            tool_name,
+            success,
+            signature_hash=(_payload or {}).get("signature_hash"),
+            cache_outcome=(_payload or {}).get("cache_outcome"),
+        )
 
     return resp

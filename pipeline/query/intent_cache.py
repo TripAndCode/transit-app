@@ -34,6 +34,30 @@ async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) 
     return out
 
 
+async def lookup_by_question(conn: asyncpg.Connection, question: str, agency_id: int) -> dict[str, Any] | None:
+    """Return a cache row matching the exact question text, or None.
+
+    Used as a pre-LLM optimization: if the same question text was resolved
+    before, we can skip the LLM call entirely and dispatch from the cache.
+    Paraphrase matching (different text, same canonical intent) is handled by
+    the downstream sig-hash lookup after an LLM call.
+    """
+    row = await conn.fetchrow(
+        "SELECT signature_hash, tool, args, confidence, hit_count, last_question, "
+        "last_user_action, promoted_at, agency_id, created_at, last_used_at "
+        "FROM ask_intent_cache WHERE last_question = $1 AND agency_id = $2 "
+        "ORDER BY last_used_at DESC LIMIT 1",
+        question,
+        agency_id,
+    )
+    if row is None:
+        return None
+    out = dict(row)
+    if isinstance(out.get("args"), str):
+        out["args"] = json.loads(out["args"])
+    return out
+
+
 async def upsert(
     conn: asyncpg.Connection,
     signature_hash: str,
