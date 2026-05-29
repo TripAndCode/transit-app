@@ -87,11 +87,12 @@ async def test_cache_miss_writes_cache_row(pool_with_agency, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
-    """Second call with same canonical intent hits the cache → LLM is NOT called a second time.
+    """Same-text repeats hit the pre-LLM question-text lookup → LLM never invoked.
 
-    Both questions map to the same sig_hash (capabilities/{}).  The first call
-    writes the cache row; the second call finds it by sig_hash before the LLM
-    is invoked and dispatches from cache without calling the LLM.
+    Exercises the fast path: when the exact question text is in the cache,
+    we skip the LLM entirely via lookup_by_question. (The paraphrase path
+    — different text, same canonical signature — is covered by
+    test_cache_paraphrase_collapses_to_same_dispatch below.)
     """
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
@@ -145,3 +146,43 @@ async def test_flag_off_no_cache_reads_or_writes(pool_with_agency, monkeypatch):
     async with pool.acquire() as conn:
         count = await conn.fetchval("SELECT COUNT(*) FROM ask_intent_cache")
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_cache_paraphrase_collapses_to_same_dispatch(pool_with_agency, monkeypatch):
+    """The spec's core promise: two differently-worded questions that emit the
+    same canonical IntentSignature collapse to one cache row.
+
+    The LLM IS called for each novel phrasing (the pre-LLM text lookup misses
+    because the wording differs), but the post-LLM sig_hash lookup hits on
+    the second call so the dispatch comes from the cache row written by the
+    first call. ``hit_count`` advances to 2; cache_outcome is "miss" then "hit".
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    # Both calls return the SAME tool+args (same canonical signature) but
+    # come back from a fake client we reset between calls to count invocations.
+    msg = _sig_message(tool="capabilities", args={})
+
+    class _Counter:
+        def __init__(self):
+            self.calls = 0
+
+        def chat_completions(self, **kw):
+            self.calls += 1
+            return msg, None
+
+    counter = _Counter()
+    monkeypatch.setattr(chat_module, "_get_client", lambda: counter)
+
+    async with pool.acquire() as conn:
+        r1 = await chat_with_tools("路線を教えて", _ctx(), conn, agency_id, locale="ja")
+        r2 = await chat_with_tools("どんな路線がある？", _ctx(), conn, agency_id, locale="ja")
+
+    assert counter.calls == 2, "Different texts → LLM called once per phrasing (pre-LLM text lookup misses)"
+    assert r1["cache_outcome"] == "miss"
+    assert r2["cache_outcome"] == "hit", "Same canonical signature → second call hits the cache"
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT signature_hash, hit_count FROM ask_intent_cache")
+    assert len(rows) == 1, "Both calls share one cache row (same sig_hash)"
+    assert rows[0]["hit_count"] == 2
