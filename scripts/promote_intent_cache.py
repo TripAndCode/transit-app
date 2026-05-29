@@ -37,6 +37,7 @@ _log = logging.getLogger(__name__)
 
 
 def _content_hash(text: str) -> str:
+    """Return the hex SHA-256 of ``text``, used as the ``rag_chunks.content_hash`` sentinel."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 

@@ -10,6 +10,7 @@ The request body now carries the global :class:`~api.range.RangeCtx`
 user's chosen window without having to mention it in the prompt.
 """
 
+import asyncio
 import os as _os
 from datetime import date, timedelta
 from typing import Any
@@ -23,9 +24,10 @@ from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_da
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
+from pipeline.query.embeddings import get_embedder
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
-from pipeline.query.router import is_follow_up, route_or_examples
+from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
@@ -58,11 +60,24 @@ class AskRequest(BaseModel):
 
 
 class AskResponse(BaseModel):
+    """Response schema for ``POST /ask``.
+
+    Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
+    ``cache_outcome``) are populated only when ``ASK_INTENT_CACHE_ENABLED=true``
+    and the request went through the LLM Stage-3 path.  They are ``None`` on the
+    Stage-1 / Stage-2 router paths and when the flag is off.
+    """
+
     answer: str
     tool_call: dict | None = None
     result: dict | None = None
     ctx: dict
     router_stage: str | None = None
+    # Phase ② canonical-intent cache fields
+    signature_hash: str | None = None
+    confidence: float | None = None
+    canonical_args: dict | None = None
+    cache_outcome: str | None = None
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
@@ -197,6 +212,10 @@ async def ask(
             result=payload["result"],
             ctx=ctx_dict,
             router_stage=stage,
+            signature_hash=sig_hash,
+            confidence=payload.get("confidence"),
+            canonical_args=payload.get("canonical_args"),
+            cache_outcome=cache_outcome,
         )
 
     if log_enabled:
@@ -384,8 +403,6 @@ async def ask_suggest(
             agency_id,
             limit,
         )
-        from pipeline.query.router import _load_golden
-
         golden = _load_golden()
         result = []
         for row in rows:
@@ -402,11 +419,6 @@ async def ask_suggest(
         return result
 
     # Non-empty query: embed + NN search.
-    import asyncio
-
-    from pipeline.query.embeddings import get_embedder
-    from pipeline.query.router import _load_golden
-
     embedder = get_embedder()
     if not getattr(embedder, "available", False):
         return []
