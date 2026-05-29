@@ -305,7 +305,9 @@
       "abs_delta": "差(絶対)",
       "signed_delta": "差(符号付)"
     },
-    "more_rows": "…他{{count}}件"
+    "more_rows": "…他{{count}}件",
+    "chips": { "more": "もっと" },
+    "autocomplete": { "noResults": "" }
   },
   "live": {
     "title": "最新観測",
