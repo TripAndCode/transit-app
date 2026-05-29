@@ -372,6 +372,12 @@ SYSTEM_PROMPT = """\
 - "データセット全体の概要" → describe_data(kind='overview')
 - "何ができる?" / "やばい系統" → capabilities()
 - "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
+
+== Output format (when asked for JSON) ==
+When the request specifies JSON output, return ONLY a JSON object of this shape:
+{"tool": "<one of the tools>", "args": {<tool args>}, "confidence": <0..1>, "rationale": "<short reason>"}
+No prose, no markdown fences. `confidence` should reflect how sure you are about the tool + args
+choice; use lower values when the user's wording is ambiguous.
 """
 
 
