@@ -319,6 +319,15 @@
       "cancel": "Cancel",
       "loading": "Loading…",
       "error": "Couldn't load the builder"
+    },
+    "pill": {
+      "interpreted": "Interpreted as",
+      "wrong": "Wrong?"
+    },
+    "lowconf": {
+      "title": "Low-confidence interpretation",
+      "run": "Run",
+      "edit": "Edit"
     }
   },
   "live": {
