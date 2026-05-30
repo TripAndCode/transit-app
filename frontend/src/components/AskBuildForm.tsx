@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAskBuildSchema } from "../api/hooks";
 import type { BuildField, BuildTool, IntentSignature } from "../api/types";
+import { RoutePicker } from "./RoutePicker";
 
 type Props = {
   agencyId: number;
@@ -11,12 +12,6 @@ type Props = {
 };
 
 type Locale = "ja" | "en";
-
-/** Turn an enum option key into a display label when no labels map is provided.
- *  "route_ranking" → "route ranking" */
-function enumKeyToLabel(key: string): string {
-  return key.replace(/_/g, " ").toLowerCase();
-}
 
 function defaultsForTool(tool: BuildTool): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -47,10 +42,12 @@ function FieldInput({
   field,
   value,
   onChange,
+  t,
 }: {
   field: BuildField;
   value: unknown;
   onChange: (val: unknown) => void;
+  t: (key: string, opts?: { defaultValue: string }) => string;
 }) {
   switch (field.type) {
     case "enum": {
@@ -63,7 +60,7 @@ function FieldInput({
         >
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
-              {enumKeyToLabel(opt)}
+              {t(`ask.build_labels.values.${opt}`, { defaultValue: opt })}
             </option>
           ))}
         </select>
@@ -253,26 +250,42 @@ export function AskBuildForm({ agencyId, initialValue, onSubmit, onCancel }: Pro
           }}
           className="ask-build-grid"
         >
-          {activeTool.fields.map((field) => (
-            <div key={field.key}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  marginBottom: "var(--space-1)",
-                  textTransform: "capitalize",
-                }}
-              >
-                {enumKeyToLabel(field.key)}
-              </label>
-              <FieldInput
-                field={field}
-                value={values[field.key]}
-                onChange={(val) => handleFieldChange(field.key, val)}
-              />
-            </div>
-          ))}
+          {activeTool.fields.map((field) => {
+            const labelBase = t(`ask.build_labels.${field.key}`, { defaultValue: field.key });
+            const optionalSuffix = field.optional
+              ? ` (${t("ask.build_labels.optional", { defaultValue: "任意" })})`
+              : "";
+            const label = labelBase + optionalSuffix;
+            const isRoute = field.key === "route_id" || field.key === "route";
+            return (
+              <div key={field.key}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    marginBottom: "var(--space-1)",
+                  }}
+                >
+                  {label}
+                </label>
+                {isRoute ? (
+                  <RoutePicker
+                    agencyId={agencyId}
+                    value={(values[field.key] as string | null) ?? null}
+                    onChange={(route_id) => handleFieldChange(field.key, route_id ?? "")}
+                  />
+                ) : (
+                  <FieldInput
+                    field={field}
+                    value={values[field.key]}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    t={t}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

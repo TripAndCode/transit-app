@@ -324,6 +324,24 @@
       "loading": "Loading…",
       "error": "Couldn't load the builder"
     },
+    "build_labels": {
+      "metric": "Metric", "n": "Count", "best_first": "Best first",
+      "service_type": "Service type", "time_window": "Time window", "granularity": "Granularity",
+      "dimension": "Compare by", "from_date": "Start date", "to_date": "End date",
+      "threshold_min": "Threshold (min)", "limit": "Limit", "offset": "Page offset",
+      "order": "Order", "route": "Route", "route_id": "Route",
+      "kind": "Kind",
+      "optional": "optional",
+      "values": {
+        "avg_delay": "Average delay", "on_time_rate": "On-time rate", "worst_5min": "5+ min delay count",
+        "weekday": "Weekday", "weekend": "Weekend/holiday", "all": "All",
+        "last_7_days": "Last 7 days", "last_2_weeks": "Last 2 weeks", "last_30_days": "Last 30 days",
+        "day": "Daily", "week": "Weekly", "month": "Monthly",
+        "dow": "Day of week", "service_type": "Service type", "period": "Period",
+        "asc": "Ascending", "desc": "Descending",
+        "routes": "Routes", "stops": "Stops", "date_range": "Date range", "sample_counts": "Sample counts"
+      }
+    },
     "pill": {
       "interpreted": "Interpreted as",
       "wrong": "Wrong?"

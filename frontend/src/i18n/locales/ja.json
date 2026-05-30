@@ -324,6 +324,24 @@
       "loading": "読み込み中…",
       "error": "ビルダーを読み込めませんでした"
     },
+    "build_labels": {
+      "metric": "指標", "n": "件数", "best_first": "良い順に並べる",
+      "service_type": "便種別", "time_window": "期間", "granularity": "粒度",
+      "dimension": "比較軸", "from_date": "開始日", "to_date": "終了日",
+      "threshold_min": "閾値(分)", "limit": "件数上限", "offset": "ページ開始",
+      "order": "並び順", "route": "路線", "route_id": "路線",
+      "kind": "情報の種類",
+      "optional": "任意",
+      "values": {
+        "avg_delay": "平均遅延", "on_time_rate": "定時率", "worst_5min": "5分以上の遅延件数",
+        "weekday": "平日", "weekend": "土日祝", "all": "すべて",
+        "last_7_days": "直近7日", "last_2_weeks": "直近2週間", "last_30_days": "直近30日",
+        "day": "日別", "week": "週別", "month": "月別",
+        "dow": "曜日", "service_type": "便種別", "period": "期間",
+        "asc": "昇順", "desc": "降順",
+        "routes": "路線", "stops": "停留所", "date_range": "期間", "sample_counts": "サンプル数"
+      }
+    },
     "pill": {
       "interpreted": "解釈",
       "wrong": "違う？"
