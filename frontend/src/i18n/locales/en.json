@@ -414,6 +414,26 @@
       "heading": "Next moves",
       "open_builder": "Edit all conditions and rerun",
       "back_to_catalog": "Back to the catalog"
+    },
+    "dashboard": {
+      "heatmap": {
+        "title_dow": "Route × DOW delay",
+        "title_hour_band": "Route × hour-band delay",
+        "toggle_dow": "DOW",
+        "toggle_hour_band": "Hour band",
+        "dow": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
+        },
+        "empty": "No data — try relaxing filters",
+        "error": "Couldn't load the heatmap",
+        "cell_aria": "{{route}} × {{dim}}: {{val}} min"
+      }
     }
   },
   "live": {

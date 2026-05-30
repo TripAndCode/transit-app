@@ -414,6 +414,26 @@
       "heading": "この結果から",
       "open_builder": "条件を変えて再実行",
       "back_to_catalog": "カタログに戻る"
+    },
+    "dashboard": {
+      "heatmap": {
+        "title_dow": "路線×曜日の遅延",
+        "title_hour_band": "路線×時間帯の遅延",
+        "toggle_dow": "曜日",
+        "toggle_hour_band": "時間帯",
+        "dow": {
+          "mon": "月",
+          "tue": "火",
+          "wed": "水",
+          "thu": "木",
+          "fri": "金",
+          "sat": "土",
+          "sun": "日"
+        },
+        "empty": "該当データなし — フィルター条件を緩めてください",
+        "error": "ヒートマップを読み込めませんでした",
+        "cell_aria": "{{route}} × {{dim}}: {{val}} 分"
+      }
     }
   },
   "live": {
