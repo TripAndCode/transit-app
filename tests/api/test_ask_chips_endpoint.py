@@ -39,11 +39,11 @@ async def test_build_schema_includes_chips(chips_app):
     body = r.json()
     assert "tools" in body
     assert "chips" in body
-    # Chips grouped by category, total 26 entries
+    # Chips grouped by category, total 24 entries (cmp-period* removed in BUG-7)
     chips_by_cat = body["chips"]
     assert isinstance(chips_by_cat, dict)
     total = sum(len(v) for v in chips_by_cat.values())
-    assert total == 26
+    assert total == 24
     # Order of category keys matches the spec: meta / ranking / trend / compare / detail
     assert list(chips_by_cat.keys()) == ["meta", "ranking", "trend", "compare", "detail"]
     # Each chip has id, title (localized), tool, args, builder_required

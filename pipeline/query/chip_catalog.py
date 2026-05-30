@@ -1,9 +1,14 @@
-"""Static registry of the 26 guided-query chip templates shown in the Ask tab.
+"""Static registry of the 24 guided-query chip templates shown in the Ask tab.
 
 Each chip is a (tool, args) tuple plus localized titles. ``builder_required=True``
 means tapping the chip opens the structured builder pre-populated with the
 chip's args (used for tools that need a route_id input we can't pick for
 the user).
+
+Note: cmp-period and cmp-period-month were removed (BUG-7). Period comparison
+(comparing the current window against the preceding equal-length window) is
+deferred to a later phase; users can use compare_segments with dimension=dow
+or dimension=service_type instead.
 """
 
 from __future__ import annotations
@@ -164,14 +169,7 @@ CHIPS: list[ChipTemplate] = [
         "By service type",
         "compare_segments",
         {"dimension": "service_type"},
-    ),
-    ChipTemplate(
-        "cmp-period",
-        "compare",
-        "前2週間との比較",
-        "vs previous 2 weeks",
-        "compare_segments",
-        {"dimension": "period", "time_window": "last_2_weeks"},
+        builder_required=True,
     ),
     # --- 路線・停留所詳細 (3, builder-required) ---
     ChipTemplate(
@@ -229,15 +227,6 @@ CHIPS: list[ChipTemplate] = [
         "top_n",
         {"metric": "on_time_rate", "n": 10, "best_first": False},
     ),
-    # 比較 (1 more) — period vs last_30_days
-    ChipTemplate(
-        "cmp-period-month",
-        "compare",
-        "前月との比較",
-        "vs previous month",
-        "compare_segments",
-        {"dimension": "period", "time_window": "last_30_days"},
-    ),
     # 時系列 (1 more) — granularity weekly + last 30 days
     ChipTemplate(
         "trend-weekly-30",
@@ -249,7 +238,7 @@ CHIPS: list[ChipTemplate] = [
     ),
 ]
 
-assert len(CHIPS) == 26, f"chip catalog must have 26 entries, got {len(CHIPS)}"
+assert len(CHIPS) == 24, f"chip catalog must have 24 entries, got {len(CHIPS)}"
 
 
 CHIPS_BY_ID: dict[str, ChipTemplate] = {c.id: c for c in CHIPS}

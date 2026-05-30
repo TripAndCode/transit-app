@@ -10,8 +10,8 @@ def _ctx():
     return {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
 
 
-def test_chip_count_is_26():
-    assert len(CHIPS) == 26
+def test_chip_count_is_24():
+    assert len(CHIPS) == 24
 
 
 def test_no_duplicate_ids():
@@ -32,7 +32,7 @@ def test_chips_by_id_lookup_works():
 
 def test_chips_by_category_groups_correctly():
     grouped = chips_by_category()
-    assert sum(len(v) for v in grouped.values()) == 26
+    assert sum(len(v) for v in grouped.values()) == 24
     assert set(grouped.keys()) == {"meta", "ranking", "trend", "compare", "detail"}
 
 
@@ -42,11 +42,15 @@ def test_every_chip_canonicalizes_cleanly():
         canonicalize(c.tool, c.args, _ctx())
 
 
-def test_builder_required_chips_have_empty_args():
-    """When builder_required=True, the chip opens the builder pre-populated; args should be empty."""
+def test_builder_required_chips_have_no_route_arg():
+    """When builder_required=True the chip opens the builder so the user can supply a route.
+    The chip args must NOT contain a 'route' key (the builder collects it); other pre-populated
+    args (e.g. dimension) are allowed and will be forwarded to the builder."""
     for c in CHIPS:
         if c.builder_required:
-            assert c.args == {}, f"{c.id}: builder_required chips must have empty args"
+            assert "route" not in c.args, (
+                f"{c.id}: builder_required chips must not pre-fill 'route'"
+            )
 
 
 def test_immutability_frozen_dataclass():
