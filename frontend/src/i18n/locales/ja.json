@@ -451,6 +451,20 @@
         "low_samples": "(少データ)",
         "row_aria": "{{rank}}. {{label}}: {{delta}} 分, {{pct}} ({{samples}} 件)"
       }
+    },
+    "card": {
+      "execute": "実行",
+      "param": {
+        "route_label": "路線",
+        "route_placeholder": "選択してください",
+        "metric_label": "指標",
+        "limit_label": "件数",
+        "granularity_label": "粒度",
+        "granularity": { "day": "日", "week": "週", "month": "月" },
+        "service_label": "運行種別"
+      },
+      "service": { "all": "すべて", "weekday": "平日", "weekend": "土日祝" },
+      "missing_required": "*"
     }
   },
   "live": {

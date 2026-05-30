@@ -451,6 +451,20 @@
         "low_samples": "(low n)",
         "row_aria": "{{rank}}. {{label}}: {{delta}} min, {{pct}} ({{samples}} samples)"
       }
+    },
+    "card": {
+      "execute": "Run",
+      "param": {
+        "route_label": "Route",
+        "route_placeholder": "Select…",
+        "metric_label": "Metric",
+        "limit_label": "Top",
+        "granularity_label": "Bucket",
+        "granularity": { "day": "Day", "week": "Week", "month": "Month" },
+        "service_label": "Service"
+      },
+      "service": { "all": "All", "weekday": "Weekday", "weekend": "Weekend" },
+      "missing_required": "*"
     }
   },
   "live": {
