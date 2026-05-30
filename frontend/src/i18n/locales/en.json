@@ -279,12 +279,6 @@
     "error_agency_not_selected": "Agency not selected",
     "empty_state": "Ask a question to get started.",
     "thinking": "Thinking...",
-    "staged": {
-      "region": "Selected question",
-      "hint": "Review the filter and run when ready",
-      "execute": "Run",
-      "cancel": "Cancel"
-    },
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
     "submit": "Send",
@@ -331,11 +325,21 @@
       "error": "Couldn't load the builder"
     },
     "build_labels": {
-      "metric": "Metric", "n": "Count", "best_first": "Best first",
-      "service_type": "Service type", "time_window": "Time window", "granularity": "Granularity",
-      "dimension": "Compare by", "from_date": "Start date", "to_date": "End date",
-      "threshold_min": "Threshold (min)", "limit": "Limit", "offset": "Page offset",
-      "order": "Order", "route": "Route", "route_id": "Route",
+      "metric": "Metric",
+      "n": "Count",
+      "best_first": "Best first",
+      "service_type": "Service type",
+      "time_window": "Time window",
+      "granularity": "Granularity",
+      "dimension": "Compare by",
+      "from_date": "Start date",
+      "to_date": "End date",
+      "threshold_min": "Threshold (min)",
+      "limit": "Limit",
+      "offset": "Page offset",
+      "order": "Order",
+      "route": "Route",
+      "route_id": "Route",
       "kind": "Kind",
       "optional": "optional",
       "tools": {
@@ -348,13 +352,27 @@
         "capabilities": "What I can answer"
       },
       "values": {
-        "avg_delay": "Average delay", "on_time_rate": "On-time rate", "worst_5min": "5+ min delay count",
-        "weekday": "Weekday", "weekend": "Weekend/holiday", "all": "All",
-        "last_7_days": "Last 7 days", "last_2_weeks": "Last 2 weeks", "last_30_days": "Last 30 days",
-        "day": "Daily", "week": "Weekly", "month": "Monthly",
-        "dow": "Day of week", "service_type": "Service type", "period": "Period",
-        "asc": "Ascending", "desc": "Descending",
-        "routes": "Routes", "stops": "Stops", "date_range": "Date range", "sample_counts": "Sample counts"
+        "avg_delay": "Average delay",
+        "on_time_rate": "On-time rate",
+        "worst_5min": "5+ min delay count",
+        "weekday": "Weekday",
+        "weekend": "Weekend/holiday",
+        "all": "All",
+        "last_7_days": "Last 7 days",
+        "last_2_weeks": "Last 2 weeks",
+        "last_30_days": "Last 30 days",
+        "day": "Daily",
+        "week": "Weekly",
+        "month": "Monthly",
+        "dow": "Day of week",
+        "service_type": "Service type",
+        "period": "Period",
+        "asc": "Ascending",
+        "desc": "Descending",
+        "routes": "Routes",
+        "stops": "Stops",
+        "date_range": "Date range",
+        "sample_counts": "Sample counts"
       }
     },
     "pill": {
@@ -397,23 +415,6 @@
       "dow_weekend": "Weekends/holidays only",
       "all_routes": "All routes",
       "no_routes_selected": "No specific routes"
-    },
-    "chip_catalog": {
-      "section_popular": "Frequently used",
-      "section_meta": "Meta",
-      "section_ranking": "Ranking",
-      "section_trend": "Trend",
-      "section_compare": "Compare",
-      "section_detail": "Route / stop details",
-      "open_builder": "Build a question",
-      "loading": "Loading…",
-      "error": "Couldn't load the chip catalog",
-      "retry": "Retry"
-    },
-    "followups": {
-      "heading": "Next moves",
-      "open_builder": "Edit all conditions and rerun",
-      "back_to_catalog": "Back to the catalog"
     },
     "dashboard": {
       "anomaly": {
@@ -460,11 +461,23 @@
         "metric_label": "Metric",
         "limit_label": "Top",
         "granularity_label": "Bucket",
-        "granularity": { "day": "Day", "week": "Week", "month": "Month" },
+        "granularity": {
+          "day": "Day",
+          "week": "Week",
+          "month": "Month"
+        },
         "service_label": "Service",
-        "service": { "all": "All", "weekday": "Weekday", "weekend": "Weekend" }
+        "service": {
+          "all": "All",
+          "weekday": "Weekday",
+          "weekend": "Weekend"
+        }
       },
-      "service": { "all": "All", "weekday": "Weekday", "weekend": "Weekend" },
+      "service": {
+        "all": "All",
+        "weekday": "Weekday",
+        "weekend": "Weekend"
+      },
       "missing_required": "*",
       "top_delay": {
         "title": "🏆 Top-N delays",

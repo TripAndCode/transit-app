@@ -279,12 +279,6 @@
     "error_agency_not_selected": "事業者が選択されていません",
     "empty_state": "質問を入力してください。",
     "thinking": "考え中...",
-    "staged": {
-      "region": "選択中の質問",
-      "hint": "条件を確認してから実行してください",
-      "execute": "実行",
-      "cancel": "キャンセル"
-    },
     "input_aria": "質問を入力",
     "input_placeholder": "例: 路線5の今月の遅延傾向は?",
     "submit": "送信",
@@ -331,11 +325,21 @@
       "error": "ビルダーを読み込めませんでした"
     },
     "build_labels": {
-      "metric": "指標", "n": "件数", "best_first": "良い順に並べる",
-      "service_type": "便種別", "time_window": "期間", "granularity": "粒度",
-      "dimension": "比較軸", "from_date": "開始日", "to_date": "終了日",
-      "threshold_min": "閾値(分)", "limit": "件数上限", "offset": "ページ開始",
-      "order": "並び順", "route": "路線", "route_id": "路線",
+      "metric": "指標",
+      "n": "件数",
+      "best_first": "良い順に並べる",
+      "service_type": "便種別",
+      "time_window": "期間",
+      "granularity": "粒度",
+      "dimension": "比較軸",
+      "from_date": "開始日",
+      "to_date": "終了日",
+      "threshold_min": "閾値(分)",
+      "limit": "件数上限",
+      "offset": "ページ開始",
+      "order": "並び順",
+      "route": "路線",
+      "route_id": "路線",
       "kind": "情報の種類",
       "optional": "任意",
       "tools": {
@@ -348,13 +352,27 @@
         "capabilities": "対応質問"
       },
       "values": {
-        "avg_delay": "平均遅延", "on_time_rate": "定時率", "worst_5min": "5分以上の遅延件数",
-        "weekday": "平日", "weekend": "土日祝", "all": "すべて",
-        "last_7_days": "直近7日", "last_2_weeks": "直近2週間", "last_30_days": "直近30日",
-        "day": "日別", "week": "週別", "month": "月別",
-        "dow": "曜日", "service_type": "便種別", "period": "期間",
-        "asc": "昇順", "desc": "降順",
-        "routes": "路線", "stops": "停留所", "date_range": "期間", "sample_counts": "サンプル数"
+        "avg_delay": "平均遅延",
+        "on_time_rate": "定時率",
+        "worst_5min": "5分以上の遅延件数",
+        "weekday": "平日",
+        "weekend": "土日祝",
+        "all": "すべて",
+        "last_7_days": "直近7日",
+        "last_2_weeks": "直近2週間",
+        "last_30_days": "直近30日",
+        "day": "日別",
+        "week": "週別",
+        "month": "月別",
+        "dow": "曜日",
+        "service_type": "便種別",
+        "period": "期間",
+        "asc": "昇順",
+        "desc": "降順",
+        "routes": "路線",
+        "stops": "停留所",
+        "date_range": "期間",
+        "sample_counts": "サンプル数"
       }
     },
     "pill": {
@@ -397,23 +415,6 @@
       "dow_weekend": "土日祝のみ",
       "all_routes": "全路線",
       "no_routes_selected": "路線指定なし"
-    },
-    "chip_catalog": {
-      "section_popular": "よく使う",
-      "section_meta": "メタ情報",
-      "section_ranking": "ランキング",
-      "section_trend": "時系列・トレンド",
-      "section_compare": "比較",
-      "section_detail": "路線・停留所詳細",
-      "open_builder": "組み立て",
-      "loading": "読み込み中…",
-      "error": "チップカタログを読み込めませんでした",
-      "retry": "再試行"
-    },
-    "followups": {
-      "heading": "この結果から",
-      "open_builder": "条件を変えて再実行",
-      "back_to_catalog": "カタログに戻る"
     },
     "dashboard": {
       "anomaly": {
@@ -460,11 +461,23 @@
         "metric_label": "指標",
         "limit_label": "件数",
         "granularity_label": "粒度",
-        "granularity": { "day": "日", "week": "週", "month": "月" },
+        "granularity": {
+          "day": "日",
+          "week": "週",
+          "month": "月"
+        },
         "service_label": "運行種別",
-        "service": { "all": "すべて", "weekday": "平日", "weekend": "土日祝" }
+        "service": {
+          "all": "すべて",
+          "weekday": "平日",
+          "weekend": "土日祝"
+        }
       },
-      "service": { "all": "すべて", "weekday": "平日", "weekend": "土日祝" },
+      "service": {
+        "all": "すべて",
+        "weekday": "平日",
+        "weekend": "土日祝"
+      },
       "missing_required": "*",
       "top_delay": {
         "title": "🏆 遅延の大きい路線 Top-N",
