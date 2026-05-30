@@ -39,6 +39,11 @@ class AppendMessage(BaseModel):
     # Path B: builder direct dispatch (tool + args, no chip lookup)
     tool: str | None = None
     args: dict[str, Any] | None = None
+    # Optional client-supplied user-bubble label so the chat doesn't show raw
+    # ``metric=avg_delay`` strings. The frontend (which owns the i18n maps)
+    # computes a localized summary and sends it through. Server-generated
+    # fallback exists only when this is omitted.
+    user_summary: str | None = None
 
     def validate_dispatch(self) -> None:
         """Exactly one of (chip_id) or (tool + args) must be supplied."""
@@ -217,8 +222,10 @@ async def append_message_endpoint(
         resolved_tool = body.tool  # type: ignore[assignment]  # validated above
         resolved_args = body.args or {}
         resolved_chip_id = None
-        arg_summary = ", ".join(f"{k}={v}" for k, v in list(resolved_args.items())[:4])
-        user_summary = f"🛠 {resolved_tool}" + (f" ({arg_summary})" if arg_summary else "")
+        # Prefer the client-supplied localized summary; fall back to a generic
+        # label that does NOT expose raw key=value pairs (those leak English/
+        # identifier noise into the JA chat bubble).
+        user_summary = body.user_summary or f"🛠 {resolved_tool}"
 
     # Build a RangeCtx from the conversation's filter_ctx
     fc = conv["filter_ctx"] or {}

@@ -249,10 +249,18 @@ export function AskTab() {
           />
         </div>
 
-        {/* Scrollable content area */}
+        {/* Scrollable content area. ``scrollbarGutter: stable`` forces the scrollbar
+            to reserve space (so the user can SEE there's a scrollable region even
+            when not actively scrolling). */}
         <div
           ref={scrollRef}
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px" }}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            padding: "12px 16px",
+            scrollbarGutter: "stable",
+          }}
         >
           {/* Build form — shown when buildOpen is not null */}
           {buildOpen !== null && id != null && (

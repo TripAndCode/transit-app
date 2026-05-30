@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import i18n from "../i18n";
 import {
   useMutation,
   useQuery,
@@ -361,6 +362,29 @@ export function useDeleteConversation(agencyId: number) {
   });
 }
 
+/** Build a user-bubble label for a structured (builder) submission that's
+ *  fully translated — no raw ``metric=avg_delay`` machine strings.
+ *  Reads from ``ask.build_labels`` in the active locale.
+ */
+function builderSummary(tool: string, args: Record<string, unknown>): string {
+  const t = i18n.t.bind(i18n);
+  const toolLabel = t(`ask.build_labels.tools.${tool}`, { defaultValue: tool });
+  const pairs: string[] = [];
+  for (const [k, v] of Object.entries(args).slice(0, 4)) {
+    const keyLabel = t(`ask.build_labels.${k}`, { defaultValue: k });
+    let valLabel: string;
+    if (typeof v === "string") {
+      valLabel = t(`ask.build_labels.values.${v}`, { defaultValue: v });
+    } else if (typeof v === "boolean") {
+      valLabel = v ? t("common.yes", { defaultValue: "はい" }) : t("common.no", { defaultValue: "いいえ" });
+    } else {
+      valLabel = String(v);
+    }
+    pairs.push(`${keyLabel}: ${valLabel}`);
+  }
+  return `🛠 ${toolLabel}` + (pairs.length ? ` (${pairs.join(", ")})` : "");
+}
+
 // Vars for the chip path
 type AppendByChip = {
   conversationId: string;
@@ -395,7 +419,7 @@ export function useAppendMessage(agencyId: number) {
         } else {
           return apiPost<AppendMessageResult>(
             `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
-            { tool: vars.tool, args: vars.args },
+            { tool: vars.tool, args: vars.args, user_summary: builderSummary(vars.tool, vars.args) },
           );
         }
       }
@@ -416,11 +440,8 @@ export function useAppendMessage(agencyId: number) {
       } else {
         dispatchTool = vars.tool;
         dispatchArgs = vars.args;
-        const argSummary = Object.entries(dispatchArgs)
-          .slice(0, 4)
-          .map(([k, v]) => `${k}=${String(v)}`)
-          .join(", ");
-        chipTitle = `🛠 ${dispatchTool}` + (argSummary ? ` (${argSummary})` : "");
+        // Use the localized summary helper instead of raw key=value joins.
+        chipTitle = builderSummary(dispatchTool, dispatchArgs);
         chipId = null;
       }
 

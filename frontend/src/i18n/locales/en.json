@@ -332,6 +332,15 @@
       "order": "Order", "route": "Route", "route_id": "Route",
       "kind": "Kind",
       "optional": "optional",
+      "tools": {
+        "top_n": "Ranking",
+        "time_series": "Trend",
+        "compare_segments": "Compare",
+        "route_stats": "Route stats",
+        "route_meta": "Route info",
+        "describe_data": "Data info",
+        "capabilities": "What I can answer"
+      },
       "values": {
         "avg_delay": "Average delay", "on_time_rate": "On-time rate", "worst_5min": "5+ min delay count",
         "weekday": "Weekday", "weekend": "Weekend/holiday", "all": "All",

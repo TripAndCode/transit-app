@@ -43,12 +43,26 @@ export function FollowupChips({ message, onPickFollowup, onOpenBuilder, onBackTo
         </>
       )}
       <div style={{ display: "flex", gap: 12, fontSize: 12, opacity: 0.78 }}>
-        <a onClick={onOpenBuilder} style={{ cursor: "pointer", textDecoration: "underline" }}>
+        <button
+          type="button"
+          onClick={onOpenBuilder}
+          style={{
+            background: "transparent", border: "none", padding: 0,
+            cursor: "pointer", textDecoration: "underline", color: "inherit", font: "inherit",
+          }}
+        >
           🛠 {t("ask.followups.open_builder", { defaultValue: "すべての条件を変えて再実行" })}
-        </a>
-        <a onClick={onBackToCatalog} style={{ cursor: "pointer", textDecoration: "underline" }}>
+        </button>
+        <button
+          type="button"
+          onClick={onBackToCatalog}
+          style={{
+            background: "transparent", border: "none", padding: 0,
+            cursor: "pointer", textDecoration: "underline", color: "inherit", font: "inherit",
+          }}
+        >
           ＋ {t("ask.followups.back_to_catalog", { defaultValue: "カタログに戻る" })}
-        </a>
+        </button>
       </div>
     </div>
   );

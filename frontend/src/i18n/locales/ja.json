@@ -332,6 +332,15 @@
       "order": "並び順", "route": "路線", "route_id": "路線",
       "kind": "情報の種類",
       "optional": "任意",
+      "tools": {
+        "top_n": "ランキング",
+        "time_series": "時系列",
+        "compare_segments": "比較",
+        "route_stats": "路線統計",
+        "route_meta": "路線情報",
+        "describe_data": "データ情報",
+        "capabilities": "対応質問"
+      },
       "values": {
         "avg_delay": "平均遅延", "on_time_rate": "定時率", "worst_5min": "5分以上の遅延件数",
         "weekday": "平日", "weekend": "土日祝", "all": "すべて",
