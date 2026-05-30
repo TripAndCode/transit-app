@@ -306,8 +306,12 @@
       "signed_delta": "差(符号付)"
     },
     "more_rows": "…他{{count}}件",
-    "chips": { "more": "もっと" },
-    "autocomplete": { "noResults": "" },
+    "chips": {
+      "more": "もっと"
+    },
+    "autocomplete": {
+      "noResults": ""
+    },
     "mode": {
       "label": "入力モード",
       "chat": "自由に",
@@ -372,6 +376,11 @@
       "loading": "読み込み中…",
       "error": "チップカタログを読み込めませんでした",
       "retry": "再試行"
+    },
+    "followups": {
+      "heading": "この結果から",
+      "open_builder": "すべての条件を変えて再実行",
+      "back_to_catalog": "カタログに戻る"
     }
   },
   "live": {

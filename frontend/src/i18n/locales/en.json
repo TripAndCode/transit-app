@@ -306,8 +306,12 @@
       "signed_delta": "Δ (signed)"
     },
     "more_rows": "…and {{count}} more",
-    "chips": { "more": "More" },
-    "autocomplete": { "noResults": "" },
+    "chips": {
+      "more": "More"
+    },
+    "autocomplete": {
+      "noResults": ""
+    },
     "mode": {
       "label": "Input mode",
       "chat": "Free text",
@@ -372,6 +376,11 @@
       "loading": "Loading…",
       "error": "Couldn't load the chip catalog",
       "retry": "Retry"
+    },
+    "followups": {
+      "heading": "Next moves",
+      "open_builder": "Edit all conditions and rerun",
+      "back_to_catalog": "Back to the catalog"
     }
   },
   "live": {
