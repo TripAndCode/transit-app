@@ -153,7 +153,7 @@ export function AskTab() {
       setActiveId(convId);
     }
 
-    appendMsg.mutate({ conversationId: convId, tool, args });
+    appendMsg.mutate({ conversationId: convId, tool, args, user_summary });
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────

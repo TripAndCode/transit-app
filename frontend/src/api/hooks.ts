@@ -382,6 +382,11 @@ export type AppendMessageVars = {
   conversationId: string;
   tool: string;
   args: Record<string, unknown>;
+  /** Human-readable label for the user bubble (e.g. from card buildSummary).
+   *  When present, sent as `user_summary` to the server and used as the
+   *  rendered_summary for the anonymous path instead of the machine-generated
+   *  builderSummary() fallback. */
+  user_summary?: string;
 };
 
 export function useAppendMessage(agencyId: number) {
@@ -389,16 +394,22 @@ export function useAppendMessage(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: AppendMessageVars): Promise<AppendMessageResult> => {
+      // BUG-3 fix: use caller-supplied user_summary (card's buildSummary) when
+      // available; fall back to the machine-generated builderSummary() only if
+      // absent.  This ensures the user bubble shows a human-readable label
+      // instead of raw key=value machine strings.
+      const humanLabel = vars.user_summary ?? builderSummary(vars.tool, vars.args);
+
       if (authed) {
         return apiPost<AppendMessageResult>(
           `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
-          { tool: vars.tool, args: vars.args, user_summary: builderSummary(vars.tool, vars.args) },
+          { tool: vars.tool, args: vars.args, user_summary: humanLabel },
         );
       }
       // Anonymous path: dispatch via POST /ask with __build__ sentinel.
       const dispatchTool = vars.tool;
       const dispatchArgs = vars.args;
-      const chipTitle = builderSummary(dispatchTool, dispatchArgs);
+      const chipTitle = humanLabel;
 
       const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
       const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
