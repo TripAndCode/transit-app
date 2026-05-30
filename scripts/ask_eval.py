@@ -79,12 +79,11 @@ def main() -> int:
             print(f"  ... and {len(misses) - 20} more")
 
     # CI gate: builder must be 100%.
-    # chip gate is skipped when chip_total == 0 (catalog removed in Phase ③.5;
-    # P11 will replace with parameterized-card entries).
+    # chip gate is skipped when chip_total == 0 (catalog removed in Phase ③.5).
     # Guard against silent-pass when the gold file has been emptied — require
-    # at least 10 builder entries.
-    _MIN_CHIP_ENTRIES = 0  # relaxed in Phase ③.5; P11 will raise this again
-    _MIN_BUILDER_ENTRIES = 10
+    # at least 20 builder entries (4 entries × 5 parameterized cards, Phase ③.5).
+    _MIN_CHIP_ENTRIES = 0  # chip catalog removed in Phase ③.5
+    _MIN_BUILDER_ENTRIES = 20  # Phase ③.5: 4 entries × 5 cards
     if chip_total > 0 and chip_total < _MIN_CHIP_ENTRIES:
         msg = f"gold set has {chip_total} chip entries; expected >= {_MIN_CHIP_ENTRIES}"
         print(f"\nERROR: {msg}", file=sys.stderr)
