@@ -461,10 +461,36 @@
         "limit_label": "Top",
         "granularity_label": "Bucket",
         "granularity": { "day": "Day", "week": "Week", "month": "Month" },
-        "service_label": "Service"
+        "service_label": "Service",
+        "service": { "all": "All", "weekday": "Weekday", "weekend": "Weekend" }
       },
       "service": { "all": "All", "weekday": "Weekday", "weekend": "Weekend" },
-      "missing_required": "*"
+      "missing_required": "*",
+      "top_delay": {
+        "title": "🏆 Top-N delays",
+        "summary": "Top {{k}} routes ({{service}})"
+      },
+      "ontime_rank": {
+        "title": "🎯 On-time rate ranking",
+        "best": "Best first",
+        "worst": "Worst first",
+        "summary": "{{dir}}, {{k}} routes"
+      },
+      "route_trend": {
+        "title": "📈 Route delay trend",
+        "summary": "Route {{route}} — {{gran}} buckets",
+        "placeholder": "Select a route"
+      },
+      "weekday_vs_weekend": {
+        "title": "⚖️ Weekday vs Weekend",
+        "summary": "Route {{route}}: weekday vs weekend comparison",
+        "placeholder": "Select a route"
+      },
+      "route_overview": {
+        "title": "🚏 Route overview",
+        "summary": "Route {{route}} overview",
+        "placeholder": "Select a route"
+      }
     }
   },
   "live": {

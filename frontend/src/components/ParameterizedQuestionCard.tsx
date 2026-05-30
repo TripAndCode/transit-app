@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { RangeCtx } from "../api/rangeContext";
+import type { FilterCtx } from "../api/types";
 import { useRoutes } from "../api/hooks";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ export type CardTemplate = {
 export type ParameterizedQuestionCardProps = {
   template: CardTemplate;
   agencyId: number;
-  filterCtx: RangeCtx;
+  filterCtx: FilterCtx;
   /** Disabled while parent is dispatching (prevents double-submit). */
   busy?: boolean;
   onSubmit: (payload: {

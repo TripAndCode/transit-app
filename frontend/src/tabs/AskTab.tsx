@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -8,25 +8,23 @@ import {
   useAppendMessage,
   useMigrateAnon,
   useIsAuthenticated,
+  useDashboardHeatmap,
+  useDashboardAnomalies,
+  useDashboardMovers,
 } from "../api/hooks";
 import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
-import type { ConvMessage, ChipTemplate, FollowupChip, FilterCtx } from "../api/types";
+import type { ConvMessage, FollowupChip, FilterCtx } from "../api/types";
 import type { ToolResult, TrendDay } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
-import { ChipCatalog } from "../components/ChipCatalog";
 import { FollowupChips } from "../components/FollowupChips";
-import { AskBuildForm } from "../components/AskBuildForm";
 import { DailyChart } from "../components/charts/DailyChart";
-
-// ─── types ────────────────────────────────────────────────────────────────────
-
-type BuildState = {
-  chip?: ChipTemplate;
-  existingTool?: string;
-  existingArgs?: Record<string, unknown>;
-} | null;
+import { DelayHeatmap } from "../components/DelayHeatmap";
+import { AnomalyTimeline } from "../components/AnomalyTimeline";
+import { MoversList } from "../components/MoversList";
+import { ParameterizedQuestionCard } from "../components/ParameterizedQuestionCard";
+import { buildCardTemplates } from "../components/askCardTemplates";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,7 +57,7 @@ function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
 // ─── AskTab ───────────────────────────────────────────────────────────────────
 
 export function AskTab() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [rangeCtx] = useRangeContext();
@@ -67,15 +65,12 @@ export function AskTab() {
 
   // ── Thread state ──────────────────────────────────────────────────────────
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [buildOpen, setBuildOpen] = useState<BuildState>(null);
-  const [catalogVisible, setCatalogVisible] = useState(false);
-  // Staged chip: tap-and-confirm pattern. A tapped chip is highlighted +
-  // shown in a confirmation banner; nothing is committed until the user
-  // clicks 実行. This stops the "instant thread creation" surprise.
-  const [stagedChip, setStagedChip] = useState<ChipTemplate | null>(null);
 
   // Local FilterCtx for the current view (synced from the active conversation's filter_ctx)
   const [filterCtx, setFilterCtx] = useState<FilterCtx>(() => rangeCtxToFilterCtx(rangeCtx));
+
+  // Heatmap dimension toggle — parent owns state so filter changes can reset it
+  const [heatDim, setHeatDim] = useState<"dow" | "hour_band">("dow");
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
@@ -105,84 +100,61 @@ export function AskTab() {
     if (!activeId) setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
   }, [activeId, rangeCtx]);
 
+  // ── Dashboard queries ─────────────────────────────────────────────────────
+  const heatmap = useDashboardHeatmap(id ?? 0, filterCtx, heatDim, 15);
+  const anomaly = useDashboardAnomalies(id ?? 0, filterCtx, 2.0);
+  const movers = useDashboardMovers(id ?? 0, filterCtx, 7, 8);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convQuery.data?.messages, appendMsg.isPending]);
 
+  // ── Card templates ────────────────────────────────────────────────────────
+  // Templates are locale-independent (buildSummary receives t at call-site).
+  // We still depend on i18n.language so the memo key updates on locale switch
+  // (components re-render with fresh t anyway, but this keeps the dep array honest).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
+
   // ── Event handlers ────────────────────────────────────────────────────────
 
   function handleSelectThread(id: string | null) {
     setActiveId(id);
-    setBuildOpen(null);
-    setCatalogVisible(false);
   }
 
   function handleNewThread() {
     setActiveId(null);
-    setBuildOpen(null);
-    setCatalogVisible(false);
     setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
   }
 
-  function handleChipSelect(chip: ChipTemplate) {
+  async function handleCardSubmit({
+    tool,
+    args,
+    user_summary,
+  }: {
+    tool: string;
+    args: Record<string, unknown>;
+    user_summary: string;
+  }) {
     if (id == null) return;
-    if (chip.builder_required) {
-      setBuildOpen({ chip });
-      setStagedChip(null);
-      return;
-    }
-    // Stage the chip — don't commit yet. The user sees a confirm banner
-    // and can adjust the filter context or pick a different chip first.
-    setStagedChip(chip);
-  }
 
-  async function handleStagedExecute() {
-    if (id == null || stagedChip == null) return;
-    const chip = stagedChip;
+    // Coerce best_first string "true"/"false" → boolean
+    if (typeof args.best_first === "string") {
+      args = { ...args, best_first: args.best_first === "true" };
+    }
+
     let convId = activeId;
     if (convId === null) {
       const created = await createConv.mutateAsync({
-        title: chip.title ?? chip.id,
+        title: user_summary.slice(0, 60),
         filter_ctx: filterCtx,
       });
       convId = created.conversation_id;
       setActiveId(convId);
     }
-    setBuildOpen(null);
-    setCatalogVisible(false);
-    setStagedChip(null);
-    appendMsg.mutate({ conversationId: convId, chip_id: chip.id });
-  }
 
-  function handleStagedCancel() {
-    setStagedChip(null);
-  }
-
-  function handleOpenBuilder() {
-    setBuildOpen({});
-  }
-
-  async function handleBuildSubmit(tool: string, args: Record<string, unknown>) {
-    if (id == null) return;
-    let convId = activeId;
-
-    if (convId === null) {
-      // Create new thread with a title derived from the tool name
-      const created = await createConv.mutateAsync({
-        title: `🛠 ${tool}`,
-        filter_ctx: rangeCtxToFilterCtx(rangeCtx),
-      });
-      convId = created.conversation_id;
-      setActiveId(convId);
-    }
-
-    setBuildOpen(null);
     appendMsg.mutate({ conversationId: convId, tool, args });
-  }
-
-  function handleBuildCancel() {
-    setBuildOpen(null);
   }
 
   function handleFollowupPick(chip: FollowupChip) {
@@ -190,35 +162,11 @@ export function AskTab() {
     appendMsg.mutate({ conversationId: activeId, tool: chip.tool, args: chip.args });
   }
 
-  function handleFollowupOpenBuilder() {
-    if (!convQuery.data?.messages) return;
-    const msgs = convQuery.data.messages;
-    const lastAsst = [...msgs].reverse().find((m) => m.role === "assistant");
-    setBuildOpen({
-      existingTool: lastAsst?.tool ?? undefined,
-      existingArgs: lastAsst?.args ?? undefined,
-    });
-  }
-
-  function handleBackToCatalog() {
-    setCatalogVisible(true);
-    setBuildOpen(null);
-  }
-
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const messages = convQuery.data?.messages ?? [];
   const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant") ?? null;
   const hasMessages = messages.length > 0;
-
-  // Build form initialValue derived from buildOpen state
-  // confidence=0 is used as a placeholder — AskBuildForm only pre-populates tool/args from it.
-  const buildInitialValue =
-    buildOpen?.chip != null
-      ? { tool: buildOpen.chip.tool, args: buildOpen.chip.args, confidence: 0, rationale: null }
-      : buildOpen?.existingTool != null
-        ? { tool: buildOpen.existingTool, args: buildOpen.existingArgs ?? {}, confidence: 0, rationale: null }
-        : null;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -229,8 +177,6 @@ export function AskTab() {
         gridTemplateColumns: "240px 1fr",
         height: "100%",
         minHeight: 0,
-        // On mobile (≤640px), collapse to single column — the sidebar handles its own hamburger
-        // but we need the grid to be single-column so main area doesn't overflow.
       }}
       className="ask-tab-grid"
     >
@@ -263,9 +209,7 @@ export function AskTab() {
           />
         </div>
 
-        {/* Scrollable content area. ``scrollbarGutter: stable`` forces the scrollbar
-            to reserve space (so the user can SEE there's a scrollable region even
-            when not actively scrolling). */}
+        {/* Scrollable content area */}
         <div
           ref={scrollRef}
           style={{
@@ -276,94 +220,72 @@ export function AskTab() {
             scrollbarGutter: "stable",
           }}
         >
-          {/* Build form — shown when buildOpen is not null */}
-          {buildOpen !== null && id != null && (
-            <div
-              style={{
-                marginBottom: 16,
-                padding: "12px 16px",
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-              }}
-            >
-              <AskBuildForm
-                agencyId={id}
-                initialValue={buildInitialValue}
-                onSubmit={handleBuildSubmit}
-                onCancel={handleBuildCancel}
+          {/* ── Dashboard row ───────────────────────────────────────────── */}
+          {id != null && (
+            <div style={{ marginBottom: 16 }}>
+              {/* Heatmap + Anomaly side-by-side on md+, stacked on narrow */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: 16,
+                  marginBottom: 16,
+                }}
+              >
+                <DelayHeatmap
+                  data={heatmap.data}
+                  isLoading={heatmap.isLoading}
+                  isError={heatmap.isError}
+                  dimension={heatDim}
+                  onDimensionChange={setHeatDim}
+                  onCellClick={(rc, d, v) =>
+                    console.log("heatmap click", rc, d, v)
+                  }
+                />
+                <AnomalyTimeline
+                  data={anomaly.data}
+                  isLoading={anomaly.isLoading}
+                  isError={anomaly.isError}
+                  onAnomalyClick={(d, s) =>
+                    console.log("anomaly click", d, s)
+                  }
+                />
+              </div>
+
+              <MoversList
+                data={movers.data}
+                isLoading={movers.isLoading}
+                isError={movers.isError}
+                windowDays={7}
+                onRowClick={(rc) => console.log("mover click", rc)}
               />
             </div>
           )}
 
-          {/* Staged-chip confirm banner. Shown when a chip has been tapped
-              but not yet committed. The user can adjust the filter context
-              above (期間・曜日・時間帯) then click 実行 to commit, or
-              キャンセル to back out. */}
-          {stagedChip !== null && (
+          {/* ── Question cards row ──────────────────────────────────────── */}
+          {id != null && (
             <div
-              role="region"
-              aria-label={t("ask.staged.region")}
               style={{
-                marginBottom: 16,
-                padding: "12px 14px",
-                background: "rgba(74, 138, 170, 0.10)",
-                border: "1px solid var(--accent, #4a8aaa)",
-                borderRadius: 8,
-                display: "flex",
-                alignItems: "center",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
                 gap: 12,
-                flexWrap: "wrap",
+                marginBottom: 16,
               }}
             >
-              <span style={{ fontWeight: 600 }}>{stagedChip.title}</span>
-              <span style={{ flex: 1, fontSize: 12, opacity: 0.7 }}>
-                {t("ask.staged.hint", { defaultValue: "条件を確認してから実行してください" })}
-              </span>
-              <button
-                type="button"
-                onClick={handleStagedExecute}
-                disabled={appendMsg.isPending || createConv.isPending}
-                style={{
-                  background: "var(--accent, #4a8aaa)",
-                  color: "white",
-                  border: "none",
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  cursor: appendMsg.isPending || createConv.isPending ? "wait" : "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                ▶ {t("ask.staged.execute", { defaultValue: "実行" })}
-              </button>
-              <button
-                type="button"
-                onClick={handleStagedCancel}
-                disabled={appendMsg.isPending || createConv.isPending}
-                style={{
-                  background: "transparent",
-                  border: "1px solid var(--border-soft)",
-                  padding: "6px 12px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
-              >
-                {t("ask.staged.cancel", { defaultValue: "キャンセル" })}
-              </button>
+              {templates.map((tpl) => (
+                <ParameterizedQuestionCard
+                  key={tpl.id}
+                  template={tpl}
+                  agencyId={id}
+                  filterCtx={filterCtx}
+                  busy={appendMsg.isPending || createConv.isPending}
+                  onSubmit={handleCardSubmit}
+                />
+              ))}
             </div>
           )}
 
-          {/* Empty thread state: show chip catalog (when no build form open) */}
-          {!hasMessages && buildOpen === null && id != null && (
-            <ChipCatalog
-              agencyId={id}
-              onSelect={handleChipSelect}
-              onOpenBuilder={handleOpenBuilder}
-              stagedChipId={stagedChip?.id ?? null}
-            />
-          )}
-
-          {/* Filled thread state: message list */}
+          {/* ── Thread messages ─────────────────────────────────────────── */}
           {hasMessages && (
             <>
               <MessageList
@@ -382,31 +304,13 @@ export function AskTab() {
                 </div>
               )}
 
-              {/* Inline catalog when user taps "カタログに戻る" */}
-              {catalogVisible && id != null && (
-                <div
-                  style={{
-                    marginTop: 16,
-                    borderTop: "1px solid var(--border-soft)",
-                    paddingTop: 16,
-                  }}
-                >
-                  <ChipCatalog
-                    agencyId={id}
-                    onSelect={(chip) => { setCatalogVisible(false); handleChipSelect(chip); }}
-                    onOpenBuilder={() => { setCatalogVisible(false); handleOpenBuilder(); }}
-                    stagedChipId={stagedChip?.id ?? null}
-                  />
-                </div>
-              )}
-
-              {/* Follow-up chips after the last assistant message (only when no build open) */}
-              {lastAssistantMsg && buildOpen === null && !catalogVisible && (
+              {/* Follow-up chips after the last assistant message */}
+              {lastAssistantMsg && (
                 <FollowupChips
                   message={lastAssistantMsg}
                   onPickFollowup={handleFollowupPick}
-                  onOpenBuilder={handleFollowupOpenBuilder}
-                  onBackToCatalog={handleBackToCatalog}
+                  onOpenBuilder={() => {}}
+                  onBackToCatalog={() => {}}
                 />
               )}
             </>
