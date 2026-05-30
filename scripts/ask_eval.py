@@ -1,10 +1,10 @@
-"""Run the gold-set eval; exit nonzero if chip or builder coverage < 100%.
+"""Run the gold-set eval; exit nonzero if builder coverage < 100%.
 
 Usage:
     poetry run python scripts/ask_eval.py
 
 Exit codes:
-    0 — chip_coverage and builder_coverage both 100%
+    0 — builder_coverage 100% (chip gate skipped — catalog removed in Phase ③.5)
     1 — at least one CI-gate metric failed
     2 — gold JSONL not found
 """
@@ -16,7 +16,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from pipeline.query.chip_catalog import CHIPS_BY_ID
 from pipeline.query.intent import canonicalize, signature_hash
 
 EVAL_CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
@@ -46,16 +45,10 @@ def main() -> int:
         expected_hash = signature_hash(expected_tool, expected_args)
 
         if via == "chip":
+            # chip catalog was removed in Phase ③.5; skip with a warning.
             chip_total += 1
-            chip = CHIPS_BY_ID.get(e["chip_id"])
-            if chip is None:
-                misses.append(f"{e['id']}: chip {e['chip_id']!r} not in catalog")
-                continue
-            actual = _hash(chip.tool, chip.args)
-            if actual == expected_hash:
-                chip_pass += 1
-            else:
-                misses.append(f"{e['id']}: chip {chip.id} hash {actual} != expected {expected_hash}")
+            print(f"  WARN: skipping chip entry {e['id']!r} (catalog removed)", file=sys.stderr)
+            continue
 
         elif via == "builder":
             builder_total += 1
@@ -67,18 +60,9 @@ def main() -> int:
 
         elif via == "paraphrase-reachable":
             paraphrase_total += 1
-            reachable_id = e.get("reachable_via_chip")
-            if reachable_id and reachable_id in CHIPS_BY_ID:
-                chip = CHIPS_BY_ID[reachable_id]
-                actual = _hash(chip.tool, chip.args)
-                if actual == expected_hash:
-                    paraphrase_pass += 1
-                else:
-                    misses.append(
-                        f"{e['id']}: reachable_via_chip {reachable_id} hash {actual} != expected {expected_hash}"
-                    )
-            else:
-                misses.append(f"{e['id']}: no reachable_via_chip pointer")
+            # chip catalog removed; paraphrase entries referencing chips are skipped.
+            print(f"  WARN: skipping paraphrase entry {e['id']!r} (chip catalog removed)", file=sys.stderr)
+            continue
 
     def pct(p: int, t: int) -> str:
         return f"{p}/{t} ({100 * p / t:.1f}%)" if t else "0/0"
@@ -94,12 +78,14 @@ def main() -> int:
         if len(misses) > 20:
             print(f"  ... and {len(misses) - 20} more")
 
-    # CI gate: chip + builder must be 100%. Guard against silent-pass when the
-    # gold file has somehow been emptied — require at least 20 chip entries +
-    # 10 builder entries, matching the spec's promised v1 coverage.
-    _MIN_CHIP_ENTRIES = 20
+    # CI gate: builder must be 100%.
+    # chip gate is skipped when chip_total == 0 (catalog removed in Phase ③.5;
+    # P11 will replace with parameterized-card entries).
+    # Guard against silent-pass when the gold file has been emptied — require
+    # at least 10 builder entries.
+    _MIN_CHIP_ENTRIES = 0  # relaxed in Phase ③.5; P11 will raise this again
     _MIN_BUILDER_ENTRIES = 10
-    if chip_total < _MIN_CHIP_ENTRIES:
+    if chip_total > 0 and chip_total < _MIN_CHIP_ENTRIES:
         msg = f"gold set has {chip_total} chip entries; expected >= {_MIN_CHIP_ENTRIES}"
         print(f"\nERROR: {msg}", file=sys.stderr)
         return 1
@@ -107,7 +93,7 @@ def main() -> int:
         msg = f"gold set has {builder_total} builder entries; expected >= {_MIN_BUILDER_ENTRIES}"
         print(f"\nERROR: {msg}", file=sys.stderr)
         return 1
-    if chip_pass < chip_total:
+    if chip_total > 0 and chip_pass < chip_total:
         return 1
     if builder_pass < builder_total:
         return 1

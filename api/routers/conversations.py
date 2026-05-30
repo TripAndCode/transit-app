@@ -14,7 +14,6 @@ from api.range import RangeCtx
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
 from pipeline.query import intent_cache as _intent_cache
-from pipeline.query.chip_catalog import CHIPS_BY_ID
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
 
@@ -33,10 +32,10 @@ class UpdateConversation(BaseModel):
 
 
 class AppendMessage(BaseModel):
-    # Path A: chip-based dispatch
+    # chip_id is retained for API compatibility but triggers a 410 in the endpoint.
     chip_id: str | None = None
     args_override: dict[str, Any] | None = None
-    # Path B: builder direct dispatch (tool + args, no chip lookup)
+    # Supported dispatch path: builder direct dispatch (tool + args)
     tool: str | None = None
     args: dict[str, Any] | None = None
     # Optional client-supplied user-bubble label so the chat doesn't show raw
@@ -46,7 +45,11 @@ class AppendMessage(BaseModel):
     user_summary: str | None = None
 
     def validate_dispatch(self) -> None:
-        """Exactly one of (chip_id) or (tool + args) must be supplied."""
+        """Validate that (tool + args) is supplied.
+
+        chip_id is accepted at parse time but causes a 410 in the endpoint.
+        Providing both chip_id and tool+args is still a 400.
+        """
         has_chip = bool(self.chip_id)
         has_tool_args = bool(self.tool) and self.args is not None
         if has_chip and has_tool_args:
@@ -207,25 +210,22 @@ async def append_message_endpoint(
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
-    # ── Resolve tool + args (chip path OR builder-direct path) ────────────────
+    # ── Resolve tool + args (builder-direct path only) ────────────────────────
     if body.chip_id is not None:
-        # Path A: chip lookup
-        if body.chip_id not in CHIPS_BY_ID:
-            raise HTTPException(status_code=400, detail=f"unknown chip_id: {body.chip_id!r}")
-        chip = CHIPS_BY_ID[body.chip_id]
-        resolved_tool = chip.tool
-        resolved_args = {**chip.args, **(body.args_override or {})}
-        resolved_chip_id: str | None = chip.id
-        user_summary = chip.title_ja if locale == "ja" else chip.title_en
-    else:
-        # Path B: builder direct — tool and args supplied by client
-        resolved_tool = body.tool  # type: ignore[assignment]  # validated above
-        resolved_args = body.args or {}
-        resolved_chip_id = None
-        # Prefer the client-supplied localized summary; fall back to a generic
-        # label that does NOT expose raw key=value pairs (those leak English/
-        # identifier noise into the JA chat bubble).
-        user_summary = body.user_summary or f"🛠 {resolved_tool}"
+        # chip dispatch was removed in Phase ③.5; use {tool, args} instead.
+        raise HTTPException(
+            status_code=410,
+            detail="chip dispatch is no longer supported; use {tool, args} instead",
+        )
+
+    # Builder direct — tool and args supplied by client
+    resolved_tool = body.tool  # type: ignore[assignment]  # validated above
+    resolved_args = body.args or {}
+    resolved_chip_id: str | None = None
+    # Prefer the client-supplied localized summary; fall back to a generic
+    # label that does NOT expose raw key=value pairs (those leak English/
+    # identifier noise into the JA chat bubble).
+    user_summary = body.user_summary or f"🛠 {resolved_tool}"
 
     # Build a RangeCtx from the conversation's filter_ctx
     fc = conv["filter_ctx"] or {}

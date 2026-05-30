@@ -111,33 +111,22 @@ async def test_patch_and_delete(conv_app):
 
 
 @pytest.mark.asyncio
-async def test_append_message_for_chip(conv_app):
-    """Tapping a known chip appends both a user message and an assistant message."""
-    app, agency, uid, pool = conv_app
-    # Seed a route so describe_data has something to dispatch.
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R1', 'R1')",
-            agency,
-        )
+async def test_append_message_chip_id_returns_410(conv_app):
+    """chip_id dispatch was removed in Phase ③.5; endpoint now returns 410 Gone."""
+    app, agency, uid, _ = conv_app
     async with _authed_client(app, uid) as c:
         cr = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
         conv_id = cr.json()["conversation_id"]
         r = await c.post(
             f"/api/{agency}/conversations/{conv_id}/messages", json={"chip_id": "meta-routes"}, headers=_CSRF
         )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["assistant"]["tool"] == "describe_data"
-        assert body["assistant"]["signature_hash"] is not None
-        # Conversation list shows both messages now
-        ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
-        assert ml.status_code == 200
-        assert len(ml.json()) == 2  # user + assistant
+        assert r.status_code == 410
+        assert "chip dispatch" in r.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_append_message_unknown_chip_400(conv_app):
+async def test_append_message_unknown_chip_id_returns_410(conv_app):
+    """Any chip_id (including unknown ones) now returns 410 Gone."""
     app, agency, uid, _ = conv_app
     async with _authed_client(app, uid) as c:
         cr = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
@@ -145,7 +134,7 @@ async def test_append_message_unknown_chip_400(conv_app):
         r = await c.post(
             f"/api/{agency}/conversations/{conv_id}/messages", json={"chip_id": "does-not-exist"}, headers=_CSRF
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 @pytest.mark.asyncio

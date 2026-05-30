@@ -24,9 +24,7 @@ from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_da
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
-from pipeline.query.chip_catalog import CHIPS_BY_ID, chips_by_category
 from pipeline.query.embeddings import get_embedder
-from pipeline.query.intent import canonicalize, signature_hash
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
 from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
@@ -332,17 +330,6 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
 }
 
 
-def _serialize_chip(chip, locale: str) -> dict[str, Any]:
-    """Serialize a ChipTemplate to a dict with a localized title."""
-    return {
-        "id": chip.id,
-        "title": chip.title_ja if locale != "en" else chip.title_en,
-        "tool": chip.tool,
-        "args": dict(chip.args),
-        "builder_required": chip.builder_required,
-    }
-
-
 @router.get("/ask/build-schema")
 async def ask_build_schema(
     request: Request,
@@ -354,8 +341,6 @@ async def ask_build_schema(
     Driven by ``_BUILD_TOOL_META`` + ``_TOOL_DEFAULTS``. The
     ``capabilities`` and ``route_meta`` tools are excluded as they are
     not useful in a builder.
-
-    Also returns the chip catalog grouped by category with localized titles.
     """
     tools_out = []
     for name in _BUILD_TOOL_NAMES:
@@ -368,87 +353,7 @@ async def ask_build_schema(
         }
         tools_out.append(entry)
 
-    # Build chip catalog grouped by category with localized titles.
-    chips_grouped = chips_by_category()
-    chips_out: dict[str, list[dict[str, Any]]] = {
-        cat: [_serialize_chip(c, locale) for c in chip_list] for cat, chip_list in chips_grouped.items()
-    }
-
-    return {"tools": tools_out, "chips": chips_out}
-
-
-@router.get("/ask/popular-chips")
-async def ask_popular_chips(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    locale: str = Depends(get_locale),
-    limit: int = Query(default=6),
-):
-    """Return chips ordered by cache hit_count (descending) for this agency.
-
-    Uses today as the ctx anchor to compute canonical signature hashes for
-    all chips, then JOINs with ask_intent_cache to get hit counts.
-    Only chips that have been seen (hit_count > 0) are returned.
-    Returns an empty list if no cache data exists.
-    ``limit`` is clamped to [1, 12].
-    """
-    limit = max(1, min(12, limit))
-
-    # Build ctx anchored to today for signature_hash computation.
-    today = date.today()
-    ctx = {"from_date": today - timedelta(days=29), "to_date": today}
-
-    # Compute the canonical signature_hash for every chip.
-    chip_hashes: dict[str, str] = {}
-    for chip in CHIPS_BY_ID.values():
-        try:
-            canonical = canonicalize(chip.tool, chip.args, ctx)
-            h = signature_hash(chip.tool, canonical)
-            chip_hashes[chip.id] = h
-        except ValueError:
-            # Unknown tool — skip gracefully.
-            continue
-
-    if not chip_hashes:
-        return []
-
-    # Build reverse mapping: hash → chip_id (first match wins if collision).
-    hash_to_chip_id: dict[str, str] = {}
-    for chip_id, h in chip_hashes.items():
-        if h not in hash_to_chip_id:
-            hash_to_chip_id[h] = chip_id
-
-    hashes = list(hash_to_chip_id.keys())
-
-    # Query hit counts for the chip hashes that exist in cache for this agency.
-    rows = await conn.fetch(
-        """
-        SELECT signature_hash, hit_count
-        FROM ask_intent_cache
-        WHERE agency_id = $1
-          AND signature_hash = ANY($2::text[])
-          AND hit_count > 0
-        ORDER BY hit_count DESC
-        LIMIT $3
-        """,
-        agency_id,
-        hashes,
-        limit,
-    )
-
-    if not rows:
-        return []
-
-    result = []
-    for row in rows:
-        chip_id = hash_to_chip_id.get(row["signature_hash"])
-        if chip_id is None:
-            continue
-        chip = CHIPS_BY_ID[chip_id]
-        result.append(_serialize_chip(chip, locale))
-
-    return result
+    return {"tools": tools_out}
 
 
 # ---------------------------------------------------------------------------

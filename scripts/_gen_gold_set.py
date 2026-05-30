@@ -1,11 +1,13 @@
-"""Regenerate tests/ask_eval/gold_questions.jsonl from the chip catalog + static entries.
+"""Regenerate tests/ask_eval/gold_questions.jsonl from static entries.
 
 Run:
     poetry run python scripts/_gen_gold_set.py
 
-The 26-chip entries are generated automatically from CHIPS; builder and
-paraphrase entries are hand-authored below.  Commit both this script and
-the resulting JSONL so future contributors can regenerate after catalog changes.
+Builder and paraphrase entries are hand-authored below.  Commit both this
+script and the resulting JSONL so future contributors can regenerate.
+
+NOTE (Phase ③.5): The 24-chip catalog was removed.  chip_entries() is
+commented out.  P11 will replace it with 20 parameterized-card entries.
 """
 
 from __future__ import annotations
@@ -14,32 +16,13 @@ import json
 from datetime import date
 from pathlib import Path
 
-from pipeline.query.chip_catalog import CHIPS
 from pipeline.query.intent import canonicalize
 
 EVAL_CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
 
 
-def chip_entries() -> list[dict]:
-    out = []
-    for i, c in enumerate(CHIPS, 1):
-        # builder_required chips open the form UI; they can't run without a
-        # route_id, so skip them for direct chip coverage.
-        if c.builder_required:
-            continue
-        can = canonicalize(c.tool, c.args, EVAL_CTX)
-        out.append(
-            {
-                "id": f"chip-{i:03d}",
-                "ja": c.title_ja,
-                "en": c.title_en,
-                "expected_tool": c.tool,
-                "expected_args_canonical": can,
-                "via": "chip",
-                "chip_id": c.id,
-            }
-        )
-    return out
+# chip_entries() removed in Phase ③.5 — chip catalog deleted.
+# P11 will add parameterized-card entries here.
 
 
 # Hand-authored builder entries — cover all 5 build-form tools with varied
@@ -317,7 +300,7 @@ PARAPHRASE_ENTRIES = [
 
 
 def main() -> None:
-    entries = chip_entries() + BUILDER_ENTRIES + PARAPHRASE_ENTRIES
+    entries = BUILDER_ENTRIES + PARAPHRASE_ENTRIES
     out_path = Path("tests/ask_eval/gold_questions.jsonl")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
