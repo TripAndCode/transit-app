@@ -149,6 +149,39 @@ async def test_flag_off_no_cache_reads_or_writes(pool_with_agency, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_sentinel_short_circuits_llm(pool_with_agency, monkeypatch):
+    """A `__build__ tool {json}` question dispatches directly without any LLM call.
+
+    Confidence is 1.0, cache_outcome is "bypass", and no cache row is written.
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+
+    class _NoCallClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat_completions(self, **kw):
+            self.calls += 1
+            raise AssertionError("LLM must NOT be called for build-mode sentinels")
+
+    fake = _NoCallClient()
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("__build__ capabilities {}", _ctx(), conn, agency_id, locale="ja")
+    assert fake.calls == 0
+    assert result["confidence"] == 1.0
+    assert result["cache_outcome"] == "bypass"
+    assert result["signature_hash"] is not None
+    assert result["tool_call"]["name"] == "capabilities"
+    # And no cache row was written
+    async with pool.acquire() as conn:
+        count = await conn.fetchval("SELECT count(*) FROM ask_intent_cache")
+    assert count == 0
+
+
+@pytest.mark.asyncio
 async def test_cache_paraphrase_collapses_to_same_dispatch(pool_with_agency, monkeypatch):
     """The spec's core promise: two differently-worded questions that emit the
     same canonical IntentSignature collapse to one cache row.

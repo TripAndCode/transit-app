@@ -139,7 +139,7 @@ export type IntentSignature = {
   rationale: string | null;
 };
 
-export type CacheOutcome = "hit" | "miss";
+export type CacheOutcome = "hit" | "miss" | "bypass";
 
 export type SuggestItem = {
   question: string;
@@ -149,10 +149,10 @@ export type SuggestItem = {
 };
 
 export type BuildField =
-  | { key: string; type: "enum"; options: string[]; default?: string }
-  | { key: string; type: "int"; min?: number; max?: number; default?: number }
-  | { key: string; type: "bool"; default?: boolean }
-  | { key: string; type: "string"; default?: string };
+  | { key: string; type: "enum"; options: string[]; default?: string; optional?: boolean }
+  | { key: string; type: "int"; min?: number; max?: number; default?: number; optional?: boolean }
+  | { key: string; type: "bool"; default?: boolean; optional?: boolean }
+  | { key: string; type: "string"; default?: string; optional?: boolean };
 
 export type BuildTool = {
   name: string;
