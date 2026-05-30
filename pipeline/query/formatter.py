@@ -40,7 +40,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_row", "en"): "#{rank} route {route} ({service}) on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
     ("worst5_header", "en"): "[{label}5+ minute delay ranking]",
-    ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超: {count}回、平均{avg}分（{samples}件）",
+    ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超 {count}回、平均{avg}分（{samples}件）",
     ("worst5_row", "en"): "#{rank} route {route} ({service}) 5+ min: {count} times, mean {avg} min ({samples} samples)",
     ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
@@ -48,11 +48,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_header_other", "ja"): "【{label}{dow}曜日遅延ランキング】",
     ("dow_header_other", "en"): "[{label}{dow} delay ranking]",
-    ("dow_row", "ja"): "{rank}位: 路線{route}（{service}）{dow_label}: 平均{avg}分（{samples}件）",
+    ("dow_row", "ja"): "{rank}位: 路線{route}（{service}）{dow_label}：平均{avg}分（{samples}件）",
     ("dow_row", "en"): "#{rank} route {route} ({service}) {dow_label}: mean {avg} min ({samples} samples)",
     ("compare_header", "ja"): "【平日・土日祝 遅延差ランキング】",
     ("compare_header", "en"): "[Weekday vs weekend/holiday delay-delta ranking]",
-    ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差: {delta}分, {direction}）",
+    ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差：{delta}分、{direction}）",
     ("compare_row", "en"): (
         "#{rank} route {route} weekday {weekday} min / weekend {weekend} min (Δ {delta} min, {direction})"
     ),

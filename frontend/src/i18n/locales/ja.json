@@ -88,7 +88,7 @@
     "settings_title": "設定",
     "settings_api_key_label": "API キー",
     "settings_api_key_placeholder": "未設定でも全機能が使えます",
-    "settings_api_key_hint": "通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。"
+    "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。"
   },
   "common": {
     "apply": "適用",
@@ -214,7 +214,7 @@
       "search_placeholder": "検索 (名前 / コード)",
       "variant_count": "({{count}}路線)",
       "empty_title": "ルートが登録されていません。",
-      "empty_hint": "初回ingest中の場合は数分後に再度お試しください。"
+      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
     }
   },
   "map": {
@@ -302,8 +302,8 @@
       "late5_count": "5分超回数",
       "heijitsu_min": "平日(分)",
       "kyujitsu_min": "土日祝(分)",
-      "abs_delta": "差(絶対)",
-      "signed_delta": "差(符号付)"
+      "abs_delta": "遅延差（絶対値）",
+      "signed_delta": "遅延差（符号付き）"
     },
     "more_rows": "…他{{count}}件",
     "chips": {
@@ -314,7 +314,7 @@
     },
     "mode": {
       "label": "入力モード",
-      "chat": "自由に",
+      "chat": "自由入力",
       "build": "組み立て"
     },
     "build": {
@@ -347,7 +347,7 @@
       "wrong": "違う？"
     },
     "lowconf": {
-      "title": "自信が低い解釈です",
+      "title": "解釈に自信がありません",
       "run": "実行",
       "edit": "修正"
     },
@@ -397,7 +397,7 @@
     },
     "followups": {
       "heading": "この結果から",
-      "open_builder": "すべての条件を変えて再実行",
+      "open_builder": "条件を変えて再実行",
       "back_to_catalog": "カタログに戻る"
     }
   },
@@ -442,7 +442,7 @@
     "select_prompt": "レポートを選択してください",
     "rendered_at": "生成: {{when}}",
     "range_suffix": "・ 期間: {{from}} 〜 {{to}}",
-    "raw_rows": "原文 ({{count}}件)",
+    "raw_rows": "生データ（{{count}}件）",
     "type": {
       "ranking": "遅延ランキング",
       "ranking_best": "定時運行ランキング",
@@ -525,7 +525,7 @@
     "agency_form": {
       "title": "新規事業者登録",
       "name_label": "事業者名",
-      "gtfs_label": "GTFS Static URL (任意)",
+      "gtfs_label": "GTFS 静的データ URL（任意）",
       "error": "登録に失敗しました",
       "submitting": "登録中...",
       "submit": "登録"
