@@ -233,6 +233,45 @@ SELECT question, count(*) FROM ask_query_log
 WHERE success = false GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
 ```
 
+### Canonical intent + cache (Phase ②)
+
+The blank text box is the root cause of "minor wording differences → different
+answers." Phase ② shrinks that surface from two sides:
+
+- **Codebase:** Stage 3's LLM call emits a strict JSON `IntentSignature`
+  (`pipeline/query/intent.py`). We canonicalize the args (sort keys, lowercase
+  enums, drop tool defaults, resolve relative dates), hash to a 16-char
+  `signature_hash`, and look the hash up in `ask_intent_cache`. Two paraphrased
+  questions with the same canonical intent share a row — the dispatch is
+  deterministic regardless of wording, and a future job auto-promotes
+  recurring signatures into `rag_chunks` so Stage 2 catches them next time
+  (the LLM is skipped entirely).
+- **UX:** Suggestion chips when the input is empty, autocomplete from the
+  golden set as the user types, a 💬/🛠 mode toggle that swaps the chat input
+  for a structured builder (zero LLM), and a confidence pill above each answer
+  that surfaces low-confidence interpretations with a "違う？" link to re-run
+  via the builder.
+
+Toggle with the env var:
+
+```bash
+ASK_INTENT_CACHE_ENABLED=true    # full pipeline + guided UX
+ASK_INTENT_CACHE_ENABLED=false   # default — Phase ① behaviour, no cache
+```
+
+The flag also gates `signature_hash` + `cache_outcome` columns on
+`ask_query_log` writes (NULL when off). Useful cache-side queries once enabled:
+
+```sql
+-- top signatures (good promotion candidates)
+SELECT signature_hash, tool, hit_count, last_question
+FROM ask_intent_cache ORDER BY hit_count DESC LIMIT 20;
+
+-- cache hit rate
+SELECT cache_outcome, count(*) FROM ask_query_log
+WHERE router_stage = 'llm' GROUP BY 1;
+```
+
 ### Load data
 
 `make bootstrap` doesn't pull any GTFS-RT data — the DB is empty until

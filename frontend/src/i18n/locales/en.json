@@ -305,7 +305,30 @@
       "abs_delta": "Δ (abs)",
       "signed_delta": "Δ (signed)"
     },
-    "more_rows": "…and {{count}} more"
+    "more_rows": "…and {{count}} more",
+    "chips": { "more": "More" },
+    "autocomplete": { "noResults": "" },
+    "mode": {
+      "label": "Input mode",
+      "chat": "Free text",
+      "build": "Build"
+    },
+    "build": {
+      "tool": "Question type",
+      "run": "Run",
+      "cancel": "Cancel",
+      "loading": "Loading…",
+      "error": "Couldn't load the builder"
+    },
+    "pill": {
+      "interpreted": "Interpreted as",
+      "wrong": "Wrong?"
+    },
+    "lowconf": {
+      "title": "Low-confidence interpretation",
+      "run": "Run",
+      "edit": "Edit"
+    }
   },
   "live": {
     "title": "Latest observations",

@@ -123,7 +123,47 @@ export type AskResponse = {
   tool_call: { name: string; arguments: Record<string, unknown> } | null;
   result: ToolResult | null;
   ctx: ResponseCtx;
+  // Phase ② canonical intent fields — null when ASK_INTENT_CACHE_ENABLED is off
+  signature_hash?: string | null;
+  confidence?: number | null;
+  canonical_args?: Record<string, unknown> | null;
+  cache_outcome?: CacheOutcome | null;
 };
+
+// Phase ② canonical intent + guided UX
+
+export type IntentSignature = {
+  tool: string;
+  args: Record<string, unknown>;
+  confidence: number;
+  rationale: string | null;
+};
+
+export type CacheOutcome = "hit" | "miss" | "bypass";
+
+export type SuggestItem = {
+  question: string;
+  tool: string;
+  args: Record<string, unknown>;
+  distance: number;
+};
+
+export type BuildField =
+  | { key: string; type: "enum"; options: string[]; default?: string; optional?: boolean }
+  | { key: string; type: "int"; min?: number; max?: number; default?: number; optional?: boolean }
+  | { key: string; type: "bool"; default?: boolean; optional?: boolean }
+  | { key: string; type: "string"; default?: string; optional?: boolean };
+
+export type BuildTool = {
+  name: string;
+  label_ja: string;
+  label_en: string;
+  fields: BuildField[];
+};
+
+export type BuildSchema = { tools: BuildTool[] };
+
+export type EditAction = "confirmed" | "edited";
 
 export type Route = {
   route_id: string;

@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import {
   useMutation,
   useQuery,
   useQueryClient,
+  type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -10,6 +12,8 @@ import { ctxToQueryString, type RangeCtx } from "./rangeContext";
 import type {
   Agency,
   AskResponse,
+  BuildSchema,
+  EditAction,
   HeatmapCollection,
   OverviewSummary,
   ReportMeta,
@@ -17,6 +21,7 @@ import type {
   Route,
   RouteShapeResponse,
   RouteSummaryResponse,
+  SuggestItem,
 } from "./types";
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
@@ -157,5 +162,69 @@ export function useCreateAgency() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agencies"] });
     },
+  });
+}
+
+// ─── Phase ② hooks ───────────────────────────────────────────────────────────
+
+/**
+ * Debounced autocomplete suggestions for the Ask input.
+ *
+ * The debounce (150 ms) is handled inside this hook — callers may pass the
+ * live, un-debounced `q` directly.  The query is skipped when the trimmed
+ * value is shorter than two characters to avoid noisy round-trips.
+ */
+export function useAskSuggest(
+  q: string,
+  agencyId: number,
+): UseQueryResult<SuggestItem[]> {
+  const [debouncedQ, setDebouncedQ] = useState(q);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQ(q), 150);
+    return () => clearTimeout(id);
+  }, [q]);
+
+  return useQuery({
+    queryKey: ["ask-suggest", agencyId, debouncedQ],
+    queryFn: () =>
+      apiGet<SuggestItem[]>(
+        `/api/${agencyId}/ask/suggest?q=${encodeURIComponent(debouncedQ)}&limit=8`,
+      ),
+    // Empty q is a valid "top-hits chip-set" query (server returns the
+    // most-hit cache rows). Short non-empty q would just be noise, so gate
+    // those out.
+    enabled: debouncedQ.trim().length === 0 || debouncedQ.trim().length >= 2,
+    // NN distances against rag_chunks are stable between deploys — 5 min
+    // stale-time prevents redundant round-trips while the user is typing.
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Fetches the tool schema used by the guided build form.
+ *
+ * The schema only changes on deploy, so it is treated as effectively
+ * immutable at runtime (staleTime: Infinity).
+ */
+export function useAskBuildSchema(agencyId: number): UseQueryResult<BuildSchema> {
+  return useQuery({
+    queryKey: ["ask-build-schema", agencyId],
+    queryFn: () => apiGet<BuildSchema>(`/api/${agencyId}/ask/build-schema`),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Records whether the user confirmed or edited a canonical intent suggestion.
+ * Fires a POST to `/api/{agencyId}/ask/edit-action`.
+ */
+export function usePostEditAction(
+  agencyId: number,
+): UseMutationResult<{ ok: true }, Error, { signature_hash: string; action: EditAction }> {
+  return useMutation({
+    mutationFn: (body: { signature_hash: string; action: EditAction }) =>
+      apiPost<{ ok: true }>(`/api/${agencyId}/ask/edit-action`, body),
   });
 }

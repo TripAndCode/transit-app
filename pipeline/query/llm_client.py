@@ -164,6 +164,7 @@ class LLMClient:
         tool_choice: str = "auto",
         temperature: float = 0.0,
         model_override: str | None = None,
+        response_format: dict | None = None,
     ) -> tuple[Any | None, str | None]:
         """Attempt each provider in order and return ``(message, error_kind)``.
 
@@ -203,13 +204,16 @@ class LLMClient:
             client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
             for attempt in (1, 2):
                 try:
-                    resp = client.chat.completions.create(
+                    create_kwargs: dict[str, Any] = dict(
                         model=model_override or cfg.model,
                         messages=messages,
                         tools=tools,
                         tool_choice=tool_choice if tools else "none",
                         temperature=temperature,
                     )
+                    if response_format is not None:
+                        create_kwargs["response_format"] = response_format
+                    resp = client.chat.completions.create(**create_kwargs)
                     return resp.choices[0].message, None
                 except APITimeoutError:
                     # The request already waited the full timeout; retrying would

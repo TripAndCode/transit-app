@@ -10,19 +10,24 @@ The request body now carries the global :class:`~api.range.RangeCtx`
 user's chosen window without having to mention it in the prompt.
 """
 
+import asyncio
 import os as _os
 from datetime import date, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
 from api.security import csrf_guard
+from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
+from pipeline.query.embeddings import get_embedder
 from pipeline.query.query_log import log_query
-from pipeline.query.router import is_follow_up, route_or_examples
+from pipeline.query.rag_index import nearest as rag_nearest
+from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
@@ -55,11 +60,24 @@ class AskRequest(BaseModel):
 
 
 class AskResponse(BaseModel):
+    """Response schema for ``POST /ask``.
+
+    Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
+    ``cache_outcome``) are populated only when ``ASK_INTENT_CACHE_ENABLED=true``
+    and the request went through the LLM Stage-3 path.  They are ``None`` on the
+    Stage-1 / Stage-2 router paths and when the flag is off.
+    """
+
     answer: str
     tool_call: dict | None = None
     result: dict | None = None
     ctx: dict
     router_stage: str | None = None
+    # Phase ② canonical-intent cache fields
+    signature_hash: str | None = None
+    confidence: float | None = None
+    canonical_args: dict | None = None
+    cache_outcome: str | None = None
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
@@ -107,6 +125,11 @@ async def ask(
     picks the response locale (defaults to JP).
     """
     csrf_guard(request)
+    # The frontend disables submit on empty input, but a direct API caller
+    # could still POST an empty/whitespace question and get a misleading
+    # describe_data answer back. Reject early.
+    if not body.question or not body.question.strip():
+        raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
 
     ctx_dict = {
@@ -149,6 +172,10 @@ async def ask(
     if router_enabled and not follow_up:
         decision, examples = await route_or_examples(body.question, conn, agency_id, k=3)
 
+    # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
+    sig_hash: str | None = None
+    cache_outcome: str | None = None
+
     if decision is not None:
         result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
         stage = decision.stage
@@ -182,15 +209,286 @@ async def ask(
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
         success = payload["success"]
+        sig_hash = payload.get("signature_hash")
+        cache_outcome = payload.get("cache_outcome")
         resp = AskResponse(
             answer=payload["answer"],
             tool_call=payload["tool_call"],
             result=payload["result"],
             ctx=ctx_dict,
             router_stage=stage,
+            signature_hash=sig_hash,
+            confidence=payload.get("confidence"),
+            canonical_args=payload.get("canonical_args"),
+            cache_outcome=cache_outcome,
         )
 
     if log_enabled:
-        await log_query(conn, agency_id, body.question, stage, tool_name, success)
+        # Build-mode synthetic questions (``__build__ tool {...}`` from the guided
+        # form) are machine-generated; logging the raw sentinel would pollute the
+        # analytics view of what users actually ask. Skip logging for those.
+        if not body.question.startswith("__build__"):
+            await log_query(
+                conn,
+                agency_id,
+                body.question,
+                stage,
+                tool_name,
+                success,
+                signature_hash=sig_hash,
+                cache_outcome=cache_outcome,
+            )
 
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Build-schema metadata
+# ---------------------------------------------------------------------------
+
+# Tools that are useful in the guided builder UI.  capabilities and route_meta
+# are excluded: capabilities is a discovery tool, route_meta requires a route
+# arg that isn't meaningful as a standalone builder form.
+_BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", "describe_data")
+
+# Per-tool labels (ja / en) and field override metadata for the builder UI.
+# Enum options and defaults are derived from _TOOL_DEFAULTS where possible;
+# this dict supplies the human-readable labels and the enum option lists that
+# aren't captured in _TOOL_DEFAULTS.
+_BUILD_TOOL_META: dict[str, dict[str, Any]] = {
+    "top_n": {
+        "label_ja": "ランキング",
+        "label_en": "Ranking",
+        "fields": [
+            {
+                "key": "metric",
+                "type": "enum",
+                "options": ["avg_delay", "on_time_rate", "worst_5min"],
+            },
+            {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
+            {"key": "best_first", "type": "bool", "default": False},
+            {
+                "key": "service_type",
+                "type": "enum",
+                "options": ["weekday", "weekend", "all"],
+                "default": "all",
+            },
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "time_series": {
+        "label_ja": "トレンド",
+        "label_en": "Trend",
+        "fields": [
+            {"key": "route", "type": "string", "optional": True},
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "compare_segments": {
+        "label_ja": "セグメント比較",
+        "label_en": "Segment Comparison",
+        "fields": [
+            {"key": "route", "type": "string", "optional": True},
+            {
+                "key": "dimension",
+                "type": "enum",
+                "options": ["dow", "service_type"],
+                "default": "dow",
+            },
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "route_stats": {
+        "label_ja": "系統統計",
+        "label_en": "Route Stats",
+        "fields": [
+            {"key": "route", "type": "string"},
+            {
+                "key": "time_window",
+                "type": "enum",
+                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
+                "default": "last_2_weeks",
+            },
+        ],
+    },
+    "describe_data": {
+        "label_ja": "データ照会",
+        "label_en": "Data Info",
+        "fields": [
+            {
+                "key": "kind",
+                "type": "enum",
+                "options": [
+                    "routes",
+                    "stops",
+                    "date_range",
+                    "agencies",
+                    "sample_counts",
+                    "overview",
+                    "metrics",
+                ],
+            },
+            {"key": "limit", "type": "int", "min": 1, "max": 200, "default": 50},
+        ],
+    },
+}
+
+
+@router.get("/ask/build-schema")
+async def ask_build_schema(
+    agency_id: int = Depends(get_agency),
+):
+    """Return tool-form metadata for the frontend's guided build mode.
+
+    Driven by ``_BUILD_TOOL_META`` + ``_TOOL_DEFAULTS``. The
+    ``capabilities`` and ``route_meta`` tools are excluded as they are
+    not useful in a builder.
+    """
+    tools_out = []
+    for name in _BUILD_TOOL_NAMES:
+        meta = _BUILD_TOOL_META.get(name, {})
+        entry: dict[str, Any] = {
+            "name": name,
+            "label_ja": meta.get("label_ja", name),
+            "label_en": meta.get("label_en", name),
+            "fields": meta.get("fields", []),
+        }
+        tools_out.append(entry)
+    return {"tools": tools_out}
+
+
+# ---------------------------------------------------------------------------
+# Suggest endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ask/suggest")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def ask_suggest(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    q: str = Query(default=""),
+    limit: int = Query(default=8),
+):
+    """Live autocomplete for the Ask input.
+
+    With a non-empty ``q``: e5-embed the query, nearest-neighbour against
+    ``rag_chunks``, return up to ``limit`` (max 12) results ordered by
+    ascending cosine distance.
+
+    With an empty ``q``: return top-N most-hit chunks as a starter chip
+    set, ordered by ``hit_count DESC``.
+    """
+    # Clamp limit to [1, 12] even if FastAPI validation lets something through.
+    limit = max(1, min(12, limit))
+
+    if not q or not q.strip():
+        # Empty query: return top-N most-hit chunks for this agency.
+        rows = await conn.fetch(
+            """
+            SELECT rc.chunk_id, rc.content
+            FROM rag_chunks rc
+            LEFT JOIN ask_intent_cache aic
+              ON aic.last_question = rc.content
+             AND aic.agency_id = rc.agency_id
+            WHERE rc.agency_id = $1
+            ORDER BY aic.hit_count DESC NULLS LAST, rc.chunk_id
+            LIMIT $2
+            """,
+            agency_id,
+            limit,
+        )
+        golden = _load_golden()
+        result = []
+        for row in rows:
+            cid = row["chunk_id"]
+            tool, args = golden.get(cid, ("", {}))
+            result.append(
+                {
+                    "question": row["content"],
+                    "tool": tool,
+                    "args": dict(args),
+                    "distance": None,
+                }
+            )
+        return result
+
+    # Non-empty query: embed + NN search.
+    embedder = get_embedder()
+    if not getattr(embedder, "available", False):
+        return []
+
+    try:
+        qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
+    except Exception:
+        return []
+
+    try:
+        matches = await rag_nearest(conn, agency_id, qvec, k=limit)
+    except Exception:
+        return []
+
+    golden = _load_golden()
+    result = []
+    for m in matches:
+        tool, args = golden.get(m.chunk_id, ("", {}))
+        result.append(
+            {
+                "question": m.content,
+                "tool": tool,
+                "args": dict(args),
+                "distance": m.distance,
+            }
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Edit-action endpoint
+# ---------------------------------------------------------------------------
+
+
+class EditActionRequest(BaseModel):
+    signature_hash: str
+    action: str
+
+
+@router.post("/ask/edit-action")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def ask_edit_action(
+    request: Request,
+    body: EditActionRequest,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Record the user's verdict on a cached interpretation.
+
+    Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``
+    Returns ``{"ok": true}`` on success, 400 on unknown action.
+
+    Same CSRF + rate-limit guards as ``POST /ask`` — without them a cross-
+    origin attacker could mark arbitrary cache rows as ``edited`` (blocking
+    promotion) or ``confirmed`` (rubber-stamping bad interpretations).
+    """
+    csrf_guard(request)
+    try:
+        await _intent_cache.update_user_action(conn, body.signature_hash, agency_id, body.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}

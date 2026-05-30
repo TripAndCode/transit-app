@@ -275,7 +275,7 @@ async def describe_data(
         )
 
     if kind == "sample_counts":
-        # "サンプルが少ない系統" wants the least-sampled routes, so allow an
+        # "サンプルが少ない路線" wants the least-sampled routes, so allow an
         # ascending order. Validate against an allowlist — never interpolate
         # raw LLM input into the ORDER BY clause.
         order = str(args.get("order", "desc")).lower()
@@ -328,7 +328,7 @@ async def describe_data(
             shown_to = offset + len(rows)
             if order == "asc":
                 jp = (
-                    f"サンプル数の少ない順 全{total}系統中 {shown_from}–{shown_to}件を表示"
+                    f"サンプル数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
                     f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
                 )
                 en = (
@@ -337,7 +337,7 @@ async def describe_data(
                 )
             else:
                 jp = (
-                    f"サンプル数 全{total}系統中 {shown_from}–{shown_to}件を表示"
+                    f"サンプル数 全{total}路線中 {shown_from}–{shown_to}件を表示"
                     f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
                 )
                 en = (
@@ -345,10 +345,10 @@ async def describe_data(
                     f"(next: 'next {limit}') ({ctx.from_date} – {window_end})"
                 )
         elif order == "asc":
-            jp = f"サンプル数の少ない順 {len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            jp = f"サンプル数の少ない順 {len(rows)}路線 ({ctx.from_date}〜{window_end})"
             en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
         else:
-            jp = f"サンプル数 上位{len(rows)}系統 ({ctx.from_date}〜{window_end})"
+            jp = f"サンプル数 上位{len(rows)}路線 ({ctx.from_date}〜{window_end})"
             en = f"sample count top-{len(rows)} ({ctx.from_date} – {window_end})"
         return ToolResult(
             kind="table",
@@ -414,13 +414,13 @@ async def describe_data(
 
 
 _CAPABILITY_EXAMPLES_JP = {
-    "single_route": "系統22171の遅延 / 系統16071のp90 / A1の運行情報",
-    "ranking": "遅延ワースト10 / 定時率TOP5 / 5分超過の多い系統",
-    "comparison": "平日と土日祝の比較 / 22171の種別比較 / 系統間の差",
+    "single_route": "路線22171の遅延 / 路線16071のp90 / A1の運行情報",
+    "ranking": "遅延ワースト10 / 定時率TOP5 / 5分超過の多い路線",
+    "comparison": "平日と土日祝の比較 / 22171の種別比較 / 路線間の差",
     "trend": "直近2週間の傾向 / 日次トレンド / 推移を見せて",
     "on_time": "5分以内の定時率 / 定時率ランキング / しきい値別の率",
     "stop_level": "(現状未対応:Phase 3) 停留所単位の集計",
-    "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い系統",
+    "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い路線",
 }
 
 _CAPABILITY_EXAMPLES_EN = {
@@ -470,7 +470,7 @@ META_TOOLS: list[dict] = [
                 "Prefer this over guessing with route_meta or route_stats when the user "
                 "did NOT specify a route. Examples in Japanese: "
                 "「どんな路線がある？」→kind=routes, 「いつから？」→kind=date_range, "
-                "「サンプル数の多い系統」→kind=sample_counts, 「全体感」→kind=overview."
+                "「サンプル数の多い路線」→kind=sample_counts, 「全体感」→kind=overview."
             ),
             "parameters": {
                 "type": "object",
@@ -487,7 +487,7 @@ META_TOOLS: list[dict] = [
                         "description": (
                             "Only honored when kind='sample_counts'. Default 'desc' → "
                             "most-sampled routes first. Use 'asc' for the LEAST-sampled "
-                            "routes (e.g. 「サンプル数の少ない系統」/「データが薄い系統」)."
+                            "routes (e.g. 「サンプル数の少ない路線」/「データが薄い路線」)."
                         ),
                     },
                     "offset": {
@@ -517,7 +517,7 @@ META_TOOLS: list[dict] = [
             "name": "capabilities",
             "description": (
                 "Return a curated list of example questions the assistant can answer. "
-                "Use this when the user's question is vague (「やばい系統」「いつものやつ」), "
+                "Use this when the user's question is vague (「やばい路線」「いつものやつ」), "
                 "out of scope, or when you cannot map their question to any analytic tool. "
                 "Prefer this over refusing in free text."
             ),
