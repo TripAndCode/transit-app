@@ -346,6 +346,20 @@
       "relative_minute": "{{n}}分前",
       "relative_hour": "{{n}}時間前",
       "relative_yesterday": "昨日"
+    },
+    "filter_bar": {
+      "edit": "編集",
+      "apply": "適用",
+      "cancel": "キャンセル",
+      "label_date_range": "期間",
+      "label_dow": "曜日",
+      "label_time_band": "時間帯",
+      "label_routes": "路線",
+      "dow_all": "すべて",
+      "dow_weekday": "平日のみ",
+      "dow_weekend": "土日祝のみ",
+      "all_routes": "全路線",
+      "no_routes_selected": "路線指定なし"
     }
   },
   "live": {

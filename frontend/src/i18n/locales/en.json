@@ -346,6 +346,20 @@
       "relative_minute": "{{n}}m ago",
       "relative_hour": "{{n}}h ago",
       "relative_yesterday": "yesterday"
+    },
+    "filter_bar": {
+      "edit": "Edit",
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "label_date_range": "Date range",
+      "label_dow": "DOW",
+      "label_time_band": "Time band",
+      "label_routes": "Routes",
+      "dow_all": "All",
+      "dow_weekday": "Weekdays only",
+      "dow_weekend": "Weekends/holidays only",
+      "all_routes": "All routes",
+      "no_routes_selected": "No specific routes"
     }
   },
   "live": {
