@@ -8,16 +8,29 @@
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dc_replace
 from datetime import timedelta
 from typing import Any
 
 import asyncpg
 
-from api.range import RangeCtx
+from api.range import RangeCtx, build_updates_filter
 
-# --- shared dedup ---
-_DEDUPED_CTE = """
+
+def _deduped_cte(agency_id: int, ctx: RangeCtx) -> tuple[str, list]:
+    """Return ``(cte_sql, params)`` for the deduped CTE.
+
+    BUG-4 fix: previously the CTE only filtered on agency_id + date range,
+    silently ignoring ctx.dow, ctx.time_band, ctx.service, and ctx.routes.
+    Now we use :func:`build_updates_filter` to apply the full context.
+
+    The CTE binds ``$1 = agency_id`` and then ``$2..`` from build_updates_filter.
+    Callers must append their own parameters starting at len(params)+1.
+    """
+    # $1 = agency_id; build_updates_filter starts at $2
+    filter_sql, filter_params, _ = build_updates_filter(ctx, next_param=2)
+    params: list = [agency_id, *filter_params]
+    sql = f"""
 WITH deduped AS (
     SELECT DISTINCT ON (route_code, service_type, scheduled_time, trip_id,
                         captured_at::date, stop_sequence)
@@ -25,11 +38,12 @@ WITH deduped AS (
     FROM updates
     WHERE agency_id = $1
       AND dep_delay IS NOT NULL
-      AND captured_at::date BETWEEN $2 AND $3
+      AND {filter_sql}
     ORDER BY route_code, service_type, scheduled_time, trip_id,
              captured_at::date, stop_sequence, captured_at DESC
 )
 """
+    return sql, params
 
 
 @dataclass(frozen=True)
@@ -74,14 +88,15 @@ async def delay_heatmap(
         raise ValueError(f"dimension must be 'dow' or 'hour_band', got {dimension!r}")
 
     # Step 1: top N routes by sample count.
+    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
+    # next positional param after the CTE's params
+    p_top = len(cte_params) + 1
     top_rows = await conn.fetch(
-        f"{_DEDUPED_CTE}"
+        f"{cte_sql}"
         "SELECT route_code, COUNT(*) AS samples "
         "FROM deduped GROUP BY route_code "
-        "ORDER BY samples DESC, route_code LIMIT $4",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
+        f"ORDER BY samples DESC, route_code LIMIT ${p_top}",
+        *cte_params,
         top_routes,
     )
     route_codes = [r["route_code"] for r in top_rows]
@@ -123,14 +138,13 @@ async def delay_heatmap(
         def bucket_normalize(b: int) -> int:
             return b
 
+    p_routes = len(cte_params) + 1
     grid_rows = await conn.fetch(
-        f"{_DEDUPED_CTE}"
+        f"{cte_sql}"
         f"SELECT route_code, {bucket_sql}, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n "
-        f"FROM deduped WHERE route_code = ANY($4::text[]) "
+        f"FROM deduped WHERE route_code = ANY(${p_routes}::text[]) "
         f"GROUP BY route_code, bucket",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
+        *cte_params,
         route_codes,
     )
 
@@ -159,13 +173,12 @@ async def anomaly_timeline(
     sigma: float = 2.0,
 ) -> AnomalyTimeline:
     """30-day daily avg delay (min) + outlier days flagged at ±sigma."""
+    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
     rows = await conn.fetch(
-        f"{_DEDUPED_CTE}"
+        f"{cte_sql}"
         "SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min "
         "FROM deduped GROUP BY d ORDER BY d",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
+        *cte_params,
     )
     series = [
         {
@@ -196,28 +209,44 @@ async def movers(
     window_days: int = 7,
     top: int = 10,
 ) -> Movers:
-    """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window."""
-    # current window = [ctx.to_date - (window_days-1), ctx.to_date]
-    # prior   window = [ctx.to_date - (2*window_days-1), ctx.to_date - window_days]
-    cur_from = ctx.to_date - timedelta(days=window_days - 1)
+    """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window.
+
+    BUG-4 fix: previously ignored ctx.from_date and all non-date filters.
+    Now uses ctx.from_date/to_date as the recent window boundaries and applies
+    dow/time_band/service/routes filters to both CTEs.
+
+    current window = [ctx.from_date, ctx.to_date]
+    prior   window = [ctx.from_date - window_days, ctx.to_date - window_days]
+    """
+    cur_from = ctx.from_date
     cur_to = ctx.to_date
-    prv_from = ctx.to_date - timedelta(days=2 * window_days - 1)
+    prv_from = ctx.from_date - timedelta(days=window_days)
     prv_to = ctx.to_date - timedelta(days=window_days)
 
-    rows = await conn.fetch(
-        """
+    # Build filter fragments for each window using the full ctx filter surface.
+    # Override only the date range per window; dow/time_band/service/routes are shared.
+    cur_ctx = dc_replace(ctx, from_date=cur_from, to_date=cur_to)
+    prv_ctx = dc_replace(ctx, from_date=prv_from, to_date=prv_to)
+
+    # $1 = agency_id (shared by both CTEs); cur filter occupies $2..$N;
+    # prv filter continues from $N+1; LIMIT is the final param.
+    cur_filter_sql, cur_params, next_n = build_updates_filter(cur_ctx, next_param=2)
+    prv_filter_sql, prv_params, prv_next = build_updates_filter(prv_ctx, next_param=next_n)
+    p_top = prv_next
+
+    sql = f"""
         WITH cur AS (
             SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n
             FROM updates
             WHERE agency_id = $1 AND dep_delay IS NOT NULL
-              AND captured_at::date BETWEEN $2 AND $3
+              AND {cur_filter_sql}
             GROUP BY route_code
         ),
         prv AS (
             SELECT route_code, AVG(dep_delay)/60.0 AS avg_min
             FROM updates
             WHERE agency_id = $1 AND dep_delay IS NOT NULL
-              AND captured_at::date BETWEEN $4 AND $5
+              AND {prv_filter_sql}
             GROUP BY route_code
         )
         SELECT cur.route_code,
@@ -227,15 +256,9 @@ async def movers(
                cur.n        AS samples
         FROM cur LEFT JOIN prv USING (route_code)
         ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
-        LIMIT $6
-        """,
-        agency_id,
-        cur_from,
-        cur_to,
-        prv_from,
-        prv_to,
-        top,
-    )
+        LIMIT ${p_top}
+    """
+    rows = await conn.fetch(sql, agency_id, *cur_params, *prv_params, top)
     label_rows = await conn.fetch(
         "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1",
         agency_id,

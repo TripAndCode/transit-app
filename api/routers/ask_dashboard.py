@@ -55,12 +55,13 @@ async def heatmap_endpoint(
     dow: str = Query(default="all"),
     time_band: str = Query(default="all"),
     service: str = Query(default="all"),
+    routes: list[str] = Query(default=[]),
     dimension: str = Query(default="dow", description="'dow' or 'hour_band'"),
     top_routes: int = Query(default=20, ge=1, le=50),
 ):
     if dimension not in ("dow", "hour_band"):
         raise HTTPException(status_code=400, detail="dimension must be 'dow' or 'hour_band'")
-    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service)
+    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await delay_heatmap(conn, agency_id=agency_id, ctx=ctx, dimension=dimension, top_routes=top_routes)
     return asdict(result)
 
@@ -76,10 +77,11 @@ async def anomalies_endpoint(
     dow: str = Query(default="all"),
     time_band: str = Query(default="all"),
     service: str = Query(default="all"),
+    routes: list[str] = Query(default=[]),
     days: int = Query(default=30, ge=7, le=90),
     sigma: float = Query(default=2.0, ge=1.0, le=5.0),
 ):
-    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service)
+    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await anomaly_timeline(conn, agency_id=agency_id, ctx=ctx, days=days, sigma=sigma)
     return asdict(result)
 
@@ -95,9 +97,10 @@ async def movers_endpoint(
     dow: str = Query(default="all"),
     time_band: str = Query(default="all"),
     service: str = Query(default="all"),
+    routes: list[str] = Query(default=[]),
     window_days: int = Query(default=7, ge=1, le=30),
     top: int = Query(default=10, ge=1, le=50),
 ):
-    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service)
+    ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await movers(conn, agency_id=agency_id, ctx=ctx, window_days=window_days, top=top)
     return asdict(result)
