@@ -14,13 +14,13 @@
     "hero_unit_min": "分",
     "hero_no_baseline": "比較データなし",
     "hero_samples": "観測 {{count}}件",
-    "section_movers_worse": "最も悪化した系統",
-    "section_movers_better": "最も改善した系統",
+    "section_movers_worse": "最も悪化した路線",
+    "section_movers_better": "最も改善した路線",
     "streak_worse": "{{count}}週連続悪化",
     "streak_better": "{{count}}週連続改善",
     "section_concentration": "遅延の集中度",
-    "concentration_legend": "上位{{count}}系統が遅延全体の {{pct}}% を占める。",
-    "concentration_rest": "残り {{count}} 系統で {{rest}}%",
+    "concentration_legend": "上位{{count}}路線が遅延全体の {{pct}}% を占める。",
+    "concentration_rest": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
     "peak_hour_callout": "ピーク時間帯は {{hour}}-{{next_hour}} 時 (平均 {{avg}} 分)。",
     "section_service_split": "サービス日別",
@@ -47,9 +47,9 @@
       "improved": "{{val}}分 改善"
     },
     "concentration": {
-      "single_route": "{{name}} が全体の 100% を占める。1系統のみの観測。",
+      "single_route": "{{name}} が全体の 100% を占める。1路線のみの観測。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
-      "lorenz_caption": "上位 20% の系統が遅延の {{pct}}% を占める。"
+      "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占める。"
     },
     "service_split": {
       "diff": "差: {{diff}}分 ({{pct}}%)",
@@ -70,8 +70,8 @@
     },
     "modal": {
       "hero": "今週の傾向",
-      "movers_worse": "最も悪化した系統 (上位10)",
-      "movers_better": "最も改善した系統 (上位10)",
+      "movers_worse": "最も悪化した路線 (上位10)",
+      "movers_better": "最も改善した路線 (上位10)",
       "concentration": "遅延の集中度 (上位20)",
       "peak_hour": "時間帯別の悪化 (平日 vs 土日祝)",
       "service_split": "サービス日別の推移"
@@ -109,7 +109,7 @@
     "reload": "再読み込み",
     "reset": "リセット",
     "retry": "再試行",
-    "route_code_fallback": "系統{{code}}",
+    "route_code_fallback": "路線{{code}}",
     "save": "保存",
     "search_placeholder": "検索...",
     "unit_count": "件",
@@ -209,10 +209,10 @@
       "label": "時間帯"
     },
     "routes": {
-      "label": "系統",
-      "count_suffix": "{{count}}系統",
+      "label": "路線",
+      "count_suffix": "{{count}}路線",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count": "({{count}}系統)",
+      "variant_count": "({{count}}路線)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回ingest中の場合は数分後に再度お試しください。"
     }
@@ -235,8 +235,8 @@
     "popup": {
       "platform_label": "のりば",
       "stop_seq_prefix": "停留所 #",
-      "route_prefix": "系統",
-      "routes_label": "系統:",
+      "route_prefix": "路線",
+      "routes_label": "路線:",
       "avg_delay_label": "平均遅延:",
       "samples_label": "サンプル:",
       "period_label": "期間:"
@@ -248,7 +248,7 @@
       "size_strong": "大きさ",
       "size_meaning": "はサンプル数（観測の多さ）。",
       "body_1": "凡例の色をクリックすると該当の遅延帯のみ表示。停留所をクリックで詳細と拡大。",
-      "body_2": "経路を 1 つに絞ると、実際の道路形状で系統が描画されます。",
+      "body_2": "経路を 1 つに絞ると、実際の道路形状で路線が描画されます。",
       "hotspots_intro": "ホットスポット（赤・大きい円）は",
       "hotspots_em": "慢性的に遅れる",
       "hotspots_outro": "停留所。",
@@ -270,7 +270,7 @@
     "hint": {
       "title": "使い方とできること",
       "body_1": "日本語で自由に質問できます。Groq の関数呼び出しで、6 つの SQL ツール（ランキング・時間帯比較・トレンド集計など）を使い分けて回答を生成します。",
-      "body_2": "例：「今日のワースト 3 系統は？」「朝のピーク時に最も遅れる停留所は？」「先週と今週の比較」",
+      "body_2": "例：「今日のワースト 3 路線は？」「朝のピーク時に最も遅れる停留所は？」「先週と今週の比較」",
       "body_3_intro": "現在の",
       "body_3_strong": "期間 / 曜日 / 時間帯フィルタ",
       "body_3_outro": "が回答にも反映されるので、画面上のフィルタを変えてから質問すると分析の切り口を変えられます。"
@@ -280,18 +280,18 @@
     "empty_state": "質問を入力してください。",
     "thinking": "考え中...",
     "input_aria": "質問を入力",
-    "input_placeholder": "例: 系統5の今月の遅延傾向は?",
+    "input_placeholder": "例: 路線5の今月の遅延傾向は?",
     "submit": "送信",
     "ctx": {
       "range": "期間 {{from}} 〜 {{to}}",
       "dow": "曜日: {{value}}",
       "time_band": "時間帯: {{value}}",
       "service": "種別: {{value}}",
-      "routes": "系統: {{value}}"
+      "routes": "路線: {{value}}"
     },
     "col": {
-      "route": "系統",
-      "route_code": "系統",
+      "route": "路線",
+      "route_code": "路線",
       "service_type": "種別",
       "dow": "曜日",
       "avg_min": "平均(分)",
@@ -305,24 +305,47 @@
       "abs_delta": "差(絶対)",
       "signed_delta": "差(符号付)"
     },
-    "more_rows": "…他{{count}}件"
+    "more_rows": "…他{{count}}件",
+    "chips": { "more": "もっと" },
+    "autocomplete": { "noResults": "" },
+    "mode": {
+      "label": "入力モード",
+      "chat": "自由に",
+      "build": "組み立て"
+    },
+    "build": {
+      "tool": "質問の型",
+      "run": "実行",
+      "cancel": "キャンセル",
+      "loading": "読み込み中…",
+      "error": "ビルダーを読み込めませんでした"
+    },
+    "pill": {
+      "interpreted": "解釈",
+      "wrong": "違う？"
+    },
+    "lowconf": {
+      "title": "自信が低い解釈です",
+      "run": "実行",
+      "edit": "修正"
+    }
   },
   "live": {
     "title": "最新観測",
     "hint": {
       "title": "このタブで分かること",
-      "body_1_intro": "最新観測日の系統別サマリー。",
+      "body_1_intro": "最新観測日の路線別サマリー。",
       "avg_strong": "平均",
       "avg_meaning": "はその日の全便平均、",
       "max_strong": "最大",
       "max_meaning": "は最も遅れた便。色付きの ● で深刻度が一目で分かります。",
-      "body_2": "サンプル数（便数 / 観測数）が多い系統ほど数字の信頼性が高い。",
-      "body_3": "並び替えで「最大遅延が大きい順」にすると、その日のホットスポット系統を即座に把握できます。"
+      "body_2": "サンプル数（便数 / 観測数）が多い路線ほど数字の信頼性が高い。",
+      "body_3": "並び替えで「最大遅延が大きい順」にすると、その日のホットスポット路線を即座に把握できます。"
     },
     "last_observation": "最終観測: {{when}}",
     "auto_refresh": "自動更新 (30秒)",
     "manual_refresh": "手動更新",
-    "filter_placeholder": "系統で絞り込み",
+    "filter_placeholder": "路線で絞り込み",
     "sort_label": "並び順",
     "sort": {
       "worst": "最大遅延",
@@ -360,7 +383,7 @@
       "dow_weekend": "週末傾向"
     },
     "col": {
-      "route": "系統",
+      "route": "路線",
       "service": "種別",
       "avg": "平均",
       "median": "中央値",
@@ -381,7 +404,7 @@
     "hint": {
       "title": "レポートの読み分け",
       "ranking_strong": "ランキング系",
-      "ranking_body": "：慢性的に遅い／定時運行が良い系統を特定。",
+      "ranking_body": "：慢性的に遅い／定時運行が良い路線を特定。",
       "trend_strong": "トレンド",
       "trend_body": "：時間経過で改善・悪化しているか。右肩上がりなら遅延が拡大中。",
       "heatmap_strong": "時間帯ヒートマップ",
@@ -415,7 +438,7 @@
       "svg_aria": "日次平均遅延チャート",
       "tooltip_metrics": "平均{{min}}分 / {{count}}件",
       "worst_label": "悪化:",
-      "offender": "系統{{code}}({{min}}分)"
+      "offender": "路線{{code}}({{min}}分)"
     }
   },
   "errors": {

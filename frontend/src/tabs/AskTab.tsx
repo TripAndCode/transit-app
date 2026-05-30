@@ -2,14 +2,21 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useAsk } from "../api/hooks";
+import { useAsk, usePostEditAction } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
 import type { ToolResult, TrendDay } from "../api/types";
+import type { IntentSignature } from "../api/types";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { DailyChart } from "../components/charts/DailyChart";
+import { AskModeToggle } from "../components/AskModeToggle";
+import type { AskMode } from "../components/AskModeToggle";
+import { AskChips } from "../components/AskChips";
+import { AskAutocomplete } from "../components/AskAutocomplete";
+import { AskBuildForm } from "../components/AskBuildForm";
+import { ConfidencePill } from "../components/ConfidencePill";
 
 type AskCtxLite = {
   from: string;
@@ -28,6 +35,10 @@ type Msg =
       tool_call: { name: string; arguments: Record<string, unknown> } | null;
       result: ToolResult | null;
       ctx: AskCtxLite;
+      signature_hash?: string | null;
+      confidence?: number | null;
+      canonical_args?: Record<string, unknown> | null;
+      cache_outcome?: "hit" | "miss" | "bypass" | null;
     };
 
 type HistTurn = { question: string; tool?: string | null; args?: Record<string, unknown> | null };
@@ -46,13 +57,27 @@ function buildHistory(msgs: Msg[]): HistTurn[] {
   return turns.slice(-3);
 }
 
+/** Build a short human-readable summary of tool args, e.g. "metric=avg_delay, n=10" */
+function previewFromArgs(args: Record<string, unknown> | null | undefined): string | undefined {
+  if (!args) return undefined;
+  const entries = Object.entries(args)
+    .slice(0, 4)
+    .map(([k, v]) => `${k}=${String(v)}`);
+  return entries.join(", ") || undefined;
+}
+
 export function AskTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
   const ask = useAsk(id);
+  const postEditAction = usePostEditAction(id ?? 0);
   const routeNames = useRouteNames(id);
+
+  const [mode, setMode] = useState<AskMode>("chat");
+  const [buildInitial, setBuildInitial] = useState<IntentSignature | null>(null);
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
 
   const suggestions = useMemo(
     () => [
@@ -84,6 +109,10 @@ export function AskTab() {
           tool_call: r.tool_call,
           result: r.result,
           ctx: r.ctx as unknown as AskCtxLite,
+          signature_hash: r.signature_hash ?? null,
+          confidence: r.confidence ?? null,
+          canonical_args: r.canonical_args ?? null,
+          cache_outcome: r.cache_outcome ?? null,
         },
       ]);
     } catch {
@@ -91,18 +120,68 @@ export function AskTab() {
     }
   }
 
-  async function submit(question: string) {
+  async function submit(question: string, displayText?: string) {
     const trimmed = question.trim();
     if (!trimmed || ask.isPending) return;
-    setMsgs((m) => [...m, { role: "user", text: trimmed }]);
+    // Build-mode submits pass a friendly displayText so users don't see the
+    // raw ``__build__ tool {...}`` sentinel in the chat bubble.
+    setMsgs((m) => [...m, { role: "user", text: displayText ?? trimmed }]);
     setInput("");
+    setShowAutocomplete(false);
     await ask_(trimmed);
+  }
+
+  async function submitFromAutocomplete(q: string) {
+    setInput(q);
+    await submit(q);
+  }
+
+  /**
+   * Build-mode form submit.
+   *
+   * Encodes the structured intent as a compact question string that the
+   * backend will parse as a JSON-mode signature directly.  The ``__build__``
+   * sentinel prefix prevents the backend from storing the machine-generated
+   * string as a human-readable ``last_question`` in the intent cache, so it
+   * never surfaces as a chip or autocomplete suggestion.
+   */
+  async function submitStructured(tool: string, args: Record<string, unknown>) {
+    const question = `__build__ ${tool} ${JSON.stringify(args)}`;
+    // Friendly display: "🛠 top_n (metric=avg_delay, n=10)" so the chat
+    // history doesn't show the raw machine sentinel.
+    const argSummary = Object.entries(args)
+      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+      .join(", ");
+    const displayText = `🛠 ${tool}${argSummary ? ` (${argSummary})` : ""}`;
+    setMode("chat");
+    setBuildInitial(null);
+    await submit(question, displayText);
   }
 
   async function retry() {
     const last = [...msgs].reverse().find((m) => m.role === "user");
     if (!last) return;
     await ask_(last.text);
+  }
+
+  /**
+   * Switch to build mode pre-populated with msg's canonical_args and tool.
+   * Also fires a fire-and-forget edit-action POST to record the user's verdict.
+   */
+  function switchToEditMode(msg: Extract<Msg, { role: "assistant" }>) {
+    setMode("build");
+    setBuildInitial({
+      tool: msg.tool_call?.name ?? "",
+      args: msg.canonical_args ?? msg.tool_call?.arguments ?? {},
+      confidence: msg.confidence ?? 0,
+      rationale: null,
+    });
+
+    if (msg.signature_hash && id != null) {
+      postEditAction
+        .mutateAsync({ signature_hash: msg.signature_hash, action: "edited" })
+        .catch(console.warn);
+    }
   }
 
   return (
@@ -127,15 +206,80 @@ export function AskTab() {
           }
         />
       </div>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 4px" }}>
-        {msgs.length === 0 && (
+
+      {/* Mode toggle — always visible above the message area */}
+      <div style={{ marginBottom: 10 }}>
+        <AskModeToggle value={mode} onChange={setMode} />
+      </div>
+
+      {/* Build form (shown in build mode, above chat history) */}
+      {mode === "build" && id != null && (
+        <div style={{
+          marginBottom: 12,
+          padding: "12px 16px",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-lg)",
+        }}>
+          <AskBuildForm
+            agencyId={id}
+            initialValue={buildInitial}
+            onSubmit={(tool, args) => submitStructured(tool, args)}
+            onCancel={() => { setMode("chat"); setBuildInitial(null); }}
+          />
+        </div>
+      )}
+
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 4px" }}>
+        {/* Chips: shown in chat mode when there are no messages yet */}
+        {mode === "chat" && msgs.length === 0 && id != null && (
+          <AskChips agencyId={id} onPick={(q) => submit(q)} />
+        )}
+
+        {msgs.length === 0 && mode === "chat" && (
           <div style={{ color: "var(--text-tertiary)", textAlign: "center", marginTop: 48 }}>
             {t("ask.empty_state")}
           </div>
         )}
-        {msgs.map((m, i) => (
-          <Bubble key={i} msg={m} formatRoute={routeNames.format} t={t} />
-        ))}
+
+        {msgs.map((m, i) => {
+          if (m.role === "assistant") {
+            const confidence = m.confidence ?? null;
+            const toolName = m.tool_call?.name ?? "";
+            const argsPreview = previewFromArgs(m.canonical_args ?? m.tool_call?.arguments);
+
+            return (
+              <div key={i}>
+                {/* Low-confidence block card — shown AFTER the answer as a strong warning.
+                    TODO: Phase ③ — block execution on the backend before LLM call when
+                    confidence < 0.5, and show this card instead of the answer. Currently
+                    the backend always executes; we surface the card post-answer. */}
+                {confidence !== null && confidence < 0.5 && toolName && (
+                  <LowConfCard
+                    toolName={toolName}
+                    argsPreview={argsPreview}
+                    onEdit={() => switchToEditMode(m)}
+                    t={t}
+                  />
+                )}
+                <Bubble msg={m} formatRoute={routeNames.format} t={t} />
+                {/* Confidence pill — only when confidence is available and >= 0.5 */}
+                {confidence !== null && confidence >= 0.5 && toolName && (
+                  <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
+                    <ConfidencePill
+                      confidence={confidence}
+                      toolName={toolName}
+                      argsPreview={argsPreview}
+                      onEdit={() => switchToEditMode(m)}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          }
+          return <Bubble key={i} msg={m} formatRoute={routeNames.format} t={t} />;
+        })}
+
         {ask.isPending && (
           <div role="status" aria-live="polite" style={{ padding: 12, color: "var(--text-tertiary)" }}>
             {t("ask.thinking")}
@@ -143,54 +287,155 @@ export function AskTab() {
         )}
         {ask.error && <ErrorBanner error={ask.error} onRetry={retry} />}
       </div>
-      <div style={{ borderTop: "1px solid var(--border-soft)", padding: "12px 0", marginTop: 12 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-          {suggestions.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => submit(s)}
-              disabled={ask.isPending}
-              style={{
-                background: "var(--bg-soft)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 999,
-                padding: "4px 12px",
-                fontSize: 13,
-                color: "var(--text-secondary)",
-              }}
+
+      {/* Input area — only shown in chat mode */}
+      {mode === "chat" && (
+        <div style={{ borderTop: "1px solid var(--border-soft)", padding: "12px 0", marginTop: 12 }}>
+          {/* Legacy suggestion chips — hidden once we have dynamic chips from AskChips,
+              but kept here as a fallback for the flag-off path */}
+          {msgs.length === 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => submit(s)}
+                  disabled={ask.isPending}
+                  style={{
+                    background: "var(--bg-soft)",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: 999,
+                    padding: "4px 12px",
+                    fontSize: 13,
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ position: "relative" }}>
+            <form
+              onSubmit={(e) => { e.preventDefault(); submit(input); }}
+              style={{ display: "flex", gap: 8 }}
             >
-              {s}
-            </button>
-          ))}
+              <input
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setShowAutocomplete(true);
+                }}
+                onFocus={() => setShowAutocomplete(true)}
+                onBlur={() => {
+                  // Delay dismiss so click on autocomplete item can fire first
+                  setTimeout(() => setShowAutocomplete(false), 150);
+                }}
+                aria-label={t("ask.input_aria")}
+                placeholder={t("ask.input_placeholder")}
+                style={{ flex: 1 }}
+                disabled={ask.isPending}
+              />
+              <button
+                type="submit"
+                disabled={ask.isPending || !input.trim()}
+                style={{
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "none",
+                  padding: "0 18px",
+                  borderRadius: "var(--radius)",
+                  opacity: ask.isPending || !input.trim() ? 0.5 : 1,
+                }}
+              >
+                {t("ask.submit")}
+              </button>
+            </form>
+            {/* Autocomplete dropdown — shown when focused + 2+ chars typed */}
+            {showAutocomplete && input.trim().length >= 2 && id != null && (
+              <AskAutocomplete
+                agencyId={id}
+                q={input}
+                onPick={(q) => submitFromAutocomplete(q)}
+                onDismiss={() => setShowAutocomplete(false)}
+              />
+            )}
+          </div>
         </div>
-        <form
-          onSubmit={(e) => { e.preventDefault(); submit(input); }}
-          style={{ display: "flex", gap: 8 }}
+      )}
+    </div>
+  );
+}
+
+/** Inline block card shown when confidence < 0.5. Extraction skipped (single usage). */
+function LowConfCard({
+  toolName,
+  argsPreview,
+  onEdit,
+  t,
+}: {
+  toolName: string;
+  argsPreview?: string;
+  onEdit: () => void;
+  t: TFunction;
+}) {
+  return (
+    <div
+      role="alert"
+      style={{
+        borderLeft: "3px solid var(--accent)",
+        background: "rgba(255, 220, 100, 0.18)",
+        padding: "8px 12px",
+        borderRadius: "0 var(--radius) var(--radius) 0",
+        marginBottom: 6,
+        fontSize: 13,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        {t("ask.lowconf.title")}
+      </div>
+      <div style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
+        <span style={{ fontWeight: 500 }}>{toolName}</span>
+        {argsPreview && (
+          <span style={{ marginLeft: 6, color: "var(--text-tertiary)", fontSize: 12 }}>
+            {argsPreview}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {/* TODO Phase ③: wire ▶ 実行 to an explicit execute endpoint so the backend can
+            skip execution when confidence < 0.5 and wait for user confirmation here. */}
+        <button
+          type="button"
+          disabled
+          style={{
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius)",
+            padding: "4px 12px",
+            fontSize: 13,
+            background: "var(--bg-soft)",
+            color: "var(--text-tertiary)",
+            cursor: "not-allowed",
+            opacity: 0.6,
+          }}
         >
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            aria-label={t("ask.input_aria")}
-            placeholder={t("ask.input_placeholder")}
-            style={{ flex: 1 }}
-            disabled={ask.isPending}
-          />
-          <button
-            type="submit"
-            disabled={ask.isPending || !input.trim()}
-            style={{
-              background: "var(--accent)",
-              color: "#fff",
-              border: "none",
-              padding: "0 18px",
-              borderRadius: "var(--radius)",
-              opacity: ask.isPending || !input.trim() ? 0.5 : 1,
-            }}
-          >
-            {t("ask.submit")}
-          </button>
-        </form>
+          ▶ {t("ask.lowconf.run")}
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          style={{
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius)",
+            padding: "4px 12px",
+            fontSize: 13,
+            background: "var(--bg-surface)",
+            color: "var(--accent)",
+            cursor: "pointer",
+          }}
+        >
+          ✎ {t("ask.lowconf.edit")}
+        </button>
       </div>
     </div>
   );

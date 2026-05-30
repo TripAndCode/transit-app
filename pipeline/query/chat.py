@@ -31,8 +31,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 
 from api.range import RangeCtx
+from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
+from pipeline.query.intent_cache import lookup as _cache_lookup
+from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
+from pipeline.query.intent_cache import upsert as _cache_upsert
 from pipeline.query.llm_client import get_client
 from pipeline.query.tools import (
     LOCALE_LANGUAGE_NAME,
@@ -45,6 +50,40 @@ from pipeline.query.tools import (
 )
 
 _log = logging.getLogger(__name__)
+
+
+def _cache_enabled() -> bool:
+    """Return True when the intent-cache feature flag is on."""
+    return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
+_BUILD_SENTINEL = "__build__"
+
+
+def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
+    """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
+
+    The guided build form on the frontend submits the user's structured intent
+    as a question with this sentinel prefix so the orchestrator can dispatch it
+    **without calling the LLM** — the spec's "zero-LLM determinism path."
+    Returns ``None`` if the string doesn't match the format (caller falls
+    through to the normal LLM path).
+    """
+    if not question.startswith(_BUILD_SENTINEL):
+        return None
+    rest = question[len(_BUILD_SENTINEL) :].lstrip()
+    tool, _sep, json_part = rest.partition(" ")
+    if not tool:
+        return None
+    json_part = json_part.strip() or "{}"
+    try:
+        args = json.loads(json_part)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    return tool, args
+
 
 # Extra per-call localisation strings. Keyed identically to the table in
 # tools.py — they live here only because they're chat-flow specific
@@ -126,6 +165,56 @@ async def chat_with_tools(
     client = _get_client()
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
     locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    # Normalize once so leading/trailing whitespace doesn't cause cache misses
+    # or visible prompt differences; downstream uses (prompt, cache key, log) all
+    # benefit. The frontend keeps its own copy of the user's raw input.
+    question = question.strip()
+    # Build-mode synthetic questions (sent by the guided form with an ``__build__``
+    # prefix) must never be written to the intent cache as last_question, otherwise
+    # machine-generated strings surface as chips / autocomplete suggestions.
+    _skip_cache_write = question.startswith(_BUILD_SENTINEL)
+
+    # Build-mode short-circuit: when the cache flag is on AND the question
+    # is a build-form sentinel, parse (tool, args) directly and dispatch
+    # without ever calling the LLM. This is the spec's "zero-LLM determinism
+    # path" — confidence=1.0 because the user constructed the query directly.
+    if _cache_enabled() and _skip_cache_write:
+        parsed = _parse_build_sentinel(question)
+        if parsed is not None:
+            build_tool, build_args = parsed
+            ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
+            try:
+                can_args = canonicalize(build_tool, build_args, ctx_dict)
+            except ValueError:
+                # Unknown tool — fall back to dispatching with raw args so the
+                # tool handler can return its own "unknown" error string.
+                can_args = dict(build_args)
+            sig_hash = signature_hash(build_tool, can_args)
+            try:
+                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale)
+            except Exception as exc:
+                _log.exception("Build-mode dispatch failed for %s", build_tool)
+                return {
+                    "answer": _chat_str("tool_error", locale, name=build_tool, exc=exc),
+                    "tool_call": {"name": build_tool, "arguments": can_args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash,
+                    "confidence": 1.0,
+                    "canonical_args": can_args,
+                    "cache_outcome": "bypass",
+                }
+            return {
+                "answer": render_tool_result(result, locale=locale),
+                "tool_call": {"name": build_tool, "arguments": can_args},
+                "result": _result_to_dict(result),
+                "success": result.kind != "empty",
+                "signature_hash": sig_hash,
+                "confidence": 1.0,
+                "canonical_args": can_args,
+                "cache_outcome": "bypass",
+            }
+
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -173,6 +262,8 @@ async def chat_with_tools(
                 lines.append(f"{i}. {q}")
         history_block = "\n".join(lines)
 
+    use_cache = _cache_enabled()
+
     def _sync():
         """Blocking LLM call executed via ``asyncio.to_thread``.
 
@@ -190,6 +281,16 @@ async def chat_with_tools(
         if history_block:
             messages.append({"role": "system", "content": history_block})
         messages.append({"role": "user", "content": user_prelude})
+        if use_cache:
+            # JSON-mode emits the signature in message.content directly.
+            # Don't send tools+tool_choice with response_format=json_object —
+            # OpenAI rejects that combo (400) and providers behave inconsistently.
+            return client.chat_completions(
+                messages=messages,
+                temperature=0.0,
+                model_override=model,
+                response_format={"type": "json_object"},
+            )
         return client.chat_completions(
             messages=messages,
             tools=TOOLS,
@@ -198,6 +299,206 @@ async def chat_with_tools(
             model_override=model,
         )
 
+    # -----------------------------------------------------------------------
+    # When cache is enabled, attempt a cache lookup BEFORE calling the LLM.
+    # Stage 1: exact question-text pre-lookup — lets us skip the LLM entirely
+    # when the same question has been seen before.
+    # Stage 2: if question is new, call LLM → compute sig_hash → sig-hash
+    # lookup (covers paraphrases that map to the same canonical intent).
+    # -----------------------------------------------------------------------
+    if use_cache:
+        # Stage 1: pre-LLM exact question-text lookup.
+        pre_row = await _cache_lookup_by_question(conn, question, agency_id)
+        if pre_row is not None:
+            # Exact same question seen before — skip LLM entirely.
+            _log.debug("Intent cache pre-hit for question %r (sig=%s)", question[:60], pre_row["signature_hash"])
+            name = pre_row["tool"]
+            args = pre_row["args"] if isinstance(pre_row["args"], dict) else {}
+            sig_hash_pre = pre_row["signature_hash"]
+            _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
+            if not _skip_cache_write:
+                await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
+            nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
+            final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
+            try:
+                result_pre: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
+            except Exception as exc:
+                _log.exception("Tool %s failed (cache pre-hit)", name)
+                return {
+                    "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash_pre,
+                    "confidence": final_conf_pre,
+                    "canonical_args": args,
+                    "cache_outcome": "hit",
+                }
+            return {
+                "answer": render_tool_result(result_pre, locale=locale),
+                "tool_call": {"name": name, "arguments": args},
+                "result": _result_to_dict(result_pre),
+                "success": result_pre.kind != "empty",
+                "signature_hash": sig_hash_pre,
+                "confidence": final_conf_pre,
+                "canonical_args": args,
+                "cache_outcome": "hit",
+            }
+
+        # Stage 2: question is new — call LLM to get the intent signature.
+        msg, error_kind = await asyncio.to_thread(_sync)
+        if msg is None:
+            key = {
+                "rate_limit": "llm_rate_limited",
+                "no_providers": "llm_unconfigured",
+            }.get(error_kind or "", "service_unreachable")
+            return {
+                "answer": _chat_str(key, locale),
+                "tool_call": None,
+                "result": None,
+                "success": False,
+                "signature_hash": None,
+                "confidence": None,
+                "canonical_args": None,
+                "cache_outcome": None,
+            }
+
+        # Try to parse JSON signature from content.
+        sig: IntentSignature | None = None
+        content = (getattr(msg, "content", None) or "").strip()
+        if content:
+            try:
+                payload = json.loads(content)
+                if isinstance(payload, dict) and "tool" in payload:
+                    sig = IntentSignature(
+                        tool=str(payload["tool"]),
+                        args=payload.get("args") or {},
+                        confidence=float(payload.get("confidence") or 0.0),
+                        rationale=str(payload.get("rationale") or ""),
+                    )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                _log.warning("JSON-mode parse failed; falling back to tool_calls path: %s", exc)
+
+        if sig is None:
+            # Graceful degradation: malformed JSON — fall through to Phase-①
+            # tool_calls path below.
+            _log.info("Cache path: falling back to Phase-① tool_calls dispatch")
+            tool_calls = getattr(msg, "tool_calls", None)
+            if not tool_calls:
+                # Do NOT surface raw LLM content as the answer in JSON-mode.
+                # The LLM is constrained to emit JSON, so any non-tool-call
+                # content (e.g. it echoed ``{"type":"json_object"}`` on an
+                # adversarial prompt) is structurally invalid output. Show the
+                # generic refusal instead — never leak raw model text.
+                return {
+                    "answer": _chat_str("refusal_fallback", locale),
+                    "tool_call": None,
+                    "result": None,
+                    "success": False,
+                    "signature_hash": None,
+                    "confidence": None,
+                    "canonical_args": None,
+                    "cache_outcome": None,
+                }
+            call = tool_calls[0]
+            name = call.function.name
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            try:
+                result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
+            except Exception as exc:
+                _log.exception("Tool %s failed", name)
+                return {
+                    "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": None,
+                    "confidence": None,
+                    "canonical_args": None,
+                    "cache_outcome": None,
+                }
+            return {
+                "answer": render_tool_result(result, locale=locale),
+                "tool_call": {"name": name, "arguments": args},
+                "result": _result_to_dict(result),
+                "success": result.kind != "empty",
+                "signature_hash": None,
+                "confidence": None,
+                "canonical_args": None,
+                "cache_outcome": None,
+            }
+
+        # We have a valid IntentSignature — canonicalize and compute hash.
+        ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
+        try:
+            can_args = canonicalize(sig.tool, sig.args, ctx_dict)
+        except ValueError:
+            # Unknown tool from LLM — degrade gracefully.
+            can_args = dict(sig.args)
+        sig_hash = signature_hash(sig.tool, can_args)
+
+        # Cache lookup: if found, use the cached (tool, args) and skip re-dispatch.
+        cache_row = await _cache_lookup(conn, sig_hash, agency_id)
+        if cache_row is not None:
+            name = cache_row["tool"]
+            args = cache_row["args"] if isinstance(cache_row["args"], dict) else {}
+            cache_outcome = "hit"
+        else:
+            name = sig.tool
+            args = can_args
+            cache_outcome = "miss"
+
+        # Upsert regardless of hit/miss (bumps hit_count on hit).
+        # Skip writes for build-mode synthetic questions so machine-generated
+        # strings never appear as last_question in the cache.
+        # Also skip when the LLM hallucinated a tool name we don't dispatch —
+        # otherwise an out-of-scope refusal (sig.tool='none', etc.) gets
+        # cached and every future similar question collapses to the same
+        # garbage hash, locking out the LLM permanently.
+        from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
+
+        _known_tool = sig.tool in _KNOWN_TOOLS
+        if not _skip_cache_write and _known_tool:
+            await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
+
+        # Compute final confidence blending NN distance + LLM self-report.
+        nn_dist = _nn_distance_for_tool(rag_examples or [], name)
+        final_conf = derive_confidence(nn_dist, sig.confidence)
+
+        try:
+            result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
+        except Exception as exc:
+            _log.exception("Tool %s failed", name)
+            return {
+                "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                "tool_call": {"name": name, "arguments": args},
+                "result": None,
+                "success": False,
+                "signature_hash": sig_hash,
+                "confidence": final_conf,
+                "canonical_args": can_args,
+                "cache_outcome": cache_outcome,
+            }
+
+        return {
+            "answer": render_tool_result(result, locale=locale),
+            "tool_call": {"name": name, "arguments": args},
+            "result": _result_to_dict(result),
+            "success": result.kind != "empty",
+            "signature_hash": sig_hash,
+            "confidence": final_conf,
+            "canonical_args": can_args,
+            "cache_outcome": cache_outcome,
+        }
+
+    # -----------------------------------------------------------------------
+    # FLAG-OFF path: byte-identical to Phase ①. No cache reads or writes.
+    # -----------------------------------------------------------------------
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate
@@ -288,7 +589,22 @@ def _result_to_dict(r: ToolResult) -> dict:
     }
 
 
+def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
+    """Return the smallest cosine distance among RAG examples whose tool matches.
+
+    Each element of ``rag_examples`` is expected to have ``.tool`` and
+    ``.distance`` attributes (a :class:`~pipeline.query.rag_index.Match`
+    enriched by :func:`~pipeline.query.router._enrich`).
+
+    Returns ``None`` when ``rag_examples`` is empty or no example maps to
+    ``tool``. Used by Stage 3 to derive a confidence score without calling
+    the LLM a second time — the NN distance is already computed upstream.
+    """
+    distances = [m.distance for m in rag_examples if getattr(m, "tool", None) == tool]
+    return min(distances) if distances else None
+
+
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["chat_with_tools", "_summary"]
+__all__ = ["chat_with_tools", "_nn_distance_for_tool", "_summary"]
