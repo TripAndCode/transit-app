@@ -440,6 +440,16 @@
         "empty": "No data — try relaxing filters",
         "error": "Couldn't load the heatmap",
         "cell_aria": "{{route}} × {{dim}}: {{val}} min"
+      },
+      "movers": {
+        "title": "Largest delay movers (week)",
+        "subtitle": "Last {{days}} days vs prior {{days}} days (min)",
+        "empty": "No significant movers — quiet week",
+        "error": "Could not load movers",
+        "new": "new",
+        "stopped": "stopped",
+        "low_samples": "(low n)",
+        "row_aria": "{{rank}}. {{label}}: {{delta}} min, {{pct}} ({{samples}} samples)"
       }
     }
   },

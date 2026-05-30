@@ -440,6 +440,16 @@
         "empty": "該当データなし — フィルター条件を緩めてください",
         "error": "ヒートマップを読み込めませんでした",
         "cell_aria": "{{route}} × {{dim}}: {{val}} 分"
+      },
+      "movers": {
+        "title": "今週の変動が大きい路線",
+        "subtitle": "直近 {{days}} 日 vs 前 {{days}} 日 (分単位)",
+        "empty": "変動が小さい — 静かな週です",
+        "error": "変動を読み込めませんでした",
+        "new": "新規",
+        "stopped": "停止",
+        "low_samples": "(少データ)",
+        "row_aria": "{{rank}}. {{label}}: {{delta}} 分, {{pct}} ({{samples}} 件)"
       }
     }
   },
