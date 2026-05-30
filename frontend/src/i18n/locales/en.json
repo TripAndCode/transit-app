@@ -440,7 +440,8 @@
         },
         "empty": "No data — try relaxing filters",
         "error": "Couldn't load the heatmap",
-        "cell_aria": "{{route}} × {{dim}}: {{val}} min"
+        "cell_aria": "{{route}} × {{dim}}: {{val}} min",
+        "no_data": "no data"
       },
       "movers": {
         "title": "Largest delay movers (week)",

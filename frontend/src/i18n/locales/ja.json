@@ -440,7 +440,8 @@
         },
         "empty": "該当データなし — フィルター条件を緩めてください",
         "error": "ヒートマップを読み込めませんでした",
-        "cell_aria": "{{route}} × {{dim}}: {{val}} 分"
+        "cell_aria": "{{route}} × {{dim}}: {{val}} 分",
+        "no_data": "データなし"
       },
       "movers": {
         "title": "今週の変動が大きい路線",

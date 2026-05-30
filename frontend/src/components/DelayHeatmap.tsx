@@ -259,9 +259,10 @@ export function DelayHeatmap({
                 const value = rowCells[colIdx] ?? null;
                 const style = cellStyle(value, baseline_min);
                 const dimLabel = formatDimension(dim, dimension, t);
+                // BUG-5 fix: use i18n key for "no data" instead of hardcoded JA string
                 const ariaLabel =
                   value === null
-                    ? `${route.label}, ${dimLabel}: データなし`
+                    ? `${route.label}, ${dimLabel}: ${t("ask.dashboard.heatmap.no_data")}`
                     : t("ask.dashboard.heatmap.cell_aria", {
                         route: route.label,
                         dim: dimLabel,
@@ -368,7 +369,6 @@ export function DelayHeatmap({
             <button
               key={d}
               role="tab"
-              aria-pressed={dimension === d}
               aria-selected={dimension === d}
               onClick={() => onDimensionChange(d)}
               style={{

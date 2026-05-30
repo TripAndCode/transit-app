@@ -281,17 +281,21 @@ export function AnomalyTimeline({
           );
         })}
 
-        {/* Y-axis labels — right-aligned at left edge */}
-        <text
-          x={PADDING - 3}
-          y={yLabelTop}
-          fontSize={10}
-          fill="var(--text-secondary, #888)"
-          textAnchor="end"
-          dominantBaseline="middle"
-        >
-          {(mean + std).toFixed(1)}
-        </text>
+        {/* Y-axis labels — right-aligned at left edge.
+            BUG-6 fix: when std===0 all three labels map to the same pixel and
+            overlap; only render the mean label in that case. */}
+        {std > 0 && (
+          <text
+            x={PADDING - 3}
+            y={yLabelTop}
+            fontSize={10}
+            fill="var(--text-secondary, #888)"
+            textAnchor="end"
+            dominantBaseline="middle"
+          >
+            {(mean + std).toFixed(1)}
+          </text>
+        )}
         <text
           x={PADDING - 3}
           y={yLabelMid}
@@ -302,16 +306,18 @@ export function AnomalyTimeline({
         >
           {mean.toFixed(1)}
         </text>
-        <text
-          x={PADDING - 3}
-          y={yLabelBot}
-          fontSize={10}
-          fill="var(--text-secondary, #888)"
-          textAnchor="end"
-          dominantBaseline="middle"
-        >
-          {(mean - std).toFixed(1)}
-        </text>
+        {std > 0 && (
+          <text
+            x={PADDING - 3}
+            y={yLabelBot}
+            fontSize={10}
+            fill="var(--text-secondary, #888)"
+            textAnchor="end"
+            dominantBaseline="middle"
+          >
+            {(mean - std).toFixed(1)}
+          </text>
+        )}
 
         {/* X-axis date labels — first (left-anchored) + last (right-anchored) */}
         <text
