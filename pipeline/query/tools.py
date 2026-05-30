@@ -63,26 +63,26 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_arg_required", "ja"): "route 引数が必要です。",
     ("route_arg_required", "en"): "The route argument is required.",
     ("route_not_registered", "ja"): (
-        "'{route}' は登録されている系統コードではありません。/api/{agency_id}/routes で一覧を確認してください。"
+        "'{route}' は登録されている路線コードではありません。/api/{agency_id}/routes で一覧を確認してください。"
     ),
     ("route_not_registered", "en"): (
         "'{route}' is not a registered route code. See /api/{agency_id}/routes for the full list."
     ),
     ("route_no_data", "ja"): (
-        "系統{route} の集計データが選択期間 ({from_date}〜{to_date}) にありません。"
+        "路線{route} の集計データが選択期間 ({from_date}〜{to_date}) にありません。"
         "期間を広げるか、フィルタを解除して試してください。"
     ),
     ("route_no_data", "en"): (
         "No aggregated data for route {route} in the selected window "
         "({from_date} to {to_date}). Try widening the range or clearing filters."
     ),
-    ("route_summary", "ja"): "系統{route} の遅延サマリ",
+    ("route_summary", "ja"): "路線{route} の遅延サマリ",
     ("route_summary", "en"): "Delay summary for route {route}",
     ("unknown_metric", "ja"): "未知の metric: {metric}",
     ("unknown_metric", "en"): "Unknown metric: {metric}",
     ("no_data", "ja"): "データがありません。",
     ("no_data", "en"): "No data available.",
-    ("ranking_summary", "ja"): "{label}ランキング 上位{count}系統",
+    ("ranking_summary", "ja"): "{label}ランキング 上位{count}路線",
     ("ranking_summary", "en"): "{label} ranking, top {count} routes",
     ("label_ranking_ontime", "ja"): "定時運行",
     ("label_ranking_ontime", "en"): "On-time",
@@ -98,9 +98,9 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("compare_summary_dow", "en"): "Weekday vs weekend/holiday delay comparison",
     ("compare_service_needs_route", "ja"): "dimension=service_type の場合は route が必要です。",
     ("compare_service_needs_route", "en"): "dimension=service_type requires a route argument.",
-    ("compare_route_no_data", "ja"): "系統{route} の比較データなし。",
+    ("compare_route_no_data", "ja"): "路線{route} の比較データなし。",
     ("compare_route_no_data", "en"): "No comparison data for route {route}.",
-    ("compare_summary_service", "ja"): "系統{route} 種別比較",
+    ("compare_summary_service", "ja"): "路線{route} 種別比較",
     ("compare_summary_service", "en"): "Service-type comparison for route {route}",
     ("unknown_dimension", "ja"): "未知の dimension: {dimension}",
     ("unknown_dimension", "en"): "Unknown dimension: {dimension}",
@@ -110,11 +110,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_summary", "en"): "Daily trend ({from_date} to {to_date}): mean {avg:.2f} min",
     ("on_time_no_data", "ja"): "定時率を計算できるデータがありません。",
     ("on_time_no_data", "en"): "Not enough data to compute on-time rate.",
-    ("on_time_summary", "ja"): "定時率 (遅延 {threshold_min} 分以内) 上位{count}系統",
+    ("on_time_summary", "ja"): "定時率 (遅延 {threshold_min} 分以内) 上位{count}路線",
     ("on_time_summary", "en"): "On-time rate (within {threshold_min} min) — top {count} routes",
-    ("route_meta_not_found", "ja"): "系統{route} の路線情報が見つかりません。",
+    ("route_meta_not_found", "ja"): "路線{route} の路線情報が見つかりません。",
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
-    ("route_meta_summary", "ja"): "系統{route} 路線情報",
+    ("route_meta_summary", "ja"): "路線{route} 路線情報",
     ("route_meta_summary", "en"): "Route info — {route}",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
@@ -136,7 +136,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("unsupported_tool", "en"): "Unsupported tool: {name}",
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
-    ("did_you_mean_candidate", "ja"): "系統{code}({name})",
+    ("did_you_mean_candidate", "ja"): "路線{code}({name})",
     ("did_you_mean_candidate", "en"): "route {code} ({name})",
     # render_tool_result decorations
     ("series_top_offenders", "ja"): " (悪化: {routes})",
@@ -145,7 +145,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} samples{top}",
     ("more_rows", "ja"): "…他{n}件",
     ("more_rows", "en"): "…{n} more",
-    ("route_prefix", "ja"): "系統{route}",
+    ("route_prefix", "ja"): "路線{route}",
     ("route_prefix", "en"): "route {route}",
 }
 
@@ -190,7 +190,7 @@ TOOLS: list[dict] = [
             "description": (
                 "Aggregate delay statistics for ONE specific route over the request "
                 "window. Use when the user asks about how a particular bus route is "
-                "doing (e.g. '系統5の遅延', '44372はどう?'). Always returns "
+                "doing (e.g. '路線5の遅延', '44372はどう?'). Always returns "
                 "per-service-type rows."
             ),
             "parameters": {
@@ -324,7 +324,7 @@ SYSTEM_PROMPT = """\
 == 重要なルール ==
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
 2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')を渡す。**
-   ユーザーが '系統5' のような短い別名や 'A1'・'中央大橋線' のような日本語名で route を
+   ユーザーが '路線5' のような短い別名や 'A1'・'中央大橋線' のような日本語名で route を
    指定してきた場合も、そのまま route に渡してよい。dispatch 層の schema_linker が別名を
    解決する。それでも解決できない曖昧な入力(例: '雨天')の場合は、route 引数を埋めて
    ツールを呼ぶのではなく、データ可用性を確かめるなら `describe_data`、
@@ -345,32 +345,32 @@ SYSTEM_PROMPT = """\
    `limit` 分増やして再呼び出しする（例: 停留所一覧の続き → describe_data(kind=stops, offset=50)）。
 
 == 利用可能なツール ==
-- route_stats(route, days_back?, from?, to?): 1 系統の遅延統計
-- top_n(metric, n?, best_first?, days_back?, from?, to?): 全系統ランキング
+- route_stats(route, days_back?, from?, to?): 1 路線の遅延統計
+- top_n(metric, n?, best_first?, days_back?, from?, to?): 全路線ランキング
 - compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 土日祝などの比較
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
-- route_meta(route): 系統の路線情報
+- route_meta(route): 路線の路線情報
 - describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
   例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
-     「サンプル数の多い系統」→ kind=sample_counts /「全体感」→ kind=overview
+     「サンプル数の多い路線」→ kind=sample_counts /「全体感」→ kind=overview
 - capabilities(category?): 答えられる質問例(カテゴリ別)を返す。
   ユーザーの質問が漠然としていたり範囲外の時に使う。
-  例:「やばい系統」「いつものやつ」「何ができる?」
+  例:「やばい路線」「いつものやつ」「何ができる?」
 
 == 例 ==
 - "今日の遅延ランキング" → top_n(metric='avg_delay', n=10)
 - "直近2週間の傾向" → time_series(days_back=14)
-- "系統22171の先週の遅延" → route_stats(route='22171', days_back=7)
-- "過去3日で5分超が一番多い系統" → top_n(metric='worst_5min', n=10, days_back=3)
+- "路線22171の先週の遅延" → route_stats(route='22171', days_back=7)
+- "過去3日で5分超が一番多い路線" → top_n(metric='worst_5min', n=10, days_back=3)
 - "雨天時の比較" → ツール呼ばず、「天気データはありません。
   代わりに『22171の平日と土日祝の比較』が答えられます」と返す
 - "どんな路線がある?" → describe_data(kind='routes')
 - "いつからのデータ?" → describe_data(kind='date_range')
-- "サンプル数の多い系統は?" → describe_data(kind='sample_counts')
+- "サンプル数の多い路線は?" → describe_data(kind='sample_counts')
 - "データセット全体の概要" → describe_data(kind='overview')
-- "何ができる?" / "やばい系統" → capabilities()
+- "何ができる?" / "やばい路線" → capabilities()
 - "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
 
 == Output format (when asked for JSON) ==
