@@ -239,7 +239,7 @@ export function ChipCatalog({ agencyId, onSelect, onOpenBuilder, stagedChipId }:
             key={category}
             emoji={emoji}
             label={t(`ask.chip_catalog.${key}`)}
-            chips={schema.chips[category] ?? []}
+            chips={schema.chips?.[category] ?? []}
             onSelect={onSelect}
             stagedChipId={stagedChipId}
           />

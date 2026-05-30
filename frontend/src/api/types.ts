@@ -173,7 +173,8 @@ export type ChipTemplate = {
 
 export type BuildSchema = {
   tools: BuildTool[];
-  chips: Record<ChipCategory, ChipTemplate[]>;
+  // chips field removed in Phase ③.5 — kept optional for P10 callers still being deleted
+  chips?: Record<ChipCategory, ChipTemplate[]>;
 };
 
 export type FilterCtx = {
@@ -314,3 +315,36 @@ export type OverviewSummary = {
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
 };
+
+// ─── Phase ③.5 — dashboard panel types ──────────────────────────────────────
+
+export type HeatmapRoute = { route_code: string; label: string };
+
+export type HeatmapResponse = {
+  routes: HeatmapRoute[];
+  dimensions: string[];
+  cells: (number | null)[][];  // shape: routes × dimensions
+  baseline_min: number;         // 1.0 — for diverging color scale
+};
+
+export type AnomalyDay = { date: string; avg_delay: number };
+export type AnomalyMarker = { date: string; delta_sigma: number };
+
+export type AnomaliesResponse = {
+  series: AnomalyDay[];
+  mean: number;
+  std: number;
+  anomalies: AnomalyMarker[];
+};
+
+export type MoverRow = {
+  route_code: string;
+  label: string;
+  current_avg: number | null;
+  previous_avg: number | null;
+  delta: number;
+  delta_pct: number | null;
+  samples: number;
+};
+
+export type MoversResponse = { rows: MoverRow[] };

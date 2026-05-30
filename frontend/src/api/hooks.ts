@@ -13,6 +13,7 @@ import { ctxToQueryString, type RangeCtx } from "./rangeContext";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
+  AnomaliesResponse,
   AnonThread,
   AppendMessageResult,
   AskResponse,
@@ -23,6 +24,8 @@ import type {
   EditAction,
   FilterCtx,
   HeatmapCollection,
+  HeatmapResponse,
+  MoversResponse,
   OverviewSummary,
   ReportMeta,
   ReportResponse,
@@ -511,28 +514,91 @@ export function useMigrateAnon(agencyId: number) {
   });
 }
 
+/** @deprecated chip catalog removed in Phase ③.5 — kept as a stub so dependent
+ *  components compile until P10 deletes them. */
+export function useChipCatalog(
+  _agencyId: number,
+): { data: BuildSchema | undefined; isLoading: boolean; isError: boolean; refetch: () => void } {
+  return { data: undefined, isLoading: false, isError: true, refetch: () => {} };
+}
+
+/** @deprecated chip catalog removed in Phase ③.5 — kept as a stub so dependent
+ *  components compile until P10 deletes them. */
+export function usePopularChips(
+  _agencyId: number,
+  _limit?: number,
+): { data: ChipTemplate[] | undefined; isLoading: boolean; isError: boolean; refetch: () => void } {
+  return { data: undefined, isLoading: false, isError: true, refetch: () => {} };
+}
+
+// ─── Phase ③.5 hooks — dashboard panels ──────────────────────────────────────
+
 /**
- * Full chip catalog from /ask/build-schema — includes tools and all chip categories.
- * Effectively immutable at runtime (staleTime: Infinity).
- * Note: also used as the chip lookup cache by useAppendMessage (anon path).
+ * Builds a `?from=...&to=...&dow=...&time_band=...&service=...&routes=...`
+ * query string from a FilterCtx. Returns an empty string when ctx is null.
  */
-export function useChipCatalog(agencyId: number): UseQueryResult<BuildSchema> {
+function filterCtxToQueryString(ctx: FilterCtx | null): string {
+  if (!ctx) return "";
+  const u = new URLSearchParams();
+  if (ctx.from_date) u.set("from", ctx.from_date);
+  if (ctx.to_date) u.set("to", ctx.to_date);
+  if (ctx.dow && ctx.dow !== "all") u.set("dow", ctx.dow);
+  if (ctx.time_band && ctx.time_band !== "all") u.set("time_band", ctx.time_band);
+  if (ctx.service && ctx.service !== "all") u.set("service", ctx.service);
+  if (ctx.routes && ctx.routes.length > 0) u.set("routes", ctx.routes.join(","));
+  const str = u.toString();
+  return str ? `?${str}` : "";
+}
+
+export function useDashboardHeatmap(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  dimension: "dow" | "hour_band" = "dow",
+  topRoutes = 20,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
   return useQuery({
-    queryKey: ["ask-build-schema", agencyId],
-    queryFn: () => apiGet<BuildSchema>(`/api/${agencyId}/ask/build-schema`),
-    staleTime: Infinity,
+    queryKey: ["dashboard", "heatmap", agencyId, filterCtx, dimension, topRoutes],
+    queryFn: () =>
+      apiGet<HeatmapResponse>(
+        `/api/${agencyId}/ask/dashboard/heatmap${qs}${sep}dimension=${dimension}&top_routes=${topRoutes}`,
+      ),
+    staleTime: 60_000,
   });
 }
 
-/**
- * Popular chips ordered by server hit_count.
- * Used as the default chip tray on empty conversation state.
- */
-export function usePopularChips(agencyId: number, limit = 6): UseQueryResult<ChipTemplate[]> {
+export function useDashboardAnomalies(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  sigma = 2.0,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
   return useQuery({
-    queryKey: ["popular-chips", agencyId, limit],
+    queryKey: ["dashboard", "anomalies", agencyId, filterCtx, sigma],
     queryFn: () =>
-      apiGet<ChipTemplate[]>(`/api/${agencyId}/ask/popular-chips?limit=${limit}`),
+      apiGet<AnomaliesResponse>(
+        `/api/${agencyId}/ask/dashboard/anomalies${qs}${sep}sigma=${sigma}`,
+      ),
+    staleTime: 60_000,
+  });
+}
+
+export function useDashboardMovers(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  windowDays = 7,
+  top = 10,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
+  return useQuery({
+    queryKey: ["dashboard", "movers", agencyId, filterCtx, windowDays, top],
+    queryFn: () =>
+      apiGet<MoversResponse>(
+        `/api/${agencyId}/ask/dashboard/movers${qs}${sep}window_days=${windowDays}&top=${top}`,
+      ),
     staleTime: 60_000,
   });
 }
