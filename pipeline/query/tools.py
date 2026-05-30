@@ -510,7 +510,10 @@ _SERVICE_TYPE_MAP = {
 
 async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     metric = args.get("metric", "avg_delay")
-    n = int(args.get("n", 10))
+    # BUG-2 fix: card chips send "k" (matches gold eval canonical form); LLM
+    # direct calls use "n" (matches the TOOLS JSON schema).  Accept both, with
+    # "k" taking precedence so the user's slider value is always honoured.
+    n = int(args.get("k", args.get("n", 10)))
     best_first = bool(args.get("best_first", metric == "on_time_rate"))
 
     # BUG-1 fix: if the chip/LLM supplies service_type, narrow ctx.service so
@@ -632,7 +635,8 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
 async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
-    n = int(args.get("n", 20))
+    # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
+    n = int(args.get("k", args.get("n", 20)))
     rows = await compute_on_time(agency_id, ctx, conn, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
@@ -708,6 +712,25 @@ async def dispatch(
     routes / service still apply). ``locale`` selects the language for the
     human-readable ``summary`` field on the returned :class:`ToolResult`.
     """
+    # BUG-1 fix: card-alias tools sent by the frontend map to canonical handler
+    # names. Keep aliases explicit here so the eval gold file can use the short
+    # card names (on_time / trend / cmp_service) and live dispatch still works.
+    _TOOL_ALIASES: dict[str, str] = {
+        "on_time": "on_time_rate",
+        "trend": "time_series",
+        "cmp_service": "compare_segments",
+    }
+    tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
+
+    # Card templates use "route_code" as the arg name (matches the param
+    # definition), but all handlers read "route".  Normalise before dispatch.
+    # "k" → "n" remapping is intentionally NOT done here — handlers accept both
+    # (BUG-2 fix).
+    if "route_code" in arguments and "route" not in arguments:
+        raw_rc = arguments["route_code"]
+        arguments = {k: v for k, v in arguments.items() if k != "route_code"}
+        arguments = {"route": raw_rc, **arguments}
+
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
