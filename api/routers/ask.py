@@ -257,6 +257,11 @@ _BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", 
 # Enum options and defaults are derived from _TOOL_DEFAULTS where possible;
 # this dict supplies the human-readable labels and the enum option lists that
 # aren't captured in _TOOL_DEFAULTS.
+# NOTE: ``service_type`` and ``time_window`` are intentionally absent from every
+# tool's builder fields. Those overlap with the per-thread FilterContextBar
+# (期間 ・ 曜日 ・ 時間帯), which is the single source of truth for time + DOW
+# scope. Chips MAY pre-set these as args (overriding filter context for that
+# specific dispatch); the builder UI does not duplicate them.
 _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
     "top_n": {
         "label_ja": "ランキング",
@@ -269,18 +274,6 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
             },
             {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
             {"key": "best_first", "type": "bool", "default": False},
-            {
-                "key": "service_type",
-                "type": "enum",
-                "options": ["weekday", "weekend", "all"],
-                "default": "all",
-            },
-            {
-                "key": "time_window",
-                "type": "enum",
-                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
-                "default": "last_2_weeks",
-            },
         ],
     },
     "time_series": {
@@ -289,10 +282,10 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
         "fields": [
             {"key": "route", "type": "string", "optional": True},
             {
-                "key": "time_window",
+                "key": "granularity",
                 "type": "enum",
-                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
-                "default": "last_2_weeks",
+                "options": ["day", "week", "month"],
+                "default": "day",
             },
         ],
     },
@@ -307,25 +300,13 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
                 "options": ["dow", "service_type"],
                 "default": "dow",
             },
-            {
-                "key": "time_window",
-                "type": "enum",
-                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
-                "default": "last_2_weeks",
-            },
         ],
     },
     "route_stats": {
-        "label_ja": "系統統計",
+        "label_ja": "路線統計",
         "label_en": "Route Stats",
         "fields": [
             {"key": "route", "type": "string"},
-            {
-                "key": "time_window",
-                "type": "enum",
-                "options": ["last_7_days", "last_2_weeks", "last_30_days"],
-                "default": "last_2_weeks",
-            },
         ],
     },
     "describe_data": {

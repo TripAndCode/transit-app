@@ -69,6 +69,10 @@ export function AskTab() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [buildOpen, setBuildOpen] = useState<BuildState>(null);
   const [catalogVisible, setCatalogVisible] = useState(false);
+  // Staged chip: tap-and-confirm pattern. A tapped chip is highlighted +
+  // shown in a confirmation banner; nothing is committed until the user
+  // clicks 実行. This stops the "instant thread creation" surprise.
+  const [stagedChip, setStagedChip] = useState<ChipTemplate | null>(null);
 
   // Local FilterCtx for the current view (synced from the active conversation's filter_ctx)
   const [filterCtx, setFilterCtx] = useState<FilterCtx>(() => rangeCtxToFilterCtx(rangeCtx));
@@ -121,28 +125,38 @@ export function AskTab() {
     setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
   }
 
-  async function handleChipSelect(chip: ChipTemplate) {
+  function handleChipSelect(chip: ChipTemplate) {
     if (id == null) return;
     if (chip.builder_required) {
       setBuildOpen({ chip });
+      setStagedChip(null);
       return;
     }
+    // Stage the chip — don't commit yet. The user sees a confirm banner
+    // and can adjust the filter context or pick a different chip first.
+    setStagedChip(chip);
+  }
 
-    // Dispatch immediately
+  async function handleStagedExecute() {
+    if (id == null || stagedChip == null) return;
+    const chip = stagedChip;
     let convId = activeId;
     if (convId === null) {
-      // Create a new conversation seeded from the URL range context
       const created = await createConv.mutateAsync({
         title: chip.title ?? chip.id,
-        filter_ctx: rangeCtxToFilterCtx(rangeCtx),
+        filter_ctx: filterCtx,
       });
       convId = created.conversation_id;
       setActiveId(convId);
     }
-
     setBuildOpen(null);
     setCatalogVisible(false);
+    setStagedChip(null);
     appendMsg.mutate({ conversationId: convId, chip_id: chip.id });
+  }
+
+  function handleStagedCancel() {
+    setStagedChip(null);
   }
 
   function handleOpenBuilder() {
@@ -282,12 +296,70 @@ export function AskTab() {
             </div>
           )}
 
+          {/* Staged-chip confirm banner. Shown when a chip has been tapped
+              but not yet committed. The user can adjust the filter context
+              above (期間・曜日・時間帯) then click 実行 to commit, or
+              キャンセル to back out. */}
+          {stagedChip !== null && (
+            <div
+              role="region"
+              aria-label={t("ask.staged.region")}
+              style={{
+                marginBottom: 16,
+                padding: "12px 14px",
+                background: "rgba(74, 138, 170, 0.10)",
+                border: "1px solid var(--accent, #4a8aaa)",
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{stagedChip.title}</span>
+              <span style={{ flex: 1, fontSize: 12, opacity: 0.7 }}>
+                {t("ask.staged.hint", { defaultValue: "条件を確認してから実行してください" })}
+              </span>
+              <button
+                type="button"
+                onClick={handleStagedExecute}
+                disabled={appendMsg.isPending || createConv.isPending}
+                style={{
+                  background: "var(--accent, #4a8aaa)",
+                  color: "white",
+                  border: "none",
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  cursor: appendMsg.isPending || createConv.isPending ? "wait" : "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                ▶ {t("ask.staged.execute", { defaultValue: "実行" })}
+              </button>
+              <button
+                type="button"
+                onClick={handleStagedCancel}
+                disabled={appendMsg.isPending || createConv.isPending}
+                style={{
+                  background: "transparent",
+                  border: "1px solid var(--border-soft)",
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                {t("ask.staged.cancel", { defaultValue: "キャンセル" })}
+              </button>
+            </div>
+          )}
+
           {/* Empty thread state: show chip catalog (when no build form open) */}
           {!hasMessages && buildOpen === null && id != null && (
             <ChipCatalog
               agencyId={id}
               onSelect={handleChipSelect}
               onOpenBuilder={handleOpenBuilder}
+              stagedChipId={stagedChip?.id ?? null}
             />
           )}
 
@@ -323,6 +395,7 @@ export function AskTab() {
                     agencyId={id}
                     onSelect={(chip) => { setCatalogVisible(false); handleChipSelect(chip); }}
                     onOpenBuilder={() => { setCatalogVisible(false); handleOpenBuilder(); }}
+                    stagedChipId={stagedChip?.id ?? null}
                   />
                 </div>
               )}

@@ -279,6 +279,12 @@
     "error_agency_not_selected": "Agency not selected",
     "empty_state": "Ask a question to get started.",
     "thinking": "Thinking...",
+    "staged": {
+      "region": "Selected question",
+      "hint": "Review the filter and run when ready",
+      "execute": "Run",
+      "cancel": "Cancel"
+    },
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
     "submit": "Send",

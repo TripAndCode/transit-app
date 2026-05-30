@@ -7,6 +7,8 @@ type Props = {
   agencyId: number;
   onSelect: (chip: ChipTemplate) => void;
   onOpenBuilder: () => void;
+  /** Highlight this chip as "staged" (tapped but not yet committed). */
+  stagedChipId?: string | null;
 };
 
 type SectionDef = {
@@ -26,31 +28,40 @@ const SECTIONS: SectionDef[] = [
 function ChipButton({
   label,
   onClick,
+  selected = false,
 }: {
   label: string;
   onClick: () => void;
+  selected?: boolean;
 }) {
+  const baseBg = selected ? "var(--accent, #4a8aaa)" : "rgba(0,0,0,0.06)";
+  const baseColor = selected ? "white" : "var(--text-primary, #1a1a1a)";
+  const baseBorder = selected ? "1px solid var(--accent, #4a8aaa)" : "1px solid transparent";
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={selected}
       style={{
-        background: "rgba(0,0,0,0.06)",
-        color: "var(--text-primary, #1a1a1a)",
-        border: "1px solid transparent",
+        background: baseBg,
+        color: baseColor,
+        border: baseBorder,
         borderRadius: 999,
         padding: "5px 14px",
         fontSize: 13,
         lineHeight: 1.4,
         cursor: "pointer",
         transition: "background var(--transition, 120ms ease), box-shadow var(--transition, 120ms ease)",
+        boxShadow: selected ? "0 1px 4px rgba(0,0,0,0.18)" : "none",
       }}
       onMouseEnter={(e) => {
+        if (selected) return;
         const el = e.currentTarget as HTMLButtonElement;
         el.style.background = "rgba(0,0,0,0.10)";
         el.style.boxShadow = "0 1px 4px rgba(0,0,0,0.12)";
       }}
       onMouseLeave={(e) => {
+        if (selected) return;
         const el = e.currentTarget as HTMLButtonElement;
         el.style.background = "rgba(0,0,0,0.06)";
         el.style.boxShadow = "none";
@@ -61,7 +72,15 @@ function ChipButton({
   );
 }
 
-function ChipRow({ chips, onSelect }: { chips: ChipTemplate[]; onSelect: (chip: ChipTemplate) => void }) {
+function ChipRow({
+  chips,
+  onSelect,
+  stagedChipId,
+}: {
+  chips: ChipTemplate[];
+  onSelect: (chip: ChipTemplate) => void;
+  stagedChipId?: string | null;
+}) {
   if (chips.length === 0) return null;
   return (
     <div
@@ -72,7 +91,12 @@ function ChipRow({ chips, onSelect }: { chips: ChipTemplate[]; onSelect: (chip: 
       }}
     >
       {chips.map((chip) => (
-        <ChipButton key={chip.id} label={chip.title} onClick={() => onSelect(chip)} />
+        <ChipButton
+          key={chip.id}
+          label={chip.title}
+          onClick={() => onSelect(chip)}
+          selected={stagedChipId === chip.id}
+        />
       ))}
     </div>
   );
@@ -83,11 +107,13 @@ function Section({
   label,
   chips,
   onSelect,
+  stagedChipId,
 }: {
   emoji: string;
   label: string;
   chips: ChipTemplate[];
   onSelect: (chip: ChipTemplate) => void;
+  stagedChipId?: string | null;
 }) {
   if (chips.length === 0) return null;
   return (
@@ -102,12 +128,12 @@ function Section({
       >
         {emoji} {label}
       </span>
-      <ChipRow chips={chips} onSelect={onSelect} />
+      <ChipRow chips={chips} onSelect={onSelect} stagedChipId={stagedChipId} />
     </div>
   );
 }
 
-export function ChipCatalog({ agencyId, onSelect, onOpenBuilder }: Props) {
+export function ChipCatalog({ agencyId, onSelect, onOpenBuilder, stagedChipId }: Props) {
   const { t } = useTranslation();
 
   const catalogQuery = useChipCatalog(agencyId);
@@ -202,6 +228,7 @@ export function ChipCatalog({ agencyId, onSelect, onOpenBuilder }: Props) {
           label={t("ask.chip_catalog.section_popular")}
           chips={popularChips}
           onSelect={onSelect}
+          stagedChipId={stagedChipId}
         />
       )}
 
@@ -214,6 +241,7 @@ export function ChipCatalog({ agencyId, onSelect, onOpenBuilder }: Props) {
             label={t(`ask.chip_catalog.${key}`)}
             chips={schema.chips[category] ?? []}
             onSelect={onSelect}
+            stagedChipId={stagedChipId}
           />
         ))}
 

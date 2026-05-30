@@ -279,6 +279,12 @@
     "error_agency_not_selected": "事業者が選択されていません",
     "empty_state": "質問を入力してください。",
     "thinking": "考え中...",
+    "staged": {
+      "region": "選択中の質問",
+      "hint": "条件を確認してから実行してください",
+      "execute": "実行",
+      "cancel": "キャンセル"
+    },
     "input_aria": "質問を入力",
     "input_placeholder": "例: 路線5の今月の遅延傾向は?",
     "submit": "送信",
