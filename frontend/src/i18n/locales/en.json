@@ -360,6 +360,18 @@
       "dow_weekend": "Weekends/holidays only",
       "all_routes": "All routes",
       "no_routes_selected": "No specific routes"
+    },
+    "chip_catalog": {
+      "section_popular": "Frequently used",
+      "section_meta": "Meta",
+      "section_ranking": "Ranking",
+      "section_trend": "Trend",
+      "section_compare": "Compare",
+      "section_detail": "Route / stop details",
+      "open_builder": "Build a question",
+      "loading": "Loading…",
+      "error": "Couldn't load the chip catalog",
+      "retry": "Retry"
     }
   },
   "live": {

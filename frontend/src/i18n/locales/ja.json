@@ -360,6 +360,18 @@
       "dow_weekend": "土日祝のみ",
       "all_routes": "全路線",
       "no_routes_selected": "路線指定なし"
+    },
+    "chip_catalog": {
+      "section_popular": "よく使う",
+      "section_meta": "メタ情報",
+      "section_ranking": "ランキング",
+      "section_trend": "時系列・トレンド",
+      "section_compare": "比較",
+      "section_detail": "路線・停留所詳細",
+      "open_builder": "組み立て",
+      "loading": "読み込み中…",
+      "error": "チップカタログを読み込めませんでした",
+      "retry": "再試行"
     }
   },
   "live": {
