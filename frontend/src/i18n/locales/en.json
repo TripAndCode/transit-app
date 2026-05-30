@@ -416,6 +416,13 @@
       "back_to_catalog": "Back to the catalog"
     },
     "dashboard": {
+      "anomaly": {
+        "title": "Daily delay trend — anomalies",
+        "baseline": "Mean {{mean}} min (±{{std}}σ)",
+        "empty": "No data",
+        "error": "Could not load trend",
+        "marker_aria": "{{date}}: {{avg}} min ({{sigma}}σ)"
+      },
       "heatmap": {
         "title_dow": "Route × DOW delay",
         "title_hour_band": "Route × hour-band delay",

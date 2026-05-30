@@ -416,6 +416,13 @@
       "back_to_catalog": "カタログに戻る"
     },
     "dashboard": {
+      "anomaly": {
+        "title": "日次遅延の推移 — 異常検知",
+        "baseline": "平均 {{mean}} 分 (±{{std}}σ)",
+        "empty": "該当データなし",
+        "error": "推移を読み込めませんでした",
+        "marker_aria": "{{date}}: {{avg}} 分 ({{sigma}}σ)"
+      },
       "heatmap": {
         "title_dow": "路線×曜日の遅延",
         "title_hour_band": "路線×時間帯の遅延",
