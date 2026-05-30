@@ -14,11 +14,10 @@ import {
 } from "../api/hooks";
 import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
-import type { ConvMessage, FollowupChip, FilterCtx } from "../api/types";
+import type { ConvMessage, FilterCtx } from "../api/types";
 import type { ToolResult, TrendDay } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
-import { FollowupChips } from "../components/FollowupChips";
 import { DailyChart } from "../components/charts/DailyChart";
 import { DelayHeatmap } from "../components/DelayHeatmap";
 import { AnomalyTimeline } from "../components/AnomalyTimeline";
@@ -157,15 +156,9 @@ export function AskTab() {
     appendMsg.mutate({ conversationId: convId, tool, args });
   }
 
-  function handleFollowupPick(chip: FollowupChip) {
-    if (id == null || activeId == null) return;
-    appendMsg.mutate({ conversationId: activeId, tool: chip.tool, args: chip.args });
-  }
-
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const messages = convQuery.data?.messages ?? [];
-  const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant") ?? null;
   const hasMessages = messages.length > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -304,15 +297,6 @@ export function AskTab() {
                 </div>
               )}
 
-              {/* Follow-up chips after the last assistant message */}
-              {lastAssistantMsg && (
-                <FollowupChips
-                  message={lastAssistantMsg}
-                  onPickFollowup={handleFollowupPick}
-                  onOpenBuilder={() => {}}
-                  onBackToCatalog={() => {}}
-                />
-              )}
             </>
           )}
         </div>

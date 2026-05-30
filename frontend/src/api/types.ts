@@ -161,20 +161,8 @@ export type BuildTool = {
   fields: BuildField[];
 };
 
-export type ChipCategory = "meta" | "ranking" | "trend" | "compare" | "detail";
-
-export type ChipTemplate = {
-  id: string;
-  title: string;                  // localized server-side
-  tool: string;
-  args: Record<string, unknown>;
-  builder_required: boolean;
-};
-
 export type BuildSchema = {
   tools: BuildTool[];
-  // chips field removed in Phase ③.5 — kept optional for P10 callers still being deleted
-  chips?: Record<ChipCategory, ChipTemplate[]>;
 };
 
 export type FilterCtx = {

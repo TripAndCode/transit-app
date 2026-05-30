@@ -18,7 +18,6 @@ import type {
   AppendMessageResult,
   AskResponse,
   BuildSchema,
-  ChipTemplate,
   Conversation,
   ConvMessage,
   EditAction,
@@ -265,15 +264,6 @@ function toServerLikeConversation(t: AnonThread): Conversation {
   };
 }
 
-function findChip(schema: BuildSchema | undefined, chipId: string): ChipTemplate | undefined {
-  if (!schema?.chips) return undefined;
-  for (const chips of Object.values(schema.chips)) {
-    const found = chips.find((c) => c.id === chipId);
-    if (found) return found;
-  }
-  return undefined;
-}
-
 export function useConversations(agencyId: number): UseQueryResult<Conversation[]> {
   const authed = useIsAuthenticated();
   return useQuery({
@@ -388,25 +378,11 @@ function builderSummary(tool: string, args: Record<string, unknown>): string {
   return `🛠 ${toolLabel}` + (pairs.length ? ` (${pairs.join(", ")})` : "");
 }
 
-// Vars for the chip path
-type AppendByChip = {
+export type AppendMessageVars = {
   conversationId: string;
-  chip_id: string;
-  args_override?: Record<string, unknown>;
-  tool?: never;
-  args?: never;
-};
-
-// Vars for the builder direct-dispatch path
-type AppendByTool = {
-  conversationId: string;
-  chip_id?: never;
-  args_override?: never;
   tool: string;
   args: Record<string, unknown>;
 };
-
-export type AppendMessageVars = AppendByChip | AppendByTool;
 
 export function useAppendMessage(agencyId: number) {
   const authed = useIsAuthenticated();
@@ -414,39 +390,15 @@ export function useAppendMessage(agencyId: number) {
   return useMutation({
     mutationFn: async (vars: AppendMessageVars): Promise<AppendMessageResult> => {
       if (authed) {
-        if (vars.chip_id !== undefined) {
-          return apiPost<AppendMessageResult>(
-            `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
-            { chip_id: vars.chip_id, args_override: vars.args_override },
-          );
-        } else {
-          return apiPost<AppendMessageResult>(
-            `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
-            { tool: vars.tool, args: vars.args, user_summary: builderSummary(vars.tool, vars.args) },
-          );
-        }
+        return apiPost<AppendMessageResult>(
+          `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
+          { tool: vars.tool, args: vars.args, user_summary: builderSummary(vars.tool, vars.args) },
+        );
       }
       // Anonymous path: dispatch via POST /ask with __build__ sentinel.
-      let dispatchTool: string;
-      let dispatchArgs: Record<string, unknown>;
-      let chipTitle: string;
-      let chipId: string | null;
-
-      if (vars.chip_id !== undefined) {
-        const schema = qc.getQueryData<BuildSchema>(["ask-build-schema", agencyId]);
-        const chip = findChip(schema, vars.chip_id);
-        if (!chip) throw new Error(`unknown chip ${vars.chip_id}`);
-        dispatchTool = chip.tool;
-        dispatchArgs = { ...chip.args, ...(vars.args_override ?? {}) };
-        chipTitle = chip.title;
-        chipId = vars.chip_id;
-      } else {
-        dispatchTool = vars.tool;
-        dispatchArgs = vars.args;
-        // Use the localized summary helper instead of raw key=value joins.
-        chipTitle = builderSummary(dispatchTool, dispatchArgs);
-        chipId = null;
-      }
+      const dispatchTool = vars.tool;
+      const dispatchArgs = vars.args;
+      const chipTitle = builderSummary(dispatchTool, dispatchArgs);
 
       const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
       const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
@@ -457,7 +409,7 @@ export function useAppendMessage(agencyId: number) {
         message_id: baseId,
         conversation_id: vars.conversationId,
         role: "user",
-        chip_id: chipId,
+        chip_id: null,
         tool: dispatchTool,
         args: dispatchArgs,
         signature_hash: null,
@@ -469,7 +421,7 @@ export function useAppendMessage(agencyId: number) {
         message_id: baseId - 1,
         conversation_id: vars.conversationId,
         role: "assistant",
-        chip_id: chipId,
+        chip_id: null,
         tool: dispatchTool,
         args: askResp.canonical_args ?? dispatchArgs,
         signature_hash: askResp.signature_hash ?? null,
@@ -512,23 +464,6 @@ export function useMigrateAnon(agencyId: number) {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
   });
-}
-
-/** @deprecated chip catalog removed in Phase ③.5 — kept as a stub so dependent
- *  components compile until P10 deletes them. */
-export function useChipCatalog(
-  _agencyId: number,
-): { data: BuildSchema | undefined; isLoading: boolean; isError: boolean; refetch: () => void } {
-  return { data: undefined, isLoading: false, isError: true, refetch: () => {} };
-}
-
-/** @deprecated chip catalog removed in Phase ③.5 — kept as a stub so dependent
- *  components compile until P10 deletes them. */
-export function usePopularChips(
-  _agencyId: number,
-  _limit?: number,
-): { data: ChipTemplate[] | undefined; isLoading: boolean; isError: boolean; refetch: () => void } {
-  return { data: undefined, isLoading: false, isError: true, refetch: () => {} };
 }
 
 // ─── Phase ③.5 hooks — dashboard panels ──────────────────────────────────────
