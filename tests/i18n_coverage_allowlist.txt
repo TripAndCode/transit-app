@@ -1,0 +1,27 @@
+# Tokens permitted to appear in the JA UI.
+# Lowercase, one per line.  Matched case-insensitively against visible text.
+# Add legitimate proper nouns and technical abbreviations here rather than
+# weakening the WORD_RE regex in i18n_coverage_test.py.
+
+# --- Standard web / data tech acronyms ---
+api
+csv
+gtfs
+json
+http
+https
+localhost
+null
+undefined
+rgba
+
+# --- Product / brand proper nouns rendered by the SPA ---
+google
+github
+groq
+
+# --- Common UI tokens that are intentionally in English (e.g. the locale switcher) ---
+english
+
+# --- Statistical / transit abbreviations shown in column headers ---
+# p50 / p90 are alphanumeric (< 4 chars), exempt by regex — no entry needed.
