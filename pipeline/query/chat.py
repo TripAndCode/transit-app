@@ -385,18 +385,11 @@ async def chat_with_tools(
             _log.info("Cache path: falling back to Phase-① tool_calls dispatch")
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
-                body = content
-                if body:
-                    return {
-                        "answer": body,
-                        "tool_call": None,
-                        "result": None,
-                        "success": True,
-                        "signature_hash": None,
-                        "confidence": None,
-                        "canonical_args": None,
-                        "cache_outcome": None,
-                    }
+                # Do NOT surface raw LLM content as the answer in JSON-mode.
+                # The LLM is constrained to emit JSON, so any non-tool-call
+                # content (e.g. it echoed ``{"type":"json_object"}`` on an
+                # adversarial prompt) is structurally invalid output. Show the
+                # generic refusal instead — never leak raw model text.
                 return {
                     "answer": _chat_str("refusal_fallback", locale),
                     "tool_call": None,
@@ -463,7 +456,14 @@ async def chat_with_tools(
         # Upsert regardless of hit/miss (bumps hit_count on hit).
         # Skip writes for build-mode synthetic questions so machine-generated
         # strings never appear as last_question in the cache.
-        if not _skip_cache_write:
+        # Also skip when the LLM hallucinated a tool name we don't dispatch —
+        # otherwise an out-of-scope refusal (sig.tool='none', etc.) gets
+        # cached and every future similar question collapses to the same
+        # garbage hash, locking out the LLM permanently.
+        from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
+
+        _known_tool = sig.tool in _KNOWN_TOOLS
+        if not _skip_cache_write and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
         # Compute final confidence blending NN distance + LLM self-report.

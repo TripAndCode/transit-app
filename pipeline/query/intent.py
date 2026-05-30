@@ -26,6 +26,7 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "compare_segments": {"dimension": "dow"},
     "route_stats": {},
     "route_meta": {},
+    "on_time_rate": {"threshold_min": 1, "n": 20},
     "capabilities": {},
 }
 

@@ -378,7 +378,9 @@ async def ask_build_schema(
 
 
 @router.get("/ask/suggest")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask_suggest(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     q: str = Query(default=""),
