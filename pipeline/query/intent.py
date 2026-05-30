@@ -20,10 +20,10 @@ from typing import Any
 # before hashing so "n=10 (explicit)" and "n omitted (defaults to 10)" collapse.
 # Keep in sync with the actual tool surface in pipeline/query/tools.py.
 _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
-    "top_n": {"n": 10, "best_first": False},
+    "top_n": {"n": 10, "best_first": False, "service_type": "all"},
     "describe_data": {"limit": 50, "offset": 0, "order": "asc"},
     "time_series": {"granularity": "day"},
-    "compare_segments": {},
+    "compare_segments": {"dimension": "dow"},
     "route_stats": {},
     "route_meta": {},
     "capabilities": {},

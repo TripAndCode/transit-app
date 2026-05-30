@@ -173,7 +173,16 @@ export function AskBuildForm({ agencyId, initialValue, onSubmit, onCancel }: Pro
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSubmit(selectedToolName, values);
+    // Drop empty-string values so optional fields (e.g. ``route``) are
+    // omitted from the args dict — sending ``""`` vs. nothing produces
+    // different canonical hashes server-side and silently mis-routes some
+    // tools (route_stats with empty route was dispatching describe_data).
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (v === "" || v === null || v === undefined) continue;
+      cleaned[k] = v;
+    }
+    onSubmit(selectedToolName, cleaned);
   }
 
   if (isLoading) {

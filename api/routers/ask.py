@@ -258,7 +258,7 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
             {
                 "key": "metric",
                 "type": "enum",
-                "options": ["avg_delay", "on_time_rate", "delay_count_5min"],
+                "options": ["avg_delay", "on_time_rate", "worst_5min"],
             },
             {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
             {"key": "best_first", "type": "bool", "default": False},

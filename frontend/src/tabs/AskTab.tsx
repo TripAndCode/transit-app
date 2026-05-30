@@ -38,7 +38,7 @@ type Msg =
       signature_hash?: string | null;
       confidence?: number | null;
       canonical_args?: Record<string, unknown> | null;
-      cache_outcome?: "hit" | "miss" | null;
+      cache_outcome?: "hit" | "miss" | "bypass" | null;
     };
 
 type HistTurn = { question: string; tool?: string | null; args?: Record<string, unknown> | null };

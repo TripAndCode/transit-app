@@ -57,6 +57,34 @@ def _cache_enabled() -> bool:
     return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+_BUILD_SENTINEL = "__build__"
+
+
+def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
+    """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
+
+    The guided build form on the frontend submits the user's structured intent
+    as a question with this sentinel prefix so the orchestrator can dispatch it
+    **without calling the LLM** — the spec's "zero-LLM determinism path."
+    Returns ``None`` if the string doesn't match the format (caller falls
+    through to the normal LLM path).
+    """
+    if not question.startswith(_BUILD_SENTINEL):
+        return None
+    rest = question[len(_BUILD_SENTINEL) :].lstrip()
+    tool, _sep, json_part = rest.partition(" ")
+    if not tool:
+        return None
+    json_part = json_part.strip() or "{}"
+    try:
+        args = json.loads(json_part)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    return tool, args
+
+
 # Extra per-call localisation strings. Keyed identically to the table in
 # tools.py — they live here only because they're chat-flow specific
 # (user prelude, refusal placeholder, error wrappers) and don't belong
@@ -144,7 +172,49 @@ async def chat_with_tools(
     # Build-mode synthetic questions (sent by the guided form with an ``__build__``
     # prefix) must never be written to the intent cache as last_question, otherwise
     # machine-generated strings surface as chips / autocomplete suggestions.
-    _skip_cache_write = question.startswith("__build__")
+    _skip_cache_write = question.startswith(_BUILD_SENTINEL)
+
+    # Build-mode short-circuit: when the cache flag is on AND the question
+    # is a build-form sentinel, parse (tool, args) directly and dispatch
+    # without ever calling the LLM. This is the spec's "zero-LLM determinism
+    # path" — confidence=1.0 because the user constructed the query directly.
+    if _cache_enabled() and _skip_cache_write:
+        parsed = _parse_build_sentinel(question)
+        if parsed is not None:
+            build_tool, build_args = parsed
+            ctx_dict = {"from_date": ctx.from_date, "to_date": ctx.to_date}
+            try:
+                can_args = canonicalize(build_tool, build_args, ctx_dict)
+            except ValueError:
+                # Unknown tool — fall back to dispatching with raw args so the
+                # tool handler can return its own "unknown" error string.
+                can_args = dict(build_args)
+            sig_hash = signature_hash(build_tool, can_args)
+            try:
+                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale)
+            except Exception as exc:
+                _log.exception("Build-mode dispatch failed for %s", build_tool)
+                return {
+                    "answer": _chat_str("tool_error", locale, name=build_tool, exc=exc),
+                    "tool_call": {"name": build_tool, "arguments": can_args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash,
+                    "confidence": 1.0,
+                    "canonical_args": can_args,
+                    "cache_outcome": "bypass",
+                }
+            return {
+                "answer": render_tool_result(result, locale=locale),
+                "tool_call": {"name": build_tool, "arguments": can_args},
+                "result": _result_to_dict(result),
+                "success": result.kind != "empty",
+                "signature_hash": sig_hash,
+                "confidence": 1.0,
+                "canonical_args": can_args,
+                "cache_outcome": "bypass",
+            }
+
     user_prelude = _chat_str(
         "user_prelude",
         locale,
