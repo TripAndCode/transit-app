@@ -328,6 +328,24 @@
       "title": "自信が低い解釈です",
       "run": "実行",
       "edit": "修正"
+    },
+    "sidebar": {
+      "new_thread": "新しい会話",
+      "pinned": "ピン留め",
+      "today": "今日",
+      "yesterday": "昨日",
+      "this_week": "今週",
+      "earlier": "それ以前",
+      "rename": "名前を変更",
+      "pin": "ピン留め",
+      "unpin": "ピン留めを外す",
+      "delete": "削除",
+      "delete_confirm": "この会話を削除しますか?",
+      "empty": "まだ会話がありません",
+      "relative_now": "今",
+      "relative_minute": "{{n}}分前",
+      "relative_hour": "{{n}}時間前",
+      "relative_yesterday": "昨日"
     }
   },
   "live": {

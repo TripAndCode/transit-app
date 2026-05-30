@@ -328,6 +328,24 @@
       "title": "Low-confidence interpretation",
       "run": "Run",
       "edit": "Edit"
+    },
+    "sidebar": {
+      "new_thread": "New conversation",
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "this_week": "This week",
+      "earlier": "Earlier",
+      "rename": "Rename",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "delete": "Delete",
+      "delete_confirm": "Delete this conversation?",
+      "empty": "No conversations yet",
+      "relative_now": "just now",
+      "relative_minute": "{{n}}m ago",
+      "relative_hour": "{{n}}h ago",
+      "relative_yesterday": "yesterday"
     }
   },
   "live": {
