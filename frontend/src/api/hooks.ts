@@ -361,52 +361,93 @@ export function useDeleteConversation(agencyId: number) {
   });
 }
 
+// Vars for the chip path
+type AppendByChip = {
+  conversationId: string;
+  chip_id: string;
+  args_override?: Record<string, unknown>;
+  tool?: never;
+  args?: never;
+};
+
+// Vars for the builder direct-dispatch path
+type AppendByTool = {
+  conversationId: string;
+  chip_id?: never;
+  args_override?: never;
+  tool: string;
+  args: Record<string, unknown>;
+};
+
+export type AppendMessageVars = AppendByChip | AppendByTool;
+
 export function useAppendMessage(agencyId: number) {
   const authed = useIsAuthenticated();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: {
-      conversationId: string;
-      chip_id: string;
-      args_override?: Record<string, unknown>;
-    }): Promise<AppendMessageResult> => {
+    mutationFn: async (vars: AppendMessageVars): Promise<AppendMessageResult> => {
       if (authed) {
-        return apiPost<AppendMessageResult>(
-          `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
-          { chip_id: vars.chip_id, args_override: vars.args_override },
-        );
+        if (vars.chip_id !== undefined) {
+          return apiPost<AppendMessageResult>(
+            `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
+            { chip_id: vars.chip_id, args_override: vars.args_override },
+          );
+        } else {
+          return apiPost<AppendMessageResult>(
+            `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
+            { tool: vars.tool, args: vars.args },
+          );
+        }
       }
-      // Option A: anonymous dispatch via existing POST /ask with __build__ sentinel.
-      // Look up the chip locally from the cached build schema.
-      const schema = qc.getQueryData<BuildSchema>(["ask-build-schema", agencyId]);
-      const chip = findChip(schema, vars.chip_id);
-      if (!chip) throw new Error(`unknown chip ${vars.chip_id}`);
-      const merged = { ...chip.args, ...(vars.args_override ?? {}) };
-      const question = `__build__ ${chip.tool} ${JSON.stringify(merged)}`;
+      // Anonymous path: dispatch via POST /ask with __build__ sentinel.
+      let dispatchTool: string;
+      let dispatchArgs: Record<string, unknown>;
+      let chipTitle: string;
+      let chipId: string | null;
+
+      if (vars.chip_id !== undefined) {
+        const schema = qc.getQueryData<BuildSchema>(["ask-build-schema", agencyId]);
+        const chip = findChip(schema, vars.chip_id);
+        if (!chip) throw new Error(`unknown chip ${vars.chip_id}`);
+        dispatchTool = chip.tool;
+        dispatchArgs = { ...chip.args, ...(vars.args_override ?? {}) };
+        chipTitle = chip.title;
+        chipId = vars.chip_id;
+      } else {
+        dispatchTool = vars.tool;
+        dispatchArgs = vars.args;
+        const argSummary = Object.entries(dispatchArgs)
+          .slice(0, 4)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join(", ");
+        chipTitle = `🛠 ${dispatchTool}` + (argSummary ? ` (${argSummary})` : "");
+        chipId = null;
+      }
+
+      const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
       const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
 
       const now = new Date().toISOString();
-      // Synthetic message_id — negative to avoid colliding with server IDs
       const baseId = -(Date.now());
       const userMsg: ConvMessage = {
         message_id: baseId,
         conversation_id: vars.conversationId,
         role: "user",
-        chip_id: vars.chip_id,
-        tool: chip.tool,
-        args: merged,
+        chip_id: chipId,
+        tool: dispatchTool,
+        args: dispatchArgs,
         signature_hash: null,
         result: null,
-        rendered_summary: chip.title,
+        rendered_summary: chipTitle,
         created_at: now,
       };
       const asstMsg: ConvMessage = {
         message_id: baseId - 1,
         conversation_id: vars.conversationId,
         role: "assistant",
-        chip_id: vars.chip_id,
-        tool: chip.tool,
-        args: askResp.canonical_args ?? merged,
+        chip_id: chipId,
+        tool: dispatchTool,
+        args: askResp.canonical_args ?? dispatchArgs,
         signature_hash: askResp.signature_hash ?? null,
         result: askResp.result
           ? {
@@ -425,10 +466,7 @@ export function useAppendMessage(agencyId: number) {
       conversationsAnon.appendMessage(vars.conversationId, asstMsg);
       return { user: userMsg, assistant: asstMsg };
     },
-    onSuccess: (
-      _result: AppendMessageResult,
-      vars: { conversationId: string; chip_id: string; args_override?: Record<string, unknown> },
-    ) => {
+    onSuccess: (_result: AppendMessageResult, vars: AppendMessageVars) => {
       qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
       qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
     },

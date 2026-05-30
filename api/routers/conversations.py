@@ -32,8 +32,21 @@ class UpdateConversation(BaseModel):
 
 
 class AppendMessage(BaseModel):
+    # Path A: chip-based dispatch
     chip_id: str | None = None
     args_override: dict[str, Any] | None = None
+    # Path B: builder direct dispatch (tool + args, no chip lookup)
+    tool: str | None = None
+    args: dict[str, Any] | None = None
+
+    def validate_dispatch(self) -> None:
+        """Exactly one of (chip_id) or (tool + args) must be supplied."""
+        has_chip = bool(self.chip_id)
+        has_tool_args = bool(self.tool) and self.args is not None
+        if has_chip and has_tool_args:
+            raise ValueError("Provide either chip_id or (tool + args), not both")
+        if not has_chip and not has_tool_args:
+            raise ValueError("One of chip_id or (tool + args) is required")
 
 
 class AnonThread(BaseModel):
@@ -169,17 +182,35 @@ async def append_message_endpoint(
     locale: str = Depends(get_locale),
 ):
     csrf_guard(request)
+    # Validate dispatch path before touching DB.
+    try:
+        body.validate_dispatch()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Ownership check up front.
     try:
         conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
-    # Resolve chip — 400 for missing or unknown chip_id
-    if not body.chip_id or body.chip_id not in CHIPS_BY_ID:
-        raise HTTPException(status_code=400, detail=f"unknown chip_id: {body.chip_id!r}")
-    chip = CHIPS_BY_ID[body.chip_id]
-    args = {**chip.args, **(body.args_override or {})}
+    # ── Resolve tool + args (chip path OR builder-direct path) ────────────────
+    if body.chip_id is not None:
+        # Path A: chip lookup
+        if body.chip_id not in CHIPS_BY_ID:
+            raise HTTPException(status_code=400, detail=f"unknown chip_id: {body.chip_id!r}")
+        chip = CHIPS_BY_ID[body.chip_id]
+        resolved_tool = chip.tool
+        resolved_args = {**chip.args, **(body.args_override or {})}
+        resolved_chip_id: str | None = chip.id
+        user_summary = chip.title_ja if locale == "ja" else chip.title_en
+    else:
+        # Path B: builder direct — tool and args supplied by client
+        resolved_tool = body.tool  # type: ignore[assignment]  # validated above
+        resolved_args = body.args or {}
+        resolved_chip_id = None
+        arg_summary = ", ".join(f"{k}={v}" for k, v in list(resolved_args.items())[:4])
+        user_summary = f"🛠 {resolved_tool}" + (f" ({arg_summary})" if arg_summary else "")
 
     # Build a RangeCtx from the conversation's filter_ctx
     fc = conv["filter_ctx"] or {}
@@ -196,29 +227,29 @@ async def append_message_endpoint(
 
     # Append the user message first.
     user_msg = await _conv.append_message(
-        conn, conversation_id, role="user", chip_id=chip.id,
+        conn, conversation_id, role="user", chip_id=resolved_chip_id,
         tool=None, args=None, signature_hash=None, result=None,
-        rendered_summary=chip.title_ja if locale == "ja" else chip.title_en,
+        rendered_summary=user_summary,
     )
 
     # Dispatch the tool — canonical signature + cache upsert (always bump)
     try:
-        can_args = canonicalize(chip.tool, args, ctx_dict)
+        can_args = canonicalize(resolved_tool, resolved_args, ctx_dict)
     except ValueError:
-        can_args = dict(args)
-    sig_hash = signature_hash(chip.tool, can_args)
+        can_args = dict(resolved_args)
+    sig_hash = signature_hash(resolved_tool, can_args)
     try:
         await _intent_cache.upsert(
             conn, sig_hash,
-            IntentSignature(tool=chip.tool, args=args, confidence=1.0),
-            can_args, agency_id, question=chip.title_ja,
+            IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+            can_args, agency_id, question=user_summary,
         )
-        result = await dispatch(chip.tool, can_args, ctx_obj, conn, agency_id, locale=locale)
+        result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
     except Exception as exc:
-        rendered = f"ツール {chip.tool} の実行に失敗しました: {exc}"
+        rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
         assistant_msg = await _conv.append_message(
-            conn, conversation_id, role="assistant", chip_id=chip.id,
-            tool=chip.tool, args=can_args, signature_hash=sig_hash,
+            conn, conversation_id, role="assistant", chip_id=resolved_chip_id,
+            tool=resolved_tool, args=can_args, signature_hash=sig_hash,
             result=None, rendered_summary=rendered,
         )
         return {"user": user_msg, "assistant": assistant_msg}
@@ -229,8 +260,8 @@ async def append_message_endpoint(
         "columns": result.columns, "series": result.series, "pairs": result.pairs,
     }
     assistant_msg = await _conv.append_message(
-        conn, conversation_id, role="assistant", chip_id=chip.id,
-        tool=chip.tool, args=can_args, signature_hash=sig_hash,
+        conn, conversation_id, role="assistant", chip_id=resolved_chip_id,
+        tool=resolved_tool, args=can_args, signature_hash=sig_hash,
         result=result_dict, rendered_summary=rendered,
     )
     return {"user": user_msg, "assistant": assistant_msg}

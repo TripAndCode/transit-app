@@ -141,6 +141,68 @@ async def test_append_message_unknown_chip_400(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_append_message_tool_args_path(conv_app):
+    """Builder direct-dispatch path: {tool, args} without chip_id appends messages."""
+    app, agency, uid, pool = conv_app
+    # Seed a route so describe_data tool has something to work with.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
+            "VALUES ($1, 'R1', 'R1')", agency,
+        )
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations",
+                          json={"title": "Builder test", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # chip_id should be null in both messages for the builder path
+        assert body["user"]["chip_id"] is None
+        assert body["assistant"]["tool"] == "describe_data"
+        # Two messages appended
+        ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
+        assert ml.status_code == 200
+        assert len(ml.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_append_message_both_chip_and_tool_400(conv_app):
+    """Providing both chip_id and tool+args is a 400."""
+    app, agency, uid, _ = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations",
+                          json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"chip_id": "meta-routes", "tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_append_message_neither_chip_nor_tool_400(conv_app):
+    """Providing neither chip_id nor tool+args is a 400."""
+    app, agency, uid, _ = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations",
+                          json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={},
+            headers=_CSRF,
+        )
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_migrate_anon_idempotent(conv_app):
     app, agency, uid, _ = conv_app
     payload = {"threads": [
