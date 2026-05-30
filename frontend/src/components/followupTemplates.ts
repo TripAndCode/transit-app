@@ -24,18 +24,20 @@ const flipBestFirst: TemplateBuilder = (args) => ({
 const TEMPLATES: Record<string, Template[]> = {
   top_n: [
     { id: "opposite", title_ja: "↕ 逆順に切り替え",   title_en: "↕ Flip ranking",        build: flipBestFirst },
-    { id: "tw-2weeks", title_ja: "📅 直近2週間に変更", title_en: "📅 Last 2 weeks",       build: (a) => ({ tool: "top_n", args: tw(a, "last_2_weeks") }) },
-    { id: "tw-30days", title_ja: "📅 直近30日に変更",  title_en: "📅 Last 30 days",       build: (a) => ({ tool: "top_n", args: tw(a, "last_30_days") }) },
+    { id: "tw-2weeks", title_ja: "📅 直近2週間に変更", title_en: "📅 Last 2 weeks",       build: (a) => a.time_window === "last_2_weeks" ? null : ({ tool: "top_n", args: tw(a, "last_2_weeks") }) },
+    { id: "tw-30days", title_ja: "📅 直近30日に変更",  title_en: "📅 Last 30 days",       build: (a) => a.time_window === "last_30_days" ? null : ({ tool: "top_n", args: tw(a, "last_30_days") }) },
     { id: "compare-dow", title_ja: "⚖️ 平日/土日で比較", title_en: "⚖️ Compare weekday vs weekend", build: () => ({ tool: "compare_segments", args: { dimension: "dow" } }) },
   ],
   time_series: [
-    { id: "gran-day",  title_ja: "📅 日別に切り替え", title_en: "📅 Daily",        build: (a) => ({ tool: "time_series", args: { ...a, granularity: "day" } }) },
-    { id: "gran-week", title_ja: "📅 週別に切り替え", title_en: "📅 Weekly",       build: (a) => ({ tool: "time_series", args: { ...a, granularity: "week" } }) },
-    { id: "tw-2weeks", title_ja: "📆 直近2週間に絞る", title_en: "📆 Last 2 weeks", build: (a) => ({ tool: "time_series", args: tw(a, "last_2_weeks") }) },
+    // Each "switch to X" returns null if the caller is already at X — otherwise
+    // the user sees a chip that does nothing (the canonical hash matches).
+    { id: "gran-day",  title_ja: "📅 日別に切り替え", title_en: "📅 Daily",        build: (a) => (a.granularity ?? "day") === "day" ? null : ({ tool: "time_series", args: { ...a, granularity: "day" } }) },
+    { id: "gran-week", title_ja: "📅 週別に切り替え", title_en: "📅 Weekly",       build: (a) => a.granularity === "week" ? null : ({ tool: "time_series", args: { ...a, granularity: "week" } }) },
+    { id: "tw-2weeks", title_ja: "📆 直近2週間に絞る", title_en: "📆 Last 2 weeks", build: (a) => a.time_window === "last_2_weeks" ? null : ({ tool: "time_series", args: tw(a, "last_2_weeks") }) },
     { id: "compare-dow", title_ja: "⚖️ 平日/土日で比較", title_en: "⚖️ Compare", build: () => ({ tool: "compare_segments", args: { dimension: "dow" } }) },
   ],
   compare_segments: [
-    { id: "by-service", title_ja: "⚖️ 便種別で比較", title_en: "⚖️ Compare by service", build: () => ({ tool: "compare_segments", args: { dimension: "service_type" } }) },
+    { id: "by-service", title_ja: "⚖️ 便種別で比較", title_en: "⚖️ Compare by service", build: (a) => a.dimension === "service_type" ? null : ({ tool: "compare_segments", args: { dimension: "service_type" } }) },
     { id: "rank-top",   title_ja: "🏆 ランキングを見る", title_en: "🏆 See ranking",     build: () => ({ tool: "top_n", args: { metric: "avg_delay", n: 10 } }) },
   ],
   route_stats: [

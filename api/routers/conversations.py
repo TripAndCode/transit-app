@@ -155,8 +155,6 @@ async def list_messages(
         raise HTTPException(status_code=404, detail="not found") from None
 
 
-# NOTE: migrate-anon must be declared BEFORE the {conversation_id} routes so
-# FastAPI doesn't try to match "migrate-anon" as a conversation_id UUID.
 @router.post("/conversations/migrate-anon")
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def migrate_anon_endpoint(
@@ -195,7 +193,10 @@ async def append_message_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Ownership check up front.
+    # Ownership check up front. The remainder of the endpoint runs in a single
+    # transaction so a concurrent DELETE of this conversation between the
+    # ownership check and the message inserts can't produce a 500 (the FK
+    # cascade would otherwise tear out the rows we're trying to write).
     try:
         conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
@@ -232,37 +233,62 @@ async def append_message_endpoint(
     )
     ctx_dict = {"from_date": ctx_obj.from_date, "to_date": ctx_obj.to_date}
 
-    # Append the user message first.
-    user_msg = await _conv.append_message(
-        conn,
-        conversation_id,
-        role="user",
-        chip_id=resolved_chip_id,
-        tool=None,
-        args=None,
-        signature_hash=None,
-        result=None,
-        rendered_summary=user_summary,
-    )
-
-    # Dispatch the tool — canonical signature + cache upsert (always bump)
-    try:
-        can_args = canonicalize(resolved_tool, resolved_args, ctx_dict)
-    except ValueError:
-        can_args = dict(resolved_args)
-    sig_hash = signature_hash(resolved_tool, can_args)
-    try:
-        await _intent_cache.upsert(
+    # Wrap user-msg + cache upsert + dispatch + assistant-msg in one transaction.
+    # Without it, a concurrent DELETE of this conversation would FK-cascade-delete
+    # the user_msg row mid-flight, producing a 500 instead of a clean 404.
+    async with conn.transaction():
+        user_msg = await _conv.append_message(
             conn,
-            sig_hash,
-            IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
-            can_args,
-            agency_id,
-            question=user_summary,
+            conversation_id,
+            role="user",
+            chip_id=resolved_chip_id,
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=user_summary,
         )
-        result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
-    except Exception as exc:
-        rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
+
+        # Canonicalize + cache upsert (always bumps hit_count for chip/builder paths)
+        try:
+            can_args = canonicalize(resolved_tool, resolved_args, ctx_dict)
+        except ValueError:
+            can_args = dict(resolved_args)
+        sig_hash = signature_hash(resolved_tool, can_args)
+        try:
+            await _intent_cache.upsert(
+                conn,
+                sig_hash,
+                IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+                can_args,
+                agency_id,
+                question=user_summary,
+            )
+            result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
+        except Exception as exc:
+            rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=resolved_chip_id,
+                tool=resolved_tool,
+                args=can_args,
+                signature_hash=sig_hash,
+                result=None,
+                rendered_summary=rendered,
+            )
+            return {"user": user_msg, "assistant": assistant_msg}
+
+        rendered = render_tool_result(result, locale=locale)
+        result_dict = {
+            "kind": result.kind,
+            "summary": result.summary,
+            "rows": result.rows,
+            "columns": result.columns,
+            "series": result.series,
+            "pairs": result.pairs,
+        }
         assistant_msg = await _conv.append_message(
             conn,
             conversation_id,
@@ -271,29 +297,7 @@ async def append_message_endpoint(
             tool=resolved_tool,
             args=can_args,
             signature_hash=sig_hash,
-            result=None,
+            result=result_dict,
             rendered_summary=rendered,
         )
-        return {"user": user_msg, "assistant": assistant_msg}
-
-    rendered = render_tool_result(result, locale=locale)
-    result_dict = {
-        "kind": result.kind,
-        "summary": result.summary,
-        "rows": result.rows,
-        "columns": result.columns,
-        "series": result.series,
-        "pairs": result.pairs,
-    }
-    assistant_msg = await _conv.append_message(
-        conn,
-        conversation_id,
-        role="assistant",
-        chip_id=resolved_chip_id,
-        tool=resolved_tool,
-        args=can_args,
-        signature_hash=sig_hash,
-        result=result_dict,
-        rendered_summary=rendered,
-    )
     return {"user": user_msg, "assistant": assistant_msg}

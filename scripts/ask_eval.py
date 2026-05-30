@@ -94,10 +94,22 @@ def main() -> int:
         if len(misses) > 20:
             print(f"  ... and {len(misses) - 20} more")
 
-    # CI gate: chip + builder must be 100%
-    if chip_total > 0 and chip_pass < chip_total:
+    # CI gate: chip + builder must be 100%. Guard against silent-pass when the
+    # gold file has somehow been emptied — require at least 20 chip entries +
+    # 10 builder entries, matching the spec's promised v1 coverage.
+    _MIN_CHIP_ENTRIES = 20
+    _MIN_BUILDER_ENTRIES = 10
+    if chip_total < _MIN_CHIP_ENTRIES:
+        msg = f"gold set has {chip_total} chip entries; expected >= {_MIN_CHIP_ENTRIES}"
+        print(f"\nERROR: {msg}", file=sys.stderr)
         return 1
-    if builder_total > 0 and builder_pass < builder_total:
+    if builder_total < _MIN_BUILDER_ENTRIES:
+        msg = f"gold set has {builder_total} builder entries; expected >= {_MIN_BUILDER_ENTRIES}"
+        print(f"\nERROR: {msg}", file=sys.stderr)
+        return 1
+    if chip_pass < chip_total:
+        return 1
+    if builder_pass < builder_total:
         return 1
     return 0
 

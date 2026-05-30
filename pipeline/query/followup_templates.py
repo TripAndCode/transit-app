@@ -154,8 +154,19 @@ def generate_followups(
     ctx: dict[str, Any],
     result_first_row: list | None = None,
 ) -> list[dict[str, Any]]:
-    """Return up to 5 follow-up suggestions for the just-completed dispatch."""
+    """Return up to 5 follow-up suggestions for the just-completed dispatch.
+
+    Skips any candidate whose canonical (tool, args) hash equals the caller's
+    — otherwise the user sees a chip that does nothing (e.g. ``gran-day`` on a
+    dispatch that already used granularity=day, which is the default).
+    """
+    from pipeline.query.intent import canonicalize, signature_hash
+
     templates = FOLLOWUPS.get(tool, [])
+    try:
+        input_hash = signature_hash(tool, canonicalize(tool, args, ctx))
+    except ValueError:
+        input_hash = None
     out: list[dict[str, Any]] = []
     for t in templates[:5]:
         try:
@@ -164,6 +175,14 @@ def generate_followups(
             continue
         if not new or "tool" not in new:
             continue
+        # Skip no-ops (same canonical hash as the caller)
+        if input_hash is not None:
+            try:
+                new_hash = signature_hash(new["tool"], canonicalize(new["tool"], new["args"], ctx))
+                if new_hash == input_hash:
+                    continue
+            except ValueError:
+                pass
         out.append(
             {
                 "id": t.id,
