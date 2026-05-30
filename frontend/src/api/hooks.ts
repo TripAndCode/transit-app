@@ -7,13 +7,20 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { ctxToQueryString, type RangeCtx } from "./rangeContext";
+import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
+  AnonThread,
+  AppendMessageResult,
   AskResponse,
   BuildSchema,
+  ChipTemplate,
+  Conversation,
+  ConvMessage,
   EditAction,
+  FilterCtx,
   HeatmapCollection,
   OverviewSummary,
   ReportMeta,
@@ -23,6 +30,7 @@ import type {
   RouteSummaryResponse,
   SuggestItem,
 } from "./types";
+import { useSession } from "./auth";
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
@@ -226,5 +234,246 @@ export function usePostEditAction(
   return useMutation({
     mutationFn: (body: { signature_hash: string; action: EditAction }) =>
       apiPost<{ ok: true }>(`/api/${agencyId}/ask/edit-action`, body),
+  });
+}
+
+// ─── Phase ③ hooks — conversations + chips ───────────────────────────────────
+
+/**
+ * True when the current session is authenticated.
+ * Reuses the `useSession` hook from auth.ts (returns null on 401).
+ */
+export function useIsAuthenticated(): boolean {
+  const { data } = useSession();
+  return Boolean(data?.user_id);
+}
+
+function toServerLikeConversation(t: AnonThread): Conversation {
+  return {
+    conversation_id: t.client_id,
+    user_id: null,
+    agency_id: t.agency_id,
+    title: t.title,
+    filter_ctx: t.filter_ctx,
+    pinned: t.pinned,
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+  };
+}
+
+function findChip(schema: BuildSchema | undefined, chipId: string): ChipTemplate | undefined {
+  if (!schema?.chips) return undefined;
+  for (const chips of Object.values(schema.chips)) {
+    const found = chips.find((c) => c.id === chipId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function useConversations(agencyId: number): UseQueryResult<Conversation[]> {
+  const authed = useIsAuthenticated();
+  return useQuery({
+    queryKey: ["conversations", agencyId, authed ? "server" : "anon"],
+    queryFn: async () => {
+      if (authed) {
+        return apiGet<Conversation[]>(`/api/${agencyId}/conversations`);
+      }
+      // Anonymous: read from localStorage; shape-convert to Conversation
+      return conversationsAnon.list(agencyId).map(toServerLikeConversation);
+    },
+    staleTime: 5_000,
+  });
+}
+
+export function useConversation(
+  agencyId: number,
+  conversationId: string | null,
+): UseQueryResult<{ conversation: Conversation; messages: ConvMessage[] } | null> {
+  const authed = useIsAuthenticated();
+  return useQuery({
+    queryKey: ["conversation", agencyId, conversationId, authed ? "server" : "anon"],
+    queryFn: async () => {
+      if (!conversationId) return null;
+      if (authed) {
+        const [conv, msgs] = await Promise.all([
+          apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`),
+          apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`),
+        ]);
+        return { conversation: conv, messages: msgs };
+      }
+      const anon = conversationsAnon.get(conversationId);
+      if (!anon) return null;
+      return { conversation: toServerLikeConversation(anon), messages: anon.messages };
+    },
+    enabled: Boolean(conversationId),
+  });
+}
+
+export function useCreateConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { title: string; filter_ctx: FilterCtx }) => {
+      if (authed) {
+        return apiPost<Conversation>(`/api/${agencyId}/conversations`, vars);
+      }
+      const anon = conversationsAnon.create(agencyId, vars.title, vars.filter_ctx);
+      return toServerLikeConversation(anon);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+export function useUpdateConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      id: string;
+      patch: Partial<Pick<Conversation, "title" | "pinned" | "filter_ctx">>;
+    }) => {
+      if (authed) {
+        return apiPatch<Conversation>(`/api/${agencyId}/conversations/${vars.id}`, vars.patch);
+      }
+      const updated = conversationsAnon.update(vars.id, vars.patch);
+      if (!updated) throw new Error("thread not found");
+      return toServerLikeConversation(updated);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId] });
+    },
+  });
+}
+
+export function useDeleteConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (authed) {
+        return apiDelete<{ ok: true }>(`/api/${agencyId}/conversations/${id}`);
+      }
+      conversationsAnon.delete(id);
+      return { ok: true as const };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+export function useAppendMessage(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      conversationId: string;
+      chip_id: string;
+      args_override?: Record<string, unknown>;
+    }): Promise<AppendMessageResult> => {
+      if (authed) {
+        return apiPost<AppendMessageResult>(
+          `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
+          { chip_id: vars.chip_id, args_override: vars.args_override },
+        );
+      }
+      // Option A: anonymous dispatch via existing POST /ask with __build__ sentinel.
+      // Look up the chip locally from the cached build schema.
+      const schema = qc.getQueryData<BuildSchema>(["ask-build-schema", agencyId]);
+      const chip = findChip(schema, vars.chip_id);
+      if (!chip) throw new Error(`unknown chip ${vars.chip_id}`);
+      const merged = { ...chip.args, ...(vars.args_override ?? {}) };
+      const question = `__build__ ${chip.tool} ${JSON.stringify(merged)}`;
+      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
+
+      const now = new Date().toISOString();
+      // Synthetic message_id — negative to avoid colliding with server IDs
+      const baseId = -(Date.now());
+      const userMsg: ConvMessage = {
+        message_id: baseId,
+        conversation_id: vars.conversationId,
+        role: "user",
+        chip_id: vars.chip_id,
+        tool: chip.tool,
+        args: merged,
+        signature_hash: null,
+        result: null,
+        rendered_summary: chip.title,
+        created_at: now,
+      };
+      const asstMsg: ConvMessage = {
+        message_id: baseId - 1,
+        conversation_id: vars.conversationId,
+        role: "assistant",
+        chip_id: vars.chip_id,
+        tool: chip.tool,
+        args: askResp.canonical_args ?? merged,
+        signature_hash: askResp.signature_hash ?? null,
+        result: askResp.result
+          ? {
+              kind: askResp.result.kind,
+              summary: askResp.result.summary ?? null,
+              rows: (askResp.result.rows as unknown[] | undefined) ?? null,
+              columns: askResp.result.columns ?? null,
+              series: askResp.result.series ?? null,
+              pairs: askResp.result.pairs ?? null,
+            }
+          : null,
+        rendered_summary: askResp.answer ?? null,
+        created_at: now,
+      };
+      conversationsAnon.appendMessage(vars.conversationId, userMsg);
+      conversationsAnon.appendMessage(vars.conversationId, asstMsg);
+      return { user: userMsg, assistant: asstMsg };
+    },
+    onSuccess: (
+      _result: AppendMessageResult,
+      vars: { conversationId: string; chip_id: string; args_override?: Record<string, unknown> },
+    ) => {
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+    },
+  });
+}
+
+export function useMigrateAnon(agencyId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const threads = conversationsAnon.exportAll();
+      if (threads.length === 0) return { inserted: 0 };
+      const r = await apiPost<{ inserted: number }>(
+        `/api/${agencyId}/conversations/migrate-anon`,
+        { threads },
+      );
+      if (r.inserted > 0) conversationsAnon.clearAll();
+      return r;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+/**
+ * Full chip catalog from /ask/build-schema — includes tools and all chip categories.
+ * Effectively immutable at runtime (staleTime: Infinity).
+ * Note: also used as the chip lookup cache by useAppendMessage (anon path).
+ */
+export function useChipCatalog(agencyId: number): UseQueryResult<BuildSchema> {
+  return useQuery({
+    queryKey: ["ask-build-schema", agencyId],
+    queryFn: () => apiGet<BuildSchema>(`/api/${agencyId}/ask/build-schema`),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Popular chips ordered by server hit_count.
+ * Used as the default chip tray on empty conversation state.
+ */
+export function usePopularChips(agencyId: number, limit = 6): UseQueryResult<ChipTemplate[]> {
+  return useQuery({
+    queryKey: ["popular-chips", agencyId, limit],
+    queryFn: () =>
+      apiGet<ChipTemplate[]>(`/api/${agencyId}/ask/popular-chips?limit=${limit}`),
+    staleTime: 60_000,
   });
 }

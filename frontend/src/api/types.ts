@@ -161,7 +161,82 @@ export type BuildTool = {
   fields: BuildField[];
 };
 
-export type BuildSchema = { tools: BuildTool[] };
+export type ChipCategory = "meta" | "ranking" | "trend" | "compare" | "detail";
+
+export type ChipTemplate = {
+  id: string;
+  title: string;                  // localized server-side
+  tool: string;
+  args: Record<string, unknown>;
+  builder_required: boolean;
+};
+
+export type BuildSchema = {
+  tools: BuildTool[];
+  chips: Record<ChipCategory, ChipTemplate[]>;
+};
+
+export type FilterCtx = {
+  dow?: "all" | "weekday" | "weekend";
+  time_band?: string;
+  service?: string;
+  from_date?: string;
+  to_date?: string;
+  routes?: string[];
+  _client_id?: string;            // server adds this for migrated anon threads; client never sets it
+};
+
+export type Conversation = {
+  conversation_id: string;        // UUID
+  user_id: number | null;
+  agency_id: number;
+  title: string;
+  filter_ctx: FilterCtx;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConvMessage = {
+  message_id: number;
+  conversation_id: string;
+  role: "user" | "assistant";
+  chip_id: string | null;
+  tool: string | null;
+  args: Record<string, unknown> | null;
+  signature_hash: string | null;
+  result: {
+    kind: string;
+    summary: string | null;
+    rows: unknown[] | null;
+    columns: string[] | null;
+    series: unknown | null;
+    pairs: unknown | null;
+  } | null;
+  rendered_summary: string | null;
+  created_at: string;
+};
+
+export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
+
+export type FollowupChip = {
+  id: string;
+  title: string;
+  tool: string;
+  args: Record<string, unknown>;
+};
+
+// Anonymous (localStorage) shape — mirrors a Conversation + inline messages
+export type AnonThread = {
+  client_id: string;
+  agency_id: number;
+  title: string;
+  filter_ctx: FilterCtx;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+  messages: ConvMessage[];        // capped at 20 per thread
+};
 
 export type EditAction = "confirmed" | "edited";
 
