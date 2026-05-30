@@ -447,7 +447,7 @@ type ConvItemProps = {
   isActive: boolean;
   isRenaming: boolean;
   renameValue: string;
-  renameInputRef: RefObject<HTMLInputElement | null>;
+  renameInputRef: RefObject<HTMLInputElement>;
   onRenameChange: (v: string) => void;
   onRenameCommit: (id: string) => void;
   onRenameBlur: (id: string) => void;

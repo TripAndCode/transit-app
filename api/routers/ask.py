@@ -390,8 +390,7 @@ async def ask_build_schema(
     # Build chip catalog grouped by category with localized titles.
     chips_grouped = chips_by_category()
     chips_out: dict[str, list[dict[str, Any]]] = {
-        cat: [_serialize_chip(c, locale) for c in chip_list]
-        for cat, chip_list in chips_grouped.items()
+        cat: [_serialize_chip(c, locale) for c in chip_list] for cat, chip_list in chips_grouped.items()
     }
 
     return {"tools": tools_out, "chips": chips_out}

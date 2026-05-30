@@ -1,4 +1,5 @@
 """/ask/build-schema chips extension + /ask/popular-chips tests."""
+
 from __future__ import annotations
 
 import os
@@ -55,8 +56,7 @@ async def test_build_schema_includes_chips(chips_app):
 async def test_build_schema_localizes_chip_titles_ja(chips_app):
     app, agency_id, _ = chips_app
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get(f"/api/{agency_id}/ask/build-schema",
-                        headers={"Accept-Language": "ja"})
+        r = await c.get(f"/api/{agency_id}/ask/build-schema", headers={"Accept-Language": "ja"})
     body = r.json()
     titles = {chip["id"]: chip["title"] for cat in body["chips"].values() for chip in cat}
     assert "遅延ランキングTOP10" in titles.values()  # rank-delay-top
@@ -66,8 +66,7 @@ async def test_build_schema_localizes_chip_titles_ja(chips_app):
 async def test_build_schema_localizes_chip_titles_en(chips_app):
     app, agency_id, _ = chips_app
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get(f"/api/{agency_id}/ask/build-schema",
-                        headers={"Accept-Language": "en"})
+        r = await c.get(f"/api/{agency_id}/ask/build-schema", headers={"Accept-Language": "en"})
     body = r.json()
     titles = {chip["id"]: chip["title"] for cat in body["chips"].values() for chip in cat}
     assert "Top 10 by avg delay" in titles.values()
@@ -91,19 +90,30 @@ async def test_popular_chips_returns_top_by_hit_count(chips_app):
 
     from pipeline.query.chip_catalog import CHIPS_BY_ID
     from pipeline.query.intent import canonicalize, signature_hash
+
     ctx = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
-    h_topn  = signature_hash("top_n", canonicalize("top_n", CHIPS_BY_ID["rank-delay-top"].args, ctx))
+    h_topn = signature_hash("top_n", canonicalize("top_n", CHIPS_BY_ID["rank-delay-top"].args, ctx))
     h_stops = signature_hash("describe_data", canonicalize("describe_data", CHIPS_BY_ID["meta-stops"].args, ctx))
     async with pool.acquire() as conn:
         await conn.execute(
             """INSERT INTO ask_intent_cache (signature_hash, tool, args, confidence,
                hit_count, last_question, agency_id) VALUES ($1,$2,$3::jsonb,0.99,$4,$5,$6)""",
-            h_topn, "top_n", '{"metric": "avg_delay", "n": 10}', 8, "...", agency_id,
+            h_topn,
+            "top_n",
+            '{"metric": "avg_delay", "n": 10}',
+            8,
+            "...",
+            agency_id,
         )
         await conn.execute(
             """INSERT INTO ask_intent_cache (signature_hash, tool, args, confidence,
                hit_count, last_question, agency_id) VALUES ($1,$2,$3::jsonb,0.99,$4,$5,$6)""",
-            h_stops, "describe_data", '{"kind": "stops"}', 3, "...", agency_id,
+            h_stops,
+            "describe_data",
+            '{"kind": "stops"}',
+            3,
+            "...",
+            agency_id,
         )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get(f"/api/{agency_id}/ask/popular-chips?limit=6")

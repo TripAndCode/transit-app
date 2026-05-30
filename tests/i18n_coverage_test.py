@@ -30,8 +30,7 @@ try:
     from playwright.sync_api import sync_playwright
 except ImportError:
     pytest.skip(
-        "playwright not installed; run `poetry add --group dev playwright` "
-        "and `playwright install chromium`",
+        "playwright not installed; run `poetry add --group dev playwright` and `playwright install chromium`",
         allow_module_level=True,
     )
 
@@ -138,8 +137,9 @@ def app_server():
 def _scan_page(page, url: str, allow: set[str]) -> list[str]:
     """Navigate to *url*, force JA locale, and return un-allowed English tokens."""
     # First visit — set the locale key before the page renders.
+    # The SPA uses 'app.locale' as the localStorage key (see src/i18n/index.ts).
     page.goto(url, wait_until="networkidle", timeout=30_000)
-    page.evaluate("() => { localStorage.setItem('i18nextLng', 'ja'); }")
+    page.evaluate("() => { localStorage.setItem('app.locale', 'ja'); }")
     # Reload so the SPA picks up the stored locale on initialisation.
     page.reload(wait_until="networkidle", timeout=30_000)
 
@@ -189,10 +189,6 @@ def test_i18n_no_english_leakage_on_ja(app_server: str) -> None:
         finally:
             browser.close()
 
-    assert not all_offenders, (
-        "English-string offenders found in JA UI:\n"
-        + "\n".join(
-            f"  {url}:\n    " + "\n    ".join(sorted(offenders))
-            for url, offenders in all_offenders.items()
-        )
+    assert not all_offenders, "English-string offenders found in JA UI:\n" + "\n".join(
+        f"  {url}:\n    " + "\n    ".join(sorted(offenders)) for url, offenders in all_offenders.items()
     )

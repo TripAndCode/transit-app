@@ -1,4 +1,5 @@
 """Endpoints for ChatGPT/Claude-style thread persistence: CRUD + append-message + anon migration."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -84,8 +85,11 @@ async def create_conversation(
 ):
     csrf_guard(request)
     return await _conv.create_conversation(
-        conn, user_id=user.user_id, agency_id=agency_id,
-        title=body.title, filter_ctx=body.filter_ctx,
+        conn,
+        user_id=user.user_id,
+        agency_id=agency_id,
+        title=body.title,
+        filter_ctx=body.filter_ctx,
     )
 
 
@@ -165,7 +169,10 @@ async def migrate_anon_endpoint(
     csrf_guard(request)
     threads = [t.model_dump() for t in body.threads]
     inserted = await _conv.migrate_anon_threads(
-        conn, user_id=user.user_id, agency_id=agency_id, threads=threads,
+        conn,
+        user_id=user.user_id,
+        agency_id=agency_id,
+        threads=threads,
     )
     return {"inserted": inserted}
 
@@ -227,8 +234,14 @@ async def append_message_endpoint(
 
     # Append the user message first.
     user_msg = await _conv.append_message(
-        conn, conversation_id, role="user", chip_id=resolved_chip_id,
-        tool=None, args=None, signature_hash=None, result=None,
+        conn,
+        conversation_id,
+        role="user",
+        chip_id=resolved_chip_id,
+        tool=None,
+        args=None,
+        signature_hash=None,
+        result=None,
         rendered_summary=user_summary,
     )
 
@@ -240,28 +253,47 @@ async def append_message_endpoint(
     sig_hash = signature_hash(resolved_tool, can_args)
     try:
         await _intent_cache.upsert(
-            conn, sig_hash,
+            conn,
+            sig_hash,
             IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
-            can_args, agency_id, question=user_summary,
+            can_args,
+            agency_id,
+            question=user_summary,
         )
         result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
     except Exception as exc:
         rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
         assistant_msg = await _conv.append_message(
-            conn, conversation_id, role="assistant", chip_id=resolved_chip_id,
-            tool=resolved_tool, args=can_args, signature_hash=sig_hash,
-            result=None, rendered_summary=rendered,
+            conn,
+            conversation_id,
+            role="assistant",
+            chip_id=resolved_chip_id,
+            tool=resolved_tool,
+            args=can_args,
+            signature_hash=sig_hash,
+            result=None,
+            rendered_summary=rendered,
         )
         return {"user": user_msg, "assistant": assistant_msg}
 
     rendered = render_tool_result(result, locale=locale)
     result_dict = {
-        "kind": result.kind, "summary": result.summary, "rows": result.rows,
-        "columns": result.columns, "series": result.series, "pairs": result.pairs,
+        "kind": result.kind,
+        "summary": result.summary,
+        "rows": result.rows,
+        "columns": result.columns,
+        "series": result.series,
+        "pairs": result.pairs,
     }
     assistant_msg = await _conv.append_message(
-        conn, conversation_id, role="assistant", chip_id=resolved_chip_id,
-        tool=resolved_tool, args=can_args, signature_hash=sig_hash,
-        result=result_dict, rendered_summary=rendered,
+        conn,
+        conversation_id,
+        role="assistant",
+        chip_id=resolved_chip_id,
+        tool=resolved_tool,
+        args=can_args,
+        signature_hash=sig_hash,
+        result=result_dict,
+        rendered_summary=rendered,
     )
     return {"user": user_msg, "assistant": assistant_msg}
