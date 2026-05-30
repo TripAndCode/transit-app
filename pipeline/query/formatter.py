@@ -18,7 +18,7 @@ from typing import Any
 from pipeline.query.labels import dow_label
 
 _LOCALES: dict[tuple[str, str], str] = {
-    ("no_data", "ja"): "データがありません。期間や系統フィルタを見直してください。",
+    ("no_data", "ja"): "データがありません。期間や路線フィルタを見直してください。",
     ("no_data", "en"): "No data available. Try widening the range or clearing route filters.",
     ("no_static", "ja"): (
         "この質問にはGTFS Staticデータが必要です。\n"
@@ -28,19 +28,19 @@ _LOCALES: dict[tuple[str, str], str] = {
         "This report needs GTFS static data.\n"
         "Run `python gtfs_rag_pipeline.py load_static ./raw_archives_static` first."
     ),
-    ("ranking_header", "ja"): "【{label}遅延ランキング上位{limit}系統】",
+    ("ranking_header", "ja"): "【{label}遅延ランキング上位{limit}路線】",
     ("ranking_header", "en"): "[{label}Delay ranking — top {limit} routes]",
-    ("ranking_row", "ja"): "{rank}位: 系統{route}（{service}）平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
+    ("ranking_row", "ja"): "{rank}位: 路線{route}（{service}）平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
     ("ranking_row", "en"): (
         "#{rank} route {route} ({service}) mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)"
     ),
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
     ("on_time_header", "en"): "[{label}On-time rate ranking]",
-    ("on_time_row", "ja"): "{rank}位: 系統{route}（{service}）定時率{pct}%、平均{avg}分（{samples}件）",
+    ("on_time_row", "ja"): "{rank}位: 路線{route}（{service}）定時率{pct}%、平均{avg}分（{samples}件）",
     ("on_time_row", "en"): "#{rank} route {route} ({service}) on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
     ("worst5_header", "en"): "[{label}5+ minute delay ranking]",
-    ("worst5_row", "ja"): "{rank}位: 系統{route}（{service}）5分超: {count}回、平均{avg}分（{samples}件）",
+    ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超: {count}回、平均{avg}分（{samples}件）",
     ("worst5_row", "en"): "#{rank} route {route} ({service}) 5+ min: {count} times, mean {avg} min ({samples} samples)",
     ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
@@ -48,11 +48,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_header_other", "ja"): "【{label}{dow}曜日遅延ランキング】",
     ("dow_header_other", "en"): "[{label}{dow} delay ranking]",
-    ("dow_row", "ja"): "{rank}位: 系統{route}（{service}）{dow_label}: 平均{avg}分（{samples}件）",
+    ("dow_row", "ja"): "{rank}位: 路線{route}（{service}）{dow_label}: 平均{avg}分（{samples}件）",
     ("dow_row", "en"): "#{rank} route {route} ({service}) {dow_label}: mean {avg} min ({samples} samples)",
     ("compare_header", "ja"): "【平日・土日祝 遅延差ランキング】",
     ("compare_header", "en"): "[Weekday vs weekend/holiday delay-delta ranking]",
-    ("compare_row", "ja"): "{rank}位: 系統{route} 平日{weekday}分 / 土日祝{weekend}分（差: {delta}分, {direction}）",
+    ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差: {delta}分, {direction}）",
     ("compare_row", "en"): (
         "#{rank} route {route} weekday {weekday} min / weekend {weekend} min (Δ {delta} min, {direction})"
     ),

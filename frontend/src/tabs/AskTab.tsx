@@ -230,7 +230,7 @@ export function AskTab() {
         </div>
       )}
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0 4px" }}>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 4px" }}>
         {/* Chips: shown in chat mode when there are no messages yet */}
         {mode === "chat" && msgs.length === 0 && id != null && (
           <AskChips agencyId={id} onPick={(q) => submit(q)} />
