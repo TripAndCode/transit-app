@@ -219,16 +219,20 @@ async def ask(
         )
 
     if log_enabled:
-        await log_query(
-            conn,
-            agency_id,
-            body.question,
-            stage,
-            tool_name,
-            success,
-            signature_hash=sig_hash,
-            cache_outcome=cache_outcome,
-        )
+        # Build-mode synthetic questions (``__build__ tool {...}`` from the guided
+        # form) are machine-generated; logging the raw sentinel would pollute the
+        # analytics view of what users actually ask. Skip logging for those.
+        if not body.question.startswith("__build__"):
+            await log_query(
+                conn,
+                agency_id,
+                body.question,
+                stage,
+                tool_name,
+                success,
+                signature_hash=sig_hash,
+                cache_outcome=cache_outcome,
+            )
 
     return resp
 

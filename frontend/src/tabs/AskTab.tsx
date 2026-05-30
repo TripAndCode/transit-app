@@ -120,10 +120,12 @@ export function AskTab() {
     }
   }
 
-  async function submit(question: string) {
+  async function submit(question: string, displayText?: string) {
     const trimmed = question.trim();
     if (!trimmed || ask.isPending) return;
-    setMsgs((m) => [...m, { role: "user", text: trimmed }]);
+    // Build-mode submits pass a friendly displayText so users don't see the
+    // raw ``__build__ tool {...}`` sentinel in the chat bubble.
+    setMsgs((m) => [...m, { role: "user", text: displayText ?? trimmed }]);
     setInput("");
     setShowAutocomplete(false);
     await ask_(trimmed);
@@ -145,9 +147,15 @@ export function AskTab() {
    */
   async function submitStructured(tool: string, args: Record<string, unknown>) {
     const question = `__build__ ${tool} ${JSON.stringify(args)}`;
+    // Friendly display: "🛠 top_n (metric=avg_delay, n=10)" so the chat
+    // history doesn't show the raw machine sentinel.
+    const argSummary = Object.entries(args)
+      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+      .join(", ");
+    const displayText = `🛠 ${tool}${argSummary ? ` (${argSummary})` : ""}`;
     setMode("chat");
     setBuildInitial(null);
-    await submit(question);
+    await submit(question, displayText);
   }
 
   async function retry() {

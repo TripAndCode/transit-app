@@ -191,7 +191,10 @@ export function useAskSuggest(
       apiGet<SuggestItem[]>(
         `/api/${agencyId}/ask/suggest?q=${encodeURIComponent(debouncedQ)}&limit=8`,
       ),
-    enabled: debouncedQ.trim().length >= 2,
+    // Empty q is a valid "top-hits chip-set" query (server returns the
+    // most-hit cache rows). Short non-empty q would just be noise, so gate
+    // those out.
+    enabled: debouncedQ.trim().length === 0 || debouncedQ.trim().length >= 2,
     // NN distances against rag_chunks are stable between deploys — 5 min
     // stale-time prevents redundant round-trips while the user is typing.
     staleTime: 5 * 60 * 1000,
