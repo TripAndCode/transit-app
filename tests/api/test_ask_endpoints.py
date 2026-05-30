@@ -9,7 +9,10 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.conftest import TEST_ORIGIN
+
 DATABASE_URL = os.environ["DATABASE_URL"]
+_CSRF_HEADERS = {"Origin": TEST_ORIGIN}
 
 
 @pytest.fixture
@@ -87,6 +90,7 @@ async def test_edit_action_writes_user_action(ask_endpoints_client):
     r = await client.post(
         f"/api/{agency_id}/ask/edit-action",
         json={"signature_hash": sig_hash, "action": "edited"},
+        headers=_CSRF_HEADERS,
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True}
@@ -113,6 +117,7 @@ async def test_edit_action_confirmed(ask_endpoints_client):
     r = await client.post(
         f"/api/{agency_id}/ask/edit-action",
         json={"signature_hash": sig_hash, "action": "confirmed"},
+        headers=_CSRF_HEADERS,
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True}
@@ -124,6 +129,7 @@ async def test_edit_action_rejects_bad_action(ask_endpoints_client):
     r = await client.post(
         f"/api/{agency_id}/ask/edit-action",
         json={"signature_hash": "0000000000000000", "action": "garbage"},
+        headers=_CSRF_HEADERS,
     )
     assert r.status_code == 400
 

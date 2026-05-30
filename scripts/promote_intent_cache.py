@@ -32,6 +32,7 @@ import asyncpg
 from pipeline.query import intent_cache
 from pipeline.query.embeddings import get_embedder
 from pipeline.query.rag_index import _format_vec
+from pipeline.query.tools import _HANDLERS as _DISPATCHABLE_TOOLS
 
 _log = logging.getLogger(__name__)
 
@@ -57,6 +58,13 @@ async def promote(agency_id: int, hit_threshold: int = 5, quiet_days: int = 7) -
         )
         promoted = 0
         for c in candidates:
+            # Skip rows whose stored tool is not in the live dispatch table.
+            # The LLM sometimes returns ``tool="none"`` (or an obsolete name)
+            # for out-of-scope questions; promoting them would pollute the RAG
+            # index with garbage NN candidates.
+            if c["tool"] not in _DISPATCHABLE_TOOLS:
+                _log.info("skipping unknown tool %r for sig %s", c["tool"], c["signature_hash"])
+                continue
             content = c["last_question"]
             chunk_id = f"cache_{c['signature_hash']}"
 

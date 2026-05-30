@@ -15,6 +15,10 @@ from pipeline.query.intent import IntentSignature
 
 _ALLOWED_ACTIONS = frozenset({"confirmed", "edited"})
 
+# Mirror the cap in ``query_log.py`` so a 3000-char adversarial question can't
+# pollute the autocomplete chip surface (and, post-promotion, the RAG index).
+_MAX_QUESTION_CHARS = 1000
+
 
 async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> dict[str, Any] | None:
     """Return the cache row (as a dict) or None when the hash isn't cached."""
@@ -83,7 +87,7 @@ async def upsert(
         signature.tool,
         json.dumps(canonical_args, ensure_ascii=False, separators=(",", ":")),
         float(signature.confidence),
-        question,
+        question[:_MAX_QUESTION_CHARS],
         agency_id,
     )
 

@@ -125,6 +125,11 @@ async def ask(
     picks the response locale (defaults to JP).
     """
     csrf_guard(request)
+    # The frontend disables submit on empty input, but a direct API caller
+    # could still POST an empty/whitespace question and get a misleading
+    # describe_data answer back. Reject early.
+    if not body.question or not body.question.strip():
+        raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
 
     ctx_dict = {
@@ -463,7 +468,9 @@ class EditActionRequest(BaseModel):
 
 
 @router.post("/ask/edit-action")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask_edit_action(
+    request: Request,
     body: EditActionRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
@@ -472,7 +479,12 @@ async def ask_edit_action(
 
     Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``
     Returns ``{"ok": true}`` on success, 400 on unknown action.
+
+    Same CSRF + rate-limit guards as ``POST /ask`` — without them a cross-
+    origin attacker could mark arbitrary cache rows as ``edited`` (blocking
+    promotion) or ``confirmed`` (rubber-stamping bad interpretations).
     """
+    csrf_guard(request)
     try:
         await _intent_cache.update_user_action(conn, body.signature_hash, agency_id, body.action)
     except ValueError as exc:
