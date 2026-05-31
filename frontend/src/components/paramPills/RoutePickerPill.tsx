@@ -125,7 +125,7 @@ export function RoutePickerPill({
               const code = r.route_code;
               return (
                 <button
-                  key={code}
+                  key={code ?? `_null_${r.route_id}`}
                   type="button"
                   role="option"
                   aria-selected={code === value}
