@@ -2,42 +2,11 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
 import { useRoutes } from "../api/hooks";
+import type { CardTemplate, ParamSpec } from "./askCardTemplates";
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-export type ParamSpec =
-  | { kind: "route"; name: string; required?: boolean }
-  | {
-      kind: "metric";
-      name: string;
-      options: Array<{ value: string; label_key: string }>;
-      default?: string;
-    }
-  | { kind: "limit"; name: string; min?: number; max?: number; default?: number }
-  | { kind: "granularity"; name: string; default?: "day" | "week" | "month" }
-  | { kind: "service"; name: string; default?: "all" | "weekday" | "weekend" };
-
-export type CardTemplate = {
-  /** Unique slug, used in user_summary fallback. */
-  id: string;
-  /** i18n key under `ask.card.<id>.title` */
-  title_key: string;
-  /** Emoji shown next to title. */
-  emoji: string;
-  /** Tool slug to dispatch (e.g. "top_n", "trend"). */
-  tool: string;
-  /** Static args merged into the final args (e.g. {"metric": "avg_delay"} when not user-selectable). */
-  fixed_args?: Record<string, unknown>;
-  /** Parameter inputs to render. */
-  params: ParamSpec[];
-  /** Renders the user_summary preview string from current values. */
-  buildSummary: (
-    values: Record<string, unknown>,
-    t: (key: string, opts?: object) => string,
-  ) => string;
-};
+// Re-export so existing importers don't break in the brief window before
+// this file is deleted in Phase ③.7 T8.
+export type { CardTemplate, ParamSpec };
 
 export type ParameterizedQuestionCardProps = {
   template: CardTemplate;

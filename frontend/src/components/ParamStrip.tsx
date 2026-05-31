@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { CardTemplate, ParamSpec } from "./ParameterizedQuestionCard";
+import type { CardTemplate, ParamSpec } from "./askCardTemplates";
 import { SegmentedPill } from "./paramPills/SegmentedPill";
 import { LimitPill } from "./paramPills/LimitPill";
 import { RoutePickerPill } from "./paramPills/RoutePickerPill";
