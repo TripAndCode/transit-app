@@ -286,7 +286,7 @@
       "chip_strip_aria": "Question picker",
       "chip_strip_idle_hint": "Click to pick a question",
       "required_marker": "*",
-      "running": "Running…"
+      "running": "Running..."
     },
     "empty_hint": "Pick a card from the panel above and press Run.",
     "followup_placeholder": "Ask about this result...",
