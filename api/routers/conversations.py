@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from api.deps import get_agency, get_conn, get_current_user, get_locale
+from api.deps import get_agency, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx
 from api.security import csrf_guard
@@ -316,7 +317,22 @@ async def append_message_endpoint(
 
 class FollowupBody(BaseModel):
     question: str = Field(..., max_length=_followup.MAX_QUESTION_CHARS)
-    context_message_id: int
+    # Authed path: reference an existing assistant message stored in DB
+    context_message_id: int | None = None
+    # Anon path: inline the prior result (frontend has it in localStorage)
+    context_tool: str | None = None
+    context_args: dict[str, Any] | None = None
+    context_result: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_context(self) -> "FollowupBody":
+        has_db_ref = self.context_message_id is not None
+        has_inline = self.context_result is not None
+        if has_db_ref and has_inline:
+            raise ValueError("Provide either context_message_id or inline context, not both")
+        # Neither is valid but we let the endpoint decide based on auth — anon
+        # without inline context will 400 in the handler.
+        return self
 
 
 @router.post("/conversations/{conversation_id}/followup")
@@ -326,7 +342,7 @@ async def followup_endpoint(
     conversation_id: str,
     body: FollowupBody,
     agency_id: int = Depends(get_agency),  # noqa: ARG001
-    user=Depends(get_current_user),
+    user=Depends(get_current_user_optional),
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
 ):
@@ -335,11 +351,73 @@ async def followup_endpoint(
     Disabled by default; flip ``ASK_FOLLOWUP_ENABLED=true`` to enable. The
     follow-up calls the LLM with the prior message's structured result as the
     sole grounding context — no tool dispatch, no external retrieval.
+
+    Auth: accepts both authenticated and anonymous callers.
+    - Authed: context_message_id points to a DB-stored assistant message.
+    - Anon: context_tool/context_args/context_result inlined in request body
+      (the frontend holds these in localStorage).
     """
     csrf_guard(request)
 
     if not _followup.is_enabled():
         raise HTTPException(status_code=503, detail="followup_disabled")
+
+    if user is None:
+        # ── Anon path ─────────────────────────────────────────────────────────
+        if body.context_result is None:
+            raise HTTPException(
+                status_code=400,
+                detail="anon followup requires inline context (context_result)",
+            )
+
+        answer, err = await _followup.answer_followup(
+            question=body.question,
+            context_tool=body.context_tool,
+            context_args=body.context_args,
+            context_result=body.context_result,
+            locale=locale,
+        )
+        if err == "too_long":
+            raise HTTPException(status_code=400, detail="question_too_long")
+        if err is not None:
+            raise HTTPException(status_code=502, detail=f"llm_error:{err}")
+
+        # Return synthetic messages — frontend persists them to localStorage.
+        now = datetime.now(tz=timezone.utc).isoformat()
+        base_id = -int(time.time() * 1000)
+        return {
+            "user": {
+                "message_id": base_id,
+                "conversation_id": conversation_id,
+                "role": "user",
+                "chip_id": None,
+                "tool": None,
+                "args": None,
+                "signature_hash": None,
+                "result": None,
+                "rendered_summary": body.question,
+                "created_at": now,
+            },
+            "assistant": {
+                "message_id": base_id - 1,
+                "conversation_id": conversation_id,
+                "role": "assistant",
+                "chip_id": None,
+                "tool": None,
+                "args": {"context_message_id": body.context_message_id},
+                "signature_hash": None,
+                "result": None,
+                "rendered_summary": answer,
+                "created_at": now,
+            },
+        }
+
+    # ── Authed path ───────────────────────────────────────────────────────────
+    if body.context_message_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="authed followup requires context_message_id",
+        )
 
     # Ownership check (also confirms the conversation exists).
     try:

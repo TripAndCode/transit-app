@@ -21,6 +21,7 @@ import { FilterContextBar } from "../components/FilterContextBar";
 import { DailyChart } from "../components/charts/DailyChart";
 import { ParameterizedQuestionCard } from "../components/ParameterizedQuestionCard";
 import { buildCardTemplates } from "../components/askCardTemplates";
+import { FOLLOWUP_CHIPS } from "../components/askFollowupChips";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ export function AskTab() {
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
   const updateConv = useUpdateConversation(id ?? 0);
-  const followup = useFollowup(id ?? 0);
+  const followup = useFollowup(id ?? 0, authed);
   const followupFlag = useFollowupEnabled(id);
   const followupEnabled = followupFlag.data?.enabled === true;
 
@@ -395,8 +396,8 @@ function MessageList({
   followupBusy: boolean;
   onFollowup: (contextMsgId: number, question: string) => void;
 }) {
-  // Last assistant message with a tool result is the only one that gets a
-  // follow-up input — follow-ups on follow-ups would compound LLM error.
+  // Last assistant message with a tool result is the only one that gets
+  // followup chips — scoped to avoid compounding LLM errors on LLM answers.
   const lastResultMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -413,7 +414,7 @@ function MessageList({
           msg={m}
           formatRoute={formatRoute}
           t={t}
-          showFollowupInput={
+          showFollowupChips={
             followupEnabled && m.message_id === lastResultMsgId
           }
           followupBusy={followupBusy}
@@ -430,28 +431,20 @@ function Bubble({
   msg,
   formatRoute,
   t,
-  showFollowupInput,
+  showFollowupChips,
   followupBusy,
   onFollowup,
 }: {
   msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
-  showFollowupInput: boolean;
+  showFollowupChips: boolean;
   followupBusy: boolean;
   onFollowup: (contextMsgId: number, question: string) => void;
 }) {
   const isUser = msg.role === "user";
   const result = msg.result as ToolResult | null;
   const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
-  const [followupText, setFollowupText] = useState("");
-
-  function submitFollowup() {
-    const q = followupText.trim();
-    if (!q || followupBusy) return;
-    onFollowup(msg.message_id, q);
-    setFollowupText("");
-  }
 
   return (
     <div
@@ -488,59 +481,46 @@ function Bubble({
         )}
       </div>
 
-      {showFollowupInput && (
+      {showFollowupChips && (
         <div
+          aria-label={t("ask.followup_chips.panel_aria", { defaultValue: "フォローアップ質問" })}
           style={{
-            marginTop: 6,
+            marginTop: 8,
             width: wide ? "100%" : "85%",
             display: "flex",
+            flexWrap: "wrap",
             gap: 6,
           }}
         >
-          <input
-            type="text"
-            value={followupText}
-            onChange={(e) => setFollowupText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submitFollowup();
-              }
-            }}
-            disabled={followupBusy}
-            placeholder={t("ask.followup_placeholder", {
-              defaultValue: "この結果について質問...",
-            })}
-            maxLength={500}
-            style={{
-              flex: 1,
-              padding: "6px 10px",
-              fontSize: 13,
-              border: "1px solid var(--border-soft)",
-              borderRadius: 6,
-              background: "var(--bg-surface)",
-              color: "var(--text-primary)",
-            }}
-          />
-          <button
-            type="button"
-            onClick={submitFollowup}
-            disabled={!followupText.trim() || followupBusy}
-            style={{
-              padding: "6px 12px",
-              fontSize: 13,
-              background: "var(--accent, #4a8aaa)",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: followupText.trim() && !followupBusy ? "pointer" : "not-allowed",
-              opacity: followupText.trim() && !followupBusy ? 1 : 0.6,
-            }}
-          >
-            {followupBusy
-              ? t("ask.thinking", { defaultValue: "..." })
-              : t("ask.followup_send", { defaultValue: "送信" })}
-          </button>
+          {FOLLOWUP_CHIPS.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              disabled={followupBusy}
+              onClick={() => onFollowup(msg.message_id, t(chip.prompt_key))}
+              style={{
+                padding: "5px 12px",
+                fontSize: 12,
+                background: "var(--bg-soft, #f4f4f5)",
+                color: "var(--text-secondary, #52525b)",
+                border: "1px solid var(--border-soft, #e4e4e7)",
+                borderRadius: 999,
+                cursor: followupBusy ? "not-allowed" : "pointer",
+                opacity: followupBusy ? 0.55 : 1,
+                whiteSpace: "nowrap",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (!followupBusy)
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
+              }}
+            >
+              {t(chip.label_key)}
+            </button>
+          ))}
         </div>
       )}
     </div>

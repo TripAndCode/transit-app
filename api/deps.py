@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, Request
 
-from api.security import require_user
+from api.security import current_user, require_user
 
 
 async def get_conn(request: Request):
@@ -27,3 +27,6 @@ def get_locale(request: Request) -> str:
 # Alias so routers can import get_current_user from api.deps and tests
 # can override it via app.dependency_overrides without touching api.security.
 get_current_user = require_user
+
+# Optional variant — returns None for anonymous callers instead of 401.
+get_current_user_optional = current_user

@@ -470,21 +470,47 @@ export function useFollowupEnabled(agencyId: number | null) {
   });
 }
 
-export function useFollowup(agencyId: number) {
+export function useFollowup(agencyId: number, authed: boolean) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: {
       conversationId: string;
       contextMessageId: number;
       question: string;
-    }) =>
-      apiPost<AppendMessageResult>(
+    }) => {
+      if (authed) {
+        return apiPost<AppendMessageResult>(
+          `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
+          { question: vars.question, context_message_id: vars.contextMessageId },
+        );
+      }
+      // Anon path: look up context message from localStorage
+      const localThread = conversationsAnon.get(vars.conversationId);
+      const ctx = localThread?.messages.find((m) => m.message_id === vars.contextMessageId);
+      if (!ctx) throw new Error("local context message not found");
+      const resp = await apiPost<AppendMessageResult>(
         `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
-        { question: vars.question, context_message_id: vars.contextMessageId },
-      ),
+        {
+          question: vars.question,
+          context_tool: ctx.tool ?? null,
+          context_args: ctx.args ?? null,
+          context_result: ctx.result ?? null,
+        },
+      );
+      // Persist synthetic messages to localStorage
+      conversationsAnon.appendMessage(vars.conversationId, resp.user);
+      conversationsAnon.appendMessage(vars.conversationId, resp.assistant);
+      return resp;
+    },
     onSuccess: (_result, vars) => {
-      qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
-      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      if (authed) {
+        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      } else {
+        // Anon: invalidate the local conversation query so UI re-renders
+        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      }
     },
   });
 }

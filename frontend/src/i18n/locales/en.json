@@ -285,6 +285,31 @@
     "empty_hint": "Pick a card from the panel above and press Run.",
     "followup_placeholder": "Ask about this result...",
     "followup_send": "Send",
+    "followup_chips": {
+      "panel_aria": "Follow-up questions",
+      "chips": {
+        "why": {
+          "label": "Why this pattern?",
+          "prompt": "Explain the pattern in this result in 3 sentences or fewer."
+        },
+        "reliability": {
+          "label": "Is the sample size reliable?",
+          "prompt": "How reliable is this result from a sample-size perspective? Point out any routes with low observation counts."
+        },
+        "slice": {
+          "label": "Other slices?",
+          "prompt": "Describe the likely differences when looking at other slices (weekday vs weekend, time of day, etc.)."
+        },
+        "summarize": {
+          "label": "Summarize in 3 points",
+          "prompt": "Summarize the 3 most important takeaways from this result as bullet points."
+        },
+        "next": {
+          "label": "What to look at next?",
+          "prompt": "Based on this result, suggest one analysis to investigate next."
+        }
+      }
+    },
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
     "submit": "Send",
