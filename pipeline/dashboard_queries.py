@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field, replace as dc_replace
+from dataclasses import dataclass, field
+from dataclasses import replace as dc_replace
 from datetime import timedelta
 from typing import Any
 
@@ -175,9 +176,7 @@ async def anomaly_timeline(
     """30-day daily avg delay (min) + outlier days flagged at ±sigma."""
     cte_sql, cte_params = _deduped_cte(agency_id, ctx)
     rows = await conn.fetch(
-        f"{cte_sql}"
-        "SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min "
-        "FROM deduped GROUP BY d ORDER BY d",
+        f"{cte_sql}SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min FROM deduped GROUP BY d ORDER BY d",
         *cte_params,
     )
     series = [

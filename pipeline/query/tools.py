@@ -548,11 +548,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
 
     # For on_time_rate with best_first=False, show "下位N路線" to make clear
     # the result is the worst routes, not the best.
-    summary_key = (
-        "ranking_summary_worst"
-        if metric == "on_time_rate" and not best_first
-        else "ranking_summary"
-    )
+    summary_key = "ranking_summary_worst" if metric == "on_time_rate" and not best_first else "ranking_summary"
     return ToolResult(
         kind="table",
         summary=_summary(summary_key, lang=locale, label=label, count=len(rows)),

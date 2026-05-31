@@ -11,6 +11,7 @@ def test_ask_eval_passes():
     # packages (pipeline.*) are importable. Fall back to sys.executable for
     # environments where the venv is already active (e.g. CI with poetry run).
     import shutil
+
     project_root = Path(__file__).parent.parent
     poetry_exe = shutil.which("poetry")
     if poetry_exe:
