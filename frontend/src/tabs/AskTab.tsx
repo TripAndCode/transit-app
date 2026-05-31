@@ -8,9 +8,6 @@ import {
   useAppendMessage,
   useMigrateAnon,
   useIsAuthenticated,
-  useDashboardHeatmap,
-  useDashboardAnomalies,
-  useDashboardMovers,
 } from "../api/hooks";
 import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
@@ -19,9 +16,6 @@ import type { ToolResult, TrendDay } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
 import { DailyChart } from "../components/charts/DailyChart";
-import { DelayHeatmap } from "../components/DelayHeatmap";
-import { AnomalyTimeline } from "../components/AnomalyTimeline";
-import { MoversList } from "../components/MoversList";
 import { ParameterizedQuestionCard } from "../components/ParameterizedQuestionCard";
 import { buildCardTemplates } from "../components/askCardTemplates";
 
@@ -68,9 +62,6 @@ export function AskTab() {
   // Local FilterCtx for the current view (synced from the active conversation's filter_ctx)
   const [filterCtx, setFilterCtx] = useState<FilterCtx>(() => rangeCtxToFilterCtx(rangeCtx));
 
-  // Heatmap dimension toggle — parent owns state so filter changes can reset it
-  const [heatDim, setHeatDim] = useState<"dow" | "hour_band">("dow");
-
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
   const migrateAnon = useMigrateAnon(id ?? 0);
@@ -98,11 +89,6 @@ export function AskTab() {
   useEffect(() => {
     if (!activeId) setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
   }, [activeId, rangeCtx]);
-
-  // ── Dashboard queries ─────────────────────────────────────────────────────
-  const heatmap = useDashboardHeatmap(id ?? 0, filterCtx, heatDim, 15);
-  const anomaly = useDashboardAnomalies(id ?? 0, filterCtx, 2.0);
-  const movers = useDashboardMovers(id ?? 0, filterCtx, 7, 8);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -213,49 +199,7 @@ export function AskTab() {
             scrollbarGutter: "stable",
           }}
         >
-          {/* ── Dashboard row ───────────────────────────────────────────── */}
-          {id != null && (
-            <div style={{ marginBottom: 16 }}>
-              {/* Heatmap + Anomaly side-by-side on md+, stacked on narrow */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                  gap: 16,
-                  marginBottom: 16,
-                }}
-              >
-                <DelayHeatmap
-                  data={heatmap.data}
-                  isLoading={heatmap.isLoading}
-                  isError={heatmap.isError}
-                  dimension={heatDim}
-                  onDimensionChange={setHeatDim}
-                  onCellClick={(rc, d, v) =>
-                    console.log("heatmap click", rc, d, v)
-                  }
-                />
-                <AnomalyTimeline
-                  data={anomaly.data}
-                  isLoading={anomaly.isLoading}
-                  isError={anomaly.isError}
-                  onAnomalyClick={(d, s) =>
-                    console.log("anomaly click", d, s)
-                  }
-                />
-              </div>
-
-              <MoversList
-                data={movers.data}
-                isLoading={movers.isLoading}
-                isError={movers.isError}
-                windowDays={7}
-                onRowClick={(rc) => console.log("mover click", rc)}
-              />
-            </div>
-          )}
-
-          {/* ── Question cards row ──────────────────────────────────────── */}
+          {/* ── Question cards row (top of Ask) ─────────────────────────── */}
           {id != null && (
             <div
               style={{
