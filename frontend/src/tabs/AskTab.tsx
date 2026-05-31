@@ -8,6 +8,7 @@ import {
   useAppendMessage,
   useMigrateAnon,
   useIsAuthenticated,
+  useUpdateConversation,
 } from "../api/hooks";
 import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
@@ -78,6 +79,7 @@ export function AskTab() {
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
+  const updateConv = useUpdateConversation(id ?? 0);
 
   // When the active conversation loads, sync the filter context
   useEffect(() => {
@@ -89,6 +91,17 @@ export function AskTab() {
   useEffect(() => {
     if (!activeId) setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
   }, [activeId, rangeCtx]);
+
+  // User-initiated filter edit. When an active thread exists, persist the
+  // new filter to the conversation so subsequent 実行 calls dispatch with
+  // the visible filter — otherwise the backend reads the stale conv.filter_ctx
+  // and the UI lies about scope.
+  function handleFilterChange(next: FilterCtx) {
+    setFilterCtx(next);
+    if (activeId) {
+      updateConv.mutate({ id: activeId, patch: { filter_ctx: next } });
+    }
+  }
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -191,7 +204,7 @@ export function AskTab() {
         <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
           <FilterContextBar
             value={filterCtx}
-            onChange={setFilterCtx}
+            onChange={handleFilterChange}
             pending={appendMsg.isPending || createConv.isPending}
           />
         </div>
