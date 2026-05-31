@@ -283,6 +283,8 @@
     "cards_strip_aria": "New question",
     "cards_strip_hint": "Click to open the question panel",
     "empty_hint": "Pick a card from the panel above and press Run.",
+    "followup_placeholder": "Ask about this result...",
+    "followup_send": "Send",
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
     "submit": "Send",

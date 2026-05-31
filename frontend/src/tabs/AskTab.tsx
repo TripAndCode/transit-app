@@ -9,6 +9,8 @@ import {
   useMigrateAnon,
   useIsAuthenticated,
   useUpdateConversation,
+  useFollowup,
+  useFollowupEnabled,
 } from "../api/hooks";
 import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
@@ -80,6 +82,9 @@ export function AskTab() {
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
   const updateConv = useUpdateConversation(id ?? 0);
+  const followup = useFollowup(id ?? 0);
+  const followupFlag = useFollowupEnabled(id);
+  const followupEnabled = followupFlag.data?.enabled === true;
 
   // When the active conversation loads, sync the filter context
   useEffect(() => {
@@ -323,6 +328,16 @@ export function AskTab() {
                 messages={messages}
                 formatRoute={routeNames.format}
                 t={t}
+                followupEnabled={followupEnabled}
+                followupBusy={followup.isPending}
+                onFollowup={(ctxMsgId, question) =>
+                  activeId &&
+                  followup.mutate({
+                    conversationId: activeId,
+                    contextMessageId: ctxMsgId,
+                    question,
+                  })
+                }
               />
 
               {appendMsg.isPending && (
@@ -369,15 +384,41 @@ function MessageList({
   messages,
   formatRoute,
   t,
+  followupEnabled,
+  followupBusy,
+  onFollowup,
 }: {
   messages: ConvMessage[];
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
+  followupEnabled: boolean;
+  followupBusy: boolean;
+  onFollowup: (contextMsgId: number, question: string) => void;
 }) {
+  // Last assistant message with a tool result is the only one that gets a
+  // follow-up input — follow-ups on follow-ups would compound LLM error.
+  const lastResultMsgId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.tool && m.result) return m.message_id;
+    }
+    return null;
+  })();
+
   return (
     <>
       {messages.map((m) => (
-        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} />
+        <Bubble
+          key={m.message_id}
+          msg={m}
+          formatRoute={formatRoute}
+          t={t}
+          showFollowupInput={
+            followupEnabled && m.message_id === lastResultMsgId
+          }
+          followupBusy={followupBusy}
+          onFollowup={onFollowup}
+        />
       ))}
     </>
   );
@@ -389,20 +430,35 @@ function Bubble({
   msg,
   formatRoute,
   t,
+  showFollowupInput,
+  followupBusy,
+  onFollowup,
 }: {
   msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
+  showFollowupInput: boolean;
+  followupBusy: boolean;
+  onFollowup: (contextMsgId: number, question: string) => void;
 }) {
   const isUser = msg.role === "user";
   const result = msg.result as ToolResult | null;
   const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
+  const [followupText, setFollowupText] = useState("");
+
+  function submitFollowup() {
+    const q = followupText.trim();
+    if (!q || followupBusy) return;
+    onFollowup(msg.message_id, q);
+    setFollowupText("");
+  }
 
   return (
     <div
       style={{
         display: "flex",
-        justifyContent: isUser ? "flex-end" : "flex-start",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
         margin: "12px 0",
       }}
     >
@@ -431,6 +487,62 @@ function Bubble({
           </details>
         )}
       </div>
+
+      {showFollowupInput && (
+        <div
+          style={{
+            marginTop: 6,
+            width: wide ? "100%" : "85%",
+            display: "flex",
+            gap: 6,
+          }}
+        >
+          <input
+            type="text"
+            value={followupText}
+            onChange={(e) => setFollowupText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submitFollowup();
+              }
+            }}
+            disabled={followupBusy}
+            placeholder={t("ask.followup_placeholder", {
+              defaultValue: "この結果について質問...",
+            })}
+            maxLength={500}
+            style={{
+              flex: 1,
+              padding: "6px 10px",
+              fontSize: 13,
+              border: "1px solid var(--border-soft)",
+              borderRadius: 6,
+              background: "var(--bg-surface)",
+              color: "var(--text-primary)",
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitFollowup}
+            disabled={!followupText.trim() || followupBusy}
+            style={{
+              padding: "6px 12px",
+              fontSize: 13,
+              background: "var(--accent, #4a8aaa)",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              cursor: followupText.trim() && !followupBusy ? "pointer" : "not-allowed",
+              opacity: followupText.trim() && !followupBusy ? 1 : 0.6,
+            }}
+          >
+            {followupBusy
+              ? t("ask.thinking", { defaultValue: "..." })
+              : t("ask.followup_send", { defaultValue: "送信" })}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

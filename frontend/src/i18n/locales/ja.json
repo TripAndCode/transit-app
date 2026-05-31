@@ -283,6 +283,8 @@
     "cards_strip_aria": "新しい質問",
     "cards_strip_hint": "クリックで質問パネルを開く",
     "empty_hint": "上の質問パネルから一つ選んで 実行 を押してください。",
+    "followup_placeholder": "この結果について質問...",
+    "followup_send": "送信",
     "input_aria": "質問を入力",
     "input_placeholder": "例: 路線5の今月の遅延傾向は?",
     "submit": "送信",

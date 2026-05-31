@@ -460,6 +460,35 @@ export function useAppendMessage(agencyId: number) {
   });
 }
 
+export function useFollowupEnabled(agencyId: number | null) {
+  return useQuery({
+    queryKey: ["ask-followup-enabled", agencyId],
+    queryFn: () =>
+      apiGet<{ enabled: boolean }>(`/api/${agencyId}/ask/followup-enabled`),
+    enabled: agencyId != null,
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useFollowup(agencyId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      conversationId: string;
+      contextMessageId: number;
+      question: string;
+    }) =>
+      apiPost<AppendMessageResult>(
+        `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
+        { question: vars.question, context_message_id: vars.contextMessageId },
+      ),
+    onSuccess: (_result, vars) => {
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+    },
+  });
+}
+
 export function useMigrateAnon(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({

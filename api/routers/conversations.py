@@ -13,6 +13,7 @@ from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
+from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
@@ -308,3 +309,98 @@ async def append_message_endpoint(
             rendered_summary=rendered,
         )
     return {"user": user_msg, "assistant": assistant_msg}
+
+
+# ─── LLM follow-up (kill-switch gated) ────────────────────────────────────────
+
+
+class FollowupBody(BaseModel):
+    question: str = Field(..., max_length=_followup.MAX_QUESTION_CHARS)
+    context_message_id: int
+
+
+@router.post("/conversations/{conversation_id}/followup")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def followup_endpoint(
+    request: Request,
+    conversation_id: str,
+    body: FollowupBody,
+    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    user=Depends(get_current_user),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """LLM-grounded follow-up on a prior assistant result.
+
+    Disabled by default; flip ``ASK_FOLLOWUP_ENABLED=true`` to enable. The
+    follow-up calls the LLM with the prior message's structured result as the
+    sole grounding context — no tool dispatch, no external retrieval.
+    """
+    csrf_guard(request)
+
+    if not _followup.is_enabled():
+        raise HTTPException(status_code=503, detail="followup_disabled")
+
+    # Ownership check (also confirms the conversation exists).
+    try:
+        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+    except (_conv.PermissionDenied, LookupError):
+        raise HTTPException(status_code=404, detail="not found") from None
+
+    # Fetch the context message (must belong to this conversation).
+    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
+    ctx_msg = next(
+        (m for m in messages if m["message_id"] == body.context_message_id),
+        None,
+    )
+    if ctx_msg is None:
+        raise HTTPException(status_code=404, detail="context message not found")
+    if ctx_msg.get("role") != "assistant":
+        raise HTTPException(status_code=400, detail="context must be an assistant message")
+
+    answer, err = await _followup.answer_followup(
+        question=body.question,
+        context_tool=ctx_msg.get("tool"),
+        context_args=ctx_msg.get("args"),
+        context_result=ctx_msg.get("result"),
+        locale=locale,
+    )
+    if err == "too_long":
+        raise HTTPException(status_code=400, detail="question_too_long")
+    if err is not None:
+        raise HTTPException(status_code=502, detail=f"llm_error:{err}")
+
+    # Append both messages atomically so a mid-flight cancel doesn't leave
+    # a dangling user message in the thread.
+    async with conn.transaction():
+        user_msg = await _conv.append_message(
+            conn,
+            conversation_id,
+            role="user",
+            chip_id=None,
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=body.question,
+        )
+        assistant_msg = await _conv.append_message(
+            conn,
+            conversation_id,
+            role="assistant",
+            chip_id=None,
+            tool=None,
+            args={"context_message_id": body.context_message_id},
+            signature_hash=None,
+            result=None,
+            rendered_summary=answer,
+        )
+    return {"user": user_msg, "assistant": assistant_msg}
+
+
+@router.get("/ask/followup-enabled")
+async def followup_enabled_endpoint(
+    agency_id: int = Depends(get_agency),  # noqa: ARG001
+):
+    """Public flag check so the frontend knows whether to render the input."""
+    return {"enabled": _followup.is_enabled()}
