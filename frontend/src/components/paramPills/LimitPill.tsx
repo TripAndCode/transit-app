@@ -23,6 +23,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
   }, [open]);
 
   function commit(next: number) {
+    if (!Number.isFinite(next)) return;
     const clamped = Math.max(min, Math.min(max, Math.round(next)));
     onChange(clamped);
   }
