@@ -132,9 +132,15 @@ async def compute_on_time(
     conn,
     threshold_sec: int = 60,
     limit: int = 100,
+    sort_order: str = "desc",
 ) -> list[tuple]:
-    """On-time percentage per route-service. ``threshold_sec`` is the cutoff."""
+    """On-time percentage per route-service. ``threshold_sec`` is the cutoff.
+
+    ``sort_order='desc'`` returns best on-time routes first (highest %);
+    ``sort_order='asc'`` returns worst routes first (lowest %) for BUG-3.
+    """
     where, params, n = build_updates_filter(ctx, next_param=2)
+    order = "DESC" if sort_order.lower() == "desc" else "ASC"
     sql = (
         f"WITH {_dedup_cte(where)}\n"
         "SELECT route_code, service_type,\n"
@@ -146,7 +152,7 @@ async def compute_on_time(
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
         "HAVING COUNT(*) > 20\n"
-        "ORDER BY on_time_pct DESC NULLS LAST\n"
+        f"ORDER BY on_time_pct {order} NULLS LAST\n"
         f"LIMIT ${n}"
     )
     rows = await conn.fetch(sql, agency_id, *params, limit)
@@ -341,24 +347,34 @@ async def compute_trend_series(
     ctx: RangeCtx,
     conn,
     top_offenders: int = 3,
+    granularity: str = "day",
 ) -> dict:
-    """Daily series + per-day worst-route attribution for the Trend chart.
+    """Bucketed series + per-bucket worst-route attribution for the Trend chart.
 
-    Returns ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``.
+    ``granularity`` controls the time bucket: ``'day'`` (default), ``'week'``,
+    or ``'month'``. Returns
+    ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``
+    where ``date`` is the bucket start date (ISO string).
     """
     where, params, _ = build_updates_filter(ctx, next_param=2)
-    # Single SQL: build dedup + per_day in one CTE chain, then derive the
-    # daily aggregate from per_day so we touch ``updates`` exactly once.
+
+    # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
+    _TRUNC = {"day": "day", "week": "week", "month": "month"}
+    trunc_unit = _TRUNC.get(granularity, "day")
+
+    # Single SQL: build dedup + per_bucket in one CTE chain.
+    # date_trunc on a DATE requires casting to timestamp and back to date.
     sql = (
         f"WITH {_dedup_cte(where)},\n"
-        "per_day AS (\n"
-        "    SELECT date, route_code, service_type,\n"
+        "per_bucket AS (\n"
+        f"    SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
+        "           route_code, service_type,\n"
         "           ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
         "           COUNT(*) AS samples\n"
-        "    FROM deduped GROUP BY date, route_code, service_type\n"
+        "    FROM deduped GROUP BY bucket, route_code, service_type\n"
         "    HAVING COUNT(*) > 5\n"
         ")\n"
-        "SELECT * FROM per_day"
+        "SELECT * FROM per_bucket"
     )
     per_day = await conn.fetch(sql, agency_id, *params)
 
@@ -366,7 +382,8 @@ async def compute_trend_series(
     by_date_weighted: dict = {}
     by_date: dict = {}
     for r in per_day:
-        d = r["date"]
+        # SQL now aliases the time-bucketed column as "bucket".
+        d = r["bucket"]
         avg = float(r["avg_min"]) if r["avg_min"] is not None else None
         n = r["samples"]
         by_date_samples[d] = by_date_samples.get(d, 0) + n

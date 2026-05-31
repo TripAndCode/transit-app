@@ -174,11 +174,13 @@ async def chat_with_tools(
     # machine-generated strings surface as chips / autocomplete suggestions.
     _skip_cache_write = question.startswith(_BUILD_SENTINEL)
 
-    # Build-mode short-circuit: when the cache flag is on AND the question
-    # is a build-form sentinel, parse (tool, args) directly and dispatch
-    # without ever calling the LLM. This is the spec's "zero-LLM determinism
-    # path" — confidence=1.0 because the user constructed the query directly.
-    if _cache_enabled() and _skip_cache_write:
+    # Build-mode short-circuit: when the question is a build-form sentinel,
+    # parse (tool, args) directly and dispatch without ever calling the LLM.
+    # This is the spec's "zero-LLM determinism path" — confidence=1.0 because
+    # the user constructed the query directly. The cache flag is irrelevant
+    # here: the sentinel is frontend-controlled and the path must always be
+    # deterministic regardless of cache configuration.
+    if _skip_cache_write:
         parsed = _parse_build_sentinel(question)
         if parsed is not None:
             build_tool, build_args = parsed
