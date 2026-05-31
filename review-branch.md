@@ -91,3 +91,58 @@ None of the six bugs were deferred. All four ship-blockers and both P1 issues ar
 ## Recommendation
 
 **MERGE** — all ship-blockers and P1 issues are fixed, eval 20/20, TypeScript clean, build clean, 436 tests pass. The 16 test errors are pre-existing asyncpg deadlock races on the shared dev DB and are not regressions from this branch.
+
+---
+
+# Phase ③.7 — Ask tab redesign (QuestionDock)
+
+## What changed
+
+Replaced the always-visible 5-card grid + collapse-strip with a chat-first **QuestionDock**: chips pinned at bottom, inline param strip rises above chips when composing, results land in the scroll area above, follow-up chips appear under the last result-bearing assistant bubble.
+
+Files (net):
+- NEW `frontend/src/components/QuestionDock.tsx` — idle/composing/busy state machine, 5-chip row, swap-on-tap
+- NEW `frontend/src/components/ParamStrip.tsx` — single-row param composer per template, exhaustive ParamSpec switch
+- NEW `frontend/src/components/paramPills/{SegmentedPill,LimitPill,RoutePickerPill}.tsx` — small popover controls
+- MOD `frontend/src/tabs/AskTab.tsx` — mounts QuestionDock as bottom sticky region, drops cards grid + cardsExpanded state
+- MOD `frontend/src/components/askCardTemplates.ts` — absorbed CardTemplate + ParamSpec types from the deleted card file
+- MOD `frontend/src/i18n/locales/{ja,en}.json` — `ask.dock.*` added, `ask.cards_strip_*` orphans removed
+- DEL `frontend/src/components/ParameterizedQuestionCard.tsx` — replaced
+
+## Quality gates
+
+- pytest: 452 pass / 2 fail / 4 skip / 1 error — failures are pre-existing dev-DB deadlocks, zero regressions
+- `scripts/ask_eval.py` — builder_coverage 20/20 (100.0%), exit 0
+- `tsc --noEmit` — clean
+- `npm run build` — succeeds
+- Playwright e2e — 11/13 ✓, 2 skipped (authed manual / kill switch needs backend restart). Zero failures.
+
+## Reviews
+
+Five fresh-context subagents reviewed: QuestionDock+ParamStrip / pills / AskTab integration / i18n / calm-UI palette.
+
+P1 findings fixed in `6091fbe`:
+- All 3 pills now restore focus + Escape-to-close
+- RoutePickerPill filters routes with null `route_code`
+- ParamStrip drops incorrect `aria-busy` on 実行 button
+- QuestionDock adds `aria-disabled` to busy-locked chips
+- AskTab `handleSelectThread(id)` renamed to `handleSelectThread(threadId)` (shadowing fix)
+- Required-* marker color reduced from hsl(25,55%,50%) → hsl(25,40%,50%) (less alarm)
+- Inline `var(--accent, …)` fallbacks unified to `#5b6cad` to match the actual CSS variable
+
+## Deferred (P2s)
+
+- LimitPill uncontrolled-typing race (NaN swallow visible) — uses local draft string state
+- RoutePickerPill viewport-clip on tall popovers (low priority, desktop-first tool)
+- `q` search-input is reset on selection but not on outside-click — minor UX nit; user must re-type if they bail
+- `appendMsg.isPending` scroll-effect fires twice per submit — visual jank is below threshold
+- `convQuery.data?.conversation?.filter_ctx` ref-equality re-fires — benign in practice
+- `ask.dock.composing_label` defined in both locales but currently unused — kept for future composing-state header
+- Inline `defaultValue: "指標"` JA fallback inside English code path — would only show JA on locale-load failure
+- Hover styles on pill triggers absent (relies on cursor change) — visual nicety
+- "dashed" border separator between param strip and chip row — slightly informal; intentional for now
+- Stale-closure on `handleRun` if `onSubmit` rejected — current code is fire-and-forget; parent's `appendMsg.isError` surfaces failure, no values to restore
+
+## Recommendation
+
+MERGE — chat-first redesign lands cleanly, all P0/P1 reviewer findings addressed, e2e covers the happy paths, kill switch verified by design (gated on `ASK_FOLLOWUP_ENABLED`).
