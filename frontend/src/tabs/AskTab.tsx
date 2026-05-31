@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -19,8 +19,7 @@ import type { ToolResult, TrendDay } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
 import { DailyChart } from "../components/charts/DailyChart";
-import { ParameterizedQuestionCard } from "../components/ParameterizedQuestionCard";
-import { buildCardTemplates } from "../components/askCardTemplates";
+import { QuestionDock } from "../components/QuestionDock";
 import { FOLLOWUP_CHIPS } from "../components/askFollowupChips";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -54,7 +53,7 @@ function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
 // ─── AskTab ───────────────────────────────────────────────────────────────────
 
 export function AskTab() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [rangeCtx] = useRangeContext();
@@ -113,21 +112,6 @@ export function AskTab() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convQuery.data?.messages, appendMsg.isPending]);
-
-  // Cards default to expanded on empty thread, collapsed once messages exist.
-  // User-controllable via the strip toggle to keep "ask another" one tap away.
-  const hasMessagesNow = (convQuery.data?.messages?.length ?? 0) > 0;
-  const [cardsExpanded, setCardsExpanded] = useState<boolean>(!hasMessagesNow);
-  useEffect(() => {
-    setCardsExpanded(!hasMessagesNow);
-  }, [activeId, hasMessagesNow]);
-
-  // ── Card templates ────────────────────────────────────────────────────────
-  // Templates are locale-independent (buildSummary receives t at call-site).
-  // We still depend on i18n.language so the memo key updates on locale switch
-  // (components re-render with fresh t anyway, but this keeps the dep array honest).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
 
   // ── Event handlers ────────────────────────────────────────────────────────
 
@@ -215,103 +199,6 @@ export function AskTab() {
           />
         </div>
 
-        {/* ── Cards (lifted out of scroll area so they're always reachable) ── */}
-        {id != null && (
-          <div
-            style={{
-              flexShrink: 0,
-              padding: "12px 16px 0",
-              borderBottom: hasMessages ? "1px solid var(--border-soft)" : undefined,
-            }}
-          >
-            {cardsExpanded ? (
-              <>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                    gap: 12,
-                    marginBottom: hasMessages ? 8 : 16,
-                  }}
-                >
-                  {templates.map((tpl) => (
-                    <ParameterizedQuestionCard
-                      key={tpl.id}
-                      template={tpl}
-                      agencyId={id}
-                      filterCtx={filterCtx}
-                      busy={appendMsg.isPending || createConv.isPending}
-                      onSubmit={(payload) => {
-                        handleCardSubmit(payload);
-                        setCardsExpanded(false);
-                      }}
-                    />
-                  ))}
-                </div>
-                {hasMessages && (
-                  <button
-                    type="button"
-                    onClick={() => setCardsExpanded(false)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--text-tertiary)",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      marginBottom: 8,
-                    }}
-                  >
-                    {t("ask.cards_collapse", { defaultValue: "▴ 質問パネルを閉じる" })}
-                  </button>
-                )}
-              </>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 8,
-                  alignItems: "center",
-                  marginBottom: 8,
-                }}
-                role="toolbar"
-                aria-label={t("ask.cards_strip_aria", { defaultValue: "新しい質問" })}
-              >
-                {templates.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => setCardsExpanded(true)}
-                    title={t(tpl.title_key)}
-                    style={{
-                      background: "var(--bg-soft)",
-                      border: "1px solid var(--border-soft)",
-                      borderRadius: 999,
-                      padding: "4px 12px",
-                      fontSize: 13,
-                      cursor: "pointer",
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    {tpl.emoji} {t(tpl.title_key)}
-                  </button>
-                ))}
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    marginLeft: 4,
-                  }}
-                >
-                  {t("ask.cards_strip_hint", {
-                    defaultValue: "クリックで質問パネルを開く",
-                  })}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ── Scrollable thread area ─────────────────────────────────────── */}
         <div
           ref={scrollRef}
@@ -357,14 +244,22 @@ export function AskTab() {
                 color: "var(--text-tertiary)",
                 fontSize: 13,
                 padding: "8px 4px",
+                textAlign: "center",
               }}
             >
-              {t("ask.empty_hint", {
-                defaultValue: "上の質問パネルから一つ選んで 実行 を押してください。",
-              })}
+              {t("ask.dock.empty_hint")}
             </div>
           )}
         </div>
+
+        {/* Bottom dock */}
+        {id != null && (
+          <QuestionDock
+            agencyId={id}
+            busy={appendMsg.isPending || createConv.isPending}
+            onSubmit={handleCardSubmit}
+          />
+        )}
       </div>
 
       {/* Responsive CSS for the two-column grid */}
