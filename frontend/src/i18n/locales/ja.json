@@ -279,9 +279,15 @@
     "error_agency_not_selected": "事業者が選択されていません",
     "empty_state": "質問を入力してください。",
     "thinking": "考え中...",
-    "cards_collapse": "▴ 質問パネルを閉じる",
-    "cards_strip_aria": "新しい質問",
-    "cards_strip_hint": "クリックで質問パネルを開く",
+    "dock": {
+      "empty_hint": "下の質問パネルから始めてください",
+      "composing_label": "質問を作成中",
+      "run": "実行",
+      "chip_strip_aria": "質問の選択",
+      "chip_strip_idle_hint": "クリックで質問を選ぶ",
+      "required_marker": "*",
+      "running": "実行中..."
+    },
     "empty_hint": "上の質問パネルから一つ選んで 実行 を押してください。",
     "followup_placeholder": "この結果について質問...",
     "followup_send": "送信",

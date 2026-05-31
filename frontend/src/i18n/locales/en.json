@@ -279,9 +279,15 @@
     "error_agency_not_selected": "Agency not selected",
     "empty_state": "Ask a question to get started.",
     "thinking": "Thinking...",
-    "cards_collapse": "▴ Close question panel",
-    "cards_strip_aria": "New question",
-    "cards_strip_hint": "Click to open the question panel",
+    "dock": {
+      "empty_hint": "Pick a question from the panel below.",
+      "composing_label": "Composing question",
+      "run": "Run",
+      "chip_strip_aria": "Question picker",
+      "chip_strip_idle_hint": "Click to pick a question",
+      "required_marker": "*",
+      "running": "Running…"
+    },
     "empty_hint": "Pick a card from the panel above and press Run.",
     "followup_placeholder": "Ask about this result...",
     "followup_send": "Send",
