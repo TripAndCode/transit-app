@@ -51,7 +51,7 @@ export function ParamStrip({
             {isMissing && (
               <span
                 aria-label={t("ask.dock.required_marker")}
-                style={{ color: "hsl(25, 55%, 50%)", fontSize: 14, fontWeight: 700 }}
+                style={{ color: "hsl(25, 40%, 50%)", fontSize: 14, fontWeight: 700 }}
               >
                 *
               </span>
@@ -66,7 +66,7 @@ export function ParamStrip({
         disabled={!canRun}
         style={{
           marginLeft: "auto",
-          background: canRun ? "var(--accent, #4a8aaa)" : "var(--bg-soft, rgba(0,0,0,0.06))",
+          background: canRun ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.06))",
           color: canRun ? "white" : "var(--text-tertiary, #999)",
           border: "none",
           borderRadius: 999,
@@ -76,7 +76,6 @@ export function ParamStrip({
           cursor: canRun ? "pointer" : "not-allowed",
           opacity: busy ? 0.7 : 1,
         }}
-        aria-busy={busy}
       >
         {busy ? t("ask.dock.running") : t("ask.dock.run")}
       </button>

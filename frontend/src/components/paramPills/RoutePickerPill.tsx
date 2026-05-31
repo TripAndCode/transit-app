@@ -21,27 +21,42 @@ export function RoutePickerPill({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const { data: routes = [], isLoading } = useRoutes(agencyId);
+
+  function close() {
+    setQ("");
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
 
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
     };
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    const list = ql
+    const list = (ql
       ? routes.filter(
           (r) =>
             (r.route_code ?? "").toLowerCase().includes(ql) ||
             (r.route_long_name ?? "").toLowerCase().includes(ql) ||
             (r.route_short_name ?? "").toLowerCase().includes(ql),
         )
-      : routes;
+      : routes
+    ).filter((r) => r.route_code != null);
     return list.slice(0, 50);
   }, [routes, q]);
 
@@ -52,6 +67,7 @@ export function RoutePickerPill({
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
@@ -133,14 +149,13 @@ export function RoutePickerPill({
                     if (code != null) {
                       onChange(code);
                     }
-                    setOpen(false);
-                    setQ("");
+                    close();
                   }}
                   style={{
                     display: "block",
                     width: "100%",
                     background: code === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                    color: code === value ? "var(--accent, #4a8aaa)" : "var(--text-primary, #1a1a1a)",
+                    color: code === value ? "var(--accent, #5b6cad)" : "var(--text-primary, #1a1a1a)",
                     border: "none",
                     borderRadius: 4,
                     padding: "5px 8px",

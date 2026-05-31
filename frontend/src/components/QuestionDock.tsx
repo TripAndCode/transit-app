@@ -104,13 +104,14 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
                 type="button"
                 onClick={() => handleChipTap(tpl)}
                 disabled={busy && !active}
+                aria-disabled={busy && !active}
                 aria-pressed={active}
                 style={{
-                  background: active ? "var(--accent, #4a8aaa)" : "var(--bg-soft, rgba(0,0,0,0.04))",
+                  background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
                   color: active ? "white" : "var(--text-primary, #1a1a1a)",
                   border: "1px solid",
                   borderColor: active
-                    ? "var(--accent, #4a8aaa)"
+                    ? "var(--accent, #5b6cad)"
                     : "var(--border-soft, rgba(0,0,0,0.08))",
                   borderRadius: 999,
                   padding: "5px 14px",

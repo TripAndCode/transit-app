@@ -115,8 +115,8 @@ export function AskTab() {
 
   // ── Event handlers ────────────────────────────────────────────────────────
 
-  function handleSelectThread(id: string | null) {
-    setActiveId(id);
+  function handleSelectThread(threadId: string | null) {
+    setActiveId(threadId);
   }
 
   function handleNewThread() {

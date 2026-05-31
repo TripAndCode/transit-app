@@ -13,20 +13,34 @@ export type SegmentedPillProps = {
 export function SegmentedPill({ label, value, options, onChange, disabled }: SegmentedPillProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value) ?? options[0];
+
+  function close() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
 
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
     };
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
@@ -73,13 +87,13 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
               aria-selected={opt.value === value}
               onClick={() => {
                 onChange(opt.value);
-                setOpen(false);
+                close();
               }}
               style={{
                 display: "block",
                 width: "100%",
                 background: opt.value === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                color: opt.value === value ? "var(--accent, #4a8aaa)" : "var(--text-primary, #1a1a1a)",
+                color: opt.value === value ? "var(--accent, #5b6cad)" : "var(--text-primary, #1a1a1a)",
                 border: "none",
                 borderRadius: 4,
                 padding: "5px 10px",
