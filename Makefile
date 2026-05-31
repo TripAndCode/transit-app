@@ -172,3 +172,10 @@ frontend-build:
 verify-secrets:
 	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
 	gitleaks detect --redact --no-banner --source .
+
+# ── Ask eval (CI gate) ────────────────────────────────────────────────────────
+# Verifies chip_coverage + builder_coverage = 100% against the gold JSONL.
+# Regenerate the gold set after catalog changes: poetry run python scripts/_gen_gold_set.py
+
+ask-eval:
+	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/ask_eval.py

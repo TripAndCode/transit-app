@@ -84,6 +84,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "en"): "No data available.",
     ("ranking_summary", "ja"): "{label}ランキング 上位{count}路線",
     ("ranking_summary", "en"): "{label} ranking, top {count} routes",
+    ("ranking_summary_worst", "ja"): "{label}ランキング 下位{count}路線",
+    ("ranking_summary_worst", "en"): "{label} ranking, bottom {count} routes",
     ("label_ranking_ontime", "ja"): "定時運行",
     ("label_ranking_ontime", "en"): "On-time",
     ("label_ranking_delay", "ja"): "遅延",
@@ -399,8 +401,10 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     present the original ctx is returned unchanged.
     """
     days_back = args.get("days_back")
-    raw_from = args.get("from")
-    raw_to = args.get("to")
+    # Accept both key forms: canonicalize writes "from_date"/"to_date";
+    # legacy/LLM-direct callers may pass "from"/"to" (no underscores).
+    raw_from = args.get("from_date") or args.get("from")
+    raw_to = args.get("to_date") or args.get("to")
     if days_back is None and not raw_from and not raw_to:
         return ctx
 
@@ -497,10 +501,26 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     )
 
 
+_SERVICE_TYPE_MAP = {
+    "weekday": "平日",
+    "weekend": "土日祝",
+    "all": "all",
+}
+
+
 async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     metric = args.get("metric", "avg_delay")
-    n = int(args.get("n", 10))
+    # BUG-2 fix: card chips send "k" (matches gold eval canonical form); LLM
+    # direct calls use "n" (matches the TOOLS JSON schema).  Accept both, with
+    # "k" taking precedence so the user's slider value is always honoured.
+    n = int(args.get("k", args.get("n", 10)))
     best_first = bool(args.get("best_first", metric == "on_time_rate"))
+
+    # BUG-1 fix: if the chip/LLM supplies service_type, narrow ctx.service so
+    # compute_ranking / compute_worst_5min honour the filter.
+    raw_service = args.get("service_type")
+    if raw_service and raw_service in _SERVICE_TYPE_MAP:
+        ctx = replace(ctx, service=_SERVICE_TYPE_MAP[raw_service])
 
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
@@ -511,7 +531,9 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
             lang=locale,
         )
     elif metric == "on_time_rate":
-        rows = await compute_on_time(agency_id, ctx, conn, limit=n)
+        # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
+        sort_order = "desc" if best_first else "asc"
+        rows = await compute_on_time(agency_id, ctx, conn, limit=n, sort_order=sort_order)
         cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
@@ -524,9 +546,12 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     if not rows:
         return ToolResult(kind="empty", summary=_summary("no_data", lang=locale))
 
+    # For on_time_rate with best_first=False, show "下位N路線" to make clear
+    # the result is the worst routes, not the best.
+    summary_key = "ranking_summary_worst" if metric == "on_time_rate" and not best_first else "ranking_summary"
     return ToolResult(
         kind="table",
-        summary=_summary("ranking_summary", lang=locale, label=label, count=len(rows)),
+        summary=_summary(summary_key, lang=locale, label=label, count=len(rows)),
         rows=[list(r) for r in rows],
         columns=cols,
     )
@@ -583,7 +608,9 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     # ignores it (compute_trend_series doesn't take a route arg directly).
     route = args.get("route")
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-    series = await compute_trend_series(agency_id, series_ctx, conn)
+    # BUG-4 fix: read granularity from args (default "day") and forward it.
+    granularity = args.get("granularity", "day")
+    series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity)
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
@@ -604,7 +631,8 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
 async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
-    n = int(args.get("n", 20))
+    # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
+    n = int(args.get("k", args.get("n", 20)))
     rows = await compute_on_time(agency_id, ctx, conn, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
@@ -680,6 +708,25 @@ async def dispatch(
     routes / service still apply). ``locale`` selects the language for the
     human-readable ``summary`` field on the returned :class:`ToolResult`.
     """
+    # BUG-1 fix: card-alias tools sent by the frontend map to canonical handler
+    # names. Keep aliases explicit here so the eval gold file can use the short
+    # card names (on_time / trend / cmp_service) and live dispatch still works.
+    _TOOL_ALIASES: dict[str, str] = {
+        "on_time": "on_time_rate",
+        "trend": "time_series",
+        "cmp_service": "compare_segments",
+    }
+    tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
+
+    # Card templates use "route_code" as the arg name (matches the param
+    # definition), but all handlers read "route".  Normalise before dispatch.
+    # "k" → "n" remapping is intentionally NOT done here — handlers accept both
+    # (BUG-2 fix).
+    if "route_code" in arguments and "route" not in arguments:
+        raw_rc = arguments["route_code"]
+        arguments = {k: v for k, v in arguments.items() if k != "route_code"}
+        arguments = {"route": raw_rc, **arguments}
+
     handler = _HANDLERS.get(tool_name)
     if handler is None:
         return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))

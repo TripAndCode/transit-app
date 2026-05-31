@@ -28,6 +28,12 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "route_meta": {},
     "on_time_rate": {"threshold_min": 1, "n": 20},
     "capabilities": {},
+    # Card-surface aliases (Phase ③.5): frontend dispatches these tool names
+    # from the parameterized question cards.  No defaults to drop — all args
+    # are treated as significant.
+    "on_time": {},
+    "trend": {},
+    "cmp_service": {},
 }
 
 # String enums whose case we normalize; identifiers stay case-preserved.
