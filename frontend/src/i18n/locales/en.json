@@ -279,6 +279,43 @@
     "error_agency_not_selected": "Agency not selected",
     "empty_state": "Ask a question to get started.",
     "thinking": "Thinking...",
+    "dock": {
+      "empty_hint": "Pick a question from the panel below.",
+      "composing_label": "Composing question",
+      "run": "Run",
+      "chip_strip_aria": "Question picker",
+      "chip_strip_idle_hint": "Click to pick a question",
+      "required_marker": "*",
+      "running": "Running..."
+    },
+    "empty_hint": "Pick a card from the panel above and press Run.",
+    "followup_placeholder": "Ask about this result...",
+    "followup_send": "Send",
+    "followup_chips": {
+      "panel_aria": "Follow-up questions",
+      "chips": {
+        "why": {
+          "label": "Why this pattern?",
+          "prompt": "Explain the pattern in this result in 3 sentences or fewer."
+        },
+        "reliability": {
+          "label": "Is the sample size reliable?",
+          "prompt": "How reliable is this result from a sample-size perspective? Point out any routes with low observation counts."
+        },
+        "slice": {
+          "label": "Other slices?",
+          "prompt": "Describe the likely differences when looking at other slices (weekday vs weekend, time of day, etc.)."
+        },
+        "summarize": {
+          "label": "Summarize in 3 points",
+          "prompt": "Summarize the 3 most important takeaways from this result as bullet points."
+        },
+        "next": {
+          "label": "What to look at next?",
+          "prompt": "Based on this result, suggest one analysis to investigate next."
+        }
+      }
+    },
     "input_aria": "Enter question",
     "input_placeholder": "e.g. What's the delay trend for route 5 this month?",
     "submit": "Send",
@@ -306,8 +343,12 @@
       "signed_delta": "Δ (signed)"
     },
     "more_rows": "…and {{count}} more",
-    "chips": { "more": "More" },
-    "autocomplete": { "noResults": "" },
+    "chips": {
+      "more": "More"
+    },
+    "autocomplete": {
+      "noResults": ""
+    },
     "mode": {
       "label": "Input mode",
       "chat": "Free text",
@@ -320,6 +361,57 @@
       "loading": "Loading…",
       "error": "Couldn't load the builder"
     },
+    "build_labels": {
+      "metric": "Metric",
+      "n": "Count",
+      "best_first": "Best first",
+      "service_type": "Service type",
+      "time_window": "Time window",
+      "granularity": "Granularity",
+      "dimension": "Compare by",
+      "from_date": "Start date",
+      "to_date": "End date",
+      "threshold_min": "Threshold (min)",
+      "limit": "Limit",
+      "offset": "Page offset",
+      "order": "Order",
+      "route": "Route",
+      "route_id": "Route",
+      "kind": "Kind",
+      "optional": "optional",
+      "tools": {
+        "top_n": "Ranking",
+        "time_series": "Trend",
+        "compare_segments": "Compare",
+        "route_stats": "Route stats",
+        "route_meta": "Route info",
+        "describe_data": "Data info",
+        "capabilities": "What I can answer"
+      },
+      "values": {
+        "avg_delay": "Average delay",
+        "on_time_rate": "On-time rate",
+        "worst_5min": "5+ min delay count",
+        "weekday": "Weekday",
+        "weekend": "Weekend/holiday",
+        "all": "All",
+        "last_7_days": "Last 7 days",
+        "last_2_weeks": "Last 2 weeks",
+        "last_30_days": "Last 30 days",
+        "day": "Daily",
+        "week": "Weekly",
+        "month": "Monthly",
+        "dow": "Day of week",
+        "service_type": "Service type",
+        "period": "Period",
+        "asc": "Ascending",
+        "desc": "Descending",
+        "routes": "Routes",
+        "stops": "Stops",
+        "date_range": "Date range",
+        "sample_counts": "Sample counts"
+      }
+    },
     "pill": {
       "interpreted": "Interpreted as",
       "wrong": "Wrong?"
@@ -328,6 +420,128 @@
       "title": "Low-confidence interpretation",
       "run": "Run",
       "edit": "Edit"
+    },
+    "sidebar": {
+      "new_thread": "New conversation",
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "this_week": "This week",
+      "earlier": "Earlier",
+      "rename": "Rename",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "delete": "Delete",
+      "delete_confirm": "Delete this conversation?",
+      "empty": "No conversations yet",
+      "relative_now": "just now",
+      "relative_minute": "{{n}}m ago",
+      "relative_hour": "{{n}}h ago",
+      "relative_yesterday": "yesterday"
+    },
+    "filter_bar": {
+      "edit": "Edit",
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "label_date_range": "Date range",
+      "label_dow": "DOW",
+      "label_time_band": "Time band",
+      "label_routes": "Routes",
+      "dow_all": "All",
+      "dow_weekday": "Weekdays only",
+      "dow_weekend": "Weekends/holidays only",
+      "all_routes": "All routes",
+      "no_routes_selected": "No specific routes"
+    },
+    "dashboard": {
+      "anomaly": {
+        "title": "Daily delay trend — anomalies",
+        "baseline": "Mean {{mean}} min (±{{std}}σ)",
+        "empty": "No data",
+        "error": "Could not load trend",
+        "marker_aria": "{{date}}: {{avg}} min ({{sigma}}σ)"
+      },
+      "heatmap": {
+        "title_dow": "Route × DOW delay",
+        "title_hour_band": "Route × hour-band delay",
+        "toggle_dow": "DOW",
+        "toggle_hour_band": "Hour band",
+        "dow": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
+        },
+        "empty": "No data — try relaxing filters",
+        "error": "Couldn't load the heatmap",
+        "cell_aria": "{{route}} × {{dim}}: {{val}} min",
+        "no_data": "no data"
+      },
+      "movers": {
+        "title": "Largest delay movers (week)",
+        "subtitle": "Last {{days}} days vs prior {{days}} days (min)",
+        "empty": "No significant movers — quiet week",
+        "error": "Could not load movers",
+        "new": "new",
+        "stopped": "stopped",
+        "low_samples": "(low n)",
+        "row_aria": "{{rank}}. {{label}}: {{delta}} min, {{pct}} ({{samples}} samples)"
+      }
+    },
+    "card": {
+      "execute": "Run",
+      "param": {
+        "route_label": "Route",
+        "route_placeholder": "Select…",
+        "metric_label": "Metric",
+        "limit_label": "Top",
+        "granularity_label": "Bucket",
+        "granularity": {
+          "day": "Day",
+          "week": "Week",
+          "month": "Month"
+        },
+        "service_label": "Service",
+        "service": {
+          "all": "All",
+          "weekday": "Weekday",
+          "weekend": "Weekend"
+        }
+      },
+      "service": {
+        "all": "All",
+        "weekday": "Weekday",
+        "weekend": "Weekend"
+      },
+      "missing_required": "*",
+      "top_delay": {
+        "title": "🏆 Top-N delays",
+        "summary": "Top {{k}} routes ({{service}})"
+      },
+      "ontime_rank": {
+        "title": "🎯 On-time rate ranking",
+        "best": "Best first",
+        "worst": "Worst first",
+        "summary": "{{dir}}, {{k}} routes"
+      },
+      "route_trend": {
+        "title": "📈 Route delay trend",
+        "summary": "Route {{route}} — {{gran}} buckets",
+        "placeholder": "Select a route"
+      },
+      "weekday_vs_weekend": {
+        "title": "⚖️ Weekday vs Weekend",
+        "summary": "Route {{route}}: weekday vs weekend comparison",
+        "placeholder": "Select a route"
+      },
+      "route_overview": {
+        "title": "🚏 Route overview",
+        "summary": "Route {{route}} overview",
+        "placeholder": "Select a route"
+      }
     }
   },
   "live": {

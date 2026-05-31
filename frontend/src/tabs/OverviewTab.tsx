@@ -9,7 +9,7 @@ import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { HeroSentence } from "../components/HeroSentence";
-import { MoversList } from "../components/MoversList";
+import { MoversList } from "../components/OverviewMoversList";
 import { OverviewModal } from "../components/OverviewModal";
 import { PeakHourRibbon } from "../components/PeakHourRibbon";
 import { ServiceSplit } from "../components/ServiceSplit";

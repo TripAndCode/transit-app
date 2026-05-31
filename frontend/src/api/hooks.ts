@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import i18n from "../i18n";
 import {
   useMutation,
   useQuery,
@@ -7,14 +8,23 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { ctxToQueryString, type RangeCtx } from "./rangeContext";
+import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
+  AnomaliesResponse,
+  AnonThread,
+  AppendMessageResult,
   AskResponse,
   BuildSchema,
+  Conversation,
+  ConvMessage,
   EditAction,
+  FilterCtx,
   HeatmapCollection,
+  HeatmapResponse,
+  MoversResponse,
   OverviewSummary,
   ReportMeta,
   ReportResponse,
@@ -23,6 +33,7 @@ import type {
   RouteSummaryResponse,
   SuggestItem,
 } from "./types";
+import { useSession } from "./auth";
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
@@ -226,5 +237,386 @@ export function usePostEditAction(
   return useMutation({
     mutationFn: (body: { signature_hash: string; action: EditAction }) =>
       apiPost<{ ok: true }>(`/api/${agencyId}/ask/edit-action`, body),
+  });
+}
+
+// ─── Phase ③ hooks — conversations + chips ───────────────────────────────────
+
+/**
+ * True when the current session is authenticated.
+ * Reuses the `useSession` hook from auth.ts (returns null on 401).
+ */
+export function useIsAuthenticated(): boolean {
+  const { data } = useSession();
+  return Boolean(data?.user_id);
+}
+
+function toServerLikeConversation(t: AnonThread): Conversation {
+  return {
+    conversation_id: t.client_id,
+    user_id: null,
+    agency_id: t.agency_id,
+    title: t.title,
+    filter_ctx: t.filter_ctx,
+    pinned: t.pinned,
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+  };
+}
+
+export function useConversations(agencyId: number): UseQueryResult<Conversation[]> {
+  const authed = useIsAuthenticated();
+  return useQuery({
+    queryKey: ["conversations", agencyId, authed ? "server" : "anon"],
+    queryFn: async () => {
+      if (authed) {
+        return apiGet<Conversation[]>(`/api/${agencyId}/conversations`);
+      }
+      // Anonymous: read from localStorage; shape-convert to Conversation
+      return conversationsAnon.list(agencyId).map(toServerLikeConversation);
+    },
+    staleTime: 5_000,
+  });
+}
+
+export function useConversation(
+  agencyId: number,
+  conversationId: string | null,
+): UseQueryResult<{ conversation: Conversation; messages: ConvMessage[] } | null> {
+  const authed = useIsAuthenticated();
+  return useQuery({
+    queryKey: ["conversation", agencyId, conversationId, authed ? "server" : "anon"],
+    queryFn: async () => {
+      if (!conversationId) return null;
+      if (authed) {
+        const [conv, msgs] = await Promise.all([
+          apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`),
+          apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`),
+        ]);
+        return { conversation: conv, messages: msgs };
+      }
+      const anon = conversationsAnon.get(conversationId);
+      if (!anon) return null;
+      return { conversation: toServerLikeConversation(anon), messages: anon.messages };
+    },
+    enabled: Boolean(conversationId),
+  });
+}
+
+export function useCreateConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { title: string; filter_ctx: FilterCtx }) => {
+      if (authed) {
+        return apiPost<Conversation>(`/api/${agencyId}/conversations`, vars);
+      }
+      const anon = conversationsAnon.create(agencyId, vars.title, vars.filter_ctx);
+      return toServerLikeConversation(anon);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+export function useUpdateConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      id: string;
+      patch: Partial<Pick<Conversation, "title" | "pinned" | "filter_ctx">>;
+    }) => {
+      if (authed) {
+        return apiPatch<Conversation>(`/api/${agencyId}/conversations/${vars.id}`, vars.patch);
+      }
+      const updated = conversationsAnon.update(vars.id, vars.patch);
+      if (!updated) throw new Error("thread not found");
+      return toServerLikeConversation(updated);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId] });
+    },
+  });
+}
+
+export function useDeleteConversation(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (authed) {
+        return apiDelete<{ ok: true }>(`/api/${agencyId}/conversations/${id}`);
+      }
+      conversationsAnon.delete(id);
+      return { ok: true as const };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+/** Build a user-bubble label for a structured (builder) submission that's
+ *  fully translated — no raw ``metric=avg_delay`` machine strings.
+ *  Reads from ``ask.build_labels`` in the active locale.
+ */
+function builderSummary(tool: string, args: Record<string, unknown>): string {
+  const t = i18n.t.bind(i18n);
+  const toolLabel = t(`ask.build_labels.tools.${tool}`, { defaultValue: tool });
+  const pairs: string[] = [];
+  for (const [k, v] of Object.entries(args).slice(0, 4)) {
+    const keyLabel = t(`ask.build_labels.${k}`, { defaultValue: k });
+    let valLabel: string;
+    if (typeof v === "string") {
+      valLabel = t(`ask.build_labels.values.${v}`, { defaultValue: v });
+    } else if (typeof v === "boolean") {
+      valLabel = v ? t("common.yes", { defaultValue: "はい" }) : t("common.no", { defaultValue: "いいえ" });
+    } else {
+      valLabel = String(v);
+    }
+    pairs.push(`${keyLabel}: ${valLabel}`);
+  }
+  return `🛠 ${toolLabel}` + (pairs.length ? ` (${pairs.join(", ")})` : "");
+}
+
+export type AppendMessageVars = {
+  conversationId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  /** Human-readable label for the user bubble (e.g. from card buildSummary).
+   *  When present, sent as `user_summary` to the server and used as the
+   *  rendered_summary for the anonymous path instead of the machine-generated
+   *  builderSummary() fallback. */
+  user_summary?: string;
+  /** Current filter context (date range + routes). Forwarded as `ctx` in the
+   *  anonymous POST /ask body so the backend scopes the query correctly. */
+  filter_ctx?: FilterCtx;
+};
+
+export function useAppendMessage(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: AppendMessageVars): Promise<AppendMessageResult> => {
+      // BUG-3 fix: use caller-supplied user_summary (card's buildSummary) when
+      // available; fall back to the machine-generated builderSummary() only if
+      // absent.  This ensures the user bubble shows a human-readable label
+      // instead of raw key=value machine strings.
+      const humanLabel = vars.user_summary ?? builderSummary(vars.tool, vars.args);
+
+      if (authed) {
+        return apiPost<AppendMessageResult>(
+          `/api/${agencyId}/conversations/${vars.conversationId}/messages`,
+          { tool: vars.tool, args: vars.args, user_summary: humanLabel },
+        );
+      }
+      // Anonymous path: dispatch via POST /ask with __build__ sentinel.
+      const dispatchTool = vars.tool;
+      const dispatchArgs = vars.args;
+      const chipTitle = humanLabel;
+
+      const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
+      // Forward filter context so the backend scopes the query to the user's
+      // chosen date range and route list (scenario 08 — filter mid-thread).
+      const fc = vars.filter_ctx;
+      const askBody: Record<string, unknown> = { question };
+      if (fc) {
+        askBody.ctx = {
+          from: fc.from_date,
+          to: fc.to_date,
+          dow: fc.dow ?? "all",
+          time_band: fc.time_band ?? "all",
+          service: fc.service ?? "all",
+          routes: fc.routes ?? [],
+        };
+      }
+      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, askBody);
+
+      const now = new Date().toISOString();
+      const baseId = -(Date.now());
+      const userMsg: ConvMessage = {
+        message_id: baseId,
+        conversation_id: vars.conversationId,
+        role: "user",
+        chip_id: null,
+        tool: dispatchTool,
+        args: dispatchArgs,
+        signature_hash: null,
+        result: null,
+        rendered_summary: chipTitle,
+        created_at: now,
+      };
+      const asstMsg: ConvMessage = {
+        message_id: baseId - 1,
+        conversation_id: vars.conversationId,
+        role: "assistant",
+        chip_id: null,
+        tool: dispatchTool,
+        args: askResp.canonical_args ?? dispatchArgs,
+        signature_hash: askResp.signature_hash ?? null,
+        result: askResp.result
+          ? {
+              kind: askResp.result.kind,
+              summary: askResp.result.summary ?? null,
+              rows: (askResp.result.rows as unknown[] | undefined) ?? null,
+              columns: askResp.result.columns ?? null,
+              series: askResp.result.series ?? null,
+              pairs: askResp.result.pairs ?? null,
+            }
+          : null,
+        rendered_summary: askResp.answer ?? null,
+        created_at: now,
+      };
+      conversationsAnon.appendMessage(vars.conversationId, userMsg);
+      conversationsAnon.appendMessage(vars.conversationId, asstMsg);
+      return { user: userMsg, assistant: asstMsg };
+    },
+    onSuccess: (_result: AppendMessageResult, vars: AppendMessageVars) => {
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+    },
+  });
+}
+
+export function useFollowupEnabled(agencyId: number | null) {
+  return useQuery({
+    queryKey: ["ask-followup-enabled", agencyId],
+    queryFn: () =>
+      apiGet<{ enabled: boolean }>(`/api/${agencyId}/ask/followup-enabled`),
+    enabled: agencyId != null,
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useFollowup(agencyId: number, authed: boolean) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      conversationId: string;
+      contextMessageId: number;
+      question: string;
+    }) => {
+      if (authed) {
+        return apiPost<AppendMessageResult>(
+          `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
+          { question: vars.question, context_message_id: vars.contextMessageId },
+        );
+      }
+      // Anon path: look up context message from localStorage
+      const localThread = conversationsAnon.get(vars.conversationId);
+      const ctx = localThread?.messages.find((m) => m.message_id === vars.contextMessageId);
+      if (!ctx) throw new Error("local context message not found");
+      const resp = await apiPost<AppendMessageResult>(
+        `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
+        {
+          question: vars.question,
+          context_tool: ctx.tool ?? null,
+          context_args: ctx.args ?? null,
+          context_result: ctx.result ?? null,
+        },
+      );
+      // Persist synthetic messages to localStorage
+      conversationsAnon.appendMessage(vars.conversationId, resp.user);
+      conversationsAnon.appendMessage(vars.conversationId, resp.assistant);
+      return resp;
+    },
+    onSuccess: (_result, vars) => {
+      if (authed) {
+        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      } else {
+        // Anon: invalidate the local conversation query so UI re-renders
+        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      }
+    },
+  });
+}
+
+export function useMigrateAnon(agencyId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const threads = conversationsAnon.exportAll();
+      if (threads.length === 0) return { inserted: 0 };
+      const r = await apiPost<{ inserted: number }>(
+        `/api/${agencyId}/conversations/migrate-anon`,
+        { threads },
+      );
+      if (r.inserted > 0) conversationsAnon.clearAll();
+      return r;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
+  });
+}
+
+// ─── Phase ③.5 hooks — dashboard panels ──────────────────────────────────────
+
+/**
+ * Builds a `?from=...&to=...&dow=...&time_band=...&service=...&routes=...`
+ * query string from a FilterCtx. Returns an empty string when ctx is null.
+ */
+function filterCtxToQueryString(ctx: FilterCtx | null): string {
+  if (!ctx) return "";
+  const u = new URLSearchParams();
+  if (ctx.from_date) u.set("from", ctx.from_date);
+  if (ctx.to_date) u.set("to", ctx.to_date);
+  if (ctx.dow && ctx.dow !== "all") u.set("dow", ctx.dow);
+  if (ctx.time_band && ctx.time_band !== "all") u.set("time_band", ctx.time_band);
+  if (ctx.service && ctx.service !== "all") u.set("service", ctx.service);
+  if (ctx.routes && ctx.routes.length > 0) u.set("routes", ctx.routes.join(","));
+  const str = u.toString();
+  return str ? `?${str}` : "";
+}
+
+export function useDashboardHeatmap(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  dimension: "dow" | "hour_band" = "dow",
+  topRoutes = 20,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
+  return useQuery({
+    queryKey: ["dashboard", "heatmap", agencyId, filterCtx, dimension, topRoutes],
+    queryFn: () =>
+      apiGet<HeatmapResponse>(
+        `/api/${agencyId}/ask/dashboard/heatmap${qs}${sep}dimension=${dimension}&top_routes=${topRoutes}`,
+      ),
+    staleTime: 60_000,
+  });
+}
+
+export function useDashboardAnomalies(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  sigma = 2.0,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
+  return useQuery({
+    queryKey: ["dashboard", "anomalies", agencyId, filterCtx, sigma],
+    queryFn: () =>
+      apiGet<AnomaliesResponse>(
+        `/api/${agencyId}/ask/dashboard/anomalies${qs}${sep}sigma=${sigma}`,
+      ),
+    staleTime: 60_000,
+  });
+}
+
+export function useDashboardMovers(
+  agencyId: number,
+  filterCtx: FilterCtx,
+  windowDays = 7,
+  top = 10,
+) {
+  const qs = filterCtxToQueryString(filterCtx);
+  const sep = qs ? "&" : "?";
+  return useQuery({
+    queryKey: ["dashboard", "movers", agencyId, filterCtx, windowDays, top],
+    queryFn: () =>
+      apiGet<MoversResponse>(
+        `/api/${agencyId}/ask/dashboard/movers${qs}${sep}window_days=${windowDays}&top=${top}`,
+      ),
+    staleTime: 60_000,
   });
 }

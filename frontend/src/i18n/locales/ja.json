@@ -88,7 +88,7 @@
     "settings_title": "設定",
     "settings_api_key_label": "API キー",
     "settings_api_key_placeholder": "未設定でも全機能が使えます",
-    "settings_api_key_hint": "通常利用には不要です。Pro tier(レート制限 60 → 600 req/min)が必要な場合のみ設定してください。"
+    "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。"
   },
   "common": {
     "apply": "適用",
@@ -214,7 +214,7 @@
       "search_placeholder": "検索 (名前 / コード)",
       "variant_count": "({{count}}路線)",
       "empty_title": "ルートが登録されていません。",
-      "empty_hint": "初回ingest中の場合は数分後に再度お試しください。"
+      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
     }
   },
   "map": {
@@ -279,6 +279,43 @@
     "error_agency_not_selected": "事業者が選択されていません",
     "empty_state": "質問を入力してください。",
     "thinking": "考え中...",
+    "dock": {
+      "empty_hint": "下の質問パネルから始めてください",
+      "composing_label": "質問を作成中",
+      "run": "実行",
+      "chip_strip_aria": "質問の選択",
+      "chip_strip_idle_hint": "クリックで質問を選ぶ",
+      "required_marker": "*",
+      "running": "実行中..."
+    },
+    "empty_hint": "上の質問パネルから一つ選んで 実行 を押してください。",
+    "followup_placeholder": "この結果について質問...",
+    "followup_send": "送信",
+    "followup_chips": {
+      "panel_aria": "フォローアップ質問",
+      "chips": {
+        "why": {
+          "label": "なぜこの結果？",
+          "prompt": "この結果のパターンを3文以内で説明してください。"
+        },
+        "reliability": {
+          "label": "観測数は信頼できる？",
+          "prompt": "観測数の観点から、この結果はどの程度信頼できますか？数字が少ない路線があれば指摘してください。"
+        },
+        "slice": {
+          "label": "他の切り口で見ると？",
+          "prompt": "他の切り口（平日/土日、時間帯など）で見たときの想定される違いを述べてください。"
+        },
+        "summarize": {
+          "label": "3点に要約",
+          "prompt": "この結果から得られる重要な点を3つに絞って箇条書きで要約してください。"
+        },
+        "next": {
+          "label": "次に見るべきは？",
+          "prompt": "この結果から、次に深掘りすべき分析を1つ提案してください。"
+        }
+      }
+    },
     "input_aria": "質問を入力",
     "input_placeholder": "例: 路線5の今月の遅延傾向は?",
     "submit": "送信",
@@ -302,15 +339,19 @@
       "late5_count": "5分超回数",
       "heijitsu_min": "平日(分)",
       "kyujitsu_min": "土日祝(分)",
-      "abs_delta": "差(絶対)",
-      "signed_delta": "差(符号付)"
+      "abs_delta": "遅延差（絶対値）",
+      "signed_delta": "遅延差（符号付き）"
     },
     "more_rows": "…他{{count}}件",
-    "chips": { "more": "もっと" },
-    "autocomplete": { "noResults": "" },
+    "chips": {
+      "more": "もっと"
+    },
+    "autocomplete": {
+      "noResults": ""
+    },
     "mode": {
       "label": "入力モード",
-      "chat": "自由に",
+      "chat": "自由入力",
       "build": "組み立て"
     },
     "build": {
@@ -320,14 +361,187 @@
       "loading": "読み込み中…",
       "error": "ビルダーを読み込めませんでした"
     },
+    "build_labels": {
+      "metric": "指標",
+      "n": "件数",
+      "best_first": "良い順に並べる",
+      "service_type": "便種別",
+      "time_window": "期間",
+      "granularity": "粒度",
+      "dimension": "比較軸",
+      "from_date": "開始日",
+      "to_date": "終了日",
+      "threshold_min": "閾値(分)",
+      "limit": "件数上限",
+      "offset": "ページ開始",
+      "order": "並び順",
+      "route": "路線",
+      "route_id": "路線",
+      "kind": "情報の種類",
+      "optional": "任意",
+      "tools": {
+        "top_n": "ランキング",
+        "time_series": "時系列",
+        "compare_segments": "比較",
+        "route_stats": "路線統計",
+        "route_meta": "路線情報",
+        "describe_data": "データ情報",
+        "capabilities": "対応質問"
+      },
+      "values": {
+        "avg_delay": "平均遅延",
+        "on_time_rate": "定時率",
+        "worst_5min": "5分以上の遅延件数",
+        "weekday": "平日",
+        "weekend": "土日祝",
+        "all": "すべて",
+        "last_7_days": "直近7日",
+        "last_2_weeks": "直近2週間",
+        "last_30_days": "直近30日",
+        "day": "日別",
+        "week": "週別",
+        "month": "月別",
+        "dow": "曜日",
+        "service_type": "便種別",
+        "period": "期間",
+        "asc": "昇順",
+        "desc": "降順",
+        "routes": "路線",
+        "stops": "停留所",
+        "date_range": "期間",
+        "sample_counts": "サンプル数"
+      }
+    },
     "pill": {
       "interpreted": "解釈",
       "wrong": "違う？"
     },
     "lowconf": {
-      "title": "自信が低い解釈です",
+      "title": "解釈に自信がありません",
       "run": "実行",
       "edit": "修正"
+    },
+    "sidebar": {
+      "new_thread": "新しい会話",
+      "pinned": "ピン留め",
+      "today": "今日",
+      "yesterday": "昨日",
+      "this_week": "今週",
+      "earlier": "それ以前",
+      "rename": "名前を変更",
+      "pin": "ピン留め",
+      "unpin": "ピン留めを外す",
+      "delete": "削除",
+      "delete_confirm": "この会話を削除しますか?",
+      "empty": "まだ会話がありません",
+      "relative_now": "今",
+      "relative_minute": "{{n}}分前",
+      "relative_hour": "{{n}}時間前",
+      "relative_yesterday": "昨日"
+    },
+    "filter_bar": {
+      "edit": "編集",
+      "apply": "適用",
+      "cancel": "キャンセル",
+      "label_date_range": "期間",
+      "label_dow": "曜日",
+      "label_time_band": "時間帯",
+      "label_routes": "路線",
+      "dow_all": "すべて",
+      "dow_weekday": "平日のみ",
+      "dow_weekend": "土日祝のみ",
+      "all_routes": "全路線",
+      "no_routes_selected": "路線指定なし"
+    },
+    "dashboard": {
+      "anomaly": {
+        "title": "日次遅延の推移 — 異常検知",
+        "baseline": "平均 {{mean}} 分 (±{{std}}σ)",
+        "empty": "該当データなし",
+        "error": "推移を読み込めませんでした",
+        "marker_aria": "{{date}}: {{avg}} 分 ({{sigma}}σ)"
+      },
+      "heatmap": {
+        "title_dow": "路線×曜日の遅延",
+        "title_hour_band": "路線×時間帯の遅延",
+        "toggle_dow": "曜日",
+        "toggle_hour_band": "時間帯",
+        "dow": {
+          "mon": "月",
+          "tue": "火",
+          "wed": "水",
+          "thu": "木",
+          "fri": "金",
+          "sat": "土",
+          "sun": "日"
+        },
+        "empty": "該当データなし — フィルター条件を緩めてください",
+        "error": "ヒートマップを読み込めませんでした",
+        "cell_aria": "{{route}} × {{dim}}: {{val}} 分",
+        "no_data": "データなし"
+      },
+      "movers": {
+        "title": "今週の変動が大きい路線",
+        "subtitle": "直近 {{days}} 日 vs 前 {{days}} 日 (分単位)",
+        "empty": "変動が小さい — 静かな週です",
+        "error": "変動を読み込めませんでした",
+        "new": "新規",
+        "stopped": "停止",
+        "low_samples": "(少データ)",
+        "row_aria": "{{rank}}. {{label}}: {{delta}} 分, {{pct}} ({{samples}} 件)"
+      }
+    },
+    "card": {
+      "execute": "実行",
+      "param": {
+        "route_label": "路線",
+        "route_placeholder": "選択してください",
+        "metric_label": "指標",
+        "limit_label": "件数",
+        "granularity_label": "粒度",
+        "granularity": {
+          "day": "日",
+          "week": "週",
+          "month": "月"
+        },
+        "service_label": "運行種別",
+        "service": {
+          "all": "すべて",
+          "weekday": "平日",
+          "weekend": "土日祝"
+        }
+      },
+      "service": {
+        "all": "すべて",
+        "weekday": "平日",
+        "weekend": "土日祝"
+      },
+      "missing_required": "*",
+      "top_delay": {
+        "title": "🏆 遅延の大きい路線 Top-N",
+        "summary": "上位 {{k}} 件 ({{service}})"
+      },
+      "ontime_rank": {
+        "title": "🎯 オンタイム率ランキング",
+        "best": "良い順",
+        "worst": "悪い順",
+        "summary": "{{dir}} {{k}} 件"
+      },
+      "route_trend": {
+        "title": "📈 路線の遅延推移",
+        "summary": "路線 {{route}} の {{gran}}ごとの推移",
+        "placeholder": "路線を選択してください"
+      },
+      "weekday_vs_weekend": {
+        "title": "⚖️ 平日 vs 土日祝",
+        "summary": "路線 {{route}}: 平日と土日祝の比較",
+        "placeholder": "路線を選択してください"
+      },
+      "route_overview": {
+        "title": "🚏 路線の概況",
+        "summary": "路線 {{route}} の概況",
+        "placeholder": "路線を選択してください"
+      }
     }
   },
   "live": {
@@ -371,7 +585,7 @@
     "select_prompt": "レポートを選択してください",
     "rendered_at": "生成: {{when}}",
     "range_suffix": "・ 期間: {{from}} 〜 {{to}}",
-    "raw_rows": "原文 ({{count}}件)",
+    "raw_rows": "生データ（{{count}}件）",
     "type": {
       "ranking": "遅延ランキング",
       "ranking_best": "定時運行ランキング",
@@ -454,7 +668,7 @@
     "agency_form": {
       "title": "新規事業者登録",
       "name_label": "事業者名",
-      "gtfs_label": "GTFS Static URL (任意)",
+      "gtfs_label": "GTFS 静的データ URL（任意）",
       "error": "登録に失敗しました",
       "submitting": "登録中...",
       "submit": "登録"

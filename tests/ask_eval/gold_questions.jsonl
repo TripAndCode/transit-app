@@ -1,0 +1,20 @@
+{"id": "top_delay_k5_all", "via": "builder", "question": "[card] top_delay_k5_all", "expected_tool": "top_n", "expected_args_canonical": {"metric": "avg_delay", "k": 5}}
+{"id": "top_delay_k10_weekday", "via": "builder", "question": "[card] top_delay_k10_weekday", "expected_tool": "top_n", "expected_args_canonical": {"metric": "avg_delay", "k": 10, "service_type": "weekday"}}
+{"id": "top_delay_k3_weekend", "via": "builder", "question": "[card] top_delay_k3_weekend", "expected_tool": "top_n", "expected_args_canonical": {"metric": "avg_delay", "k": 3, "service_type": "weekend"}}
+{"id": "top_delay_k20_all", "via": "builder", "question": "[card] top_delay_k20_all", "expected_tool": "top_n", "expected_args_canonical": {"metric": "avg_delay", "k": 20}}
+{"id": "ontime_top5_worst", "via": "builder", "question": "[card] ontime_top5_worst", "expected_tool": "on_time", "expected_args_canonical": {"k": 5, "best_first": false}}
+{"id": "ontime_top5_best", "via": "builder", "question": "[card] ontime_top5_best", "expected_tool": "on_time", "expected_args_canonical": {"k": 5, "best_first": true}}
+{"id": "ontime_top10_worst", "via": "builder", "question": "[card] ontime_top10_worst", "expected_tool": "on_time", "expected_args_canonical": {"k": 10, "best_first": false}}
+{"id": "ontime_top3_best", "via": "builder", "question": "[card] ontime_top3_best", "expected_tool": "on_time", "expected_args_canonical": {"k": 3, "best_first": true}}
+{"id": "trend_route1_day", "via": "builder", "question": "[card] trend_route1_day", "expected_tool": "trend", "expected_args_canonical": {"metric": "avg_delay", "route_code": "1", "granularity": "day"}}
+{"id": "trend_route1_week", "via": "builder", "question": "[card] trend_route1_week", "expected_tool": "trend", "expected_args_canonical": {"metric": "avg_delay", "route_code": "1", "granularity": "week"}}
+{"id": "trend_route1_month", "via": "builder", "question": "[card] trend_route1_month", "expected_tool": "trend", "expected_args_canonical": {"metric": "avg_delay", "route_code": "1", "granularity": "month"}}
+{"id": "trend_routeA_week", "via": "builder", "question": "[card] trend_routeA_week", "expected_tool": "trend", "expected_args_canonical": {"metric": "avg_delay", "route_code": "A", "granularity": "week"}}
+{"id": "cmp_service_route1", "via": "builder", "question": "[card] cmp_service_route1", "expected_tool": "cmp_service", "expected_args_canonical": {"metric": "avg_delay", "route_code": "1"}}
+{"id": "cmp_service_routeA", "via": "builder", "question": "[card] cmp_service_routeA", "expected_tool": "cmp_service", "expected_args_canonical": {"metric": "avg_delay", "route_code": "A"}}
+{"id": "cmp_service_route2", "via": "builder", "question": "[card] cmp_service_route2", "expected_tool": "cmp_service", "expected_args_canonical": {"metric": "avg_delay", "route_code": "2"}}
+{"id": "cmp_service_route3", "via": "builder", "question": "[card] cmp_service_route3", "expected_tool": "cmp_service", "expected_args_canonical": {"metric": "avg_delay", "route_code": "3"}}
+{"id": "route_stats_route1", "via": "builder", "question": "[card] route_stats_route1", "expected_tool": "route_stats", "expected_args_canonical": {"route_code": "1"}}
+{"id": "route_stats_routeA", "via": "builder", "question": "[card] route_stats_routeA", "expected_tool": "route_stats", "expected_args_canonical": {"route_code": "A"}}
+{"id": "route_stats_route2", "via": "builder", "question": "[card] route_stats_route2", "expected_tool": "route_stats", "expected_args_canonical": {"route_code": "2"}}
+{"id": "route_stats_route3", "via": "builder", "question": "[card] route_stats_route3", "expected_tool": "route_stats", "expected_args_canonical": {"route_code": "3"}}

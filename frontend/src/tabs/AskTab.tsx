@@ -1,462 +1,355 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useAsk, usePostEditAction } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import {
+  useConversation,
+  useCreateConversation,
+  useAppendMessage,
+  useMigrateAnon,
+  useIsAuthenticated,
+  useUpdateConversation,
+  useFollowup,
+  useFollowupEnabled,
+} from "../api/hooks";
+import { useRangeContext, DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
+import type { ConvMessage, FilterCtx } from "../api/types";
 import type { ToolResult, TrendDay } from "../api/types";
-import type { IntentSignature } from "../api/types";
-import { ErrorBanner } from "../components/ErrorBanner";
-import { InsightHint } from "../components/InsightHint";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { ThreadSidebar } from "../components/ThreadSidebar";
+import { FilterContextBar } from "../components/FilterContextBar";
 import { DailyChart } from "../components/charts/DailyChart";
-import { AskModeToggle } from "../components/AskModeToggle";
-import type { AskMode } from "../components/AskModeToggle";
-import { AskChips } from "../components/AskChips";
-import { AskAutocomplete } from "../components/AskAutocomplete";
-import { AskBuildForm } from "../components/AskBuildForm";
-import { ConfidencePill } from "../components/ConfidencePill";
+import { QuestionDock } from "../components/QuestionDock";
+import { FOLLOWUP_CHIPS } from "../components/askFollowupChips";
 
-type AskCtxLite = {
-  from: string;
-  to: string;
-  dow: string;
-  time_band: string;
-  service: string;
-  routes?: string[];
-};
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-type Msg =
-  | { role: "user"; text: string }
-  | {
-      role: "assistant";
-      text: string;
-      tool_call: { name: string; arguments: Record<string, unknown> } | null;
-      result: ToolResult | null;
-      ctx: AskCtxLite;
-      signature_hash?: string | null;
-      confidence?: number | null;
-      canonical_args?: Record<string, unknown> | null;
-      cache_outcome?: "hit" | "miss" | "bypass" | null;
-    };
-
-type HistTurn = { question: string; tool?: string | null; args?: Record<string, unknown> | null };
-
-function buildHistory(msgs: Msg[]): HistTurn[] {
-  const turns: HistTurn[] = [];
-  for (let i = 0; i < msgs.length; i++) {
-    const m = msgs[i];
-    // a user message followed by an assistant message = one turn
-    if (m.role === "user") {
-      const next = msgs[i + 1];
-      const tc = next && next.role === "assistant" ? next.tool_call : null;
-      turns.push({ question: m.text, tool: tc?.name ?? null, args: tc?.arguments ?? null });
-    }
-  }
-  return turns.slice(-3);
+/** Convert URL-based RangeCtx to FilterCtx for new thread seeding. */
+function rangeCtxToFilterCtx(ctx: ReturnType<typeof useRangeContext>[0]): FilterCtx {
+  return {
+    from_date: ctx.from,
+    to_date: ctx.to,
+    dow: ctx.dow !== "all" ? ctx.dow : undefined,
+    time_band: ctx.time_band !== "all" ? ctx.time_band : undefined,
+    service: ctx.service !== "all" ? ctx.service : undefined,
+    routes: ctx.routes.length > 0 ? ctx.routes : undefined,
+  };
 }
 
-/** Build a short human-readable summary of tool args, e.g. "metric=avg_delay, n=10" */
-function previewFromArgs(args: Record<string, unknown> | null | undefined): string | undefined {
-  if (!args) return undefined;
-  const entries = Object.entries(args)
-    .slice(0, 4)
-    .map(([k, v]) => `${k}=${String(v)}`);
-  return entries.join(", ") || undefined;
+/** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults. */
+function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
+  const today = todayISO();
+  const fromDefault = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
+  return {
+    from_date: fc?.from_date ?? fromDefault,
+    to_date: fc?.to_date ?? today,
+    dow: fc?.dow ?? "all",
+    time_band: fc?.time_band ?? "all",
+    service: fc?.service ?? "all",
+    routes: fc?.routes ?? [],
+  };
 }
+
+// ─── AskTab ───────────────────────────────────────────────────────────────────
 
 export function AskTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
-  const [ctx] = useRangeContext();
-  const ask = useAsk(id);
-  const postEditAction = usePostEditAction(id ?? 0);
+  const [rangeCtx] = useRangeContext();
   const routeNames = useRouteNames(id);
 
-  const [mode, setMode] = useState<AskMode>("chat");
-  const [buildInitial, setBuildInitial] = useState<IntentSignature | null>(null);
-  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  // ── Thread state ──────────────────────────────────────────────────────────
+  const [activeId, setActiveId] = useState<string | null>(null);
 
-  const suggestions = useMemo(
-    () => [
-      t("ask.suggestion.today_ranking"),
-      t("ask.suggestion.rain_compare"),
-      t("ask.suggestion.recent_trend"),
-    ],
-    [t],
-  );
+  // Local FilterCtx for the current view (synced from the active conversation's filter_ctx)
+  const [filterCtx, setFilterCtx] = useState<FilterCtx>(() => rangeCtxToFilterCtx(rangeCtx));
 
-  const [input, setInput] = useState("");
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  // ── Hooks ─────────────────────────────────────────────────────────────────
+  const authed = useIsAuthenticated();
+  const migrateAnon = useMigrateAnon(id ?? 0);
+  const migratedRef = useRef(false);
+
+  // Anon → authed migration: fire once when user first becomes authenticated
+  useEffect(() => {
+    if (authed && !migratedRef.current && id != null) {
+      migratedRef.current = true;
+      migrateAnon.mutate();
+    }
+  }, [authed, id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const convQuery = useConversation(id ?? 0, activeId);
+  const createConv = useCreateConversation(id ?? 0);
+  const appendMsg = useAppendMessage(id ?? 0);
+  const updateConv = useUpdateConversation(id ?? 0);
+  const followup = useFollowup(id ?? 0, authed);
+  const followupFlag = useFollowupEnabled(id);
+  const followupEnabled = followupFlag.data?.enabled === true;
+
+  // When the active conversation loads, sync the filter context
+  useEffect(() => {
+    const fc = convQuery.data?.conversation?.filter_ctx;
+    if (fc) setFilterCtx(resolvedFilterCtx(fc));
+  }, [convQuery.data?.conversation?.filter_ctx]);
+
+  // When no thread is active, use URL range context
+  useEffect(() => {
+    if (!activeId) setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
+  }, [activeId, rangeCtx]);
+
+  // User-initiated filter edit. When an active thread exists, persist the
+  // new filter to the conversation so subsequent 実行 calls dispatch with
+  // the visible filter — otherwise the backend reads the stale conv.filter_ctx
+  // and the UI lies about scope.
+  function handleFilterChange(next: FilterCtx) {
+    setFilterCtx(next);
+    if (activeId) {
+      updateConv.mutate({ id: activeId, patch: { filter_ctx: next } });
+    }
+  }
+
   const scrollRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [msgs, ask.isPending]);
+  }, [convQuery.data?.messages, appendMsg.isPending]);
 
-  async function ask_(question: string) {
-    if (ask.isPending) return;
-    try {
-      const history = buildHistory(msgs);
-      const r = await ask.mutateAsync({ question, ctx, history });
-      setMsgs((m) => [
-        ...m,
-        {
-          role: "assistant",
-          text: r.answer,
-          tool_call: r.tool_call,
-          result: r.result,
-          ctx: r.ctx as unknown as AskCtxLite,
-          signature_hash: r.signature_hash ?? null,
-          confidence: r.confidence ?? null,
-          canonical_args: r.canonical_args ?? null,
-          cache_outcome: r.cache_outcome ?? null,
-        },
-      ]);
-    } catch {
-      // error renders via ask.error below
+  // ── Event handlers ────────────────────────────────────────────────────────
+
+  function handleSelectThread(threadId: string | null) {
+    setActiveId(threadId);
+  }
+
+  function handleNewThread() {
+    setActiveId(null);
+    setFilterCtx(rangeCtxToFilterCtx(rangeCtx));
+  }
+
+  async function handleCardSubmit({
+    tool,
+    args,
+    user_summary,
+  }: {
+    tool: string;
+    args: Record<string, unknown>;
+    user_summary: string;
+  }) {
+    if (id == null) return;
+
+    // Coerce best_first string "true"/"false" → boolean
+    if (typeof args.best_first === "string") {
+      args = { ...args, best_first: args.best_first === "true" };
     }
-  }
 
-  async function submit(question: string, displayText?: string) {
-    const trimmed = question.trim();
-    if (!trimmed || ask.isPending) return;
-    // Build-mode submits pass a friendly displayText so users don't see the
-    // raw ``__build__ tool {...}`` sentinel in the chat bubble.
-    setMsgs((m) => [...m, { role: "user", text: displayText ?? trimmed }]);
-    setInput("");
-    setShowAutocomplete(false);
-    await ask_(trimmed);
-  }
-
-  async function submitFromAutocomplete(q: string) {
-    setInput(q);
-    await submit(q);
-  }
-
-  /**
-   * Build-mode form submit.
-   *
-   * Encodes the structured intent as a compact question string that the
-   * backend will parse as a JSON-mode signature directly.  The ``__build__``
-   * sentinel prefix prevents the backend from storing the machine-generated
-   * string as a human-readable ``last_question`` in the intent cache, so it
-   * never surfaces as a chip or autocomplete suggestion.
-   */
-  async function submitStructured(tool: string, args: Record<string, unknown>) {
-    const question = `__build__ ${tool} ${JSON.stringify(args)}`;
-    // Friendly display: "🛠 top_n (metric=avg_delay, n=10)" so the chat
-    // history doesn't show the raw machine sentinel.
-    const argSummary = Object.entries(args)
-      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-      .join(", ");
-    const displayText = `🛠 ${tool}${argSummary ? ` (${argSummary})` : ""}`;
-    setMode("chat");
-    setBuildInitial(null);
-    await submit(question, displayText);
-  }
-
-  async function retry() {
-    const last = [...msgs].reverse().find((m) => m.role === "user");
-    if (!last) return;
-    await ask_(last.text);
-  }
-
-  /**
-   * Switch to build mode pre-populated with msg's canonical_args and tool.
-   * Also fires a fire-and-forget edit-action POST to record the user's verdict.
-   */
-  function switchToEditMode(msg: Extract<Msg, { role: "assistant" }>) {
-    setMode("build");
-    setBuildInitial({
-      tool: msg.tool_call?.name ?? "",
-      args: msg.canonical_args ?? msg.tool_call?.arguments ?? {},
-      confidence: msg.confidence ?? 0,
-      rationale: null,
-    });
-
-    if (msg.signature_hash && id != null) {
-      postEditAction
-        .mutateAsync({ signature_hash: msg.signature_hash, action: "edited" })
-        .catch(console.warn);
+    let convId = activeId;
+    if (convId === null) {
+      const created = await createConv.mutateAsync({
+        title: user_summary.slice(0, 60),
+        filter_ctx: filterCtx,
+      });
+      convId = created.conversation_id;
+      setActiveId(convId);
     }
+
+    appendMsg.mutate({ conversationId: convId, tool, args, user_summary, filter_ctx: filterCtx });
   }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", maxWidth: 760, margin: "0 auto" }}>
-      <TabFilterBar />
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        fontSize: 12, color: "var(--text-tertiary)",
-        margin: "4px 0 8px",
-      }}>
-        {t("nav.ask")}
-        <InsightHint
-          title={t("ask.hint.title")}
-          body={
-            <>
-              {t("ask.hint.body_1")}
-              <br /><br />
-              {t("ask.hint.body_2")}
-              <br /><br />
-              {t("ask.hint.body_3_intro")}<strong>{t("ask.hint.body_3_strong")}</strong>{t("ask.hint.body_3_outro")}
-            </>
-          }
-        />
-      </div>
+  // ── Derived state ─────────────────────────────────────────────────────────
 
-      {/* Mode toggle — always visible above the message area */}
-      <div style={{ marginBottom: 10 }}>
-        <AskModeToggle value={mode} onChange={setMode} />
-      </div>
+  const messages = convQuery.data?.messages ?? [];
+  const hasMessages = messages.length > 0;
 
-      {/* Build form (shown in build mode, above chat history) */}
-      {mode === "build" && id != null && (
-        <div style={{
-          marginBottom: 12,
-          padding: "12px 16px",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-lg)",
-        }}>
-          <AskBuildForm
-            agencyId={id}
-            initialValue={buildInitial}
-            onSubmit={(tool, args) => submitStructured(tool, args)}
-            onCancel={() => { setMode("chat"); setBuildInitial(null); }}
-          />
-        </div>
-      )}
+  // ── Render ────────────────────────────────────────────────────────────────
 
-      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 4px" }}>
-        {/* Chips: shown in chat mode when there are no messages yet */}
-        {mode === "chat" && msgs.length === 0 && id != null && (
-          <AskChips agencyId={id} onPick={(q) => submit(q)} />
-        )}
-
-        {msgs.length === 0 && mode === "chat" && (
-          <div style={{ color: "var(--text-tertiary)", textAlign: "center", marginTop: 48 }}>
-            {t("ask.empty_state")}
-          </div>
-        )}
-
-        {msgs.map((m, i) => {
-          if (m.role === "assistant") {
-            const confidence = m.confidence ?? null;
-            const toolName = m.tool_call?.name ?? "";
-            const argsPreview = previewFromArgs(m.canonical_args ?? m.tool_call?.arguments);
-
-            return (
-              <div key={i}>
-                {/* Low-confidence block card — shown AFTER the answer as a strong warning.
-                    TODO: Phase ③ — block execution on the backend before LLM call when
-                    confidence < 0.5, and show this card instead of the answer. Currently
-                    the backend always executes; we surface the card post-answer. */}
-                {confidence !== null && confidence < 0.5 && toolName && (
-                  <LowConfCard
-                    toolName={toolName}
-                    argsPreview={argsPreview}
-                    onEdit={() => switchToEditMode(m)}
-                    t={t}
-                  />
-                )}
-                <Bubble msg={m} formatRoute={routeNames.format} t={t} />
-                {/* Confidence pill — only when confidence is available and >= 0.5 */}
-                {confidence !== null && confidence >= 0.5 && toolName && (
-                  <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
-                    <ConfidencePill
-                      confidence={confidence}
-                      toolName={toolName}
-                      argsPreview={argsPreview}
-                      onEdit={() => switchToEditMode(m)}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          }
-          return <Bubble key={i} msg={m} formatRoute={routeNames.format} t={t} />;
-        })}
-
-        {ask.isPending && (
-          <div role="status" aria-live="polite" style={{ padding: 12, color: "var(--text-tertiary)" }}>
-            {t("ask.thinking")}
-          </div>
-        )}
-        {ask.error && <ErrorBanner error={ask.error} onRetry={retry} />}
-      </div>
-
-      {/* Input area — only shown in chat mode */}
-      {mode === "chat" && (
-        <div style={{ borderTop: "1px solid var(--border-soft)", padding: "12px 0", marginTop: 12 }}>
-          {/* Legacy suggestion chips — hidden once we have dynamic chips from AskChips,
-              but kept here as a fallback for the flag-off path */}
-          {msgs.length === 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => submit(s)}
-                  disabled={ask.isPending}
-                  style={{
-                    background: "var(--bg-soft)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: 999,
-                    padding: "4px 12px",
-                    fontSize: 13,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-          <div style={{ position: "relative" }}>
-            <form
-              onSubmit={(e) => { e.preventDefault(); submit(input); }}
-              style={{ display: "flex", gap: 8 }}
-            >
-              <input
-                value={input}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  setShowAutocomplete(true);
-                }}
-                onFocus={() => setShowAutocomplete(true)}
-                onBlur={() => {
-                  // Delay dismiss so click on autocomplete item can fire first
-                  setTimeout(() => setShowAutocomplete(false), 150);
-                }}
-                aria-label={t("ask.input_aria")}
-                placeholder={t("ask.input_placeholder")}
-                style={{ flex: 1 }}
-                disabled={ask.isPending}
-              />
-              <button
-                type="submit"
-                disabled={ask.isPending || !input.trim()}
-                style={{
-                  background: "var(--accent)",
-                  color: "#fff",
-                  border: "none",
-                  padding: "0 18px",
-                  borderRadius: "var(--radius)",
-                  opacity: ask.isPending || !input.trim() ? 0.5 : 1,
-                }}
-              >
-                {t("ask.submit")}
-              </button>
-            </form>
-            {/* Autocomplete dropdown — shown when focused + 2+ chars typed */}
-            {showAutocomplete && input.trim().length >= 2 && id != null && (
-              <AskAutocomplete
-                agencyId={id}
-                q={input}
-                onPick={(q) => submitFromAutocomplete(q)}
-                onDismiss={() => setShowAutocomplete(false)}
-              />
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Inline block card shown when confidence < 0.5. Extraction skipped (single usage). */
-function LowConfCard({
-  toolName,
-  argsPreview,
-  onEdit,
-  t,
-}: {
-  toolName: string;
-  argsPreview?: string;
-  onEdit: () => void;
-  t: TFunction;
-}) {
   return (
     <div
-      role="alert"
       style={{
-        borderLeft: "3px solid var(--accent)",
-        background: "rgba(255, 220, 100, 0.18)",
-        padding: "8px 12px",
-        borderRadius: "0 var(--radius) var(--radius) 0",
-        marginBottom: 6,
-        fontSize: 13,
+        display: "grid",
+        gridTemplateColumns: "240px 1fr",
+        height: "100%",
+        minHeight: 0,
       }}
+      className="ask-tab-grid"
     >
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>
-        {t("ask.lowconf.title")}
-      </div>
-      <div style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
-        <span style={{ fontWeight: 500 }}>{toolName}</span>
-        {argsPreview && (
-          <span style={{ marginLeft: 6, color: "var(--text-tertiary)", fontSize: 12 }}>
-            {argsPreview}
-          </span>
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      {id != null && (
+        <ThreadSidebar
+          agencyId={id}
+          activeId={activeId}
+          onSelect={handleSelectThread}
+          onNewThread={handleNewThread}
+        />
+      )}
+
+      {/* ── Main area ────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+          minHeight: 0,
+          overflow: "hidden",
+        }}
+      >
+        {/* Filter bar */}
+        <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
+          <FilterContextBar
+            value={filterCtx}
+            onChange={handleFilterChange}
+            pending={appendMsg.isPending || createConv.isPending}
+          />
+        </div>
+
+        {/* ── Scrollable thread area ─────────────────────────────────────── */}
+        <div
+          ref={scrollRef}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            padding: "12px 16px",
+            scrollbarGutter: "stable",
+          }}
+        >
+          {hasMessages ? (
+            <>
+              <MessageList
+                messages={messages}
+                formatRoute={routeNames.format}
+                t={t}
+                followupEnabled={followupEnabled}
+                followupBusy={followup.isPending}
+                onFollowup={(ctxMsgId, question) =>
+                  activeId &&
+                  followup.mutate({
+                    conversationId: activeId,
+                    contextMessageId: ctxMsgId,
+                    question,
+                  })
+                }
+              />
+
+              {appendMsg.isPending && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  style={{ padding: 12, color: "var(--text-tertiary)", fontSize: 13 }}
+                >
+                  {t("ask.thinking")}
+                </div>
+              )}
+            </>
+          ) : (
+            <div
+              style={{
+                color: "var(--text-tertiary)",
+                fontSize: 13,
+                padding: "8px 4px",
+                textAlign: "center",
+              }}
+            >
+              {t("ask.dock.empty_hint")}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom dock */}
+        {id != null && (
+          <QuestionDock
+            agencyId={id}
+            busy={appendMsg.isPending || createConv.isPending}
+            onSubmit={handleCardSubmit}
+          />
         )}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        {/* TODO Phase ③: wire ▶ 実行 to an explicit execute endpoint so the backend can
-            skip execution when confidence < 0.5 and wait for user confirmation here. */}
-        <button
-          type="button"
-          disabled
-          style={{
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            padding: "4px 12px",
-            fontSize: 13,
-            background: "var(--bg-soft)",
-            color: "var(--text-tertiary)",
-            cursor: "not-allowed",
-            opacity: 0.6,
-          }}
-        >
-          ▶ {t("ask.lowconf.run")}
-        </button>
-        <button
-          type="button"
-          onClick={onEdit}
-          style={{
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            padding: "4px 12px",
-            fontSize: 13,
-            background: "var(--bg-surface)",
-            color: "var(--accent)",
-            cursor: "pointer",
-          }}
-        >
-          ✎ {t("ask.lowconf.edit")}
-        </button>
-      </div>
+
+      {/* Responsive CSS for the two-column grid */}
+      <style>{`
+        @media (max-width: 640px) {
+          .ask-tab-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
+
+// ─── MessageList ──────────────────────────────────────────────────────────────
+
+function MessageList({
+  messages,
+  formatRoute,
+  t,
+  followupEnabled,
+  followupBusy,
+  onFollowup,
+}: {
+  messages: ConvMessage[];
+  formatRoute: (rc: string | null | undefined) => string;
+  t: TFunction;
+  followupEnabled: boolean;
+  followupBusy: boolean;
+  onFollowup: (contextMsgId: number, question: string) => void;
+}) {
+  // Last assistant message with a tool result is the only one that gets
+  // followup chips — scoped to avoid compounding LLM errors on LLM answers.
+  const lastResultMsgId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.tool && m.result) return m.message_id;
+    }
+    return null;
+  })();
+
+  return (
+    <>
+      {messages.map((m) => (
+        <Bubble
+          key={m.message_id}
+          msg={m}
+          formatRoute={formatRoute}
+          t={t}
+          showFollowupChips={
+            followupEnabled && m.message_id === lastResultMsgId
+          }
+          followupBusy={followupBusy}
+          onFollowup={onFollowup}
+        />
+      ))}
+    </>
+  );
+}
+
+// ─── Bubble ───────────────────────────────────────────────────────────────────
 
 function Bubble({
   msg,
   formatRoute,
   t,
+  showFollowupChips,
+  followupBusy,
+  onFollowup,
 }: {
-  msg: Msg;
+  msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
+  showFollowupChips: boolean;
+  followupBusy: boolean;
+  onFollowup: (contextMsgId: number, question: string) => void;
 }) {
   const isUser = msg.role === "user";
-  const result = !isUser && "result" in msg ? msg.result : null;
-  const ctx = !isUser && "ctx" in msg ? msg.ctx : null;
+  const result = msg.result as ToolResult | null;
   const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
 
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", margin: "12px 0" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
+        margin: "12px 0",
+      }}
+    >
       <div
         style={{
           maxWidth: wide ? "100%" : "85%",
@@ -469,52 +362,77 @@ function Bubble({
         }}
       >
         {result ? (
-          <RichResult result={result} fallbackText={msg.text} formatRoute={formatRoute} ctx={ctx} t={t} />
+          <RichResult result={result} fallbackText={msg.rendered_summary ?? ""} formatRoute={formatRoute} t={t} />
         ) : (
-          // The assistant response `text` is server-rendered by the backend
-          // formatter, already in the locale the request asked for via
-          // Accept-Language (see api/middleware/locale.py). Rendered as-is.
-          <span style={{ whiteSpace: "pre-wrap" }}>{msg.text}</span>
+          <span style={{ whiteSpace: "pre-wrap" }}>{msg.rendered_summary ?? msg.tool}</span>
         )}
-        {!isUser && "result" in msg && (msg.tool_call || msg.result) && (
+        {!isUser && (msg.tool || msg.result) && (
           <details style={{ marginTop: 8, color: "var(--text-tertiary)", fontSize: 12 }}>
             <summary style={{ cursor: "pointer" }}>{t("common.details")}</summary>
             <pre style={{ overflowX: "auto", marginTop: 6, whiteSpace: "pre" }}>
-              {JSON.stringify({ tool_call: msg.tool_call, result: msg.result }, null, 2)}
+              {JSON.stringify({ tool: msg.tool, args: msg.args, result: msg.result }, null, 2)}
             </pre>
           </details>
         )}
       </div>
+
+      {showFollowupChips && (
+        <div
+          aria-label={t("ask.followup_chips.panel_aria", { defaultValue: "フォローアップ質問" })}
+          style={{
+            marginTop: 8,
+            width: wide ? "100%" : "85%",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+          }}
+        >
+          {FOLLOWUP_CHIPS.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              disabled={followupBusy}
+              onClick={() => onFollowup(msg.message_id, t(chip.prompt_key))}
+              style={{
+                padding: "5px 12px",
+                fontSize: 12,
+                background: "var(--bg-soft, #f4f4f5)",
+                color: "var(--text-secondary, #52525b)",
+                border: "1px solid var(--border-soft, #e4e4e7)",
+                borderRadius: 999,
+                cursor: followupBusy ? "not-allowed" : "pointer",
+                opacity: followupBusy ? 0.55 : 1,
+                whiteSpace: "nowrap",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (!followupBusy)
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
+              }}
+            >
+              {t(chip.label_key)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function CtxLine({ ctx, t }: { ctx: AskCtxLite | null; t: TFunction }) {
-  if (!ctx) return null;
-  const bits: string[] = [t("ask.ctx.range", { from: ctx.from, to: ctx.to })];
-  if (ctx.dow && ctx.dow !== "all") bits.push(t("ask.ctx.dow", { value: ctx.dow }));
-  if (ctx.time_band && ctx.time_band !== "all") bits.push(t("ask.ctx.time_band", { value: ctx.time_band }));
-  if (ctx.service && ctx.service !== "all") bits.push(t("ask.ctx.service", { value: ctx.service }));
-  if (ctx.routes && ctx.routes.length > 0) bits.push(t("ask.ctx.routes", { value: ctx.routes.join(", ") }));
-  const joined = bits.join(" ・ "); // i18n-ignore: separator
-  return (
-    <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: -4, marginBottom: 8 }}>
-      {joined}
-    </div>
-  );
-}
+// ─── RichResult ───────────────────────────────────────────────────────────────
 
 function RichResult({
   result,
   fallbackText,
   formatRoute,
-  ctx,
   t,
 }: {
   result: ToolResult;
   fallbackText: string;
   formatRoute: (rc: string | null | undefined) => string;
-  ctx: AskCtxLite | null;
   t: TFunction;
 }) {
   if (result.kind === "table" && result.rows && result.columns) {
@@ -523,16 +441,21 @@ function RichResult({
     const serviceTypeIdx = cols.findIndex((c) => c === "service_type");
     return (
       <div>
-        {/* `summary` is the backend-formatted, locale-aware summary
-            (rendered by pipeline.query.tools._summary on the server). */}
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
-        <CtxLine ctx={ctx} t={t} />
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
                 {cols.map((c) => (
-                  <th key={c} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-secondary)", fontWeight: 500 }}>
+                  <th
+                    key={c}
+                    style={{
+                      padding: "6px 10px",
+                      textAlign: "left",
+                      color: "var(--text-secondary)",
+                      fontWeight: 500,
+                    }}
+                  >
                     {t(`ask.col.${c}`, { defaultValue: c })}
                   </th>
                 ))}
@@ -541,7 +464,7 @@ function RichResult({
             <tbody>
               {result.rows.slice(0, 50).map((row, i) => (
                 <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  {row.map((cell, j) => (
+                  {(row as unknown[]).map((cell, j) => (
                     <td key={j} style={{ padding: "6px 10px" }}>
                       {j === routeIdx
                         ? formatRoute(cell as string)
@@ -567,14 +490,14 @@ function RichResult({
       </div>
     );
   }
+
   if (result.kind === "kv" && result.pairs) {
     return (
       <div>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
-        <CtxLine ctx={ctx} t={t} />
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
-            {result.pairs.map(([k, v], i) => (
+            {(result.pairs as [string, unknown][]).map(([k, v], i) => (
               <tr key={i}>
                 <td style={{ padding: "4px 12px 4px 0", color: "var(--text-secondary)" }}>{k}</td>
                 <td style={{ padding: "4px 0" }}>{String(v)}</td>
@@ -585,16 +508,16 @@ function RichResult({
       </div>
     );
   }
-  if (result.kind === "series" && result.series && result.series.length > 0) {
+
+  if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
       <div>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
-        <CtxLine ctx={ctx} t={t} />
         <DailyChart days={result.series as TrendDay[]} height={200} />
       </div>
     );
   }
-  // empty, text, or series with no points → plain text rendering. `fallbackText`
-  // is the backend-formatted answer — opaque on the client (see T-EXTRA-B note).
+
+  // empty, text, or series with no points → plain text
   return <span style={{ whiteSpace: "pre-wrap" }}>{fallbackText}</span>;
 }
