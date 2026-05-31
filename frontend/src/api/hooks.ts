@@ -387,6 +387,9 @@ export type AppendMessageVars = {
    *  rendered_summary for the anonymous path instead of the machine-generated
    *  builderSummary() fallback. */
   user_summary?: string;
+  /** Current filter context (date range + routes). Forwarded as `ctx` in the
+   *  anonymous POST /ask body so the backend scopes the query correctly. */
+  filter_ctx?: FilterCtx;
 };
 
 export function useAppendMessage(agencyId: number) {
@@ -412,7 +415,21 @@ export function useAppendMessage(agencyId: number) {
       const chipTitle = humanLabel;
 
       const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
-      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, { question });
+      // Forward filter context so the backend scopes the query to the user's
+      // chosen date range and route list (scenario 08 — filter mid-thread).
+      const fc = vars.filter_ctx;
+      const askBody: Record<string, unknown> = { question };
+      if (fc) {
+        askBody.ctx = {
+          from: fc.from_date,
+          to: fc.to_date,
+          dow: fc.dow ?? "all",
+          time_band: fc.time_band ?? "all",
+          service: fc.service ?? "all",
+          routes: fc.routes ?? [],
+        };
+      }
+      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, askBody);
 
       const now = new Date().toISOString();
       const baseId = -(Date.now());
