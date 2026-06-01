@@ -1,3 +1,12 @@
+/**
+ * ParamStrip — inline parameter row rendered below the active question chip.
+ *
+ * Renders the template title, one pill per {@link ParamSpec}, required-field
+ * markers, and the 実行 (Run) submit button. Each param kind is delegated to
+ * its dedicated pill component: {@link LimitPill}, {@link SegmentedPill}, or
+ * {@link RoutePickerPill}. The strip is disabled and the button shows "実行中…"
+ * while a query is in flight.
+ */
 import { useTranslation } from "react-i18next";
 import type { CardTemplate, ParamSpec } from "./askCardTemplates";
 import { SegmentedPill } from "./paramPills/SegmentedPill";

@@ -1,7 +1,17 @@
+/**
+ * SegmentedPill — popover selector for a fixed set of string options.
+ *
+ * Renders a pill button labelled with the currently selected option. Clicking
+ * opens a small listbox popover with all available options. Closes on outside
+ * click, Escape, or option selection. Used by service, granularity, and metric
+ * parameter kinds in {@link ParamStrip}.
+ */
 import { useState, useRef, useEffect } from "react";
 
+/** A single option entry for {@link SegmentedPill}. */
 export type SegmentedOption = { value: string; label: string };
 
+/** Props for {@link SegmentedPill}. */
 export type SegmentedPillProps = {
   label: string;
   value: string;
@@ -10,6 +20,7 @@ export type SegmentedPillProps = {
   disabled?: boolean;
 };
 
+/** Pill trigger that opens a listbox popover for selecting among a fixed set of options. */
 export function SegmentedPill({ label, value, options, onChange, disabled }: SegmentedPillProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

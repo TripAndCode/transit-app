@@ -1,3 +1,12 @@
+/**
+ * AskTab — conversational analytics interface for an agency.
+ *
+ * Manages thread selection, filter context, message dispatch, and scroll
+ * behaviour for the Ask feature. Renders a two-column layout: {@link ThreadSidebar}
+ * on the left, and a scrollable message list with a sticky {@link QuestionDock}
+ * on the right. Handles anonymous-to-authenticated conversation migration on
+ * first login.
+ */
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -109,9 +118,6 @@ export function AskTab() {
   }
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Scroll to bottom when message list changes (new user/assistant bubble lands).
-  // Dropping appendMsg.isPending from deps avoids a redundant pre-fetch fire that
-  // scrolls before the new row is in the DOM and again after.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convQuery.data?.messages]);

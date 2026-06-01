@@ -1,6 +1,16 @@
+/**
+ * RoutePickerPill — searchable route selector pill popover.
+ *
+ * Renders a pill button showing the currently selected route's long name (or a
+ * placeholder when unset). Clicking opens a listbox popover with a live-search
+ * text input filtering routes by code, short name, or long name. Results are
+ * capped at 50 to keep rendering fast. Closes on outside click, Escape, or
+ * option selection.
+ */
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
 
+/** Props for {@link RoutePickerPill}. */
 export type RoutePickerPillProps = {
   label: string;
   value: string | null;
@@ -10,6 +20,7 @@ export type RoutePickerPillProps = {
   disabled?: boolean;
 };
 
+/** Searchable route picker pill that filters routes by code/name and emits the selected route code. */
 export function RoutePickerPill({
   label,
   value,
