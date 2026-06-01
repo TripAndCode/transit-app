@@ -281,14 +281,12 @@
     "thinking": "Thinking...",
     "dock": {
       "empty_hint": "Pick a question from the panel below.",
-      "composing_label": "Composing question",
       "run": "Run",
       "chip_strip_aria": "Question picker",
       "chip_strip_idle_hint": "Click to pick a question",
       "required_marker": "*",
       "running": "Running..."
     },
-    "empty_hint": "Pick a card from the panel above and press Run.",
     "followup_placeholder": "Ask about this result...",
     "followup_send": "Send",
     "followup_chips": {

@@ -1,6 +1,16 @@
+/**
+ * RoutePickerPill — searchable route selector pill popover.
+ *
+ * Renders a pill button showing the currently selected route's long name (or a
+ * placeholder when unset). Clicking opens a listbox popover with a live-search
+ * text input filtering routes by code, short name, or long name. Results are
+ * capped at 50 to keep rendering fast. Closes on outside click, Escape, or
+ * option selection.
+ */
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
 
+/** Props for {@link RoutePickerPill}. */
 export type RoutePickerPillProps = {
   label: string;
   value: string | null;
@@ -10,6 +20,7 @@ export type RoutePickerPillProps = {
   disabled?: boolean;
 };
 
+/** Searchable route picker pill that filters routes by code/name and emits the selected route code. */
 export function RoutePickerPill({
   label,
   value,
@@ -71,6 +82,13 @@ export function RoutePickerPill({
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
+        onMouseEnter={(e) => {
+          if (disabled) return;
+          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
+        }}
         style={{
           background: "var(--bg-soft, rgba(0,0,0,0.04))",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
@@ -86,6 +104,7 @@ export function RoutePickerPill({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+          transition: "background 120ms ease",
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
