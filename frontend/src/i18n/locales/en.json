@@ -516,27 +516,27 @@
       },
       "missing_required": "*",
       "top_delay": {
-        "title": "🏆 Top-N delays",
+        "title": "Top-N delays",
         "summary": "Top {{k}} routes ({{service}})"
       },
       "ontime_rank": {
-        "title": "🎯 On-time rate ranking",
+        "title": "On-time rate ranking",
         "best": "Best first",
         "worst": "Worst first",
         "summary": "{{dir}}, {{k}} routes"
       },
       "route_trend": {
-        "title": "📈 Route delay trend",
+        "title": "Route delay trend",
         "summary": "Route {{route}} — {{gran}} buckets",
         "placeholder": "Select a route"
       },
       "weekday_vs_weekend": {
-        "title": "⚖️ Weekday vs Weekend",
+        "title": "Weekday vs Weekend",
         "summary": "Route {{route}}: weekday vs weekend comparison",
         "placeholder": "Select a route"
       },
       "route_overview": {
-        "title": "🚏 Route overview",
+        "title": "Route overview",
         "summary": "Route {{route}} overview",
         "placeholder": "Select a route"
       }

@@ -516,27 +516,27 @@
       },
       "missing_required": "*",
       "top_delay": {
-        "title": "🏆 遅延の大きい路線 Top-N",
+        "title": "遅延の大きい路線 Top-N",
         "summary": "上位 {{k}} 件 ({{service}})"
       },
       "ontime_rank": {
-        "title": "🎯 オンタイム率ランキング",
+        "title": "オンタイム率ランキング",
         "best": "良い順",
         "worst": "悪い順",
         "summary": "{{dir}} {{k}} 件"
       },
       "route_trend": {
-        "title": "📈 路線の遅延推移",
+        "title": "路線の遅延推移",
         "summary": "路線 {{route}} の {{gran}}ごとの推移",
         "placeholder": "路線を選択してください"
       },
       "weekday_vs_weekend": {
-        "title": "⚖️ 平日 vs 土日祝",
+        "title": "平日 vs 土日祝",
         "summary": "路線 {{route}}: 平日と土日祝の比較",
         "placeholder": "路線を選択してください"
       },
       "route_overview": {
-        "title": "🚏 路線の概況",
+        "title": "路線の概況",
         "summary": "路線 {{route}} の概況",
         "placeholder": "路線を選択してください"
       }
