@@ -179,3 +179,35 @@ P2 cleanup from Phase ③.7 review-branch.md. Frontend-only.
 ## Recommendation
 
 MERGE — polish PR, no behavior regressions, tsc + ruff + i18n parity all clean.
+
+---
+
+# Phase ⑦ — Loading indicators upgrade
+
+## What changed
+
+User feedback: "I hate the current loading icon, hard to see it."
+
+- `TopProgressBar`: 2px → 3px, accent gradient with glowing leading edge, 80ms grace before showing, prefers-reduced-motion fallback
+- `Spinner` (NEW): 14px-default SVG arc + faded ring, currentColor, inline+block modes, used in busy buttons and inline-text status rows
+- `ParamStrip` 実行 button: spinner appears the moment the user taps, alongside the 実行中… label
+- `AskTab` "考え中…" status row: spinner left of the label
+
+## Reviews
+
+3 fresh-context reviewers found 1 P0 + 4 P1 issues, all fixed in `a54fe79`:
+
+- **P0** `ParamStrip` — Spinner `color="white"` rendered on `bg-soft` (light gray) background when busy, so it was invisible. Exact opposite of what the user asked for. Fix: keep accent background through the busy state so the white spinner stays readable; also added `display: inline-flex; alignItems: center` to the button for crisp alignment.
+- **P1** `Spinner` `@media (prefers-reduced-motion: reduce)` selector matched any `role=status` or `aria-hidden=true` SVG document-wide. Fix: scope via `[data-spinner]` attribute.
+- **P1** `TopProgressBar` `@media (prefers-reduced-motion: reduce)` selector `[aria-hidden] > div` would catch any aria-hidden container with a child div. Fix: scope via `[data-tpb]` attribute.
+- **P1** `Spinner` SVG rotation: without `transform-box: fill-box; transform-origin: 50% 50%` the arc could orbit instead of spinning in place across some browsers. Fix: added both.
+- **P1** `Spinner` `aria-label={label}` rendered an empty announcement when caller passed `label=""`. Fix: `label || undefined`.
+
+## Deferred
+
+- `Spinner` `verticalAlign: "middle"` — superseded the hardcoded `-2px` from the reviewer note. Generic enough that size-specific pixel offsets aren't needed.
+- z-index ceiling — current 1000 is fine; future modal layer should consciously go higher.
+
+## Recommendation
+
+MERGE — calm palette held (saturation ≤33%), visibility meaningfully improved per the user's complaint, all P0/P1 reviewer findings addressed, tsc clean.
