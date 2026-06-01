@@ -581,8 +581,7 @@
   "reports": {
     "list_title": "レポート一覧",
     "select_prompt": "レポートを選択してください",
-    "rendered_at": "生成: {{when}}",
-    "range_suffix": "・ 期間: {{from}} 〜 {{to}}",
+    "range_suffix": "期間: {{from}} 〜 {{to}}",
     "raw_rows": "生データ（{{count}}件）",
     "type": {
       "ranking": "遅延ランキング",
