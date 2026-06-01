@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
-import { relativeTime } from "../utils/relativeTime";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -91,9 +90,6 @@ export function ReportsTab() {
               }}
             >
               <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
-              <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-                {relativeTime(r.rendered_at)}
-              </div>
             </div>
           );
         })}
@@ -137,14 +133,11 @@ export function ReportsTab() {
                 </a>
               )}
             </div>
-            <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 16px" }}>
-              {t("reports.rendered_at", { when: relativeTime(detail.data.rendered_at) })}
-              {detail.data.ctx && (
-                <>
-                  {" "}{t("reports.range_suffix", { from: detail.data.ctx.from, to: detail.data.ctx.to })}
-                </>
-              )}
-            </div>
+            {detail.data.ctx && (
+              <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 16px" }}>
+                {t("reports.range_suffix", { from: detail.data.ctx.from, to: detail.data.ctx.to })}
+              </div>
+            )}
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows as unknown as { days: TrendDay[]; hourly: HourlyCell[] }[]} />
             ) : detail.data.rows.length > 0 ? (
