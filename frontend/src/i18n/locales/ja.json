@@ -6,6 +6,12 @@
     "live": "リアルタイム",
     "reports": "レポート"
   },
+  "app": {
+    "data_stale": {
+      "banner": "データが最新ではありません — 最終取り込み: {{when}}",
+      "dismiss_aria": "閉じる"
+    }
+  },
   "overview": {
     "eyebrow": "概況 — {{from}} 〜 {{to}}",
     "hero_avg_prefix": "今週の平均遅延は",
