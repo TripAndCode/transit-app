@@ -211,3 +211,39 @@ User feedback: "I hate the current loading icon, hard to see it."
 ## Recommendation
 
 MERGE — calm palette held (saturation ≤33%), visibility meaningfully improved per the user's complaint, all P0/P1 reviewer findings addressed, tsc clean.
+
+---
+
+# Phase ⑦.5 — ActivityStrip + drop TopProgressBar
+
+## What changed
+
+User feedback after Phase ⑦: "still hate the loading icon". Two iterations of top-of-viewport bars (2px → 3px) didn't fix the discoverability problem. Phase ⑦.5 moves the loading signal INTO the content area:
+
+- NEW `ActivityStrip` — 24px soft-lavender band beneath the header, three pulsing dots + "データを読み込み中..." label, gated on `useIsMutating()`, 80ms grace, prefers-reduced-motion fallback
+- DELETED `TopProgressBar` — superseded
+- App.tsx mounts ActivityStrip between DataStalenessBanner and the flex content row
+
+## Reviews
+
+Per memory ritual, 5 fresh-context reviewers (3 narrow + 2 repo-wide) ran before push. Combined findings:
+
+**Fixed inline (5 commits total on the branch):**
+
+- R1+R2 (`2b31058`): integer-count flicker (mutating dep) + inline-style re-injection
+- R3 (`79a24b7`): HMR style duplication (useRef → module-level flag) + idle SR announcement (conditional render of span)
+- R5 (`4ace493`): cross-tab regressions from dropping useIsFetching:
+  - MapTab `isLoading` → `isFetching` (filter-change refetches were silently stale)
+  - ReportsTab detail same fix
+  - AskTab — guard convQuery.isPending so saved-thread loading shows skeleton instead of empty-state hint
+  - RequireAdmin — replace `return null` with Skeleton placeholder so admin pages don't flash blank
+
+**Deferred to a follow-up cleanup phase (R4 + R5 P2/P3):**
+
+- 5 unused components: `AnomalyTimeline`, `AskAutocomplete`, `AskModeToggle`, `ConfidencePill`, `DelayHeatmap` — all from earlier Ask phases, no consumers
+- ~21 orphan i18n keys (ask.sidebar.relative_*, ask.hint.body_3_*, ask.suggestion.*, errors.no_agency_selected, common.locale_ja/en, ask.error_empty/empty_state/input_aria/input_placeholder/followup_placeholder/followup_send)
+- 3 admin pages + 3 leaf components still using plain-text loading labels (AdminUsersPage, AdminUserDetailPage, AccountPage, ThreadSidebar, AgencyPicker, RoutesPicker)
+
+## Recommendation
+
+MERGE — visible-in-context loading signal solves the user's core complaint, all 5 reviewers' P0/P1 findings addressed, no tsc errors, no lint errors. Deferred cleanup logged for next phase.
