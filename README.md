@@ -1,6 +1,6 @@
 # Transit Delay App
 
-Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST API plus a React SPA (map heatmap, hourly heatmap, daily trend chart, route polyline overlay, CSV export). Natural-language Japanese questions go through Groq (llama-3.3-70b-versatile) tool-use against six deterministic SQL tools.
+Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST API plus a React SPA (map heatmap, hourly heatmap, daily trend chart, route polyline overlay, CSV export, threaded Q&A with persistent conversations). The Ask tab is a chat-first interface: a bottom-pinned dock of five parameterized question chips (`top_n` / `on_time` / `trend` / `cmp_service` / `route_stats`) dispatches deterministic SQL tools — no LLM on the primary path. Optional LLM-grounded follow-up chips interpret the result that's already on screen, gated behind `ASK_FOLLOWUP_ENABLED` per the kill-switch policy.
 
 ---
 
@@ -63,9 +63,48 @@ once per session.
 
 ## Ask tab — how it works
 
+### Frontend dispatch surface (Phase ③ onward)
+
+The user-facing Ask tab is a **chat-first QuestionDock** in
+`frontend/src/components/QuestionDock.tsx`:
+
+- Bottom-pinned strip of **5 question chips** — 🏆 Top-N delays, 🎯 On-time
+  rate, 📈 Route delay trend, ⚖️ Weekday vs Weekend, 🚏 Route overview
+- Tapping a chip raises a one-row **`ParamStrip`** above the chips with
+  inline pills (件数 / 運行種別 / 路線 / 粒度 / 指標) and an 実行 button
+- Submit hits `POST /api/{agencyId}/conversations/{cid}/messages` with
+  `{tool, args, user_summary}` — **deterministic dispatch, zero LLM**.
+  Backend `append_message_endpoint` (`api/routers/conversations.py`)
+  canonicalizes args, looks up the canonical-intent cache, then runs
+  `pipeline.query.tools.dispatch()` and persists user + assistant rows
+  in one transaction
+- Anonymous users (no login) use the same flow via
+  `POST /api/{agencyId}/ask` with a `__build__ {tool} {args}` sentinel
+  question — `pipeline/query/chat.py` short-circuits the LLM path and
+  runs the same `dispatch()` directly. Threads live in `localStorage`
+  until migrated on login
+
+Each result-bearing assistant bubble gets a row of **follow-up chips**
+(`why` / `reliability` / `slice` / `summarize` / `next`). Tapping one
+hits `POST /conversations/{cid}/followup` with the prior result as
+grounding context. The LLM is called *only* here, with no tool use, so
+it's bounded to interpretation of data the user is already looking at.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `ASK_FOLLOWUP_ENABLED` | `false` | When off, follow-up chip row is hidden and `POST /followup` returns 503. Disable path for the LLM kill-switch. |
+| `ASK_INTENT_CACHE_ENABLED` | `false` | Enables the canonical-intent cache + promotion job (see [Phase ②](#canonical-intent--cache-phase-) below). |
+| `ASK_HISTORY_ENABLED` | `true` | When off, the LLM stage gets no conversation memory. |
+| `ASK_QUERY_LOG_ENABLED` | `true` | When off, no rows are written to `ask_query_log`. |
+
+### Free-text `/ask` (LLM fallback, also used by anonymous build-sentinel)
+
 `POST /api/{agency_id}/ask` answers a Japanese (or English) natural-language
 question about delay data. It uses a 3-stage router so most common questions
-never reach the LLM, keeping the Cerebras/Groq free tiers comfortable.
+never reach the LLM, keeping the Cerebras/Groq free tiers comfortable. The
+QuestionDock does not exercise this path for authed users; the deterministic
+`conversations/messages` flow above is used instead. Anonymous users still
+fall through here via the build-sentinel short-circuit.
 
 ### Request flow
 
@@ -429,6 +468,11 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0009_auth` | `users`, `oauth_identities`, `sessions`, `login_events`, `filter_presets` |
 | `0010_audit_kinds` | widens `login_events.kind` to include `account_created` + `login_failed` |
 | `0011_correctness_types` | `scheduled_time` TEXT→TIME (`updates` + `agg_route_hour`); `agg_route_dow.dow` TEXT→SMALLINT (ISODOW) |
+| `0012_pgtrgm_route_names` | `pg_trgm` extension + trigram GIN indexes on `route_long_name` / `route_short_name` for fuzzy search |
+| `0013_ask_query_log` | `ask_query_log` table for anonymized query analytics |
+| `0014_ask_intent_cache` | `ask_intent_cache` table for the canonical-intent cache (Phase ②) |
+| `0015_ask_intent_cache_composite_pk` | Composite PK on `(agency_id, signature_hash)` for per-agency cache isolation |
+| `0016_ask_conversations` | `ask_conversations` + `ask_conversation_messages` for threaded Q&A (Phase ③) |
 
 > **2026-05-22 note on type changes:** migration `0011` retypes
 > `scheduled_time` from `TEXT` to `TIME` and `agg_route_dow.dow` from
@@ -522,7 +566,23 @@ Computes five aggregation tables used by all API queries:
 | `GET` | `/api/agencies` | List agencies |
 | `POST` | `/api/agencies` | Register agency |
 | `GET` | `/api/agencies/{id}` | Get agency |
-| `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer (Groq tool-use) |
+| `POST` | `/api/{agency_id}/ask` | Natural-language question → Japanese answer (LLM fallback; also handles anonymous `__build__` sentinel from the dock) |
+| `GET` | `/api/{agency_id}/ask/suggest` | Autocomplete suggestions for the empty/typing input (Phase ②) |
+| `GET` | `/api/{agency_id}/ask/build-schema` | Dock's parameterized-question schema |
+| `POST` | `/api/{agency_id}/ask/edit-action` | Records confirm-vs-edit of a low-confidence canonical interpretation |
+| `GET` | `/api/{agency_id}/ask/followup-enabled` | Returns `{enabled: bool}` — frontend uses this to gate the follow-up chip row |
+| `GET` | `/api/{agency_id}/ask/dashboard/heatmap` | Route × DOW or hour-band delay heatmap (Phase ③.5; remains for plotting) |
+| `GET` | `/api/{agency_id}/ask/dashboard/anomalies` | Daily-delay series with ±σ band + anomaly markers |
+| `GET` | `/api/{agency_id}/ask/dashboard/movers` | Week-over-week largest delay movers |
+| `GET` | `/api/{agency_id}/conversations` | List the caller's threads |
+| `POST` | `/api/{agency_id}/conversations` | Create a thread (title + filter_ctx) |
+| `GET` | `/api/{agency_id}/conversations/{cid}` | Get a thread + its messages |
+| `PATCH` | `/api/{agency_id}/conversations/{cid}` | Update title / pinned / filter_ctx |
+| `DELETE` | `/api/{agency_id}/conversations/{cid}` | Soft-delete a thread |
+| `POST` | `/api/{agency_id}/conversations/{cid}/messages` | Deterministic dispatch — primary Ask path |
+| `POST` | `/api/{agency_id}/conversations/{cid}/followup` | LLM-grounded follow-up bounded to the prior result (kill-switch gated) |
+| `GET` | `/api/{agency_id}/conversations/{cid}/messages` | List messages in a thread |
+| `POST` | `/api/{agency_id}/conversations/migrate-anon` | Bulk-import anon threads on first login |
 | `GET` | `/api/{agency_id}/reports` | List pre-computed reports |
 | `GET` | `/api/{agency_id}/reports/{type}` | Report payload (`format=json` default, `csv` for download) |
 | `GET` | `/api/{agency_id}/delays/live` | Latest delay per trip |
@@ -657,16 +717,26 @@ Each row carries `ip`, `user_agent`, `provider`, optional `meta` JSONB, and `act
 
 ## Frontend
 
-Single-page React app at `frontend/` (Vite + TypeScript strict + TanStack Query + react-router-dom + MapLibre GL). Default tab is the map; tabs cover ask (NL questions), live delays (most-recent-observation cards), and pre-rendered reports (with hourly heatmap and daily-trend chart). UI chrome is Japanese.
+Single-page React app at `frontend/` (Vite + TypeScript strict + TanStack Query + react-router-dom + MapLibre GL + react-i18next). Tabs: Overview / Map / Ask / Live / Reports. Default route is the Ask tab. UI chrome is bilingual (ja / en) via locale switcher in the header.
 
-Key v2 components (all under `frontend/src/components/`):
+Key components (all under `frontend/src/components/`):
 
-- `RangeBadge` + `TabFilterBar` — unified date-range / DOW / time-band / service / route filter strip; state lives in URL params and persists across tab switches.
+- `RangeBadge` + `TabFilterBar` + `FilterContextBar` — unified date-range / DOW / time-band / service / route filter strip; state lives in URL params and persists across tab switches.
+- `DataStalenessBanner` — calm warm-tan pill above the tab content when GTFS ingest hasn't run in 24h+. Reuses the existing `/today/route-summary` query (zero extra requests).
 - `MapLegend` — draggable, position-persisted overlay explaining the delay-severity color ramp.
 - `charts/DailyChart` — sample-weighted line chart for trend reports.
 - `charts/HourlyHeatmap` — date × hour-of-day heatmap; click a row label / column / cell to drill the global filter into that time-band / day / both.
 - `ReportTable` — inline horizontal bars colored by severity for ranking/compare reports; CSV export with Japanese headers.
 - Map tooltips show stop name, GTFS `platform_code` (のりば badge), `stop_code`, contributing route_codes, and the active filter period.
+
+Ask-tab specifics (Phase ③ → ③.9):
+
+- `tabs/AskTab.tsx` — left thread sidebar, top filter pill, middle scroll area (bubbles + per-result follow-up chips), bottom `QuestionDock`.
+- `components/QuestionDock.tsx` — owns the dock state machine (idle / composing / busy); renders the chip row and rises a `ParamStrip` when a chip is tapped.
+- `components/ParamStrip.tsx` — one-row inline parameter composer per `CardTemplate`; routes each `ParamSpec` to its pill control.
+- `components/paramPills/{SegmentedPill,LimitPill,RoutePickerPill}.tsx` — small popover-style param controls with Escape-to-close, focus restoration, and outside-click dismiss.
+- `components/ThreadSidebar.tsx` — ChatGPT-style conversation list with anonymous (localStorage) → authed (server) migration on first login.
+- `components/askCardTemplates.ts` + `askFollowupChips.ts` — declarative chip templates; single source of truth for tool + args + i18n title keys.
 
 ### Local dev
 
@@ -717,7 +787,9 @@ api/middleware/
   session.py                sid cookie → DB lookup → request.state.user (1/min last_seen throttle)
 api/routers/
   agencies.py               agency CRUD
-  ask.py                    NL question → Groq tool-use → answer (pipeline/query/chat)
+  ask.py                    /ask LLM fallback + /ask/suggest + /ask/build-schema + /ask/edit-action
+  conversations.py          /conversations CRUD + /messages (deterministic) + /followup (LLM-grounded, kill-switch gated)
+  ask_dashboard.py          /ask/dashboard/{heatmap,anomalies,movers} — analytical previews
   reports.py                pre-computed report payloads (json + csv)
   map.py                    live delays + heatmap + route-shape + today summary
   static.py                 route/stop lists
@@ -731,11 +803,20 @@ api/security.py             User dataclass + require_user / require_admin / csrf
     ▼
 api/range.py                shared RangeCtx (from/to/dow/time_band/service/routes) + SQL filter builder
 pipeline/query/
-  chat.py                   Groq tool-use chat (six tools, system prompt, date overrides)
-  tools.py                  the six tool implementations + route validation
+  chat.py                   LLM-fallback chat (provider ladder, __build__ sentinel short-circuit)
+  llm_client.py             Cerebras → Groq → Ollama provider ladder, malformed tool-call recovery
+  tools.py                  the deterministic tool implementations + alias map (on_time, trend, cmp_service)
   tool_queries.py           SQL helpers for tools.py (per-route DOW / compare / metadata)
+  intent.py                 IntentSignature + canonicalize + signature_hash (Phase ②)
+  intent_cache.py           ask_intent_cache DAL + cache_outcome bookkeeping
+  router.py                 Stage-1 rules router (regex → tool args)
+  embeddings.py             e5-small wrapper for stage-2 nearest-neighbor router
+  rag_index.py              rag_chunks builder + cosine NN lookup
+  conversations.py          ask_conversations + ask_conversation_messages DAL
+  followup.py               LLM-grounded follow-up (bounded; kill-switch gated)
   labels.py                 dow_label / time_label display helpers
   formatter.py              Python templates → Japanese text (reports endpoint)
+pipeline/dashboard_queries.py  /ask/dashboard/* SQL — heatmap, anomalies, movers
 pipeline/audit.py           one-row INSERT into login_events (caller owns the txn)
 pipeline/reports.py         compute_* aggregations (cached via async_lru_cache)
 pipeline/cache.py           bounded async LRU + TTL decorator
