@@ -10,6 +10,9 @@
     "data_stale": {
       "banner": "データが最新ではありません — 最終取り込み: {{when}}",
       "dismiss_aria": "閉じる"
+    },
+    "loading": {
+      "banner": "データを読み込み中..."
     }
   },
   "overview": {

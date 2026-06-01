@@ -10,6 +10,9 @@
     "data_stale": {
       "banner": "Data is not current — last ingest: {{when}}",
       "dismiss_aria": "Dismiss"
+    },
+    "loading": {
+      "banner": "Loading data..."
     }
   },
   "overview": {

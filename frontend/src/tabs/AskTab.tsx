@@ -31,6 +31,7 @@ import { DailyChart } from "../components/charts/DailyChart";
 import { QuestionDock } from "../components/QuestionDock";
 import { FOLLOWUP_CHIPS } from "../components/askFollowupChips";
 import { Spinner } from "../components/Spinner";
+import { Skeleton } from "../components/Skeleton";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -220,7 +221,17 @@ export function AskTab() {
             scrollbarGutter: "stable",
           }}
         >
-          {hasMessages ? (
+          {activeId !== null && convQuery.isPending ? (
+            // Thread selected but its messages haven't loaded yet — show a
+            // skeleton instead of the empty-state hint, which would otherwise
+            // read 'start a new conversation' while a saved thread is still
+            // fetching (review-flagged regression: R5 P1).
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Skeleton height={64} />
+              <Skeleton height={120} />
+              <Skeleton height={64} style={{ alignSelf: "flex-end", width: "60%" }} />
+            </div>
+          ) : hasMessages ? (
             <>
               <MessageList
                 messages={messages}
