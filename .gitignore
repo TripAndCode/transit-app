@@ -24,3 +24,11 @@ api/static
 frontend/vite.config.js
 frontend/vite.config.d.ts
 client_secret_*.json
+# Ad-hoc screenshots, scout artifacts, and Playwright MCP captures should
+# never land in the repo root. Keep these catch-alls so `git status` stays
+# noise-free after browser-driven debugging.
+/*.png
+/*.jpg
+/*.gif
+/*.pdf
+.playwright-mcp/
