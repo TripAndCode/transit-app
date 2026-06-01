@@ -581,8 +581,7 @@
   "reports": {
     "list_title": "Reports",
     "select_prompt": "Select a report",
-    "rendered_at": "Generated: {{when}}",
-    "range_suffix": "· Range: {{from}} – {{to}}",
+    "range_suffix": "Range: {{from}} – {{to}}",
     "raw_rows": "Raw ({{count}} rows)",
     "type": {
       "ranking": "Delay ranking",
