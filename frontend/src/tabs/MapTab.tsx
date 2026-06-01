@@ -21,7 +21,7 @@ export function MapTab() {
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
   const { t } = useTranslation();
-  const { data, isLoading, error, refetch } = useHeatmap(id, ctx);
+  const { data, isFetching, error, refetch } = useHeatmap(id, ctx);
   // Single-route overlay: only fetch when exactly one route is selected.
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
   const { data: shape } = useRouteShape(id, focusedRoute, ctx);
@@ -209,7 +209,7 @@ export function MapTab() {
           sees a calm "再試行" pill. */} {/* // i18n-ignore: JSX comment */}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       <div style={{ position: "relative", flex: 1, minHeight: 400 }}>
-      {isLoading && (
+      {isFetching && (
         <div style={{ position: "absolute", inset: 0, padding: 24, zIndex: 1 }}>
           <Skeleton height="100%" />
         </div>

@@ -102,7 +102,7 @@ export function ReportsTab() {
         {reportType && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && detail.isLoading && <Skeleton height={400} />}
+        {reportType && detail.isFetching && <Skeleton height={400} />}
         {detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
