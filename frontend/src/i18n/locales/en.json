@@ -6,6 +6,12 @@
     "live": "Live",
     "reports": "Reports"
   },
+  "app": {
+    "data_stale": {
+      "banner": "Data is not current — last ingest: {{when}}",
+      "dismiss_aria": "Dismiss"
+    }
+  },
   "overview": {
     "eyebrow": "Overview — {{from}} – {{to}}",
     "hero_avg_prefix": "This week's average delay is",

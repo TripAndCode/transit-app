@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -25,6 +26,7 @@ export default function App() {
       <GuestPrompt />
       <TopProgressBar />
       <Header />
+      <DataStalenessBanner />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar />
         <main style={{ flex: 1, overflowY: "auto", padding: 24 }}>
