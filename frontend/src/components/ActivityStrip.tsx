@@ -18,9 +18,12 @@
  * transparent border) so the content below does not shift when the strip
  * appears or disappears.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+
+/** Guards against duplicate <style> injection across Strict Mode double-invoke and HMR remounts. */
+let _stripStylesInjected = false;
 
 /** CSS injected once into the document head; scoped to [data-activity-strip]. */
 const STRIP_CSS = `
@@ -49,18 +52,18 @@ const STRIP_CSS = `
 `;
 
 /**
- * Injects `STRIP_CSS` into the document `<head>` exactly once per page load.
- * Using a module-level flag avoids re-insertion across React strict-mode
- * double-invocation and hot-module reloads.
+ * Injects `STRIP_CSS` into the document `<head>` exactly once per module
+ * lifetime. The module-level `_stripStylesInjected` flag survives React
+ * Strict Mode's double-invocation of effects and Vite HMR remounts, both of
+ * which would reset a `useRef`.
  */
 function useStripStyles(): void {
-  const injected = useRef(false);
   useEffect(() => {
-    if (injected.current) return;
+    if (_stripStylesInjected) return;
     const el = document.createElement("style");
     el.textContent = STRIP_CSS;
     document.head.appendChild(el);
-    injected.current = true;
+    _stripStylesInjected = true;
   }, []);
 }
 
@@ -117,7 +120,7 @@ export function ActivityStrip() {
         <span className="as-dot" />
         <span className="as-dot" />
       </span>
-      <span>{t("app.loading.banner")}</span>
+      {visible && <span>{t("app.loading.banner")}</span>}
     </div>
   );
 }
