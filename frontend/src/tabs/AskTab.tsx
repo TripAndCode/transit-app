@@ -109,9 +109,12 @@ export function AskTab() {
   }
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Scroll to bottom when message list changes (new user/assistant bubble lands).
+  // Dropping appendMsg.isPending from deps avoids a redundant pre-fetch fire that
+  // scrolls before the new row is in the DOM and again after.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [convQuery.data?.messages, appendMsg.isPending]);
+  }, [convQuery.data?.messages]);
 
   // ── Event handlers ────────────────────────────────────────────────────────
 

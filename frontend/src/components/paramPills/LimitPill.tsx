@@ -11,6 +11,13 @@ export type LimitPillProps = {
 
 export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled }: LimitPillProps) {
   const [open, setOpen] = useState(false);
+  // Local draft tracks the literal text in the input so transient invalid
+  // states ("", "-", "e") don't propagate to the committed value. Sync from
+  // `value` when the parent updates externally (e.g., chip swap defaults).
+  const [draft, setDraft] = useState<string>(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -48,6 +55,13 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
+        onMouseEnter={(e) => {
+          if (disabled) return;
+          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
+        }}
         style={{
           background: "var(--bg-soft, rgba(0,0,0,0.04))",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
@@ -59,6 +73,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
+          transition: "background 120ms ease",
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -104,8 +119,20 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           </button>
           <input
             type="number"
-            value={value}
-            onChange={(e) => commit(Number(e.target.value))}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              const parsed = Number(draft);
+              if (Number.isFinite(parsed)) commit(parsed);
+              else setDraft(String(value));
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const parsed = Number(draft);
+                if (Number.isFinite(parsed)) commit(parsed);
+                else setDraft(String(value));
+              }
+            }}
             min={min}
             max={max}
             style={{

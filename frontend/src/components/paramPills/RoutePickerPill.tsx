@@ -71,6 +71,13 @@ export function RoutePickerPill({
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
+        onMouseEnter={(e) => {
+          if (disabled) return;
+          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
+        }}
         style={{
           background: "var(--bg-soft, rgba(0,0,0,0.04))",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
@@ -86,6 +93,7 @@ export function RoutePickerPill({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+          transition: "background 120ms ease",
         }}
         aria-haspopup="listbox"
         aria-expanded={open}

@@ -139,7 +139,7 @@ function renderPill(
     const value = (typeof v === "string" ? v : spec.default) ?? spec.options[0].value;
     return (
       <SegmentedPill
-        label={t("ask.card.param.metric_label", { defaultValue: "指標" })}
+        label={t("ask.card.param.metric_label")}
         value={value}
         options={spec.options.map((o) => ({ value: o.value, label: t(o.label_key) }))}
         onChange={(s) => onChange(spec.name, s)}
