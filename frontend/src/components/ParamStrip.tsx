@@ -12,6 +12,7 @@ import type { CardTemplate, ParamSpec } from "./askCardTemplates";
 import { SegmentedPill } from "./paramPills/SegmentedPill";
 import { LimitPill } from "./paramPills/LimitPill";
 import { RoutePickerPill } from "./paramPills/RoutePickerPill";
+import { Spinner } from "./Spinner";
 
 export type ParamStripProps = {
   template: CardTemplate;
@@ -86,6 +87,7 @@ export function ParamStrip({
           opacity: busy ? 0.7 : 1,
         }}
       >
+        {busy && <Spinner size={12} inline color="white" />}
         {busy ? t("ask.dock.running") : t("ask.dock.run")}
       </button>
     </div>

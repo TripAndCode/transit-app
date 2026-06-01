@@ -30,6 +30,7 @@ import { FilterContextBar } from "../components/FilterContextBar";
 import { DailyChart } from "../components/charts/DailyChart";
 import { QuestionDock } from "../components/QuestionDock";
 import { FOLLOWUP_CHIPS } from "../components/askFollowupChips";
+import { Spinner } from "../components/Spinner";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -241,8 +242,16 @@ export function AskTab() {
                 <div
                   role="status"
                   aria-live="polite"
-                  style={{ padding: 12, color: "var(--text-tertiary)", fontSize: 13 }}
+                  style={{
+                    padding: 12,
+                    color: "var(--text-tertiary)",
+                    fontSize: 13,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
                 >
+                  <Spinner size={14} />
                   {t("ask.thinking")}
                 </div>
               )}
