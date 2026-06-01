@@ -146,3 +146,36 @@ P1 findings fixed in `6091fbe`:
 ## Recommendation
 
 MERGE — chat-first redesign lands cleanly, all P0/P1 reviewer findings addressed, e2e covers the happy paths, kill switch verified by design (gated on `ASK_FOLLOWUP_ENABLED`).
+
+---
+
+# Phase ③.8 — Ask polish (Pxx cleanup)
+
+## What changed
+
+P2 cleanup from Phase ③.7 review-branch.md. Frontend-only.
+
+- LimitPill: local draft string state — commit on Enter/blur only, with empty-string guard (P1 found mid-review)
+- All 3 pill triggers: subtle hover bg + 120ms transition
+- ParamStrip: drop hardcoded JA defaultValue on metric_label
+- Locales: remove unused `ask.empty_hint` and `ask.dock.composing_label`
+- AskTab: scroll-effect dep array tightened (drop `appendMsg.isPending`)
+- JSDoc added to all dock files (5 files)
+
+## Reviews
+
+3 fresh-context reviewers. All P1s addressed in `45bda62`.
+
+- R1 (LimitPill + scroll): empty-string commit bug — fixed
+- R2 (hover + i18n): all pass; minor question about Enter not closing the popover — left as-is (consistent with stepper)
+- R3 (holistic taste): merge with notes; DRY note on 3× hover boilerplate — tolerable at 3 sites
+
+## Deferred
+
+- `usePillHoverProps()` hook if a 4th pill is added
+- `followup_chips.panel_aria` defaultValue dead weight (pre-existing, out of scope)
+- LimitPill stepper using committed value vs draft (out-of-scope edge case)
+
+## Recommendation
+
+MERGE — polish PR, no behavior regressions, tsc + ruff + i18n parity all clean.

@@ -1,5 +1,15 @@
+/**
+ * LimitPill — numeric stepper popover for selecting an integer result limit (k).
+ *
+ * Renders a pill button that opens an inline +/− stepper popover. A local draft
+ * string buffers the raw input value so transient states (empty field, partially
+ * typed digits) never propagate to the parent; the committed value is only written
+ * on blur or Enter, after clamping to [min, max]. The draft re-syncs from `value`
+ * whenever the parent updates it externally (e.g., chip-swap resetting defaults).
+ */
 import { useState, useRef, useEffect } from "react";
 
+/** Props for {@link LimitPill}. */
 export type LimitPillProps = {
   label: string;
   value: number;
@@ -9,8 +19,13 @@ export type LimitPillProps = {
   disabled?: boolean;
 };
 
+/** Numeric stepper pill that commits only on blur or Enter, guarding invalid drafts. */
 export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled }: LimitPillProps) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string>(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -35,10 +50,23 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
     };
   }, [open]);
 
+  /** Clamp and emit a numeric value; no-op for non-finite inputs. */
   function commit(next: number) {
     if (!Number.isFinite(next)) return;
     const clamped = Math.max(min, Math.min(max, Math.round(next)));
     onChange(clamped);
+  }
+
+  /** Attempt to commit the current draft string; reset draft to last good value if invalid or empty. */
+  function commitDraft() {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
+      setDraft(String(value));
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) commit(parsed);
+    else setDraft(String(value));
   }
 
   return (
@@ -48,6 +76,13 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
+        onMouseEnter={(e) => {
+          if (disabled) return;
+          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
+        }}
         style={{
           background: "var(--bg-soft, rgba(0,0,0,0.04))",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
@@ -59,6 +94,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
+          transition: "background 120ms ease",
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -104,8 +140,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           </button>
           <input
             type="number"
-            value={value}
-            onChange={(e) => commit(Number(e.target.value))}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitDraft();
+            }}
             min={min}
             max={max}
             style={{
