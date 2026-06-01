@@ -76,18 +76,23 @@ export function ParamStrip({
         disabled={!canRun}
         style={{
           marginLeft: "auto",
-          background: canRun ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.06))",
-          color: canRun ? "white" : "var(--text-tertiary, #999)",
+          // Keep the accent background while busy so the spinner stays
+          // readable; only fade to bg-soft when blocked by missing params.
+          background:
+            busy || canRun ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.06))",
+          color: busy || canRun ? "white" : "var(--text-tertiary, #999)",
           border: "none",
           borderRadius: 999,
           padding: "5px 16px",
           fontSize: 13,
           fontWeight: 600,
           cursor: canRun ? "pointer" : "not-allowed",
-          opacity: busy ? 0.7 : 1,
+          opacity: busy ? 0.85 : 1,
+          display: "inline-flex",
+          alignItems: "center",
         }}
       >
-        {busy && <Spinner size={12} inline color="white" />}
+        {busy && <Spinner size={12} inline />}
         {busy ? t("ask.dock.running") : t("ask.dock.run")}
       </button>
     </div>

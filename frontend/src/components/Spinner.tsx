@@ -32,12 +32,14 @@ export function Spinner({
   const stroke = Math.max(1.4, size / 8);
   return (
     <span
+      data-spinner
       role={label ? "status" : undefined}
-      aria-label={label}
+      aria-label={label || undefined}
       aria-hidden={label ? undefined : true}
       style={{
         display: inline ? "inline-flex" : "inline-block",
-        verticalAlign: inline ? "-2px" : "baseline",
+        alignItems: inline ? "center" : undefined,
+        verticalAlign: inline ? "middle" : "baseline",
         marginRight: inline ? 6 : 0,
         width: size,
         height: size,
@@ -51,6 +53,8 @@ export function Spinner({
         fill="none"
         style={{
           animation: "spinner-rotate 0.9s linear infinite",
+          transformBox: "fill-box",
+          transformOrigin: "50% 50%",
         }}
       >
         <circle
@@ -75,7 +79,7 @@ export function Spinner({
           to { transform: rotate(360deg); }
         }
         @media (prefers-reduced-motion: reduce) {
-          [role="status"] svg, [aria-hidden="true"] svg {
+          [data-spinner] svg {
             animation-duration: 2.4s !important;
           }
         }

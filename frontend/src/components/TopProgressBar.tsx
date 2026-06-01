@@ -33,8 +33,12 @@ export function TopProgressBar() {
 
   return (
     <div
+      data-tpb
       aria-hidden
       style={{
+        // zIndex 1000 — chosen well above the sidebar drawer (500) and below
+        // any future modal layer (≥10000). If you add a higher layer, bump
+        // this too so the progress signal stays on top.
         position: "fixed",
         top: 0,
         left: 0,
@@ -66,8 +70,9 @@ export function TopProgressBar() {
           100% { transform: translateX(385%); }
         }
         @media (prefers-reduced-motion: reduce) {
-          /* Static accent bar — communicates busy without animation. */
-          [aria-hidden] > div { animation: none !important; transform: translateX(0) !important; width: 100% !important; opacity: 0.45; }
+          /* Static accent bar — communicates busy without animation. Scoped
+             to data-tpb so the rule can't leak to other aria-hidden divs. */
+          [data-tpb] > div { animation: none !important; transform: translateX(0) !important; width: 100% !important; opacity: 0.45; }
         }
       `}</style>
     </div>
