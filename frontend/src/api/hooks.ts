@@ -269,7 +269,7 @@ function builderSummary(tool: string, args: Record<string, unknown>): string {
     if (typeof v === "string") {
       valLabel = t(`ask.build_labels.values.${v}`, { defaultValue: v });
     } else if (typeof v === "boolean") {
-      valLabel = v ? t("common.yes", { defaultValue: "はい" }) : t("common.no", { defaultValue: "いいえ" });
+      valLabel = v ? t("common.yes") : t("common.no");
     } else {
       valLabel = String(v);
     }

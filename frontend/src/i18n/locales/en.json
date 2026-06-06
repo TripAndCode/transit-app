@@ -88,11 +88,11 @@
       "service_split": "Service-day trend"
     },
     "empty": "No observations in this range. Try a wider window.",
-    "movers_explainer": "Compares each route's average delay over the last 7 days ({{from}} – {{to}}) with the 7 days before that. Only routes with at least 10 observations in both windows are ranked. The sparkline shows the weekly average over the past 4 weeks.",
-    "hero_explainer": "“This week” is the most recent 7 days with data inside the selected range ({{from}} – {{to}}); “last week” is the 7 days before that. The chart shows the daily average delay across the full selected range.",
-    "concentration_explainer": "Each route's share of the total delay across the selected range. The Lorenz curve below shows how concentrated delay is — the dotted diagonal is perfectly even delay across routes; the further the curve bends away, the more delay is concentrated in a few routes.",
-    "peak_explainer": "Average delay by hour of day (0–23) across the selected range, split into weekdays and weekends/holidays so commute peaks and weekend patterns can be compared.",
-    "service_split_explainer": "Average delay on weekdays vs weekends/holidays across the selected range. The chart below shows the day-by-day series, so you can tell whether the gap is persistent or a one-off."
+    "movers_explainer": "Average delay per route, last 7 days ({{from}} – {{to}}) vs the 7 days prior. Only routes with 10+ observations in both windows are ranked; the sparkline traces the weekly average over the past 4 weeks.",
+    "hero_explainer": "“This week” is the latest 7 days with data in the selected range ({{from}} – {{to}}); “last week” is the 7 days before that. The chart plots the daily average delay across the full range.",
+    "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
+    "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
+    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -129,6 +129,8 @@
     "save": "Save",
     "search_placeholder": "Search...",
     "unit_count": "obs.",
+    "yes": "Yes",
+    "no": "No",
     "unit_min": "min",
     "unit_min_sec_signed": "{{sign}}{{m}} min {{s}} s",
     "unit_min_signed": "{{sign}}{{value}} min",
@@ -146,7 +148,7 @@
   },
   "account": {
     "admin_link": "Admin",
-    "guest_prompt": "Like it? Sign in to save your filters.",
+    "guest_prompt": "Sign in to save your filters.",
     "title": "Account",
     "role_label": "Role",
     "role": {

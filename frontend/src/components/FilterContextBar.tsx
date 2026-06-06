@@ -193,7 +193,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
       <div style={pillRowStyle}>
         <span aria-hidden style={{ fontSize: 14 }}>📅</span>
         <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{summary}</span>
-        <span style={{ color: "var(--text-tertiary)" }}>・</span>
+        <span style={{ color: "var(--text-tertiary)" }}>・</span>{/* i18n-ignore: locale-neutral separator */}
         <span>{routes}</span>
         <button
           type="button"

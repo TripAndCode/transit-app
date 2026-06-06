@@ -62,7 +62,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ・ ");
+  return parts.join(" ・ "); // i18n-ignore: locale-neutral separator
 }
 
 // ─── context menu ────────────────────────────────────────────────────────────
@@ -471,7 +471,7 @@ function ConvItem({
   onContextMenu,
   filterSummaryText,
 }: ConvItemProps) {
-  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ ");
+  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ "); // i18n-ignore: locale-neutral separator
 
   return (
     <div
