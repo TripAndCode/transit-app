@@ -36,3 +36,27 @@ wait "$PID" 2>/dev/null || true
 ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail ".part left on failure"
 ls "$COLLECTOR_BASE"/data/1/rt/*/*.pb 2>/dev/null && fail "pb written despite failure"
 pass "rt-poller failure path clean"
+
+# SIGTERM mid-fetch + startup sweep both leave zero .part behind.
+teardown_base
+setup_base
+printf '1\taomori\t1\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+# Part A: slow curl leaves a .part mid-write; TERM trap must clean it.
+CURL_SLEEP=5 ../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 1
+ls "$COLLECTOR_BASE/data/1/rt/"*/*.part >/dev/null 2>&1 || fail "expected mid-write .part"
+kill -TERM "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail ".part left after TERM"
+# Part B: a stale .part from a prior kill must be swept on the next startup.
+day=$(date -u +%Y%m%d)
+mkdir -p "$COLLECTOR_BASE/data/1/rt/$day"
+: > "$COLLECTOR_BASE/data/1/rt/$day/TripUpdate_000000.pb.part"
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 1.5
+kill "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail "stale .part not swept on startup"
+pass "rt-poller .part cleaned on TERM + startup sweep"

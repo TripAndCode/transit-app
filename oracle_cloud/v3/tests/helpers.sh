@@ -24,6 +24,8 @@ done
 if [ -n "$out" ]; then
     printf 'PBDATA-%s' "${CURL_BODY:-default}" > "$out"
 fi
+# CURL_SLEEP: stay alive after writing --output file, leaving a mid-write .part.
+[ -n "${CURL_SLEEP:-}" ] && sleep "$CURL_SLEEP"
 exit 0
 SHIM
     chmod +x "$SHIM_DIR/curl"

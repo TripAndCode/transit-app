@@ -15,9 +15,14 @@ row=$(awk -F'\t' -v id="$AGENCY_ID" '$1==id && $0 !~ /^#/ {print; exit}' "$TSV")
 [ -n "$row" ] || { echo "agency $AGENCY_ID not found in $TSV" >&2; exit 64; }
 IFS=$'\t' read -r _ NAME INTERVAL FEED_URL STATIC_URL PING_URL <<< "$row"
 : "$STATIC_URL"  # unused here (static-fetch.sh's job); kept for column clarity
+case "$INTERVAL" in ''|*[!0-9]*) echo "invalid interval '$INTERVAL' for agency $AGENCY_ID" >&2; exit 64;; esac
 
 RT_DIR="$BASE_DIR/data/$AGENCY_ID/rt"
 mkdir -p "$RT_DIR"
+# Clean any .part left behind by a previous kill (each loop uses a fresh name).
+find "$RT_DIR" -name '*.part' -type f -delete 2>/dev/null || true
+trap '[ -n "${f:-}" ] && rm -f "$f.part" 2>/dev/null' EXIT
+trap 'exit 143' TERM INT
 
 PING_EVERY=$(( 300 / INTERVAL ))
 [ "$PING_EVERY" -lt 1 ] && PING_EVERY=1
