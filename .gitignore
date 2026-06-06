@@ -32,3 +32,4 @@ client_secret_*.json
 /*.gif
 /*.pdf
 .playwright-mcp/
+.coverage
