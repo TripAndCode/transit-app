@@ -60,3 +60,15 @@ kill "$PID" 2>/dev/null || true
 wait "$PID" 2>/dev/null || true
 ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail "stale .part not swept on startup"
 pass "rt-poller .part cleaned on TERM + startup sweep"
+
+# Interval 0 must be rejected (would divide by zero in PING_EVERY).
+teardown_base
+setup_base
+printf '1\taomori\t0\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+set +e
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "interval 0 not rejected (rc=$rc)"
+grep -q "invalid interval" "$COLLECTOR_BASE/poller.out" || fail "missing invalid-interval message"
+pass "rt-poller rejects interval 0"
