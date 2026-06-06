@@ -5,12 +5,20 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 import tseslint from 'typescript-eslint'
 
-// Accessibility rules ship as errors in the recommended preset. We adopt them
-// as WARN for a calm, non-blocking rollout: they surface in the editor and CI
-// logs without failing the build or churning the 43 hand-rolled components in
-// one pass. Tighten to error later once the warning count is driven down.
-const a11yAsWarn = Object.fromEntries(
-  Object.keys(jsxA11y.flatConfigs.recommended.rules).map((rule) => [rule, 'warn']),
+// Accessibility: adopt jsx-a11y's `recommended` preset, which enables the
+// meaningful rules with their intended options (and deliberately leaves
+// deprecated/superseded rules such as `label-has-for` off in favour of
+// `label-has-associated-control`). The rollout is now complete, so the rules
+// are enforced as errors and gate the build.
+const a11yAsError = Object.fromEntries(
+  Object.entries(jsxA11y.flatConfigs.recommended.rules).map(([rule, value]) => {
+    // Preserve rules the preset intentionally disables (e.g. the deprecated
+    // `label-has-for`); only promote the active rules to `error`.
+    const severity = Array.isArray(value) ? value[0] : value
+    if (severity === 'off' || severity === 0) return [rule, value]
+    const options = Array.isArray(value) ? value.slice(1) : []
+    return [rule, ['error', ...options]]
+  }),
 )
 
 export default tseslint.config(
@@ -30,7 +38,7 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      ...a11yAsWarn,
+      ...a11yAsError,
       // Honor the underscore-prefix convention for intentionally-unused bindings.
       '@typescript-eslint/no-unused-vars': [
         'error',

@@ -77,10 +77,18 @@ export function ReportsTab() {
         {list.data?.map((r) => {
           const active = r.report_type === reportType;
           return (
-            <div
+            <button
               key={r.report_type}
+              type="button"
               onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}${filterSuffix}`)}
+              aria-pressed={active}
               style={{
+                appearance: "none",
+                font: "inherit",
+                textAlign: "left",
+                color: "inherit",
+                display: "block",
+                width: "100%",
                 padding: "10px 12px",
                 marginBottom: 4,
                 background: active ? "var(--accent-soft)" : "var(--bg-surface)",
@@ -90,7 +98,7 @@ export function ReportsTab() {
               }}
             >
               <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
-            </div>
+            </button>
           );
         })}
       </div>

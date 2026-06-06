@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch } from "./client";
 
-export type AdminUser = {
+type AdminUser = {
   user_id: number;
   email: string;
   name: string | null;
@@ -11,7 +11,7 @@ export type AdminUser = {
   created_at: string;
 };
 
-export type AdminUserList = { users: AdminUser[]; total: number };
+type AdminUserList = { users: AdminUser[]; total: number };
 
 /** Paginated/filterable admin user list (q, role, suspended). */
 export function useAdminUsers(params: { q?: string; role?: string; suspended?: string }) {

@@ -132,38 +132,7 @@ export type AskResponse = {
 
 // Phase ② canonical intent + guided UX
 
-export type IntentSignature = {
-  tool: string;
-  args: Record<string, unknown>;
-  confidence: number;
-  rationale: string | null;
-};
-
 export type CacheOutcome = "hit" | "miss" | "bypass";
-
-export type SuggestItem = {
-  question: string;
-  tool: string;
-  args: Record<string, unknown>;
-  distance: number;
-};
-
-export type BuildField =
-  | { key: string; type: "enum"; options: string[]; default?: string; optional?: boolean }
-  | { key: string; type: "int"; min?: number; max?: number; default?: number; optional?: boolean }
-  | { key: string; type: "bool"; default?: boolean; optional?: boolean }
-  | { key: string; type: "string"; default?: string; optional?: boolean };
-
-export type BuildTool = {
-  name: string;
-  label_ja: string;
-  label_en: string;
-  fields: BuildField[];
-};
-
-export type BuildSchema = {
-  tools: BuildTool[];
-};
 
 export type FilterCtx = {
   dow?: "all" | "weekday" | "weekend";
@@ -208,13 +177,6 @@ export type ConvMessage = {
 
 export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
 
-export type FollowupChip = {
-  id: string;
-  title: string;
-  tool: string;
-  args: Record<string, unknown>;
-};
-
 // Anonymous (localStorage) shape — mirrors a Conversation + inline messages
 export type AnonThread = {
   client_id: string;
@@ -226,8 +188,6 @@ export type AnonThread = {
   updated_at: string;
   messages: ConvMessage[];        // capped at 20 per thread
 };
-
-export type EditAction = "confirmed" | "edited";
 
 export type Route = {
   route_id: string;
@@ -304,35 +264,3 @@ export type OverviewSummary = {
   sparkline_points: number[];
 };
 
-// ─── Phase ③.5 — dashboard panel types ──────────────────────────────────────
-
-export type HeatmapRoute = { route_code: string; label: string };
-
-export type HeatmapResponse = {
-  routes: HeatmapRoute[];
-  dimensions: string[];
-  cells: (number | null)[][];  // shape: routes × dimensions
-  baseline_min: number;         // 1.0 — for diverging color scale
-};
-
-export type AnomalyDay = { date: string; avg_delay: number };
-export type AnomalyMarker = { date: string; delta_sigma: number };
-
-export type AnomaliesResponse = {
-  series: AnomalyDay[];
-  mean: number;
-  std: number;
-  anomalies: AnomalyMarker[];
-};
-
-export type MoverRow = {
-  route_code: string;
-  label: string;
-  current_avg: number | null;
-  previous_avg: number | null;
-  delta: number;
-  delta_pct: number | null;
-  samples: number;
-};
-
-export type MoversResponse = { rows: MoverRow[] };

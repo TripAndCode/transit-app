@@ -14,7 +14,7 @@ import { LimitPill } from "./paramPills/LimitPill";
 import { RoutePickerPill } from "./paramPills/RoutePickerPill";
 import { Spinner } from "./Spinner";
 
-export type ParamStripProps = {
+type ParamStripProps = {
   template: CardTemplate;
   agencyId: number;
   values: Record<string, unknown>;

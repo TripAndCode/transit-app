@@ -30,7 +30,10 @@ export function SettingsDrawer({ open, onClose }: Props) {
 
   return (
     <div
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="presentation"
       style={{
         position: "fixed",
         inset: 0,
@@ -39,7 +42,9 @@ export function SettingsDrawer({ open, onClose }: Props) {
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("header.settings_title")}
         style={{
           position: "absolute",
           top: 0,

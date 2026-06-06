@@ -36,7 +36,10 @@ export function AgencyForm({ onClose }: Props) {
 
   return (
     <div
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="presentation"
       style={{
         position: "fixed",
         inset: 0,
@@ -51,7 +54,6 @@ export function AgencyForm({ onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="agency-form-title"
-        onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
         style={{
           background: "var(--bg-surface)",
@@ -62,8 +64,10 @@ export function AgencyForm({ onClose }: Props) {
         }}
       >
         <h3 id="agency-form-title" style={{ marginTop: 0 }}>{t("admin.agency_form.title")}</h3>
-        <Field label={t("admin.agency_form.name_label")}>
+        <Field htmlFor="agency-form-name" label={t("admin.agency_form.name_label")}>
           <input
+            id="agency-form-name"
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- primary input of a modal dialog; focusing it on open is the expected UX
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -71,8 +75,9 @@ export function AgencyForm({ onClose }: Props) {
             style={{ width: "100%" }}
           />
         </Field>
-        <Field label="GTFS-RT Feed URL">
+        <Field htmlFor="agency-form-feed" label="GTFS-RT Feed URL">
           <input
+            id="agency-form-feed"
             type="url"
             value={feed}
             onChange={(e) => setFeed(e.target.value)}
@@ -80,8 +85,9 @@ export function AgencyForm({ onClose }: Props) {
             style={{ width: "100%" }}
           />
         </Field>
-        <Field label={t("admin.agency_form.gtfs_label")}>
+        <Field htmlFor="agency-form-static" label={t("admin.agency_form.gtfs_label")}>
           <input
+            id="agency-form-static"
             type="url"
             value={staticUrl}
             onChange={(e) => setStaticUrl(e.target.value)}
@@ -106,9 +112,17 @@ export function AgencyForm({ onClose }: Props) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label style={{ display: "block", marginBottom: 12 }}>
+    <label htmlFor={htmlFor} style={{ display: "block", marginBottom: 12 }}>
       <div style={{ marginBottom: 4, fontSize: 13, color: "var(--text-secondary)" }}>{label}</div>
       {children}
     </label>

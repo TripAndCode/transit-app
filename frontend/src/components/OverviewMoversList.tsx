@@ -1,6 +1,5 @@
 // frontend/src/components/OverviewMoversList.tsx
 // Overview-specific movers list (direction/worse/better variant).
-// The new dashboard MoversList (with MoversResponse) lives in MoversList.tsx.
 import { useTranslation } from "react-i18next";
 
 import type { OverviewMover } from "../api/types";

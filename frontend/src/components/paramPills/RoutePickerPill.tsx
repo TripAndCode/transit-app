@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
 
 /** Props for {@link RoutePickerPill}. */
-export type RoutePickerPillProps = {
+type RoutePickerPillProps = {
   label: string;
   value: string | null;
   agencyId: number;
@@ -143,6 +143,7 @@ export function RoutePickerPill({
               background: "var(--bg-surface, white)",
               marginBottom: 6,
             }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- search field of a just-opened route picker dropdown; focusing it is the expected UX
             autoFocus
           />
           <div style={{ maxHeight: 220, overflowY: "auto" }}>

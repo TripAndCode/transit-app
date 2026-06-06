@@ -1,6 +1,6 @@
 /** Predefined follow-up chips shown under the last result bubble. */
 
-export type FollowupChip = { id: string; label_key: string; prompt_key: string };
+type FollowupChip = { id: string; label_key: string; prompt_key: string };
 
 export const FOLLOWUP_CHIPS: FollowupChip[] = [
   {

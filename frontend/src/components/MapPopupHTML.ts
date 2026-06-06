@@ -25,7 +25,7 @@ import type { TFunction } from "i18next";
  * under `map.popup.*` + shared `common.unit_min` / `common.unit_count`.
  */
 
-export type StopPopupData = {
+type StopPopupData = {
   stop_name: string;
   stop_code?: string | null;
   platform_code?: string | null;
@@ -41,9 +41,9 @@ export type StopPopupData = {
   active_route?: string | null;
 };
 
-export type Period = { from: string; to: string };
+type Period = { from: string; to: string };
 
-export function escapeHtml(s: string): string {
+function escapeHtml(s: string): string {
   return s.replace(
     /[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,

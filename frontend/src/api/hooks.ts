@@ -1,37 +1,28 @@
-import { useEffect, useState } from "react";
 import i18n from "../i18n";
 import {
   useMutation,
   useQuery,
   useQueryClient,
-  type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { ctxToQueryString, type RangeCtx } from "./rangeContext";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
-  AnomaliesResponse,
   AnonThread,
   AppendMessageResult,
   AskResponse,
-  BuildSchema,
   Conversation,
   ConvMessage,
-  EditAction,
   FilterCtx,
   HeatmapCollection,
-  HeatmapResponse,
-  MoversResponse,
   OverviewSummary,
   ReportMeta,
   ReportResponse,
   Route,
   RouteShapeResponse,
   RouteSummaryResponse,
-  SuggestItem,
 } from "./types";
 import { useSession } from "./auth";
 
@@ -137,34 +128,7 @@ export function useTodayRouteSummary(
   });
 }
 
-export function useAsk(agencyId: number | null) {
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: (vars: {
-      question: string;
-      ctx: RangeCtx;
-      history?: { question: string; tool?: string | null; args?: Record<string, unknown> | null }[];
-    }) => {
-      if (agencyId == null) {
-        return Promise.reject(new Error(t("ask.error_agency_not_selected")));
-      }
-      return apiPost<AskResponse>(`/api/${agencyId}/ask`, {
-        question: vars.question,
-        ctx: {
-          from: vars.ctx.from,
-          to: vars.ctx.to,
-          dow: vars.ctx.dow,
-          time_band: vars.ctx.time_band,
-          service: vars.ctx.service,
-          routes: vars.ctx.routes,
-        },
-        history: vars.history ?? [],
-      });
-    },
-  });
-}
-
-export type CreateAgencyBody = Omit<Agency, "agency_id">;
+type CreateAgencyBody = Omit<Agency, "agency_id">;
 
 export function useCreateAgency() {
   const qc = useQueryClient();
@@ -173,70 +137,6 @@ export function useCreateAgency() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["agencies"] });
     },
-  });
-}
-
-// ─── Phase ② hooks ───────────────────────────────────────────────────────────
-
-/**
- * Debounced autocomplete suggestions for the Ask input.
- *
- * The debounce (150 ms) is handled inside this hook — callers may pass the
- * live, un-debounced `q` directly.  The query is skipped when the trimmed
- * value is shorter than two characters to avoid noisy round-trips.
- */
-export function useAskSuggest(
-  q: string,
-  agencyId: number,
-): UseQueryResult<SuggestItem[]> {
-  const [debouncedQ, setDebouncedQ] = useState(q);
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedQ(q), 150);
-    return () => clearTimeout(id);
-  }, [q]);
-
-  return useQuery({
-    queryKey: ["ask-suggest", agencyId, debouncedQ],
-    queryFn: () =>
-      apiGet<SuggestItem[]>(
-        `/api/${agencyId}/ask/suggest?q=${encodeURIComponent(debouncedQ)}&limit=8`,
-      ),
-    // Empty q is a valid "top-hits chip-set" query (server returns the
-    // most-hit cache rows). Short non-empty q would just be noise, so gate
-    // those out.
-    enabled: debouncedQ.trim().length === 0 || debouncedQ.trim().length >= 2,
-    // NN distances against rag_chunks are stable between deploys — 5 min
-    // stale-time prevents redundant round-trips while the user is typing.
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (prev) => prev,
-  });
-}
-
-/**
- * Fetches the tool schema used by the guided build form.
- *
- * The schema only changes on deploy, so it is treated as effectively
- * immutable at runtime (staleTime: Infinity).
- */
-export function useAskBuildSchema(agencyId: number): UseQueryResult<BuildSchema> {
-  return useQuery({
-    queryKey: ["ask-build-schema", agencyId],
-    queryFn: () => apiGet<BuildSchema>(`/api/${agencyId}/ask/build-schema`),
-    staleTime: Infinity,
-  });
-}
-
-/**
- * Records whether the user confirmed or edited a canonical intent suggestion.
- * Fires a POST to `/api/{agencyId}/ask/edit-action`.
- */
-export function usePostEditAction(
-  agencyId: number,
-): UseMutationResult<{ ok: true }, Error, { signature_hash: string; action: EditAction }> {
-  return useMutation({
-    mutationFn: (body: { signature_hash: string; action: EditAction }) =>
-      apiPost<{ ok: true }>(`/api/${agencyId}/ask/edit-action`, body),
   });
 }
 
@@ -378,7 +278,7 @@ function builderSummary(tool: string, args: Record<string, unknown>): string {
   return `🛠 ${toolLabel}` + (pairs.length ? ` (${pairs.join(", ")})` : "");
 }
 
-export type AppendMessageVars = {
+type AppendMessageVars = {
   conversationId: string;
   tool: string;
   args: Record<string, unknown>;
@@ -546,77 +446,5 @@ export function useMigrateAnon(agencyId: number) {
       return r;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agencyId] }),
-  });
-}
-
-// ─── Phase ③.5 hooks — dashboard panels ──────────────────────────────────────
-
-/**
- * Builds a `?from=...&to=...&dow=...&time_band=...&service=...&routes=...`
- * query string from a FilterCtx. Returns an empty string when ctx is null.
- */
-function filterCtxToQueryString(ctx: FilterCtx | null): string {
-  if (!ctx) return "";
-  const u = new URLSearchParams();
-  if (ctx.from_date) u.set("from", ctx.from_date);
-  if (ctx.to_date) u.set("to", ctx.to_date);
-  if (ctx.dow && ctx.dow !== "all") u.set("dow", ctx.dow);
-  if (ctx.time_band && ctx.time_band !== "all") u.set("time_band", ctx.time_band);
-  if (ctx.service && ctx.service !== "all") u.set("service", ctx.service);
-  if (ctx.routes && ctx.routes.length > 0) u.set("routes", ctx.routes.join(","));
-  const str = u.toString();
-  return str ? `?${str}` : "";
-}
-
-export function useDashboardHeatmap(
-  agencyId: number,
-  filterCtx: FilterCtx,
-  dimension: "dow" | "hour_band" = "dow",
-  topRoutes = 20,
-) {
-  const qs = filterCtxToQueryString(filterCtx);
-  const sep = qs ? "&" : "?";
-  return useQuery({
-    queryKey: ["dashboard", "heatmap", agencyId, filterCtx, dimension, topRoutes],
-    queryFn: () =>
-      apiGet<HeatmapResponse>(
-        `/api/${agencyId}/ask/dashboard/heatmap${qs}${sep}dimension=${dimension}&top_routes=${topRoutes}`,
-      ),
-    staleTime: 60_000,
-  });
-}
-
-export function useDashboardAnomalies(
-  agencyId: number,
-  filterCtx: FilterCtx,
-  sigma = 2.0,
-) {
-  const qs = filterCtxToQueryString(filterCtx);
-  const sep = qs ? "&" : "?";
-  return useQuery({
-    queryKey: ["dashboard", "anomalies", agencyId, filterCtx, sigma],
-    queryFn: () =>
-      apiGet<AnomaliesResponse>(
-        `/api/${agencyId}/ask/dashboard/anomalies${qs}${sep}sigma=${sigma}`,
-      ),
-    staleTime: 60_000,
-  });
-}
-
-export function useDashboardMovers(
-  agencyId: number,
-  filterCtx: FilterCtx,
-  windowDays = 7,
-  top = 10,
-) {
-  const qs = filterCtxToQueryString(filterCtx);
-  const sep = qs ? "&" : "?";
-  return useQuery({
-    queryKey: ["dashboard", "movers", agencyId, filterCtx, windowDays, top],
-    queryFn: () =>
-      apiGet<MoversResponse>(
-        `/api/${agencyId}/ask/dashboard/movers${qs}${sep}window_days=${windowDays}&top=${top}`,
-      ),
-    staleTime: 60_000,
   });
 }

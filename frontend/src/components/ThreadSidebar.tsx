@@ -328,6 +328,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         {mobileOpen && (
           <div
             onClick={() => setMobileOpen(false)}
+            role="presentation"
             style={{
               position: "fixed",
               inset: 0,
