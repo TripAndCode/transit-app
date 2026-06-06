@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
@@ -33,15 +33,75 @@ export function MapTab() {
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
   const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
 
-  // ctx changes on filter/range edits; click handlers are registered once at
-  // init, so we read through this ref to always see the current period.
-  const ctxRef = useRef(ctx);
-  ctxRef.current = ctx;
-  // Same dance for `t` — the popup builder is invoked from delegated map
-  // event handlers registered once at init, so we re-read through a ref to
-  // pick up any language switch.
-  const tRef = useRef(t);
-  tRef.current = t;
+  // Click handlers are registered once at map init but must always see the
+  // current filter context and language. useEffectEvent gives them a stable
+  // identity while reading the latest ctx / t on every call — replaces the
+  // previous render-time ref-mirroring, which the React Compiler forbids.
+  const onStopClick = useEffectEvent((e: maplibregl.MapLayerMouseEvent) => {
+    const m = mapRef.current;
+    const f = e.features?.[0];
+    if (!m || !f) return;
+    const p = f.properties as HeatmapProps;
+    const html = renderStopPopupHTML(
+      {
+        stop_name: p.stop_name,
+        stop_code: p.stop_code,
+        platform_code: p.platform_code,
+        stop_id: p.stop_id,
+        avg_min: Number(p.avg_delay_min),
+        samples: p.samples,
+        contributing_routes: (p.route_codes || "").split(",").filter(Boolean),
+      },
+      { from: ctx.from, to: ctx.to },
+      t,
+    );
+    popupRef.current?.remove();
+    popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
+      .setLngLat(e.lngLat)
+      .setHTML(html)
+      .addTo(m);
+    // Focus the clicked stop: gentle camera move, zoom only if currently zoomed out.
+    const targetZoom = Math.max(m.getZoom(), 14);
+    m.easeTo({ center: e.lngLat, zoom: targetZoom, duration: 600 });
+  });
+
+  // Route-stop click handler — registered once at init so it never
+  // accumulates on filter / shape changes. The layer it targets
+  // (ROUTE_STOPS_LAYER) may not exist yet; MapLibre's delegated
+  // listener silently no-ops until the layer is added.
+  const onRouteStopClick = useEffectEvent((e: maplibregl.MapLayerMouseEvent) => {
+    const m = mapRef.current;
+    const f = e.features?.[0];
+    if (!m || !f) return;
+    const p = f.properties as {
+      stop_sequence: number;
+      stop_name: string;
+      stop_id?: string | null;
+      stop_code?: string | null;
+      platform_code?: string | null;
+      avg_min: number;
+      samples: number;
+    };
+    const html = renderStopPopupHTML(
+      {
+        stop_name: p.stop_name,
+        stop_code: p.stop_code,
+        platform_code: p.platform_code,
+        stop_id: p.stop_id,
+        stop_sequence: p.stop_sequence,
+        avg_min: Number(p.avg_min),
+        samples: p.samples,
+        active_route: ctx.routes[0] ?? null,
+      },
+      { from: ctx.from, to: ctx.to },
+      t,
+    );
+    popupRef.current?.remove();
+    popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
+      .setLngLat(e.lngLat)
+      .setHTML(html)
+      .addTo(m);
+  });
 
   // Init the map once. Click / hover handlers are registered here too —
   // MapLibre's delegated listeners no-op until the named layer exists,
@@ -57,33 +117,6 @@ export function MapTab() {
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
-    const onClick = (e: maplibregl.MapLayerMouseEvent) => {
-      const f = e.features?.[0];
-      if (!f) return;
-      const p = f.properties as HeatmapProps;
-      const c = ctxRef.current;
-      const html = renderStopPopupHTML(
-        {
-          stop_name: p.stop_name,
-          stop_code: p.stop_code,
-          platform_code: p.platform_code,
-          stop_id: p.stop_id,
-          avg_min: Number(p.avg_delay_min),
-          samples: p.samples,
-          contributing_routes: (p.route_codes || "").split(",").filter(Boolean),
-        },
-        { from: c.from, to: c.to },
-        tRef.current,
-      );
-      popupRef.current?.remove();
-      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
-        .setLngLat(e.lngLat)
-        .setHTML(html)
-        .addTo(m);
-      // Focus the clicked stop: gentle camera move, zoom only if currently zoomed out.
-      const targetZoom = Math.max(m.getZoom(), 14);
-      m.easeTo({ center: e.lngLat, zoom: targetZoom, duration: 600 });
-    };
     let hoveredId: number | string | undefined;
     const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
       m.getCanvas().style.cursor = "pointer";
@@ -104,46 +137,8 @@ export function MapTab() {
       }
     };
 
-    // Route-stop click handler — registered once at init so it never
-    // accumulates on filter / shape changes. The layer it targets
-    // (ROUTE_STOPS_LAYER) may not exist yet; MapLibre's delegated
-    // listener silently no-ops until the layer is added.
-    const onRouteStopClick = (e: maplibregl.MapLayerMouseEvent) => {
-      const f = e.features?.[0];
-      if (!f) return;
-      const p = f.properties as {
-        stop_sequence: number;
-        stop_name: string;
-        stop_id?: string | null;
-        stop_code?: string | null;
-        platform_code?: string | null;
-        avg_min: number;
-        samples: number;
-      };
-      const c = ctxRef.current;
-      const html = renderStopPopupHTML(
-        {
-          stop_name: p.stop_name,
-          stop_code: p.stop_code,
-          platform_code: p.platform_code,
-          stop_id: p.stop_id,
-          stop_sequence: p.stop_sequence,
-          avg_min: Number(p.avg_min),
-          samples: p.samples,
-          active_route: c.routes[0] ?? null,
-        },
-        { from: c.from, to: c.to },
-        tRef.current,
-      );
-      popupRef.current?.remove();
-      popupRef.current = new Popup({ closeButton: true, closeOnClick: true })
-        .setLngLat(e.lngLat)
-        .setHTML(html)
-        .addTo(m);
-    };
-
     m.on("load", () => { styleLoadedRef.current = true; });
-    m.on("click", LAYER, onClick);
+    m.on("click", LAYER, onStopClick);
     m.on("mouseenter", LAYER, onEnter);
     m.on("mouseleave", LAYER, onLeave);
     m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
@@ -154,7 +149,7 @@ export function MapTab() {
     return () => {
       popupRef.current?.remove();
       popupRef.current = null;
-      m.off("click", LAYER, onClick);
+      m.off("click", LAYER, onStopClick);
       m.off("mouseenter", LAYER, onEnter);
       m.off("mouseleave", LAYER, onLeave);
       m.off("click", ROUTE_STOPS_LAYER, onRouteStopClick);

@@ -36,7 +36,17 @@ export default tseslint.config(
       'jsx-a11y': jsxA11y,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // 'recommended-latest' includes the React Compiler diagnostics shipped
+      // with eslint-plugin-react-hooks v7 (flags code the compiler can't
+      // optimize), on top of the classic rules-of-hooks set.
+      ...reactHooks.configs['recommended-latest'].rules,
+      // Compiler-adoption staging: these two flag pre-existing patterns
+      // (sync-from-props setState in effects, Date.now() staleness check)
+      // that the compiler safely bails out on. Surface as warnings while the
+      // touched components are reworked (AskTab effect chain lands in the
+      // follow-up refactor PR); new code should keep them clean.
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/purity': 'warn',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
       // Honor the underscore-prefix convention for intentionally-unused bindings.
