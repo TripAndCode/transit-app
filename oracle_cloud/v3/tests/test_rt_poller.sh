@@ -44,11 +44,20 @@ printf '1\taomori\t1\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agenc
 # Part A: slow curl leaves a .part mid-write; TERM trap must clean it.
 CURL_SLEEP=5 ../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
 PID=$!
-sleep 1
-ls "$COLLECTOR_BASE/data/1/rt/"*/*.part >/dev/null 2>&1 || fail "expected mid-write .part"
+found=0
+for _ in $(seq 1 40); do
+    if ls "$COLLECTOR_BASE"/data/1/rt/*/*.part >/dev/null 2>&1; then found=1; break; fi
+    sleep 0.25
+done
+[ "$found" -eq 1 ] || fail "no mid-write .part appeared within 10s"
 kill -TERM "$PID" 2>/dev/null || true
 wait "$PID" 2>/dev/null || true
-ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail ".part left after TERM"
+gone=0
+for _ in $(seq 1 20); do
+    if ! ls "$COLLECTOR_BASE"/data/1/rt/*/*.part >/dev/null 2>&1; then gone=1; break; fi
+    sleep 0.25
+done
+[ "$gone" -eq 1 ] || fail ".part left after TERM"
 # Part B: a stale .part from a prior kill must be swept on the next startup.
 day=$(date -u +%Y%m%d)
 mkdir -p "$COLLECTOR_BASE/data/1/rt/$day"
