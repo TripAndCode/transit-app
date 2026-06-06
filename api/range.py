@@ -137,10 +137,36 @@ def date_range_clause(
     column: str,
     ctx: RangeCtx,
     next_param: int,
+    *,
+    column_type: str = "timestamptz",
 ) -> tuple[str, list, int]:
-    """``column`` is the date/timestamp column (e.g. ``captured_at``)."""
-    fragment = f"{column}::date BETWEEN ${next_param} AND ${next_param + 1}"
-    return fragment, [ctx.from_date, ctx.to_date], next_param + 2
+    """Date-range WHERE fragment for ``column``.
+
+    ``column_type="timestamptz"`` (``updates.captured_at``): emits half-open
+    timestamptz bounds (midnight-to-midnight in the session timezone — JST,
+    set by api/main._init_connection) instead of the previous
+    ``column::date BETWEEN $a AND $b``. The cast on the *column* side defeated
+    ``idx_updates_agency_at`` and forced full seq scans of ``updates``; the
+    half-open form is index-sargable and date-equivalent under the same
+    session TZ (verified row-count-identical on live data; a 7-day window
+    scan went 340ms → 70ms).
+
+    ``column_type="text_date"`` (agg tables store ISO date strings): keeps the
+    ``column::date BETWEEN`` form — those tables are small aggregates with no
+    index at stake.
+
+    The ``::text`` coercion keeps asyncpg sending the params as TEXT,
+    mirroring time_band_clause; ``str()`` normalizes the mixed caller types
+    (ISO str from the API ctx, datetime.date from tests).
+    """
+    if column_type == "text_date":
+        fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
+    else:
+        fragment = (
+            f"({column} >= ((${next_param}::text)::date)::timestamptz "
+            f"AND {column} < (((${next_param + 1}::text)::date + 1))::timestamptz)"
+        )
+    return fragment, [str(ctx.from_date), str(ctx.to_date)], next_param + 2
 
 
 def dow_clause(
@@ -222,7 +248,7 @@ def build_agg_daily_trend_filter(ctx: RangeCtx, next_param: int) -> tuple[str, l
     params: list = []
     n = next_param
 
-    frag, p, n = date_range_clause("date", ctx, n)
+    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
     parts.append(frag)
     params.extend(p)
 
