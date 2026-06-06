@@ -52,7 +52,7 @@ def test_embedder_dim_and_cosine_similarity():
     assert len(v_passage) == 384
 
     def cos(a, b):
-        return sum(x * y for x, y in zip(a, b))  # vectors are normalize_embeddings=True
+        return sum(x * y for x, y in zip(a, b, strict=False))  # vectors are normalize_embeddings=True
 
     assert cos(v_jp, v_en) > 0.5  # JP/EN paraphrase similarity
     assert cos(v_jp, v_passage) > 0.5  # JP query/passage similarity

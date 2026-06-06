@@ -5,6 +5,7 @@ The router owns: file iteration (tarballs + loose .pb), captured_at
 derivation, dedup against the updates table, and bulk INSERT.
 """
 
+import logging
 import pathlib
 import re
 import tarfile
@@ -17,10 +18,12 @@ from pipeline.strategies import get_ingest_strategy
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
 from pipeline.strategies._pb import UPDATE_INSERT_SQL, _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
-from pipeline.strategies.aomori_regex import (  # noqa: F401
+from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
+
+logger = logging.getLogger(__name__)
 
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
 # derive captured_at when the filename alone doesn't carry the date.
@@ -71,7 +74,7 @@ def parse_pb(
     from pipeline.strategies._pb import _fields as _f
 
     pat = pattern or _TRIP_RE_DEFAULT
-    rows = []
+    rows: list[tuple] = []
     try:
         top = _f(raw)
     except Exception:
@@ -135,7 +138,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
 
     Dispatches to the agency's ingest strategy. Returns total rows attempted.
     """
-    folder = pathlib.Path(folder)
+    root = pathlib.Path(folder)
     n_errors = 0
     n_inserted = 0
 
@@ -149,15 +152,15 @@ def ingest(folder: str, agency_id: int, conn) -> int:
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
-    tarballs = sorted(folder.glob("*.tar.gz")) + sorted(folder.glob("*.tgz"))
-    pb_loose = sorted(folder.rglob("*.pb"))
-    print(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb (strategy={strategy_name})")
+    tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
+    pb_loose = sorted(root.rglob("*.pb"))
+    logger.info(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb (strategy={strategy_name})")
 
     with conn.cursor() as cur:
         for i, tgz in enumerate(tarballs, 1):
             date_m = re.search(r"(\d{8})", tgz.stem)
             date_dir = date_m.group(1) if date_m else ""
-            print(f"[{i}/{len(tarballs)}] {tgz.name}")
+            logger.info(f"[{i}/{len(tarballs)}] {tgz.name}")
             try:
                 with tarfile.open(tgz, "r:gz") as tf:
                     members = []
@@ -169,25 +172,28 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
-                    print(f"  {len(members)} pb files, {len(new)} new")
+                    logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
                         ts = _ts(d, pb_name)
-                        raw = tf.extractfile(member).read()
+                        fobj = tf.extractfile(member)
+                        if fobj is None:  # non-file member (dir/special)
+                            continue
+                        raw = fobj.read()
                         rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         n_inserted += _insert_updates(cur, agency_id, rows)
                         done.add(f"{d}/{pb_name}")
                         if j % 300 == 0 and j > 0:
                             conn.commit()
-                            print(f"    {j}/{len(new)}...")
+                            logger.info(f"    {j}/{len(new)}...")
             except Exception as e:
-                print(f"  [ERROR] {e}")
+                logger.error(f"  [ERROR] {e}")
                 n_errors += 1
                 conn.rollback()
             conn.commit()
 
         new_pb = [p for p in pb_loose if f"{_date_dir(p.parent.name)}/{p.name}" not in done]
         if new_pb:
-            print(f"\n{len(new_pb)} loose .pb files")
+            logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
@@ -196,12 +202,12 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                 done.add(f"{d}/{path.name}")
                 if j % 500 == 0:
                     conn.commit()
-                    print(f"  {j}/{len(new_pb)}")
+                    logger.info(f"  {j}/{len(new_pb)}")
         conn.commit()
 
     if n_errors:
-        print(f"Skipped {n_errors} files with parse errors")
-    print(f"\nDone: {n_inserted} new rows inserted")
+        logger.warning(f"Skipped {n_errors} files with parse errors")
+    logger.info(f"\nDone: {n_inserted} new rows inserted")
     return n_inserted
 
 
@@ -220,7 +226,7 @@ def ingest_live(agency_id: int, conn) -> int:
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
-    print(f"Fetching live feed from {feed_url} (strategy={strategy_name})")
+    logger.info(f"Fetching live feed from {feed_url} (strategy={strategy_name})")
     with urllib.request.urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 
@@ -233,5 +239,5 @@ def ingest_live(agency_id: int, conn) -> int:
         n_inserted = _insert_updates(cur, agency_id, rows)
     conn.commit()
 
-    print(f"Done: {n_inserted} rows inserted (live)")
+    logger.info(f"Done: {n_inserted} rows inserted (live)")
     return n_inserted

@@ -121,7 +121,7 @@ def parse_feed(
         )
 
     if miss:
-        print(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
+        _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
     if skipped_extended:
-        print(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
+        _log.warning(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
     return rows

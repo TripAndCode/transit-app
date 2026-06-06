@@ -6,12 +6,15 @@ the site root, download, sha256, persist as gtfs_static_YYYYMMDD.zip.
 """
 
 import hashlib
+import logging
 import pathlib
 import re
 import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _HREF_RE = re.compile(r'href="([^"]*gtfs-aomoricitybus[^"]*\.zip)"')
 
@@ -53,12 +56,12 @@ def fetch(
         with urllib.request.urlopen(index_url, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except urllib.error.URLError as e:
-        print(f"[aomori_index_scrape] failed to fetch index {index_url}: {e}")
+        logger.warning(f"[aomori_index_scrape] failed to fetch index {index_url}: {e}")
         return None
 
     m = _HREF_RE.search(html)
     if not m:
-        print("[aomori_index_scrape] gtfs-aomoricitybus*.zip href not found")
+        logger.warning("[aomori_index_scrape] gtfs-aomoricitybus*.zip href not found")
         return None
     zip_url = _resolve(m.group(1), index_url)
 
@@ -68,11 +71,11 @@ def fetch(
         with urllib.request.urlopen(zip_url, timeout=60) as resp:
             data = resp.read()
     except urllib.error.URLError as e:
-        print(f"[aomori_index_scrape] failed to fetch zip {zip_url}: {e}")
+        logger.warning(f"[aomori_index_scrape] failed to fetch zip {zip_url}: {e}")
         return None
 
     if data[:2] != b"PK":
-        print("[aomori_index_scrape] downloaded file is not a ZIP (missing PK header)")
+        logger.warning("[aomori_index_scrape] downloaded file is not a ZIP (missing PK header)")
         return None
 
     final.write_bytes(data)
@@ -83,5 +86,5 @@ def fetch(
     with history_path.open("a") as f:
         f.write(f"{datetime.now().isoformat()},{zip_url},{sha},{len(data)},{final}\n")
 
-    print(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
+    logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final

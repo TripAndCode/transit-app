@@ -752,7 +752,7 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     valid_idx = [h for h in range(24) if by_hour[h] is not None]
     if not valid_idx:
         return None
-    peak_h = max(valid_idx, key=lambda h: by_hour[h])
+    peak_h = max(valid_idx, key=lambda h: by_hour[h] or 0.0)
     return {
         "by_hour": by_hour,
         "peak_hour": peak_h,

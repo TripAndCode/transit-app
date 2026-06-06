@@ -11,16 +11,17 @@ user's chosen window without having to mention it in the prompt.
 """
 
 import asyncio
+import logging
 import os as _os
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
+from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, DowFilter, RangeCtx, ServiceType, TimeBand, parse_iso_date
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
@@ -29,6 +30,8 @@ from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
 from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
 from pipeline.query.tools import dispatch, render_tool_result
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["ask"])
 
@@ -92,13 +95,13 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
     if (to_date - from_date).days >= MAX_RANGE_DAYS:
         from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
 
-    dow = body_ctx.dow if body_ctx.dow in ("all", "weekday", "weekend") else "all"
+    dow = cast(DowFilter, body_ctx.dow if body_ctx.dow in ("all", "weekday", "weekend") else "all")
     valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb = body_ctx.time_band if body_ctx.time_band in valid_bands else "all"
-    svc = body_ctx.service if body_ctx.service in ("all", "平日", "土日祝") else "all"
+    tb = cast(TimeBand, body_ctx.time_band if body_ctx.time_band in valid_bands else "all")
+    svc = cast(ServiceType, body_ctx.service if body_ctx.service in ("all", "平日", "土日祝") else "all")
     routes = tuple(r for r in (body_ctx.routes or []) if r)[:100]
 
-    return RangeCtx(  # type: ignore[arg-type]
+    return RangeCtx(
         from_date=from_date,
         to_date=to_date,
         dow=dow,
@@ -421,11 +424,13 @@ async def ask_suggest(
     try:
         qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
     except Exception:
+        _log.debug("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
         return []
 
     try:
         matches = await rag_nearest(conn, agency_id, qvec, k=limit)
     except Exception:
+        _log.debug("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
         return []
 
     golden = _load_golden()

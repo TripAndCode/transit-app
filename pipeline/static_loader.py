@@ -15,11 +15,14 @@ Two tables get geometry-aware handling: ``static_stops`` builds a
 
 import csv
 import io
+import logging
 import pathlib
 import zipfile
 from collections import defaultdict
 
 from psycopg2.extras import execute_values
+
+logger = logging.getLogger(__name__)
 
 _STATIC_FILE_MAP = [
     ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),
@@ -64,7 +67,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
         if not zips:
             raise FileNotFoundError(f"No *static*.zip found in {p}")
         p = zips[-1]
-        print(f"Using: {p.name}")
+        logger.info(f"Using: {p.name}")
     if not p.exists():
         raise FileNotFoundError(f"File not found: {p}")
 
@@ -72,7 +75,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
         names_in_zip = set(zf.namelist())
         for filename, table, csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
-                print(f"  {filename} not in zip — skipped")
+                logger.warning(f"  {filename} not in zip — skipped")
                 continue
 
             cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
@@ -85,7 +88,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 for row in raw_rows:
                     stop_id, stop_name = row[0], row[1]
                     try:
-                        lat, lon = float(row[2]), float(row[3])
+                        lat, lon = float(row[2] or ""), float(row[3] or "")
                     except (TypeError, ValueError):
                         lat, lon = None, None
                     # Optional GTFS fields — present in Aomori's feed
@@ -108,9 +111,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 for row in raw_rows:
                     shape_id = row[0]
                     try:
-                        lat = float(row[1])
-                        lon = float(row[2])
-                        seq = int(row[3])
+                        lat = float(row[1] or "")
+                        lon = float(row[2] or "")
+                        seq = int(row[3] or "")
                     except (TypeError, ValueError):
                         skipped += 1
                         continue
@@ -118,7 +121,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         by_shape[shape_id].append((seq, lon, lat))
 
                 if skipped:
-                    print(f"  shapes.txt: skipped {skipped} malformed row(s)")
+                    logger.warning(f"  shapes.txt: skipped {skipped} malformed row(s)")
 
                 for shape_id, pts in by_shape.items():
                     pts.sort(key=lambda t: t[0])
@@ -138,7 +141,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
             else:
                 db_cols = _DB_COLS[table]
                 col_list = ", ".join(db_cols)
-                pg_rows = [[agency_id] + row for row in raw_rows]
+                pg_rows = [[agency_id, *row] for row in raw_rows]
                 # RETURNING lets us count how many rows actually landed vs were deduped
                 inserted = execute_values(
                     cur,
@@ -148,9 +151,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 )
                 skipped = len(pg_rows) - len(inserted)
                 if skipped:
-                    print(f"  WARNING: {skipped} duplicate rows skipped in {table}")
+                    logger.warning(f"  WARNING: {skipped} duplicate rows skipped in {table}")
 
             conn.commit()
-            print(f"  {table}: {len(raw_rows):,} rows")
+            logger.info(f"  {table}: {len(raw_rows):,} rows")
 
-    print("Static data loaded.")
+    logger.info("Static data loaded.")

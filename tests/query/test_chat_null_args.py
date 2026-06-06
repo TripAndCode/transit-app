@@ -47,7 +47,7 @@ class _FakeClient:
         self._arguments = arguments
         self._tool_name = tool_name
 
-    def chat_completions(self, **kwargs):  # noqa: D401 — adapter shape
+    def chat_completions(self, **kwargs):
         return _fake_message(self._arguments, self._tool_name), None
 
 

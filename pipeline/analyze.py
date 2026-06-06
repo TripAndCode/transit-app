@@ -13,9 +13,13 @@ Aggregation tables produced:
 - agg_stop_seq      — per-stop delay (requires static data)
 """
 
+import logging
+
 import psycopg2.extras
 
 from pipeline.db import _DEDUP_INNER, _static_loaded
+
+logger = logging.getLogger(__name__)
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -115,7 +119,7 @@ def analyze(agency_id: int, conn) -> None:
             rows,
             conn,
         )
-        print(f"  agg_route_stats: {len(rows)} rows")
+        logger.info(f"  agg_route_stats: {len(rows)} rows")
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = f"""
@@ -143,7 +147,7 @@ def analyze(agency_id: int, conn) -> None:
             rows,
             conn,
         )
-        print(f"  agg_route_hour: {len(rows)} rows")
+        logger.info(f"  agg_route_hour: {len(rows)} rows")
 
         # ── agg_route_dow ────────────────────────────────────────────────
         sql = f"""
@@ -165,7 +169,7 @@ def analyze(agency_id: int, conn) -> None:
             rows,
             conn,
         )
-        print(f"  agg_route_dow: {len(rows)} rows")
+        logger.info(f"  agg_route_dow: {len(rows)} rows")
 
         # ── agg_daily_trend ──────────────────────────────────────────────
         sql = f"""
@@ -186,7 +190,7 @@ def analyze(agency_id: int, conn) -> None:
             rows,
             conn,
         )
-        print(f"  agg_daily_trend: {len(rows)} rows")
+        logger.info(f"  agg_daily_trend: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:
@@ -234,9 +238,9 @@ def analyze(agency_id: int, conn) -> None:
             rows,
             conn,
         )
-        print(f"  agg_stop_seq: {len(rows)} rows")
+        logger.info(f"  agg_stop_seq: {len(rows)} rows")
         conn.commit()
-        print("Analysis complete.")
+        logger.info("Analysis complete.")
     except Exception:
         conn.rollback()
         raise

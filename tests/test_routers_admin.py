@@ -88,7 +88,7 @@ async def test_admin_cannot_modify_self(admin_client, aconn):
 @pytest.mark.asyncio
 async def test_admin_last_admin_guard(admin_client, aconn):
     sid_a, uid_a, _ = await _seed(aconn, role="admin")
-    sid_b, uid_b, _ = await _seed(aconn, role="admin")
+    _sid_b, uid_b, _ = await _seed(aconn, role="admin")
     # admin A demotes B -> leaves one admin (A) -- allowed
     r = await admin_client.patch(
         f"/api/admin/users/{uid_b}",
@@ -127,7 +127,7 @@ async def test_suspend_kills_sessions(admin_client, aconn):
 @pytest.mark.asyncio
 async def test_soft_delete_anonymizes(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
-    sid_target, uid_target, target_email = await _seed(aconn, email="target@x")
+    _sid_target, uid_target, target_email = await _seed(aconn, email="target@x")
     r = await admin_client.delete(
         f"/api/admin/users/{uid_target}",
         cookies={"sid": sid_admin},

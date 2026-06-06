@@ -139,13 +139,13 @@ def test_load_static_shapes_two_loads_no_duplicates(pg_conn, agency_id):
         assert cur.fetchone()[0] == 3, "second load must not produce duplicate rows"
 
 
-def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, capsys):
+def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, caplog):
     """A static zip lacking shapes.txt must still load other tables and log a skip."""
     from pipeline.static_loader import load_static
 
-    load_static("tests/fixtures/static_no_shapes.zip", agency_id, pg_conn)
-    out = capsys.readouterr().out
-    assert "shapes.txt not in zip — skipped" in out
+    with caplog.at_level("WARNING", logger="pipeline.static_loader"):
+        load_static("tests/fixtures/static_no_shapes.zip", agency_id, pg_conn)
+    assert "shapes.txt not in zip — skipped" in caplog.text
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM static_shapes WHERE agency_id = %s", (agency_id,))

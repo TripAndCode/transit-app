@@ -174,7 +174,7 @@ async def create_preset(
             json.dumps(body.range_ctx),
         )
     except asyncpg.UniqueViolationError:
-        raise HTTPException(409, "name already used")
+        raise HTTPException(409, "name already used") from None
     return PresetOut(
         preset_id=row["preset_id"],
         agency_id=row["agency_id"],

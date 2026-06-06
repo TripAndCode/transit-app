@@ -133,7 +133,7 @@ async def route_shape(
             f" AND trip_id IN (SELECT trip_id FROM static_trips "
             f"                  WHERE agency_id = $1 AND shape_id = ${next_param})"
         )
-        params = (*params, chosen_shape_id)
+        params = [*params, chosen_shape_id]
     else:
         shape_filter = ""
     rows = await conn.fetch(

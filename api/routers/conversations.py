@@ -76,7 +76,7 @@ class MigrateAnon(BaseModel):
 
 @router.get("/conversations")
 async def list_conversations(
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -89,7 +89,7 @@ async def list_conversations(
 async def create_conversation(
     request: Request,
     body: CreateConversation,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -106,7 +106,7 @@ async def create_conversation(
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001 — implicit auth scope
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -123,7 +123,7 @@ async def update_conversation(
     request: Request,
     conversation_id: str,
     body: UpdateConversation,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -140,7 +140,7 @@ async def update_conversation(
 async def delete_conversation(
     request: Request,
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -155,7 +155,7 @@ async def delete_conversation(
 @router.get("/conversations/{conversation_id}/messages")
 async def list_messages(
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -170,7 +170,7 @@ async def list_messages(
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
@@ -191,7 +191,7 @@ async def append_message_endpoint(
     request: Request,
     conversation_id: str,
     body: AppendMessage,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
@@ -220,8 +220,11 @@ async def append_message_endpoint(
             detail="chip dispatch is no longer supported; use {tool, args} instead",
         )
 
-    # Builder direct — tool and args supplied by client
-    resolved_tool = body.tool  # type: ignore[assignment]  # validated above
+    # Builder direct — tool and args supplied by client.
+    # validate_dispatch() already rejected tool=None; narrow for the type checker.
+    if body.tool is None:
+        raise HTTPException(status_code=400, detail="tool is required")
+    resolved_tool = body.tool
     resolved_args = body.args or {}
     resolved_chip_id: str | None = None
     # Prefer the client-supplied localized summary; fall back to a generic
@@ -341,7 +344,7 @@ async def followup_endpoint(
     request: Request,
     conversation_id: str,
     body: FollowupBody,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user_optional),
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
@@ -478,7 +481,7 @@ async def followup_endpoint(
 
 @router.get("/ask/followup-enabled")
 async def followup_enabled_endpoint(
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
 ):
     """Public flag check so the frontend knows whether to render the input."""
     return {"enabled": _followup.is_enabled()}

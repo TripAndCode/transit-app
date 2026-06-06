@@ -4,11 +4,14 @@ Resolves the agency's static_strategy + static_url from the DB, dispatches to
 the strategy, and on a fresh zip calls pipeline.static_loader.load_static.
 """
 
+import logging
 import pathlib
 from typing import Optional
 
 from pipeline.static_loader import load_static
 from pipeline.strategies import get_static_strategy
+
+logger = logging.getLogger(__name__)
 
 
 def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]:
@@ -20,11 +23,11 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
         )
         row = cur.fetchone()
     if row is None:
-        print(f"[static_fetcher] no agency {agency_id}")
+        logger.warning(f"[static_fetcher] no agency {agency_id}")
         return None
     static_url, strategy_name = row
     if not static_url or not strategy_name:
-        print(f"[static_fetcher] agency={agency_id} not configured for static refresh")
+        logger.warning(f"[static_fetcher] agency={agency_id} not configured for static refresh")
         return None
 
     strategy = get_static_strategy(strategy_name)
@@ -33,7 +36,7 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
         return None
 
     load_static(str(zip_path), agency_id, conn)
-    print(f"[static_fetcher] agency={agency_id} loaded {zip_path.name}")
+    logger.info(f"[static_fetcher] agency={agency_id} loaded {zip_path.name}")
     return zip_path
 
 

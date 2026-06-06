@@ -129,7 +129,7 @@ def csrf_guard(request: Request) -> None:
     origin_raw = request.headers.get("origin")
     if origin_raw is not None and _has_origin_path(origin_raw):
         raise HTTPException(status_code=403, detail="cross-origin request denied")
-    raw = origin_raw or request.headers.get("referer", "")
+    raw = origin_raw or request.headers.get("referer") or ""
     incoming = _serialized_origin(raw)
     if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")

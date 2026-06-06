@@ -1,5 +1,6 @@
 """Canonicalization + signature_hash unit tests."""
 
+import dataclasses
 from datetime import date
 
 import pytest
@@ -109,7 +110,7 @@ def test_unknown_tool_raises():
 
 def test_signature_dataclass_frozen():
     sig = IntentSignature(tool="top_n", args={"metric": "avg_delay"}, confidence=0.9)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         sig.tool = "time_series"  # frozen dataclass
 
 

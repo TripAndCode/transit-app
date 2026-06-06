@@ -8,6 +8,7 @@ a router.
 import re
 import struct
 from datetime import datetime
+from typing import Any
 
 # ── varint protobuf decoder (no external dependencies) ────────────────────────
 
@@ -41,7 +42,7 @@ def _fields(data):
     5 (32-bit). Unknown wire types terminate parsing early.
     """
     pos = 0
-    f = {}
+    f: dict[int, list[Any]] = {}
     while pos < len(data):
         try:
             tw, pos = _read_varint(data, pos)

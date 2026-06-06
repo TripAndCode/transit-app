@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import date, timedelta
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, RangeCtx, parse_iso_date
+from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, DowFilter, RangeCtx, ServiceType, TimeBand, parse_iso_date
 from pipeline.dashboard_queries import anomaly_timeline, delay_heatmap, movers
 
 router = APIRouter(prefix="/api/{agency_id}/ask/dashboard", tags=["dashboard"])
@@ -30,11 +31,11 @@ def _resolve_ctx(
         from_d, to_d = to_d, from_d
     if (to_d - from_d).days >= MAX_RANGE_DAYS:
         from_d = to_d - timedelta(days=MAX_RANGE_DAYS - 1)
-    dow_ = dow if dow in ("all", "weekday", "weekend") else "all"
+    dow_ = cast(DowFilter, dow if dow in ("all", "weekday", "weekend") else "all")
     valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb_ = time_band if time_band in valid_bands else "all"
-    svc_ = service if service in ("all", "平日", "土日祝") else "all"
-    return RangeCtx(  # type: ignore[arg-type]
+    tb_ = cast(TimeBand, time_band if time_band in valid_bands else "all")
+    svc_ = cast(ServiceType, service if service in ("all", "平日", "土日祝") else "all")
+    return RangeCtx(
         from_date=from_d,
         to_date=to_d,
         dow=dow_,
