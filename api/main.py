@@ -23,6 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware as StarletteSessionM
 
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
+from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
@@ -139,6 +140,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want. LocaleMiddleware is innermost (cheap,
 # no I/O) and only needs to run before the route handlers read state.locale.
+# Innermost (added first → runs closest to the routers): cancels GET handler
+# tasks when the client disconnects, so aborted SPA fetches also cancel the
+# asyncpg query instead of letting heavy scans run to completion. GET-only by
+# design — see api/middleware/cancel_on_disconnect.py.
+app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
