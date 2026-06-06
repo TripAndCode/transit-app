@@ -717,7 +717,15 @@ Each row carries `ip`, `user_agent`, `provider`, optional `meta` JSONB, and `act
 
 ## Frontend
 
-Single-page React app at `frontend/` (Vite + TypeScript strict + TanStack Query + react-router-dom + MapLibre GL + react-i18next). Tabs: Overview / Map / Ask / Live / Reports. Default route is the Ask tab. UI chrome is bilingual (ja / en) via locale switcher in the header.
+Single-page React app at `frontend/` (React 19.2 + React Compiler, Vite 7, TypeScript strict, TanStack Query, react-router-dom, MapLibre GL, react-i18next). Tabs: Overview / Map / Ask / Live / Reports. Default route is the Ask tab. UI chrome is bilingual (ja / en) via locale switcher in the header.
+
+Platform notes (since the React 19 modernization, PRs #43/#46/#45):
+
+- **Code splitting** — every tab/page route is `React.lazy`; MapLibre (~800 KB) loads only when the Map tab is visited. Entry chunk ≈ 440 KB. A router-level `RouteError` boundary degrades render crashes to an inline message instead of a white screen.
+- **React Compiler** is on (`babel-plugin-react-compiler` in `vite.config.ts`). Don't add `useMemo`/`useCallback`/`React.memo` for performance — the compiler memoizes automatically. Existing manual memoization is harmless and pruned opportunistically.
+- **Compiler lint** — `eslint-plugin-react-hooks` v7 `recommended-latest`. Two rules are staged at `warn` for pre-existing code (`set-state-in-effect`, `purity`); new code must keep them clean. Handlers that need fresh props inside once-registered listeners use `useEffectEvent` (see `MapTab`), not render-time ref mirroring.
+- **Request cancellation** — all GET hooks thread TanStack Query's `AbortSignal` into `apiGet`; filter changes abort in-flight requests.
+- **i18n lints** — `npm run lint:i18n` checks ja/en key parity; `npm run lint:i18n-strings` fails on hardcoded kana in `src/` (comment-only lines and `.test.` files are skipped; suppress legitimate cases with `i18n-ignore`).
 
 Key components (all under `frontend/src/components/`):
 
@@ -731,7 +739,8 @@ Key components (all under `frontend/src/components/`):
 
 Ask-tab specifics (Phase ③ → ③.9):
 
-- `tabs/AskTab.tsx` — left thread sidebar, top filter pill, middle scroll area (bubbles + per-result follow-up chips), bottom `QuestionDock`.
+- `tabs/AskTab.tsx` — thread/filter state owner: left thread sidebar, top filter pill, middle scroll area, bottom `QuestionDock`. The visible filter is *derived* (unsaved edit → conversation's stored `filter_ctx` → URL range), and an in-flight filter save is awaited before dispatch so answers never use a stale scope.
+- `tabs/ask/` — presentational pieces: `MessageList`/`Bubble`, `RichResult` (table / kv / chart per tool-result kind), `FollowupChipsRow`, and the `FilterCtx` helpers.
 - `components/QuestionDock.tsx` — owns the dock state machine (idle / composing / busy); renders the chip row and rises a `ParamStrip` when a chip is tapped.
 - `components/ParamStrip.tsx` — one-row inline parameter composer per `CardTemplate`; routes each `ParamSpec` to its pill control.
 - `components/paramPills/{SegmentedPill,LimitPill,RoutePickerPill}.tsx` — small popover-style param controls with Escape-to-close, focus restoration, and outside-click dismiss.
