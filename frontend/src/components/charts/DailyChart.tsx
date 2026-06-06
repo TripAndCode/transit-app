@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
 import type { TrendDay } from "../../api/types";
@@ -7,13 +7,11 @@ type Props = { days: TrendDay[]; height?: number };
 
 export function DailyChart({ days, height = 240 }: Props) {
   const { t } = useTranslation();
-  const [hover, setHover] = useState<number | null>(null);
+  const [rawHover, setHover] = useState<number | null>(null);
 
-  // If the data shrinks (filter narrowed), drop a stale hover index so the
-  // tooltip doesn't dereference out-of-bounds.
-  useEffect(() => {
-    if (hover != null && hover >= days.length) setHover(null);
-  }, [days.length, hover]);
+  // If the data shrinks (filter narrowed), a stale hover index would
+  // dereference out-of-bounds — clamp during render instead of an effect.
+  const hover = rawHover != null && rawHover < days.length ? rawHover : null;
   const W = 760;
   const H = height;
   const padL = 44;

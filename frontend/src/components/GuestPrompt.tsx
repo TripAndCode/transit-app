@@ -17,10 +17,10 @@ export function GuestPrompt() {
   useEffect(() => {
     if (isLoading) return;
     if (session) {
-      // logged in → clear timer + dismissal so a future logout starts fresh
+      // logged in → clear timer + dismissal so a future logout starts fresh.
+      // Visibility is handled by the render guard below — no setState needed.
       localStorage.removeItem(STARTED);
       localStorage.removeItem(DISMISSED);
-      setShow(false);
       return;
     }
     let started = parseInt(localStorage.getItem(STARTED) || "0", 10);
@@ -39,12 +39,17 @@ export function GuestPrompt() {
         setShow(false);
       }
     }
-    check();
+    // First check goes through a 0ms timer so the effect itself never calls
+    // setState synchronously (React Compiler set-state-in-effect rule).
+    const t0 = setTimeout(check, 0);
     const t = setInterval(check, 30_000);
-    return () => clearInterval(t);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(t);
+    };
   }, [session, isLoading]);
 
-  if (!show) return null;
+  if (!show || isLoading || session) return null;
   return (
     <div
       role="status"
