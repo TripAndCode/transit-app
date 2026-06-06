@@ -27,16 +27,19 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # ESLint: type/hooks rules fail the build; jsx-a11y rules are warnings
-      # (non-blocking) during the calm rollout, so they surface here without
-      # gating the merge.
+      # ESLint: type/hooks and jsx-a11y rules all fail the build. The calm-UI
+      # accessibility rollout is complete, so the a11y rules are now enforced
+      # as errors rather than warnings.
       - name: Lint
         run: npm run lint
 
-      # Knip dead-code report is informational only — it exits non-zero on any
-      # finding, so don't let it gate the build yet.
-      - name: Dead-code report (non-blocking)
-        run: npm run deadcode || true
+      # Knip dead-code check: exits non-zero on any unused file/export, which
+      # now gates the build to keep the tree free of dead code.
+      - name: Dead-code check
+        run: npm run deadcode
+
+      - name: Unit tests
+        run: npm run test
 
   test:
     runs-on: ubuntu-latest
@@ -109,8 +112,11 @@ jobs:
           poetry run ruff check .
           poetry run ruff format --check .
 
+      - name: Type check
+        run: poetry run mypy
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
           GROQ_API_KEY: test-key
-        run: poetry run pytest
+        run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term
