@@ -28,10 +28,10 @@
     "streak_worse": "{{count}}週連続悪化",
     "streak_better": "{{count}}週連続改善",
     "section_concentration": "遅延の集中度",
-    "concentration_legend": "上位{{count}}路線が遅延全体の {{pct}}% を占める。",
+    "concentration_legend": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
     "concentration_rest": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
-    "peak_hour_callout": "ピーク時間帯は {{hour}}-{{next_hour}} 時 (平均 {{avg}} 分)。",
+    "peak_hour_callout": "ピークは {{hour}}時〜{{next_hour}}時です (平均 {{avg}} 分)。",
     "section_service_split": "サービス日別",
     "service_split_label": {
       "平日": "平日",
@@ -46,10 +46,10 @@
       "stat_days": "日数"
     },
     "story": {
-      "better": "今週は先週より良くなった。",
-      "worse": "今週は先週より悪化した。",
-      "same": "今週は先週とほぼ同じ。",
-      "no_baseline": "今週の状況。"
+      "better": "今週は先週より改善しました。",
+      "worse": "今週は先週より悪化しました。",
+      "same": "今週は先週とほぼ同じです。",
+      "no_baseline": "今週の概況です。"
     },
     "mover": {
       "worsened": "{{val}}分 悪化",
@@ -58,15 +58,15 @@
       "delta_tooltip": "前週の平均遅延に対する変化率"
     },
     "concentration": {
-      "single_route": "{{name}} が全体の 100% を占める。1路線のみの観測。",
+      "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
-      "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占める。"
+      "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占めています。"
     },
     "service_split": {
       "diff": "差: {{diff}}分 ({{pct}}%)",
-      "story_weekday_higher": "平日は土日祝の {{ratio}}倍 遅延。",
-      "story_weekend_higher": "土日祝は平日の {{ratio}}倍 遅延。",
-      "story_same": "平日と土日祝はほぼ同じ。",
+      "story_weekday_higher": "平日の遅延は土日祝の {{ratio}}倍です。",
+      "story_weekend_higher": "土日祝の遅延は平日の {{ratio}}倍です。",
+      "story_same": "平日と土日祝でほぼ差はありません。",
       "weekday_label": "平日",
       "weekend_label": "土日祝",
       "daily_label": "平日 vs 土日祝の日次推移"
@@ -146,7 +146,7 @@
   },
   "account": {
     "admin_link": "管理",
-    "guest_prompt": "気に入りましたか？フィルターを保存するにはログインしてください。",
+    "guest_prompt": "ログインするとフィルター条件を保存できます。",
     "title": "アカウント",
     "role_label": "ロール",
     "role": {
@@ -264,7 +264,7 @@
       "color_meaning": "は平均遅延の段階、",
       "size_strong": "大きさ",
       "size_meaning": "はサンプル数（観測の多さ）。",
-      "body_1": "凡例の色をクリックすると該当の遅延帯のみ表示。停留所をクリックで詳細と拡大。",
+      "body_1": "凡例の色をクリックすると該当の遅延帯だけを表示します。停留所をクリックすると詳細表示と拡大ができます。",
       "body_2": "経路を 1 つに絞ると、実際の道路形状で路線が描画されます。",
       "hotspots_intro": "ホットスポット（赤・大きい円）は",
       "hotspots_em": "慢性的に遅れる",
@@ -332,7 +332,7 @@
       }
     },
     "input_aria": "質問を入力",
-    "input_placeholder": "例: 路線5の今月の遅延傾向は?",
+    "input_placeholder": "例: 路線5の今月の遅延傾向は？",
     "submit": "送信",
     "ctx": {
       "range": "期間 {{from}} 〜 {{to}}",
@@ -447,7 +447,7 @@
       "pin": "ピン留め",
       "unpin": "ピン留めを外す",
       "delete": "削除",
-      "delete_confirm": "この会話を削除しますか?",
+      "delete_confirm": "この会話を削除しますか？",
       "empty": "まだ会話がありません",
       "relative_now": "今",
       "relative_minute": "{{n}}分前",
@@ -568,8 +568,8 @@
       "avg_meaning": "はその日の全便平均、",
       "max_strong": "最大",
       "max_meaning": "は最も遅れた便。色付きの ● で深刻度が一目で分かります。",
-      "body_2": "サンプル数（便数 / 観測数）が多い路線ほど数字の信頼性が高い。",
-      "body_3": "並び替えで「最大遅延が大きい順」にすると、その日のホットスポット路線を即座に把握できます。"
+      "body_2": "サンプル数（便数 / 観測数）が多い路線ほど、数字の信頼性が高くなります。",
+      "body_3": "並び替えを「最大遅延」にすると、その日のホットスポット路線をすぐに把握できます。"
     },
     "last_observation": "最終観測: {{when}}",
     "auto_refresh": "自動更新 (30秒)",
