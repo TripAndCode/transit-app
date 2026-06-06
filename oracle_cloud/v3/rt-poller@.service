@@ -1,0 +1,17 @@
+# Install: sudo cp rt-poller@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# Enable:  sudo systemctl enable --now rt-poller@1 rt-poller@8 rt-poller@9 rt-poller@10
+[Unit]
+Description=GTFS-RT poller agency %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+ExecStart=/home/opc/collector/bin/rt-poller.sh %i
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
