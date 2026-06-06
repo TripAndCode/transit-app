@@ -140,7 +140,7 @@ export function useCreateAgency() {
   });
 }
 
-// ─── Phase ③ hooks — conversations + chips ───────────────────────────────────
+// ─── Conversation + chip hooks ───────────────────────────────────────────────
 
 /**
  * True when the current session is authenticated.
@@ -297,7 +297,7 @@ export function useAppendMessage(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: AppendMessageVars): Promise<AppendMessageResult> => {
-      // BUG-3 fix: use caller-supplied user_summary (card's buildSummary) when
+      // Use caller-supplied user_summary (card's buildSummary) when
       // available; fall back to the machine-generated builderSummary() only if
       // absent.  This ensures the user bubble shows a human-readable label
       // instead of raw key=value machine strings.
