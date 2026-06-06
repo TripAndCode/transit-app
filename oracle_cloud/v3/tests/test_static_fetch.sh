@@ -29,3 +29,15 @@ pass "unchanged static discarded"
 CURL_BODY=v2 ../bin/static-fetch.sh
 grep -q "PBDATA-v2" "$COLLECTOR_BASE/data/1/static/latest.zip" || fail "latest not updated on change"
 pass "changed static updates latest"
+
+teardown_base
+setup_base
+trap teardown_base EXIT
+
+# TSV last row lacks a trailing newline (hand-edited file): that agency must still process.
+printf '3\thirosaki\t30\thttp://feed.test/tu3.pb\thttp://feed.test/static3.zip\t' \
+    > "$COLLECTOR_BASE/etc/agencies.tsv"
+day=$(date -u +%Y%m%d)
+CURL_BODY=v3 ../bin/static-fetch.sh
+[ -f "$COLLECTOR_BASE/data/3/static/gtfs_static_$day.zip" ] || fail "newline-less last row not processed"
+pass "newline-less TSV tail processed"

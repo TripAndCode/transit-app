@@ -6,11 +6,14 @@ set -euo pipefail
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="$BASE_DIR/etc/agencies.tsv"
+trap 'rm -f "${tmp:-}"' EXIT INT TERM
 day=$(date -u +%Y%m%d)
 
 sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$1" | cut -d' ' -f1; }
 
-while IFS=$'\t' read -r id name interval feed static ping; do
+# `|| [ -n "$id" ]` processes a final row lacking a trailing newline (read
+# returns nonzero at EOF but still fills the fields from a hand-edited TSV).
+while IFS=$'\t' read -r id name interval feed static ping || [ -n "$id" ]; do
     case "$id" in ''|\#*) continue ;; esac
     [ -n "${static:-}" ] || continue
     : "$name" "$interval" "$feed" "$ping"
