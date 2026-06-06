@@ -3,24 +3,25 @@ import { useTranslation } from "react-i18next";
 
 type Props = { open: boolean; onClose: () => void };
 
+/** Thin gate: the drawer body mounts fresh on every open, so its state
+ *  (the api-key draft) re-initializes from localStorage without any
+ *  sync-from-props effect. */
 export function SettingsDrawer({ open, onClose }: Props) {
+  if (!open) return null;
+  return <SettingsDrawerBody onClose={onClose} />;
+}
+
+function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("api_key") ?? "");
 
   useEffect(() => {
-    if (open) setApiKey(localStorage.getItem("api_key") ?? "");
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
+  }, [onClose]);
 
   function save() {
     if (apiKey) localStorage.setItem("api_key", apiKey);

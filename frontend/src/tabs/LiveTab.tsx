@@ -45,7 +45,10 @@ export function LiveTab() {
   }, [data, filter, sort, routeNames]);
 
   const latest = data?.latest_captured_at;
-  const stale = latest ? Date.now() - new Date(latest).getTime() > 60 * 60 * 1000 : false;
+  // Age measured against the fetch timestamp (react-query's dataUpdatedAt)
+  // rather than Date.now() — render stays pure for the React Compiler, and
+  // the 30s auto-refresh keeps the reference point current anyway.
+  const stale = latest ? dataUpdatedAt - new Date(latest).getTime() > 60 * 60 * 1000 : false;
 
   return (
     <div>

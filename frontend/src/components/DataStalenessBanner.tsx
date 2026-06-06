@@ -10,7 +10,7 @@
  * Dismissible per session — re-appears on full page reload to avoid
  * permanently hiding the signal.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
@@ -29,14 +29,12 @@ export function DataStalenessBanner() {
   const agencyId = raw ? Number(raw) : null;
   const { t, i18n } = useTranslation();
   const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
-  const [dismissed, setDismissed] = useState(false);
-
-  // Re-read dismissed state on agency or locale change so cross-navigation
-  // (e.g., switching agencies) re-evaluates whether to show.
-  useEffect(() => {
-    const stored = sessionStorage.getItem(SESSION_DISMISS_KEY);
-    setDismissed(stored != null);
-  }, [agencyId]);
+  // sessionStorage is only ever written by handleDismiss in this same tab,
+  // so a lazy initializer + the handler's own setState cover every path —
+  // the previous re-read effect was a no-op (the key is agency-independent).
+  const [dismissed, setDismissed] = useState(
+    () => sessionStorage.getItem(SESSION_DISMISS_KEY) != null,
+  );
 
   if (agencyId == null) return null;
   const captured = data?.latest_captured_at;

@@ -82,12 +82,12 @@ export function ActivityStrip() {
 
   useStripStyles();
 
+  // Show is debounced 80ms so sub-frame mutations never flash the strip;
+  // hide goes through a 0ms timeout too, keeping the effect free of
+  // synchronous setState (React Compiler set-state-in-effect rule).
   useEffect(() => {
-    if (busy) {
-      const id = setTimeout(() => setVisible(true), 80);
-      return () => clearTimeout(id);
-    }
-    setVisible(false);
+    const id = setTimeout(() => setVisible(busy), busy ? 80 : 0);
+    return () => clearTimeout(id);
   }, [busy]);
 
   return (

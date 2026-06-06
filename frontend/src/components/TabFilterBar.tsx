@@ -100,9 +100,15 @@ export function TabFilterBar() {
     [serviceOptions],
   );
 
-  useEffect(() => {
+  // Mirror external ctx changes (chip clears, presets, drilldowns) into the
+  // popover draft via the render-adjust pattern — same semantics as the old
+  // sync-effect but without the extra commit + effect pass.
+  const ctxKey = `${ctx.dow}|${ctx.time_band}|${ctx.service}|${ctx.routes.join(",")}`;
+  const [prevCtxKey, setPrevCtxKey] = useState(ctxKey);
+  if (prevCtxKey !== ctxKey) {
+    setPrevCtxKey(ctxKey);
     setDraft({ dow: ctx.dow, time_band: ctx.time_band, service: ctx.service, routes: ctx.routes });
-  }, [ctx.dow, ctx.time_band, ctx.service, ctx.routes]);
+  }
 
   useEffect(() => {
     function onClick(e: MouseEvent) {

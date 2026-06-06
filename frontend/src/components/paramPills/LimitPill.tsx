@@ -23,9 +23,14 @@ type LimitPillProps = {
 export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled }: LimitPillProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string>(String(value));
-  useEffect(() => {
+  // Re-sync the draft when the parent updates `value` externally (chip-swap
+  // resetting defaults) — the render-adjust pattern from the React docs,
+  // which the compiler accepts where a sync-effect would not be.
+  const [prevValue, setPrevValue] = useState(value);
+  if (prevValue !== value) {
+    setPrevValue(value);
     setDraft(String(value));
-  }, [value]);
+  }
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
