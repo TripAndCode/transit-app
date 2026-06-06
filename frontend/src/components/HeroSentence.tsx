@@ -206,6 +206,14 @@ export function HeroSentence({
           to: headline.window_to,
         })}
       </p>
+      {variant === "modal" && (
+        <p className="ov-modal-explainer">
+          {t("overview.hero_explainer", {
+            from: headline.window_from,
+            to: headline.window_to,
+          })}
+        </p>
+      )}
       <h1 className="ov-hero-story">{story}</h1>
       <div className="ov-hero-row">
         <span className="ov-hero-number ov-anim-fade">

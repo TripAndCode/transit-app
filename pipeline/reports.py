@@ -909,6 +909,10 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
             "route_short_name": names.get(code),
             "delta_min": dm,
             "delta_pct": dp,
+            # Absolute averages for both windows so the UI can show
+            # "last week X min → this week Y min" instead of a bare Δ%.
+            "current_avg_min": round(cur[code][0], 1),
+            "previous_avg_min": round(prv[code][0], 1),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
             "sparkline_points": pts,
         }

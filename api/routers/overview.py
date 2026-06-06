@@ -42,12 +42,14 @@ class Mover(BaseModel):
     route_short_name: str | None
     delta_min: float
     delta_pct: float
+    current_avg_min: float
+    previous_avg_min: float
     streak_weeks: int
     sparkline_points: list[float]
 
 
 class Movers(BaseModel):
-    """Top-3 worsening and top-3 improving routes."""
+    """Top-10 worsening and top-10 improving routes (card shows 3)."""
 
     worse: list[Mover]
     better: list[Mover]

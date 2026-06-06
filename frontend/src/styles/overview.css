@@ -415,6 +415,39 @@
 }
 .ov-modal-body { padding: 32px; overflow-y: auto; }
 
+/* One-line methodology note at the top of drill-down modals. */
+.ov-modal-explainer {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6e6e73;
+}
+
+/* Modal mover rows gain a "prev wk → this wk" column; give it the
+ * stretch column so the row fills the 900px modal without dead space. */
+.ov-mover-row-modal {
+  grid-template-columns: 28px minmax(180px, 280px) 1fr auto auto;
+}
+.ov-mover-cmp {
+  font-size: 13px;
+  color: #3a3a3c;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  /* Collapse to the same 2-col stack as card rows; chip + spark wrap
+   * below the name (generic nth-child rules in the Mobile block). */
+  .ov-mover-row-modal { grid-template-columns: 22px 1fr; }
+  .ov-mover-row-modal > .ov-mover-cmp { display: none; }
+  .ov-mover-row-modal > :nth-child(4),
+  .ov-mover-row-modal > :nth-child(5) {
+    grid-column: 2 / -1;
+    justify-self: flex-start;
+  }
+}
+
 /* Card hover affordance — applied to .ov-card and the .ov-hero wrapper */
 .ov-card.ov-clickable,
 .ov-hero.ov-clickable {

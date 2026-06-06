@@ -136,6 +136,8 @@ export function OverviewTab() {
             movers={data.movers.worse}
             limit={10}
             variant="modal"
+            windowFrom={data.headline.window_from}
+            windowTo={data.headline.window_to}
           />
         )}
         {data && open === "movers_better" && (
@@ -144,6 +146,8 @@ export function OverviewTab() {
             movers={data.movers.better}
             limit={10}
             variant="modal"
+            windowFrom={data.headline.window_from}
+            windowTo={data.headline.window_to}
           />
         )}
         {data && open === "concentration" && (

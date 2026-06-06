@@ -105,6 +105,11 @@ export function ServiceSplit({
           {t("overview.section_service_split")}
         </p>
       )}
+      {variant === "modal" && (
+        <p className="ov-modal-explainer">
+          {t("overview.service_split_explainer")}
+        </p>
+      )}
       <div className="ov-svc-list">
         {keys.map((k) => {
           const v = service_split[k];

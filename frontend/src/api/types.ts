@@ -123,14 +123,14 @@ export type AskResponse = {
   tool_call: { name: string; arguments: Record<string, unknown> } | null;
   result: ToolResult | null;
   ctx: ResponseCtx;
-  // Phase ② canonical intent fields — null when ASK_INTENT_CACHE_ENABLED is off
+  // Canonical intent fields — null when ASK_INTENT_CACHE_ENABLED is off
   signature_hash?: string | null;
   confidence?: number | null;
   canonical_args?: Record<string, unknown> | null;
   cache_outcome?: CacheOutcome | null;
 };
 
-// Phase ② canonical intent + guided UX
+// Canonical intent + guided UX
 
 export type CacheOutcome = "hit" | "miss" | "bypass";
 
@@ -207,7 +207,8 @@ export type OverviewHeadline = {
    *  (always anchored at ctx.to and 7 days wide, regardless of the
    *  full ctx range). Use this for the eyebrow label. */
   window_from: string;
-  /** ISO date of the end of the headline 7-day window (= ctx.to). */
+  /** ISO date of the end of the headline 7-day window (anchored at the
+   *  latest date that has data inside ctx, not necessarily ctx.to). */
   window_to: string;
 };
 
@@ -216,6 +217,10 @@ export type OverviewMover = {
   route_short_name: string | null;
   delta_min: number;
   delta_pct: number;
+  /** Avg delay (min) in the current 7-day window. */
+  current_avg_min: number;
+  /** Avg delay (min) in the prior 7-day window. */
+  previous_avg_min: number;
   streak_weeks: number;
   sparkline_points: number[];
 };

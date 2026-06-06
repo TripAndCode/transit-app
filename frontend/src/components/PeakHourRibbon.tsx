@@ -286,6 +286,7 @@ export function PeakHourRibbon({
   if (variant === "modal") {
     return (
       <div className={wrapperClass} {...interactiveProps}>
+        <p className="ov-modal-explainer">{t("overview.peak_explainer")}</p>
         <div className="ov-peak-dow-stack">
           <div>
             <p className="ov-peak-dow-panel-title">

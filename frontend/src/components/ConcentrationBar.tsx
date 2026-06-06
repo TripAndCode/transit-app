@@ -109,6 +109,11 @@ export function ConcentrationBar({
           {t("overview.section_concentration")}
         </p>
       )}
+      {variant === "modal" && (
+        <p className="ov-modal-explainer">
+          {t("overview.concentration_explainer")}
+        </p>
+      )}
       <p className="ov-conc-headline">
         {t("overview.concentration_legend", {
           count: visibleRoutes.length,
