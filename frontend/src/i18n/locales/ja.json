@@ -246,7 +246,8 @@
       "size_density": "サイズ・濃度",
       "few_to_many": "少 → 多",
       "color_explainer": "色: 平均遅延の段階",
-      "size_explainer": "円の大きさ・濃度: サンプル数"
+      "size_explainer": "円の大きさ・濃度: サンプル数",
+      "drag_handle": "凡例を移動 (矢印キー)"
     },
     "popup": {
       "platform_label": "のりば",

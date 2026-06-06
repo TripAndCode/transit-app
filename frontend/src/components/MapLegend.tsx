@@ -75,6 +75,21 @@ export function MapLegend({
     document.body.style.userSelect = "none";
   }
 
+  /** Keyboard counterpart to the mouse drag: arrow keys nudge the legend. */
+  function nudge(e: React.KeyboardEvent) {
+    const STEP = 16;
+    const delta: Record<string, [number, number]> = {
+      ArrowLeft: [-STEP, 0],
+      ArrowRight: [STEP, 0],
+      ArrowUp: [0, -STEP],
+      ArrowDown: [0, STEP],
+    };
+    const d = delta[e.key];
+    if (!d) return;
+    e.preventDefault();
+    setPos((p) => ({ x: Math.max(0, p.x + d[0]), y: Math.max(0, p.y + d[1]) }));
+  }
+
   return (
     <div
       style={{
@@ -92,12 +107,13 @@ export function MapLegend({
         userSelect: "none",
       }}
     >
-      {/* Mouse-only drag affordance — deliberately not focusable: a
-          role="button" with no keyboard handler would advertise a dead
-          control to screen readers. Legend position is cosmetic; the
-          collapse button inside stays fully accessible. */}
+      {/* Drag handle: mouse drag + keyboard arrow-key nudging. */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={t("map.legend.drag_handle")}
         onMouseDown={startDrag}
+        onKeyDown={nudge}
         style={{
           display: "flex",
           alignItems: "center",

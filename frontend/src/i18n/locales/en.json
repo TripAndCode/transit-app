@@ -246,7 +246,8 @@
       "size_density": "Size · density",
       "few_to_many": "Few → many",
       "color_explainer": "Color: average delay band",
-      "size_explainer": "Circle size & opacity: sample count"
+      "size_explainer": "Circle size & opacity: sample count",
+      "drag_handle": "Move legend (arrow keys)"
     },
     "popup": {
       "platform_label": "Platform",
