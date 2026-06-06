@@ -19,6 +19,9 @@ specs/
 oracle_cloud/*
 !oracle_cloud/CUTOVER.md
 !oracle_cloud/v3/
+# inside the re-included v3 tree: never track runtime data or key material
+oracle_cloud/v3/data/
+oracle_cloud/v3/**/*.key
 frontend/node_modules
 frontend/dist
 api/static
