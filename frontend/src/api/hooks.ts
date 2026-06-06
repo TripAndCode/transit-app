@@ -29,7 +29,7 @@ import { useSession } from "./auth";
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
     queryKey: ["routes", agencyId],
-    queryFn: () => apiGet<Route[]>(`/api/${agencyId}/routes`),
+    queryFn: ({ signal }) => apiGet<Route[]>(`/api/${agencyId}/routes`, { signal }),
     enabled: agencyId != null,
     // Routes are quarterly-static, but a 1-hour staleTime froze empty
     // arrays (returned during a fresh deploy's initial ingest) for an
@@ -43,7 +43,7 @@ export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
 export function useAgencies(): UseQueryResult<Agency[]> {
   return useQuery({
     queryKey: ["agencies"],
-    queryFn: () => apiGet<Agency[]>("/api/agencies"),
+    queryFn: ({ signal }) => apiGet<Agency[]>("/api/agencies", { signal }),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -51,7 +51,7 @@ export function useAgencies(): UseQueryResult<Agency[]> {
 export function useReports(agencyId: number | null): UseQueryResult<ReportMeta[]> {
   return useQuery({
     queryKey: ["reports", agencyId],
-    queryFn: () => apiGet<ReportMeta[]>(`/api/${agencyId}/reports`),
+    queryFn: ({ signal }) => apiGet<ReportMeta[]>(`/api/${agencyId}/reports`, { signal }),
     enabled: agencyId != null,
   });
 }
@@ -69,8 +69,8 @@ export function useReport(
 ): UseQueryResult<ReportResponse> {
   return useQuery({
     queryKey: ["reports", agencyId, reportType, ...ctxKey(ctx)],
-    queryFn: () =>
-      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`),
+    queryFn: ({ signal }) =>
+      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
   });
 }
@@ -81,8 +81,8 @@ export function useOverviewSummary(
 ): UseQueryResult<OverviewSummary> {
   return useQuery({
     queryKey: ["overview-summary", agencyId, ...ctxKey(ctx)],
-    queryFn: () =>
-      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`),
+    queryFn: ({ signal }) =>
+      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
   });
 }
@@ -93,7 +93,8 @@ export function useHeatmap(
 ): UseQueryResult<HeatmapCollection> {
   return useQuery({
     queryKey: ["heatmap", agencyId, ...ctxKey(ctx)],
-    queryFn: () => apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`),
+    queryFn: ({ signal }) =>
+      apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
     staleTime: 60 * 1000,
   });
@@ -106,10 +107,10 @@ export function useRouteShape(
 ): UseQueryResult<RouteShapeResponse> {
   return useQuery({
     queryKey: ["route_shape", agencyId, route, ...ctxKey(ctx)],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const qs = new URLSearchParams(ctxToQueryString(ctx));
       qs.set("route", route!);
-      return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`);
+      return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`, { signal });
     },
     enabled: agencyId != null && !!route,
     staleTime: 60 * 1000,
@@ -122,7 +123,7 @@ export function useTodayRouteSummary(
 ): UseQueryResult<RouteSummaryResponse> {
   return useQuery({
     queryKey: ["today_route_summary", agencyId],
-    queryFn: () => apiGet<RouteSummaryResponse>(`/api/${agencyId}/today/route-summary`),
+    queryFn: ({ signal }) => apiGet<RouteSummaryResponse>(`/api/${agencyId}/today/route-summary`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
   });
@@ -168,9 +169,9 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
   const authed = useIsAuthenticated();
   return useQuery({
     queryKey: ["conversations", agencyId, authed ? "server" : "anon"],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (authed) {
-        return apiGet<Conversation[]>(`/api/${agencyId}/conversations`);
+        return apiGet<Conversation[]>(`/api/${agencyId}/conversations`, { signal });
       }
       // Anonymous: read from localStorage; shape-convert to Conversation
       return conversationsAnon.list(agencyId).map(toServerLikeConversation);
@@ -186,12 +187,12 @@ export function useConversation(
   const authed = useIsAuthenticated();
   return useQuery({
     queryKey: ["conversation", agencyId, conversationId, authed ? "server" : "anon"],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!conversationId) return null;
       if (authed) {
         const [conv, msgs] = await Promise.all([
-          apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`),
-          apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`),
+          apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`, { signal }),
+          apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`, { signal }),
         ]);
         return { conversation: conv, messages: msgs };
       }
@@ -380,8 +381,8 @@ export function useAppendMessage(agencyId: number) {
 export function useFollowupEnabled(agencyId: number | null) {
   return useQuery({
     queryKey: ["ask-followup-enabled", agencyId],
-    queryFn: () =>
-      apiGet<{ enabled: boolean }>(`/api/${agencyId}/ask/followup-enabled`),
+    queryFn: ({ signal }) =>
+      apiGet<{ enabled: boolean }>(`/api/${agencyId}/ask/followup-enabled`, { signal }),
     enabled: agencyId != null,
     staleTime: 60 * 60 * 1000,
   });

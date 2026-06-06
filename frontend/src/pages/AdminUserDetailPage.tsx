@@ -12,7 +12,13 @@ type Detail = {
   suspended_at: string | null;
   created_at: string;
   identities: { provider: string; provider_sub: string; email_at_link: string | null; created_at: string }[];
-  recent_events: { event_id: number; kind: string; provider: string | null; meta: any; created_at: string }[];
+  recent_events: {
+    event_id: number;
+    kind: string;
+    provider: string | null;
+    meta: Record<string, unknown> | null;
+    created_at: string;
+  }[];
 };
 
 /** Admin: detail view for a single user with identities and recent audit events. */
@@ -21,7 +27,7 @@ export function AdminUserDetailPage() {
   const { uid } = useParams<{ uid: string }>();
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
-    queryFn: () => apiGet<Detail>(`/api/admin/users/${uid}`),
+    queryFn: ({ signal }) => apiGet<Detail>(`/api/admin/users/${uid}`, { signal }),
   });
   if (isLoading) return <div style={{ padding: 24 }}>{t("common.loading")}</div>;
   if (error || !data) {

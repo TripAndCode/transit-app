@@ -47,8 +47,7 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
     if (typeof args.best_first === "string") {
       args.best_first = args.best_first === "true";
     }
-    const tCast = t as unknown as (k: string, opts?: object) => string;
-    const summary = composing.buildSummary(values, tCast);
+    const summary = composing.buildSummary(values, t);
     onSubmit({ tool: composing.tool, args, user_summary: summary });
     // Caller's onSubmit handler is responsible for awaiting and resetting state.
     setComposingId(null);

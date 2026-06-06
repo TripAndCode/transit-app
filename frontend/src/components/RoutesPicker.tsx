@@ -36,6 +36,9 @@ export function RoutesPicker({
   const { data, isPending, refetch } = useRoutes(id);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Render cap keeps the first paint cheap for huge agencies; "show more"
+  // raises it instead of silently dropping the tail (search still scans all).
+  const [visibleCap, setVisibleCap] = useState(200);
 
   const groups = useMemo<RouteGroup[]>(() => {
     if (!data) return [];
@@ -117,7 +120,7 @@ export function RoutesPicker({
           borderRadius: 4,
         }}
       >
-        {filteredGroups.slice(0, 200).map((g) => {
+        {filteredGroups.slice(0, visibleCap).map((g) => {
           const codes = g.variants.map((v) => v.code);
           const allOn = codes.every((c) => selected.includes(c));
           const someOn = !allOn && codes.some((c) => selected.includes(c));
@@ -228,6 +231,23 @@ export function RoutesPicker({
             </div>
           );
         })}
+        {filteredGroups.length > visibleCap && (
+          <button
+            type="button"
+            onClick={() => setVisibleCap((c) => c + 200)}
+            style={{
+              width: "100%",
+              background: "transparent",
+              border: "none",
+              color: "var(--accent)",
+              padding: "8px 10px",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            {t("filters.routes.show_more", { count: filteredGroups.length - visibleCap })}
+          </button>
+        )}
         {filteredGroups.length === 0 && isPending && (
           <div style={{ padding: 10, color: "var(--text-tertiary)", fontSize: 13 }}>
             {t("common.loading")}

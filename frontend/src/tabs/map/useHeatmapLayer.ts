@@ -91,9 +91,7 @@ export function useHeatmapLayer(
       ? data
       : {
           ...data,
-          features: data.features.filter(
-            (f: any) => (f.properties?.samples ?? 0) >= 2,
-          ),
+          features: data.features.filter((f) => (f.properties?.samples ?? 0) >= 2),
         };
 
     function applyData() {

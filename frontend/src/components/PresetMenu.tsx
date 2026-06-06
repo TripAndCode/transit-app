@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
+import type { RangeCtx } from "../api/rangeContext";
 
-type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: Record<string, any> };
+type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
 
 /** Dropdown + save dialog for filter presets; renders a hint when anonymous. */
 export function PresetMenu({
@@ -13,8 +14,8 @@ export function PresetMenu({
   onSelect,
 }: {
   agencyId: number;
-  currentRangeCtx: Record<string, any>;
-  onSelect: (rangeCtx: Record<string, any>) => void;
+  currentRangeCtx: RangeCtx;
+  onSelect: (rangeCtx: RangeCtx) => void;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -24,7 +25,7 @@ export function PresetMenu({
 
   const { data: presets } = useQuery({
     queryKey: ["presets", agencyId],
-    queryFn: () => apiGet<Preset[]>(`/api/me/presets?agency_id=${agencyId}`),
+    queryFn: ({ signal }) => apiGet<Preset[]>(`/api/me/presets?agency_id=${agencyId}`, { signal }),
     enabled: !!session,
   });
 
