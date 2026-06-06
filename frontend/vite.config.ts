@@ -2,7 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [react()],
+  // React Compiler (v1.0) auto-memoizes components — manual useMemo/useCallback
+  // are now only needed where the compiler bails out (see eslint react-hooks
+  // compiler diagnostics).
+  plugins: [react({ babel: { plugins: ["babel-plugin-react-compiler"] } })],
   server: {
     port: 5173,
     // Backend lives under /api/* and /health. Anything else is owned by
