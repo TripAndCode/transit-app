@@ -8,7 +8,7 @@
   },
   "app": {
     "data_stale": {
-      "banner": "Data is not current — last ingest: {{when}}",
+      "banner": "Data is out of date — last ingest: {{when}}",
       "dismiss_aria": "Dismiss"
     },
     "loading": {
@@ -23,10 +23,10 @@
     "hero_unit_min": " min",
     "hero_no_baseline": "No baseline data",
     "hero_samples": "{{count}} observations",
-    "section_movers_worse": "Most-worsened routes",
-    "section_movers_better": "Most-improved routes",
-    "streak_worse": "worse {{count}} weeks running",
-    "streak_better": "better {{count}} weeks running",
+    "section_movers_worse": "Routes that got worse",
+    "section_movers_better": "Routes that improved",
+    "streak_worse": "worse {{count}} weeks in a row",
+    "streak_better": "better {{count}} weeks in a row",
     "section_concentration": "Delay concentration",
     "concentration_legend": "Top {{count}} routes carry {{pct}}% of the delay.",
     "concentration_rest": "Remaining {{count}} routes: {{rest}}%",
@@ -54,7 +54,7 @@
     "mover": {
       "worsened": "{{val}} min worse",
       "improved": "{{val}} min better",
-      "week_compare": "prev wk {{prev}} min → this wk {{cur}} min",
+      "week_compare": "last week {{prev}} min → this week {{cur}} min",
       "delta_tooltip": "Change vs the prior week's average delay"
     },
     "concentration": {
@@ -81,8 +81,8 @@
     },
     "modal": {
       "hero": "This week's trend",
-      "movers_worse": "Most-worsened routes (top 10)",
-      "movers_better": "Most-improved routes (top 10)",
+      "movers_worse": "Routes that got worse (top 10)",
+      "movers_better": "Routes that improved (top 10)",
       "concentration": "Delay concentration (top 20)",
       "peak_hour": "Worst hour (Weekday vs Weekend)",
       "service_split": "Service-day trend"
@@ -290,7 +290,7 @@
       "body_2": "Examples: \"Today's worst 3 routes?\" \"Most-delayed stops during the morning peak?\" \"Compare last week and this week\"",
       "body_3_intro": "The current",
       "body_3_strong": "date / day / time-band filters",
-      "body_3_outro": "are applied to the answer too, so change the on-screen filters before asking to shift the analytical angle."
+      "body_3_outro": "carry over to the answer, so adjust the filters first to look at the data from a different angle."
     },
     "error_empty": "Please enter a question",
     "error_agency_not_selected": "Agency not selected",
@@ -567,9 +567,9 @@
       "avg_strong": "Avg",
       "avg_meaning": "is the day's average across all trips;",
       "max_strong": "Max",
-      "max_meaning": "is the latest trip. Colored ● dots indicate severity at a glance.",
+      "max_meaning": "is the single most-delayed trip. Colored ● dots indicate severity at a glance.",
       "body_2": "Routes with more samples (trips / observations) have more reliable numbers.",
-      "body_3": "Sorting by \"max delay descending\" surfaces the day's hotspot routes immediately."
+      "body_3": "Sort by \"Max delay\" to surface the day's hotspot routes right away."
     },
     "last_observation": "Last observation: {{when}}",
     "auto_refresh": "Auto-refresh (30s)",
@@ -672,9 +672,9 @@
   "errors": {
     "rate_limited": "High traffic right now. Please wait a moment and retry.",
     "not_found": "No data available yet.",
-    "server_5xx": "Temporarily unable to fetch. Please retry.",
+    "server_5xx": "Couldn't load data just now. Please retry.",
     "generic_status": "Failed to load ({{status}})",
-    "network": "Network briefly interrupted. Please retry.",
+    "network": "Connection dropped for a moment. Please retry.",
     "generic": "Failed to load.",
     "no_agency_selected": "No agency selected"
   },
