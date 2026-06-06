@@ -160,10 +160,7 @@ def date_range_clause(
     (ISO str from the API ctx, datetime.date from tests).
     """
     if column_type == "text_date":
-        fragment = (
-            f"{column}::date BETWEEN (${next_param}::text)::date "
-            f"AND (${next_param + 1}::text)::date"
-        )
+        fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
     else:
         fragment = (
             f"({column} >= ((${next_param}::text)::date)::timestamptz "

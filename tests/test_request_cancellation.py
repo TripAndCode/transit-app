@@ -92,7 +92,7 @@ async def test_client_disconnect_cancels_running_query(apply_schema):
         watcher = await asyncpg.connect(DATABASE_URL)
         try:
             # Raw socket client: send the request, then hard-close mid-query.
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
             await writer.drain()
 
