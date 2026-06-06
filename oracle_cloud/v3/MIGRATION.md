@@ -39,6 +39,10 @@ static IS collected on the VM via `direct_url` curl.
     sudo cp /home/opc/rt-poller@.service /etc/systemd/system/
     sudo cp /home/opc/logrotate-collector.conf /etc/logrotate.d/collector
     sudo systemctl daemon-reload
+    # SELinux (Oracle Linux 9 enforcing): systemd cannot exec user_home_t
+    # scripts — without this, units fail with status=203/EXEC "Permission denied":
+    sudo semanage fcontext -a -t bin_t "/home/opc/collector/bin(/.*)?"
+    sudo restorecon -Rv /home/opc/collector/bin
 
 ## 4. Cutover Aomori (the <1 min gap)
     OLD_PID=$(pgrep -f 'transportation_analysis/poller.sh' | head -1)
