@@ -422,8 +422,9 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         new_to = _parse(raw_to) or today
         new_from = _parse(raw_from) or new_to - timedelta(days=29)
     else:
-        if days_back is None:
-            return ctx
+        # Reaching this branch implies days_back is set: the early return
+        # above already handled (days_back is None and no raw dates).
+        assert days_back is not None
         try:
             n = max(1, int(days_back))
         except (TypeError, ValueError):

@@ -88,7 +88,7 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 for row in raw_rows:
                     stop_id, stop_name = row[0], row[1]
                     try:
-                        lat, lon = float(row[2] or ""), float(row[3] or "")
+                        lat, lon = float(row[2]), float(row[3])  # type: ignore[arg-type]  # None -> TypeError, caught below
                     except (TypeError, ValueError):
                         lat, lon = None, None
                     # Optional GTFS fields — present in Aomori's feed
@@ -111,9 +111,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 for row in raw_rows:
                     shape_id = row[0]
                     try:
-                        lat = float(row[1] or "")
-                        lon = float(row[2] or "")
-                        seq = int(row[3] or "")
+                        lat = float(row[1])  # type: ignore[arg-type]  # None -> TypeError, caught below
+                        lon = float(row[2])  # type: ignore[arg-type]
+                        seq = int(row[3])  # type: ignore[arg-type]
                     except (TypeError, ValueError):
                         skipped += 1
                         continue

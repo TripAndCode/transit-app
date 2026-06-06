@@ -1,3 +1,5 @@
+"""Integration tests for pipeline.static_loader against a live Postgres."""
+
 import io
 import pathlib
 import zipfile

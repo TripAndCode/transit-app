@@ -236,7 +236,6 @@
   "map": {
     "legend": {
       "title": "凡例",
-      "drag_handle": "凡例を移動",
       "show_single_sample": "1観測のみも表示",
       "delay_avg": "遅延 (平均)",
       "band_lt_2": "< 2分",

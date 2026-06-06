@@ -903,6 +903,7 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
     history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4)
 
     def _entry(code, dm, dp, direction):
+        """Serialize one mover row (deltas, absolute averages, streak, sparkline)."""
         pts = [v for v in history.get(code, []) if v is not None]
         return {
             "route_code": code,

@@ -48,6 +48,7 @@ class _FakeClient:
         self._tool_name = tool_name
 
     def chat_completions(self, **kwargs):
+        """Stub returning a canned chat completion."""
         return _fake_message(self._arguments, self._tool_name), None
 
 

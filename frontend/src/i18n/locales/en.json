@@ -236,7 +236,6 @@
   "map": {
     "legend": {
       "title": "Legend",
-      "drag_handle": "Move legend",
       "show_single_sample": "Show single-sample stops",
       "delay_avg": "Delay (avg)",
       "band_lt_2": "< 2 min",

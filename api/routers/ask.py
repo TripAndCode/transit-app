@@ -84,6 +84,7 @@ class AskResponse(BaseModel):
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
+    """Build a clamped RangeCtx from the request body, defaulting invalid enums to 'all'."""
     today = date.today()
     if body_ctx is None:
         return RangeCtx(from_date=today - timedelta(days=DEFAULT_RANGE_DAYS - 1), to_date=today)

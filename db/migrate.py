@@ -1,3 +1,10 @@
+"""Plain-SQL migration runner backed by a schema_migrations tracking table.
+
+Migrations live in db/migrations/ as NNNN_name.up.sql / .down.sql pairs and
+are applied in filename order inside a transaction (rollback on failure).
+Driven by `gtfs_pipeline.py migrate up|down`.
+"""
+
 import logging
 import pathlib
 
@@ -25,6 +32,7 @@ def _applied_versions(conn) -> set[str]:
 
 
 def _run_up(version: str, conn) -> None:
+    """Apply one up-migration and record its version, atomically."""
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.up.sql"))
     if not matches:
         raise FileNotFoundError(f"No up migration file for version {version}")
@@ -41,6 +49,7 @@ def _run_up(version: str, conn) -> None:
 
 
 def _run_down(version: str, conn) -> None:
+    """Run one down-migration and delete its version row, atomically."""
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.down.sql"))
     if not matches:
         raise FileNotFoundError(f"No down migration file for version {version}")
@@ -57,6 +66,7 @@ def _run_down(version: str, conn) -> None:
 
 
 def migrate_up(conn) -> None:
+    """Apply every migration on disk that is not yet in schema_migrations."""
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
@@ -72,6 +82,7 @@ def migrate_up(conn) -> None:
 
 
 def migrate_down(target: str | None, conn) -> None:
+    """Roll back the most recently applied migration (one step)."""
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()

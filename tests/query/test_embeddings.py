@@ -52,6 +52,7 @@ def test_embedder_dim_and_cosine_similarity():
     assert len(v_passage) == 384
 
     def cos(a, b):
+        """Dot product of normalized vectors = cosine similarity."""
         return sum(x * y for x, y in zip(a, b, strict=False))  # vectors are normalize_embeddings=True
 
     assert cos(v_jp, v_en) > 0.5  # JP/EN paraphrase similarity

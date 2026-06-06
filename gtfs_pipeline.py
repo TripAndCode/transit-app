@@ -238,6 +238,7 @@ def cmd_build_rag_index(args):
         raise SystemExit(f"golden set not found: {golden}")
 
     async def run():
+        """Async body executed via asyncio.run()."""
         pool = await asyncpg.create_pool(DATABASE_URL)
         if args.all_agencies:
             async with pool.acquire() as conn:
@@ -270,6 +271,7 @@ def cmd_prune_query_log(args):
     days = int(args.days)
 
     async def run():
+        """Async body executed via asyncio.run()."""
         conn = await asyncpg.connect(DATABASE_URL)
         result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
         logger.info(f"prune_query_log: {result}")

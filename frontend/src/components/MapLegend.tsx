@@ -92,10 +92,11 @@ export function MapLegend({
         userSelect: "none",
       }}
     >
+      {/* Mouse-only drag affordance — deliberately not focusable: a
+          role="button" with no keyboard handler would advertise a dead
+          control to screen readers. Legend position is cosmetic; the
+          collapse button inside stays fully accessible. */}
       <div
-        role="button"
-        tabIndex={0}
-        aria-label={t("map.legend.drag_handle")}
         onMouseDown={startDrag}
         style={{
           display: "flex",

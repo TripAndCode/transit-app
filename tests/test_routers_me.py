@@ -62,6 +62,7 @@ async def test_me_returns_profile(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_preset_create_list_delete(me_client, aconn, aagency_id):
+    """Filter presets: create, list, delete round-trip."""
     sid, _uid = await _seed_user_and_session(aconn)
     body = {"agency_id": aagency_id, "name": "朝ラッシュ", "range_ctx": {"time_band": "0700-1000"}}
     r = await me_client.post(
@@ -115,6 +116,7 @@ async def test_other_user_cannot_delete_preset(me_client, aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_sessions_listed_then_revoked(me_client, aconn):
+    """Sessions list shows the active session; revoking it logs out."""
     sid, _uid = await _seed_user_and_session(aconn)
     r = await me_client.get("/api/me/sessions", cookies={"sid": sid})
     assert r.status_code == 200

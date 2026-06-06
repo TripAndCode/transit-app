@@ -24,6 +24,7 @@ def _resolve_ctx(
     service: str,
     routes: tuple[str, ...] = (),
 ) -> RangeCtx:
+    """Build a clamped RangeCtx from query params, defaulting invalid enums to 'all'."""
     today = date.today()
     to_d = parse_iso_date(to_date) or today
     from_d = parse_iso_date(from_date) or (to_d - timedelta(days=DEFAULT_RANGE_DAYS - 1))

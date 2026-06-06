@@ -80,6 +80,7 @@ async def list_conversations(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return the caller's 50 most recent conversations for this agency."""
     rows = await _conv.list_conversations(conn, user_id=user.user_id, agency_id=agency_id, limit=50)
     return rows
 
@@ -93,6 +94,7 @@ async def create_conversation(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Create a conversation owned by the caller with the given title + filter_ctx."""
     csrf_guard(request)
     return await _conv.create_conversation(
         conn,
@@ -110,6 +112,7 @@ async def get_conversation(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return one conversation with its messages; 404 unless the caller owns it."""
     try:
         return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
@@ -127,6 +130,7 @@ async def update_conversation(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Patch title / pinned / filter_ctx on a conversation the caller owns."""
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     try:
@@ -144,6 +148,7 @@ async def delete_conversation(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
     try:
         await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id)
@@ -159,6 +164,7 @@ async def list_messages(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return all messages of a conversation the caller owns."""
     try:
         return await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
@@ -174,6 +180,7 @@ async def migrate_anon_endpoint(
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Import anonymous localStorage threads into the caller's account."""
     csrf_guard(request)
     threads = [t.model_dump() for t in body.threads]
     inserted = await _conv.migrate_anon_threads(
@@ -196,6 +203,7 @@ async def append_message_endpoint(
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
 ):
+    """Dispatch a {tool, args} question and persist user + assistant rows atomically."""
     csrf_guard(request)
     # Validate dispatch path before touching DB.
     try:
