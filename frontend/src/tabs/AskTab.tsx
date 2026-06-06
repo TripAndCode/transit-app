@@ -359,7 +359,7 @@ function FollowupChipsRow({
   return (
     <div
       role="group"
-      aria-label={t("ask.followup_chips.panel_aria", { defaultValue: "フォローアップ質問" })}
+      aria-label={t("ask.followup_chips.panel_aria")}
       style={{
         marginTop: 8,
         display: "flex",
