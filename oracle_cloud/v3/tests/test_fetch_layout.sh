@@ -15,6 +15,7 @@ mkdir -p "$REMOTE/collector/data/1/rt" "$REMOTE/collector/data/8/rt" \
 printf 'a' > "$REMOTE/collector/data/1/rt/20260601.tar.gz"
 printf 'b' > "$REMOTE/collector/data/8/rt/20260601.tar.gz"
 printf 'z' > "$REMOTE/collector/data/1/static/gtfs_static_20260601.zip"
+ln -sfn gtfs_static_20260601.zip "$REMOTE/collector/data/1/static/latest.zip"
 
 FETCH_TEST_LOCAL=1 \
 COLLECTOR_DATA_DIR="$REMOTE/collector/data" \
@@ -28,6 +29,7 @@ ORACLE_HOST=unused ORACLE_SSH_KEY_PATH=/dev/null \
 [ -f "$LOCAL/raw_archives/8/20260601.tar.gz" ] || fail "v3: agency 8 tarball not fetched"
 [ -f "$LOCAL/raw_archives_static/1/gtfs_static_20260601.zip" ] || fail "v3: static not fetched"
 [ -d "$LOCAL/raw_archives/1/20990101" ] && fail "v3: live day dir must not be fetched"
+[ ! -e "$LOCAL/raw_archives_static/1/latest.zip" ] || fail "latest.zip must not be fetched"
 pass "v3 per-agency fetch"
 
 # Legacy flat layout still works when COLLECTOR_DATA_DIR unset.

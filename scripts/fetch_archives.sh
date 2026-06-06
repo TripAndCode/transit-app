@@ -74,7 +74,7 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
             "$LOCAL_RT_DIR/$id/"
         echo "==> [a$id] static archives"
         rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
-            --include="*.zip" --exclude="latest.zip" --exclude="*" \
+            --exclude="latest.zip" --include="*.zip" --exclude="*" \
             "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/static/" \
             "$LOCAL_STATIC_DIR/$id/" \
             || echo "  (no static for agency $id — skipping)"
