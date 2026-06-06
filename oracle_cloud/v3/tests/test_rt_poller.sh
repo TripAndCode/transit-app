@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# rt-poller.sh: writes pb into UTC day dir; pings healthcheck; survives feed failure.
+set -euo pipefail
+cd "$(dirname "$0")"
+source ./helpers.sh
+setup_base
+trap teardown_base EXIT
+
+printf '1\taomori\t1\thttp://feed.test/tu.pb\thttp://feed.test/static.zip\thttp://ping.test/hc\n' \
+    > "$COLLECTOR_BASE/etc/agencies.tsv"
+
+# Run poller for ~2.5s (interval=1) then kill.
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 2.5
+kill "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+
+day=$(date -u +%Y%m%d)
+count=$(ls "$COLLECTOR_BASE/data/1/rt/$day/"TripUpdate_*.pb 2>/dev/null | wc -l | tr -d ' ')
+[ "$count" -ge 2 ] || fail "expected >=2 pb files, got $count"
+grep -q "PBDATA" "$COLLECTOR_BASE/data/1/rt/$day/"TripUpdate_*.pb || fail "pb content missing"
+ls "$COLLECTOR_BASE/data/1/rt/$day/"*.part 2>/dev/null && fail "leftover .part file"
+grep -q "http://ping.test/hc" "$CURL_LOG" || fail "healthcheck ping never sent"
+pass "rt-poller writes pb + pings"
+
+# Failure mode: CURL_FAIL — poller must not crash, must not leave .part.
+teardown_base
+setup_base
+printf '1\taomori\t1\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+CURL_FAIL=1 ../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 2
+kill "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail ".part left on failure"
+ls "$COLLECTOR_BASE"/data/1/rt/*/*.pb 2>/dev/null && fail "pb written despite failure"
+pass "rt-poller failure path clean"
+
+# SIGTERM mid-fetch + startup sweep both leave zero .part behind.
+teardown_base
+setup_base
+printf '1\taomori\t1\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+# Part A: slow curl leaves a .part mid-write; TERM trap must clean it.
+CURL_SLEEP=5 ../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+found=0
+for _ in $(seq 1 40); do
+    if ls "$COLLECTOR_BASE"/data/1/rt/*/*.part >/dev/null 2>&1; then found=1; break; fi
+    sleep 0.25
+done
+[ "$found" -eq 1 ] || fail "no mid-write .part appeared within 10s"
+kill -TERM "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+gone=0
+for _ in $(seq 1 20); do
+    if ! ls "$COLLECTOR_BASE"/data/1/rt/*/*.part >/dev/null 2>&1; then gone=1; break; fi
+    sleep 0.25
+done
+[ "$gone" -eq 1 ] || fail ".part left after TERM"
+# Part B: a stale .part from a prior kill must be swept on the next startup.
+day=$(date -u +%Y%m%d)
+mkdir -p "$COLLECTOR_BASE/data/1/rt/$day"
+: > "$COLLECTOR_BASE/data/1/rt/$day/TripUpdate_000000.pb.part"
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 1.5
+kill "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+ls "$COLLECTOR_BASE"/data/1/rt/*/*.part 2>/dev/null && fail "stale .part not swept on startup"
+pass "rt-poller .part cleaned on TERM + startup sweep"
+
+# Interval 0 must be rejected (would divide by zero in PING_EVERY).
+teardown_base
+setup_base
+printf '1\taomori\t0\thttp://feed.test/tu.pb\t\t\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+set +e
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "interval 0 not rejected (rc=$rc)"
+grep -q "invalid interval" "$COLLECTOR_BASE/poller.out" || fail "missing invalid-interval message"
+pass "rt-poller rejects interval 0"

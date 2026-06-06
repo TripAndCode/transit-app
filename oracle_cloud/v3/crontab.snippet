@@ -1,0 +1,6 @@
+# Collector v3 cron jobs (pollers run under systemd, NOT cron).
+CRON_TZ=Asia/Tokyo
+0  9 * * *  nice -n 10 /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
+5  9 * * *  nice -n 10 /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
+# ENABLE ONLY after workstation mirror parity verified (MIGRATION.md step 7):
+#30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1

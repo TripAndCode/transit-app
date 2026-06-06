@@ -1,0 +1,5 @@
+# id	name	interval	feed_url	static_url	ping_url
+1	aomori	30	https://aomoricitybus.com/TripUpdate.pb		https://hc-ping.com/FILL-ME-1
+8	hiroden	30	https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/8/current_data.zip	https://hc-ping.com/FILL-ME-8
+9	hirobus	30	https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/9/current_data.zip	https://hc-ping.com/FILL-ME-9
+10	hiroko	30	https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/10/current_data.zip	https://hc-ping.com/FILL-ME-10

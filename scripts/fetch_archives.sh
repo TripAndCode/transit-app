@@ -51,21 +51,48 @@ trap cleanup EXIT
 
 SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=no -o BatchMode=yes"
 
-echo "==> Fetching RT archives from ${ORACLE_USER}@${ORACLE_HOST}:${ORACLE_RT_DIR}/"
-rsync -az --progress \
-    -e "ssh $SSH_OPTS" \
-    --include="*.tar.gz" \
-    --exclude="*" \
-    "${ORACLE_USER}@${ORACLE_HOST}:${ORACLE_RT_DIR}/" \
-    "$LOCAL_RT_DIR/"
+# FETCH_TEST_LOCAL=1: rsync local paths directly (test hook, no ssh).
+if [ "${FETCH_TEST_LOCAL:-0}" = "1" ]; then
+    RSYNC_E=()
+    REMOTE_PREFIX=""
+else
+    RSYNC_E=(-e "ssh $SSH_OPTS")
+    REMOTE_PREFIX="${ORACLE_USER}@${ORACLE_HOST}:"
+fi
 
-echo "==> Fetching static archives from ${ORACLE_USER}@${ORACLE_HOST}:${ORACLE_STATIC_DIR}/"
-rsync -az --progress \
-    -e "ssh $SSH_OPTS" \
-    --include="*.zip" \
-    --exclude="*" \
-    "${ORACLE_USER}@${ORACLE_HOST}:${ORACLE_STATIC_DIR}/" \
-    "$LOCAL_STATIC_DIR/" \
-    || echo "  (no static dir on remote — skipping)"
+if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
+    # ── v3 per-agency layout ──────────────────────────────────────────────
+    # COLLECTOR_DATA_DIR points at /home/opc/collector/data on the remote.
+    # AGENCY_IDS defaults to ids parsed from agencies.csv rows with a feed_url.
+    AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$(dirname "$0")/../agencies.csv" | tr '\n' ' ')}"
+    for id in $AGENCY_IDS; do
+        echo "==> [a$id] RT archives"
+        mkdir -p "$LOCAL_RT_DIR/$id" "$LOCAL_STATIC_DIR/$id"
+        rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
+            --include="*.tar.gz" --exclude="*" \
+            "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/rt/" \
+            "$LOCAL_RT_DIR/$id/"
+        echo "==> [a$id] static archives"
+        rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
+            --exclude="latest.zip" --include="*.zip" --exclude="*" \
+            "${REMOTE_PREFIX}${COLLECTOR_DATA_DIR}/$id/static/" \
+            "$LOCAL_STATIC_DIR/$id/" \
+            || echo "  (no static for agency $id — skipping)"
+    done
+else
+    # ── legacy flat layout (unchanged behavior) ───────────────────────────
+    echo "==> Fetching RT archives from ${REMOTE_PREFIX}${ORACLE_RT_DIR}/"
+    rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
+        --include="*.tar.gz" --exclude="*" \
+        "${REMOTE_PREFIX}${ORACLE_RT_DIR}/" \
+        "$LOCAL_RT_DIR/"
+
+    echo "==> Fetching static archives from ${REMOTE_PREFIX}${ORACLE_STATIC_DIR}/"
+    rsync -az --progress ${RSYNC_E[@]+"${RSYNC_E[@]}"} \
+        --include="*.zip" --exclude="*" \
+        "${REMOTE_PREFIX}${ORACLE_STATIC_DIR}/" \
+        "$LOCAL_STATIC_DIR/" \
+        || echo "  (no static dir on remote — skipping)"
+fi
 
 echo "==> Done"
