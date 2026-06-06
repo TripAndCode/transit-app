@@ -1,9 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGetOrNull, apiPost } from "./client";
 
-export type Identity = { provider: "google" | "github"; email_at_link: string | null };
+type Identity = { provider: "google" | "github"; email_at_link: string | null };
 
-export type Session = {
+type Session = {
   user_id: number;
   email: string;
   name: string | null;

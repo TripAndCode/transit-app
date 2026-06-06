@@ -411,7 +411,7 @@ async def chat_with_tools(
             if not isinstance(args, dict):
                 args = {}
             try:
-                result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
+                result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
             except Exception as exc:
                 _log.exception("Tool %s failed", name)
                 return {
@@ -559,7 +559,7 @@ async def chat_with_tools(
         args = {}
 
     try:
-        result: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
+        result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
     except Exception as exc:
         _log.exception("Tool %s failed", name)
         # A tool blowing up is a hard failure, not a deliberate decline.
@@ -609,4 +609,4 @@ def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["chat_with_tools", "_nn_distance_for_tool", "_summary"]
+__all__ = ["_nn_distance_for_tool", "_summary", "chat_with_tools"]

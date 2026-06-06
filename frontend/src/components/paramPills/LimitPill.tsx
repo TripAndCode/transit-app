@@ -10,7 +10,7 @@
 import { useState, useRef, useEffect } from "react";
 
 /** Props for {@link LimitPill}. */
-export type LimitPillProps = {
+type LimitPillProps = {
   label: string;
   value: number;
   min?: number;

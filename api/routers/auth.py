@@ -280,7 +280,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     ua = request.headers.get("user-agent")
     ip = request.client.host if request.client else None
     async with conn.transaction():
-        uid, role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
+        uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
         sid = secrets.token_urlsafe(32)
         await conn.execute(
             "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",

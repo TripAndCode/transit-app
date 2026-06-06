@@ -76,10 +76,11 @@ class MigrateAnon(BaseModel):
 
 @router.get("/conversations")
 async def list_conversations(
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return the caller's 50 most recent conversations for this agency."""
     rows = await _conv.list_conversations(conn, user_id=user.user_id, agency_id=agency_id, limit=50)
     return rows
 
@@ -89,10 +90,11 @@ async def list_conversations(
 async def create_conversation(
     request: Request,
     body: CreateConversation,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Create a conversation owned by the caller with the given title + filter_ctx."""
     csrf_guard(request)
     return await _conv.create_conversation(
         conn,
@@ -106,10 +108,11 @@ async def create_conversation(
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001 — implicit auth scope
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return one conversation with its messages; 404 unless the caller owns it."""
     try:
         return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
@@ -123,10 +126,11 @@ async def update_conversation(
     request: Request,
     conversation_id: str,
     body: UpdateConversation,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Patch title / pinned / filter_ctx on a conversation the caller owns."""
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     try:
@@ -140,10 +144,11 @@ async def update_conversation(
 async def delete_conversation(
     request: Request,
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
     try:
         await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id)
@@ -155,10 +160,11 @@ async def delete_conversation(
 @router.get("/conversations/{conversation_id}/messages")
 async def list_messages(
     conversation_id: str,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Return all messages of a conversation the caller owns."""
     try:
         return await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
     except (_conv.PermissionDenied, LookupError):
@@ -170,10 +176,11 @@ async def list_messages(
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
 ):
+    """Import anonymous localStorage threads into the caller's account."""
     csrf_guard(request)
     threads = [t.model_dump() for t in body.threads]
     inserted = await _conv.migrate_anon_threads(
@@ -191,11 +198,12 @@ async def append_message_endpoint(
     request: Request,
     conversation_id: str,
     body: AppendMessage,
-    agency_id: int = Depends(get_agency),
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
 ):
+    """Dispatch a {tool, args} question and persist user + assistant rows atomically."""
     csrf_guard(request)
     # Validate dispatch path before touching DB.
     try:
@@ -220,8 +228,11 @@ async def append_message_endpoint(
             detail="chip dispatch is no longer supported; use {tool, args} instead",
         )
 
-    # Builder direct — tool and args supplied by client
-    resolved_tool = body.tool  # type: ignore[assignment]  # validated above
+    # Builder direct — tool and args supplied by client.
+    # validate_dispatch() already rejected tool=None; narrow for the type checker.
+    if body.tool is None:
+        raise HTTPException(status_code=400, detail="tool is required")
+    resolved_tool = body.tool
     resolved_args = body.args or {}
     resolved_chip_id: str | None = None
     # Prefer the client-supplied localized summary; fall back to a generic
@@ -341,7 +352,7 @@ async def followup_endpoint(
     request: Request,
     conversation_id: str,
     body: FollowupBody,
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user_optional),
     conn=Depends(get_conn),
     locale: str = Depends(get_locale),
@@ -478,7 +489,7 @@ async def followup_endpoint(
 
 @router.get("/ask/followup-enabled")
 async def followup_enabled_endpoint(
-    agency_id: int = Depends(get_agency),  # noqa: ARG001
+    agency_id: int = Depends(get_agency),  # implicit auth scope
 ):
     """Public flag check so the frontend knows whether to render the input."""
     return {"enabled": _followup.is_enabled()}

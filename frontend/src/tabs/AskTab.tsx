@@ -237,19 +237,9 @@ export function AskTab() {
                 messages={messages}
                 formatRoute={routeNames.format}
                 t={t}
-                followupEnabled={followupEnabled}
-                followupBusy={followup.isPending}
-                onFollowup={(ctxMsgId, question) =>
-                  activeId &&
-                  followup.mutate({
-                    conversationId: activeId,
-                    contextMessageId: ctxMsgId,
-                    question,
-                  })
-                }
               />
 
-              {appendMsg.isPending && (
+              {(appendMsg.isPending || followup.isPending) && (
                 <div
                   role="status"
                   aria-live="polite"
@@ -265,6 +255,25 @@ export function AskTab() {
                   <Spinner size={14} />
                   {t("ask.thinking")}
                 </div>
+              )}
+
+              {/* Follow-up chips pinned after the latest message so the
+                  conversation can continue indefinitely. Each follow-up is
+                  grounded on the most recent tool result (not on prior LLM
+                  answers) to avoid compounding LLM errors. */}
+              {followupEnabled && !followup.isPending && !appendMsg.isPending && (
+                <FollowupChipsRow
+                  messages={messages}
+                  t={t}
+                  onFollowup={(ctxMsgId, question) =>
+                    activeId &&
+                    followup.mutate({
+                      conversationId: activeId,
+                      contextMessageId: ctxMsgId,
+                      question,
+                    })
+                  }
+                />
               )}
             </>
           ) : (
@@ -309,19 +318,35 @@ function MessageList({
   messages,
   formatRoute,
   t,
-  followupEnabled,
-  followupBusy,
-  onFollowup,
 }: {
   messages: ConvMessage[];
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
-  followupEnabled: boolean;
-  followupBusy: boolean;
+}) {
+  return (
+    <>
+      {messages.map((m) => (
+        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} />
+      ))}
+    </>
+  );
+}
+
+// ─── FollowupChipsRow ─────────────────────────────────────────────────────────
+
+/** Bottom-of-thread follow-up chips. Grounds every follow-up on the most
+ *  recent assistant message that carries a tool result, so multi-turn
+ *  follow-ups never compound LLM-generated answers. Hidden when the thread
+ *  has no tool result to ground on. */
+function FollowupChipsRow({
+  messages,
+  t,
+  onFollowup,
+}: {
+  messages: ConvMessage[];
+  t: TFunction;
   onFollowup: (contextMsgId: number, question: string) => void;
 }) {
-  // Last assistant message with a tool result is the only one that gets
-  // followup chips — scoped to avoid compounding LLM errors on LLM answers.
   const lastResultMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -329,23 +354,46 @@ function MessageList({
     }
     return null;
   })();
+  if (lastResultMsgId == null) return null;
 
   return (
-    <>
-      {messages.map((m) => (
-        <Bubble
-          key={m.message_id}
-          msg={m}
-          formatRoute={formatRoute}
-          t={t}
-          showFollowupChips={
-            followupEnabled && m.message_id === lastResultMsgId
-          }
-          followupBusy={followupBusy}
-          onFollowup={onFollowup}
-        />
+    <div
+      role="group"
+      aria-label={t("ask.followup_chips.panel_aria", { defaultValue: "フォローアップ質問" })}
+      style={{
+        marginTop: 8,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6,
+      }}
+    >
+      {FOLLOWUP_CHIPS.map((chip) => (
+        <button
+          key={chip.id}
+          type="button"
+          onClick={() => onFollowup(lastResultMsgId, t(chip.prompt_key))}
+          style={{
+            padding: "5px 12px",
+            fontSize: 12,
+            background: "var(--bg-soft, #f4f4f5)",
+            color: "var(--text-secondary, #52525b)",
+            border: "1px solid var(--border-soft, #e4e4e7)",
+            borderRadius: 999,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            transition: "background 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
+          }}
+        >
+          {t(chip.label_key)}
+        </button>
       ))}
-    </>
+    </div>
   );
 }
 
@@ -355,16 +403,10 @@ function Bubble({
   msg,
   formatRoute,
   t,
-  showFollowupChips,
-  followupBusy,
-  onFollowup,
 }: {
   msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
-  showFollowupChips: boolean;
-  followupBusy: boolean;
-  onFollowup: (contextMsgId: number, question: string) => void;
 }) {
   const isUser = msg.role === "user";
   const result = msg.result as ToolResult | null;
@@ -405,48 +447,6 @@ function Bubble({
         )}
       </div>
 
-      {showFollowupChips && (
-        <div
-          aria-label={t("ask.followup_chips.panel_aria", { defaultValue: "フォローアップ質問" })}
-          style={{
-            marginTop: 8,
-            width: wide ? "100%" : "85%",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 6,
-          }}
-        >
-          {FOLLOWUP_CHIPS.map((chip) => (
-            <button
-              key={chip.id}
-              type="button"
-              disabled={followupBusy}
-              onClick={() => onFollowup(msg.message_id, t(chip.prompt_key))}
-              style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                background: "var(--bg-soft, #f4f4f5)",
-                color: "var(--text-secondary, #52525b)",
-                border: "1px solid var(--border-soft, #e4e4e7)",
-                borderRadius: 999,
-                cursor: followupBusy ? "not-allowed" : "pointer",
-                opacity: followupBusy ? 0.55 : 1,
-                whiteSpace: "nowrap",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (!followupBusy)
-                  (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
-              }}
-            >
-              {t(chip.label_key)}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

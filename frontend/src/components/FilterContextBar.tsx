@@ -17,7 +17,7 @@ type Props = {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 /** Shared summary helper — mirrors ThreadSidebar's filterSummary logic. */
-export function filterSummary(
+function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {

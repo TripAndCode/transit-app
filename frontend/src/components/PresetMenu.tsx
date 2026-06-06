@@ -67,6 +67,7 @@ export function PresetMenu({
                        background: "var(--surface-1)", border: "1px solid var(--surface-2)",
                        borderRadius: 4, zIndex: 10 }}>
           <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- name field of a just-opened "save preset" popover; focusing it is the expected UX
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}

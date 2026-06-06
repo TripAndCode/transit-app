@@ -16,7 +16,7 @@
     }
   },
   "overview": {
-    "eyebrow": "Overview — {{from}} – {{to}}",
+    "eyebrow": "Overview — last 7 days: {{from}} – {{to}}",
     "hero_avg_prefix": "This week's average delay is",
     "hero_avg_suffix": " min.",
     "hero_compared": "vs last week",
@@ -53,7 +53,9 @@
     },
     "mover": {
       "worsened": "{{val}} min worse",
-      "improved": "{{val}} min better"
+      "improved": "{{val}} min better",
+      "week_compare": "prev wk {{prev}} min → this wk {{cur}} min",
+      "delta_tooltip": "Change vs the prior week's average delay"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",
@@ -85,7 +87,12 @@
       "peak_hour": "Worst hour (Weekday vs Weekend)",
       "service_split": "Service-day trend"
     },
-    "empty": "No observations in this range. Try a wider window."
+    "empty": "No observations in this range. Try a wider window.",
+    "movers_explainer": "Compares each route's average delay over the last 7 days ({{from}} – {{to}}) with the 7 days before that. Only routes with at least 10 observations in both windows are ranked. The sparkline shows the weekly average over the past 4 weeks.",
+    "hero_explainer": "“This week” is the most recent 7 days with data inside the selected range ({{from}} – {{to}}); “last week” is the 7 days before that. The chart shows the daily average delay across the full selected range.",
+    "concentration_explainer": "Each route's share of the total delay across the selected range. The Lorenz curve below shows how concentrated delay is — the dotted diagonal is perfectly even delay across routes; the further the curve bends away, the more delay is concentrated in a few routes.",
+    "peak_explainer": "Average delay by hour of day (0–23) across the selected range, split into weekdays and weekends/holidays so commute peaks and weekend patterns can be compared.",
+    "service_split_explainer": "Average delay on weekdays vs weekends/holidays across the selected range. The chart below shows the day-by-day series, so you can tell whether the gap is persistent or a one-off."
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -239,7 +246,8 @@
       "size_density": "Size · density",
       "few_to_many": "Few → many",
       "color_explainer": "Color: average delay band",
-      "size_explainer": "Circle size & opacity: sample count"
+      "size_explainer": "Circle size & opacity: sample count",
+      "drag_handle": "Move legend (arrow keys)"
     },
     "popup": {
       "platform_label": "Platform",

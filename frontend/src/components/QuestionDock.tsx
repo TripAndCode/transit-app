@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
 
-export type QuestionDockProps = {
+type QuestionDockProps = {
   agencyId: number;
   busy: boolean;
   /** Called when the user taps 実行. Caller is responsible for thread creation,

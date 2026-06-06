@@ -174,8 +174,9 @@ verify-secrets:
 	gitleaks detect --redact --no-banner --source .
 
 # ── Ask eval (CI gate) ────────────────────────────────────────────────────────
-# Verifies chip_coverage + builder_coverage = 100% against the gold JSONL.
-# Regenerate the gold set after catalog changes: poetry run python scripts/_gen_gold_set.py
+# Verifies builder_coverage = 100% against the gold JSONL (the chip gate is
+# skipped — the chip catalog was removed). Regenerate the gold set after card
+# changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
 
 ask-eval:
 	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/ask_eval.py

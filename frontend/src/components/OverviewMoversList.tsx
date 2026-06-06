@@ -1,6 +1,5 @@
 // frontend/src/components/OverviewMoversList.tsx
 // Overview-specific movers list (direction/worse/better variant).
-// The new dashboard MoversList (with MoversResponse) lives in MoversList.tsx.
 import { useTranslation } from "react-i18next";
 
 import type { OverviewMover } from "../api/types";
@@ -16,6 +15,10 @@ type Props = {
   variant?: "card" | "modal";
   /** When set, the card becomes clickable and opens the modal. */
   onClick?: () => void;
+  /** ISO dates of the current 7-day comparison window. When provided
+   *  (modal variant), an explainer line describes the methodology. */
+  windowFrom?: string;
+  windowTo?: string;
 };
 
 export function MoversList({
@@ -24,6 +27,8 @@ export function MoversList({
   limit = 3,
   variant = "card",
   onClick,
+  windowFrom,
+  windowTo,
 }: Props) {
   const { t } = useTranslation();
   if (movers.length === 0) return null;
@@ -62,10 +67,15 @@ export function MoversList({
       }
     : {};
 
+  const isModal = variant === "modal";
+
   return (
     <div className={wrapperClass} {...interactiveProps}>
-      {variant !== "modal" && (
-        <p className="ov-card-eyebrow">{t(sectionKey)}</p>
+      {!isModal && <p className="ov-card-eyebrow">{t(sectionKey)}</p>}
+      {isModal && windowFrom && windowTo && (
+        <p className="ov-modal-explainer">
+          {t("overview.movers_explainer", { from: windowFrom, to: windowTo })}
+        </p>
       )}
       <div className="ov-mover-list">
         {visible.map((m, idx) => {
@@ -74,7 +84,10 @@ export function MoversList({
             val: Math.abs(m.delta_min).toFixed(1),
           });
           return (
-            <div className="ov-mover-row" key={m.route_code}>
+            <div
+              className={`ov-mover-row${isModal ? " ov-mover-row-modal" : ""}`}
+              key={m.route_code}
+            >
               <span className={`ov-rank ${rankClass}`}>{idx + 1}</span>
               <div className="ov-mover-text">
                 <div className="ov-mover-name">
@@ -89,7 +102,18 @@ export function MoversList({
                   </div>
                 )}
               </div>
-              <span className={`ov-chip ov-chip-lg ${chipClass}`}>
+              {isModal && (
+                <div className="ov-mover-cmp">
+                  {t("overview.mover.week_compare", {
+                    prev: m.previous_avg_min.toFixed(1),
+                    cur: m.current_avg_min.toFixed(1),
+                  })}
+                </div>
+              )}
+              <span
+                className={`ov-chip ov-chip-lg ${chipClass}`}
+                title={t("overview.mover.delta_tooltip")}
+              >
                 {arrow} {pctText}
               </span>
               <div className="ov-mover-spark">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
+import { onActivateKey } from "../utils/a11y";
 
 export function AgencyPicker() {
   const { t } = useTranslation();
@@ -96,17 +97,22 @@ export function AgencyPicker() {
           }}
         >
           <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- search field of a just-opened picker dropdown; focusing it is the expected UX
             autoFocus
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder={t("common.search_placeholder")}
             style={{ width: "100%", border: "none", borderBottom: "1px solid var(--border-soft)", borderRadius: 0 }}
           />
-          <div style={{ maxHeight: 280, overflowY: "auto" }}>
+          <div role="listbox" style={{ maxHeight: 280, overflowY: "auto" }}>
             {filtered.map((a) => (
               <div
                 key={a.agency_id}
+                role="option"
+                aria-selected={a.agency_id === currentId}
+                tabIndex={0}
                 onClick={() => selectAgency(a.agency_id)}
+                onKeyDown={onActivateKey(() => selectAgency(a.agency_id))}
                 style={{
                   padding: "8px 12px",
                   cursor: "pointer",

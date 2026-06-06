@@ -27,7 +27,7 @@ def test_static_join_loop_drops_extended_hour_row():
     }
     kept = []
     skipped = 0
-    for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
+    for trip_id, _rt_route_id, stop_seq, dep_delay in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             continue

@@ -10,7 +10,7 @@
  */
 import type { CSSProperties } from "react";
 
-export type SpinnerProps = {
+type SpinnerProps = {
   /** Pixel size; defaults to 14 (matches a 13px button label height). */
   size?: number;
   /** Stroke color; defaults to `currentColor` so it inherits button text color. */

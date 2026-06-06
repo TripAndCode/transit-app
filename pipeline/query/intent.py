@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -40,7 +41,7 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
 _LOWERCASE_KEYS = frozenset({"metric", "service_type", "time_window", "granularity", "order"})
 
 # Relative time tokens we resolve to absolute date pairs from the RangeCtx.
-_REL_TIME: dict[str, callable] = {
+_REL_TIME: dict[str, Callable[[dict[str, Any]], tuple[date, date]]] = {
     "last_7_days": lambda ctx: ((ctx["to_date"] - timedelta(days=7)), ctx["to_date"]),
     "last_2_weeks": lambda ctx: ((ctx["to_date"] - timedelta(days=14)), ctx["to_date"]),
     "last_30_days": lambda ctx: ((ctx["to_date"] - timedelta(days=30)), ctx["to_date"]),

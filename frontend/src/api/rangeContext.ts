@@ -22,7 +22,7 @@ export type RangeCtx = {
   routes: string[];
 };
 
-export type RangeCtxPatch = {
+type RangeCtxPatch = {
   from?: string;
   to?: string;
   dow?: DowFilter;
@@ -35,7 +35,7 @@ export type RangeCtxPatch = {
 export const DEFAULT_RANGE_DAYS = 30;
 
 /** JST is the only timezone the server uses (see api/main.py _init_connection). */
-export const JST_TZ = "Asia/Tokyo";
+const JST_TZ = "Asia/Tokyo";
 
 // en-CA renders YYYY-MM-DD without locale-specific separators.
 const jstFmt = new Intl.DateTimeFormat("en-CA", {

@@ -75,6 +75,21 @@ export function MapLegend({
     document.body.style.userSelect = "none";
   }
 
+  /** Keyboard counterpart to the mouse drag: arrow keys nudge the legend. */
+  function nudge(e: React.KeyboardEvent) {
+    const STEP = 16;
+    const delta: Record<string, [number, number]> = {
+      ArrowLeft: [-STEP, 0],
+      ArrowRight: [STEP, 0],
+      ArrowUp: [0, -STEP],
+      ArrowDown: [0, STEP],
+    };
+    const d = delta[e.key];
+    if (!d) return;
+    e.preventDefault();
+    setPos((p) => ({ x: Math.max(0, p.x + d[0]), y: Math.max(0, p.y + d[1]) }));
+  }
+
   return (
     <div
       style={{
@@ -92,8 +107,13 @@ export function MapLegend({
         userSelect: "none",
       }}
     >
+      {/* Drag handle: mouse drag + keyboard arrow-key nudging. */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={t("map.legend.drag_handle")}
         onMouseDown={startDrag}
+        onKeyDown={nudge}
         style={{
           display: "flex",
           alignItems: "center",
@@ -171,9 +191,16 @@ export function MapLegend({
             onClick={() => onFocusedSeverityChange(focusedSeverity === "severe" ? null : "severe")}
           />
           {focusedSeverity && (
-            <div
+            <button
+              type="button"
               onClick={() => onFocusedSeverityChange(null)}
               style={{
+                appearance: "none",
+                background: "transparent",
+                border: "none",
+                font: "inherit",
+                textAlign: "left",
+                display: "block",
                 cursor: "pointer",
                 fontSize: 10,
                 color: "var(--text-tertiary)",
@@ -182,7 +209,7 @@ export function MapLegend({
               }}
             >
               {t("map.legend.clear_selection")}
-            </div>
+            </button>
           )}
           <div style={{ marginTop: 8, marginBottom: 6, color: "var(--text-tertiary)", letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 10 }}>
             {t("map.legend.size_density")}
@@ -215,12 +242,19 @@ function Row({
   onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
+      aria-pressed={selected}
       style={{
+        appearance: "none",
+        border: "none",
+        font: "inherit",
+        textAlign: "left",
         display: "flex",
         alignItems: "center",
         gap: 8,
+        width: "100%",
         marginBottom: 3,
         padding: "2px 4px",
         borderRadius: 4,
@@ -243,7 +277,7 @@ function Row({
         }}
       />
       <span>{label}</span>
-    </div>
+    </button>
   );
 }
 

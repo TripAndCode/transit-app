@@ -38,7 +38,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       // Index has no static target — AgencyPicker (in Header) auto-redirects
-      // to /agencies/<first>/overview once agencies load. Sending Navigate to="overview"
+      // to /agencies/<first>/map once agencies load. Sending Navigate to="overview"
       // here loops with the catch-all because /overview is not a registered route.
       { index: true, element: <IndexLoadingPlaceholder /> },
       { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },

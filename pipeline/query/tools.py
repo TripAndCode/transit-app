@@ -31,7 +31,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from api.range import MAX_RANGE_DAYS, RangeCtx
+from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.tool_queries import (
@@ -422,6 +422,9 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         new_to = _parse(raw_to) or today
         new_from = _parse(raw_from) or new_to - timedelta(days=29)
     else:
+        # Reaching this branch implies days_back is set: the early return
+        # above already handled (days_back is None and no raw dates).
+        assert days_back is not None
         try:
             n = max(1, int(days_back))
         except (TypeError, ValueError):
@@ -501,7 +504,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     )
 
 
-_SERVICE_TYPE_MAP = {
+_SERVICE_TYPE_MAP: dict[str, ServiceType] = {
     "weekday": "平日",
     "weekend": "土日祝",
     "all": "all",

@@ -1,4 +1,14 @@
+"""Plain-SQL migration runner backed by a schema_migrations tracking table.
+
+Migrations live in db/migrations/ as NNNN_name.up.sql / .down.sql pairs and
+are applied in filename order inside a transaction (rollback on failure).
+Driven by `gtfs_pipeline.py migrate up|down`.
+"""
+
+import logging
 import pathlib
+
+logger = logging.getLogger(__name__)
 
 _MIGRATIONS_DIR = pathlib.Path(__file__).parent / "migrations"
 
@@ -22,6 +32,7 @@ def _applied_versions(conn) -> set[str]:
 
 
 def _run_up(version: str, conn) -> None:
+    """Apply one up-migration and record its version, atomically."""
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.up.sql"))
     if not matches:
         raise FileNotFoundError(f"No up migration file for version {version}")
@@ -34,10 +45,11 @@ def _run_up(version: str, conn) -> None:
     except Exception:
         conn.rollback()
         raise
-    print(f"  Applied: {matches[0].name}")
+    logger.info(f"  Applied: {matches[0].name}")
 
 
 def _run_down(version: str, conn) -> None:
+    """Run one down-migration and delete its version row, atomically."""
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.down.sql"))
     if not matches:
         raise FileNotFoundError(f"No down migration file for version {version}")
@@ -50,10 +62,11 @@ def _run_down(version: str, conn) -> None:
     except Exception:
         conn.rollback()
         raise
-    print(f"  Rolled back: {matches[0].name}")
+    logger.info(f"  Rolled back: {matches[0].name}")
 
 
 def migrate_up(conn) -> None:
+    """Apply every migration on disk that is not yet in schema_migrations."""
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
@@ -61,20 +74,21 @@ def migrate_up(conn) -> None:
     applied = _applied_versions(conn)
     pending = [v for v in all_v if v not in applied]
     if not pending:
-        print("Already up to date.")
+        logger.info("Already up to date.")
         return
     for v in pending:
         _run_up(v, conn)
-    print(f"Applied {len(pending)} migration(s).")
+    logger.info(f"Applied {len(pending)} migration(s).")
 
 
 def migrate_down(target: str | None, conn) -> None:
+    """Roll back the most recently applied migration (one step)."""
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
     applied = sorted(_applied_versions(conn), reverse=True)
     if not applied:
-        print("Nothing to roll back.")
+        logger.info("Nothing to roll back.")
         return
     if target is None:
         to_roll = [applied[0]]
@@ -82,8 +96,8 @@ def migrate_down(target: str | None, conn) -> None:
         to_roll = [v for v in applied if v > target]
         to_roll.sort(reverse=True)
     if not to_roll:
-        print(f"Already at or before version {target}.")
+        logger.info(f"Already at or before version {target}.")
         return
     for v in to_roll:
         _run_down(v, conn)
-    print(f"Rolled back {len(to_roll)} migration(s).")
+    logger.info(f"Rolled back {len(to_roll)} migration(s).")

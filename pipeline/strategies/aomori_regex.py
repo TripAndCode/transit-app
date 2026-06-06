@@ -51,7 +51,7 @@ def parse_feed(
     The 9-tuple consumed by INSERT prepends agency_id at insert time.
     """
     pattern = _resolve_pattern(agency_id, conn)
-    rows = []
+    rows: list[tuple] = []
     try:
         top = _fields(pb_bytes)
     except Exception:

@@ -2,10 +2,13 @@
 """Thin CLI wrapper for the GTFS pipeline jobs."""
 
 import argparse
+import logging
 import os
 import sys
 
 import psycopg2
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -25,14 +28,14 @@ def _require_agency(args, conn) -> int:
         cur.execute("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
         agencies = cur.fetchall()
     if not agencies:
-        print("No agencies found. Add one first:")
-        print("  python gtfs_pipeline.py add_agency --name 'Agency Name' --feed-url 'http://...'")
+        logger.info("No agencies found. Add one first:")
+        logger.info("  python gtfs_pipeline.py add_agency --name 'Agency Name' --feed-url 'http://...'")
         sys.exit(1)
     if len(agencies) == 1:
         return agencies[0][0]
-    print("Multiple agencies found. Specify --agency-id:")
+    logger.info("Multiple agencies found. Specify --agency-id:")
     for aid, name in agencies:
-        print(f"  {aid}: {name}")
+        logger.info(f"  {aid}: {name}")
     sys.exit(1)
 
 
@@ -46,7 +49,7 @@ def cmd_add_agency(args):
         )
         aid = cur.fetchone()[0]
     conn.commit()
-    print(f"Added agency {aid}: {args.name}")
+    logger.info(f"Added agency {aid}: {args.name}")
     conn.close()
 
 
@@ -123,10 +126,10 @@ def cmd_seed_agencies(args):
                 aid, was_inserted = cur.fetchone()
                 if was_inserted:
                     inserted += 1
-                    print(f"  + agency {aid}: {name}")
+                    logger.info(f"  + agency {aid}: {name}")
                 else:
                     updated += 1
-                    print(f"  ~ agency {aid}: {name} (updated)")
+                    logger.info(f"  ~ agency {aid}: {name} (updated)")
             # Realign the sequence so future inserts without an explicit
             # id don't collide with the explicit ones we just wrote.
             cur.execute(
@@ -135,7 +138,7 @@ def cmd_seed_agencies(args):
             )
     conn.commit()
     conn.close()
-    print(f"Seeded {inserted} new + {updated} updated from {path}")
+    logger.info(f"Seeded {inserted} new + {updated} updated from {path}")
 
 
 def cmd_ingest(args):
@@ -169,10 +172,10 @@ def cmd_refresh_static(args):
     if args.agency_id:
         result = refresh_static(int(args.agency_id), conn, dest)
         if result is None:
-            print("No change.")
+            logger.info("No change.")
     else:
         n = refresh_all(conn, dest)
-        print(f"Refreshed {n} agencies.")
+        logger.info(f"Refreshed {n} agencies.")
     conn.close()
 
 
@@ -198,11 +201,11 @@ def cmd_ingest_live(args):
             cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
-            print("No agencies found.")
+            logger.info("No agencies found.")
             conn.close()
             return
         for aid in agency_ids:
-            print(f"--- Ingesting agency_id={aid} ---")
+            logger.info(f"--- Ingesting agency_id={aid} ---")
             ingest_live(aid, conn)
     conn.close()
 
@@ -235,6 +238,7 @@ def cmd_build_rag_index(args):
         raise SystemExit(f"golden set not found: {golden}")
 
     async def run():
+        """Async body executed via asyncio.run()."""
         pool = await asyncpg.create_pool(DATABASE_URL)
         if args.all_agencies:
             async with pool.acquire() as conn:
@@ -248,7 +252,7 @@ def cmd_build_rag_index(args):
         for aid, name in ids:
             async with pool.acquire() as conn:
                 counts = await build_index(conn, aid, golden)
-            print(
+            logger.info(
                 f"  {aid:>3} {name}: "
                 f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
             )
@@ -267,9 +271,10 @@ def cmd_prune_query_log(args):
     days = int(args.days)
 
     async def run():
+        """Async body executed via asyncio.run()."""
         conn = await asyncpg.connect(DATABASE_URL)
         result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
-        print(f"prune_query_log: {result}")
+        logger.info(f"prune_query_log: {result}")
         await conn.close()
 
     asyncio.run(run())
@@ -277,6 +282,7 @@ def cmd_prune_query_log(args):
 
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 

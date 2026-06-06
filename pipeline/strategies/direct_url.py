@@ -11,11 +11,14 @@ Conditional GET via If-Modified-Since / If-None-Match. 304 → no-op.
 
 import hashlib
 import json
+import logging
 import pathlib
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -47,10 +50,10 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     except urllib.error.HTTPError as e:
         if e.code == 304:
             return None, None
-        print(f"[direct_url] HTTP {e.code} for {url}: {e.reason}")
+        logger.warning(f"[direct_url] HTTP {e.code} for {url}: {e.reason}")
         return None, None
     except urllib.error.URLError as e:
-        print(f"[direct_url] network error for {url}: {e}")
+        logger.warning(f"[direct_url] network error for {url}: {e}")
         return None, None
 
 
@@ -88,7 +91,7 @@ def fetch(
     if nothing_changed:
         for tmp in (tmp_current, tmp_latest):
             tmp.unlink(missing_ok=True)
-        print(f"[direct_url] agency={agency_id} no change")
+        logger.info(f"[direct_url] agency={agency_id} no change")
         return None
 
     # Pick which to load: prefer latest if it differs from current
@@ -98,7 +101,7 @@ def fetch(
         chosen_tmp = tmp_current if tmp_current.exists() else tmp_latest
 
     if not chosen_tmp.exists():
-        print(f"[direct_url] agency={agency_id} both variants 304/failed — keeping prior state")
+        logger.warning(f"[direct_url] agency={agency_id} both variants 304/failed — keeping prior state")
         return None
 
     day = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -121,5 +124,5 @@ def fetch(
         "sha256": lat_sha,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2))
-    print(f"[direct_url] agency={agency_id} persisted {final.name}")
+    logger.info(f"[direct_url] agency={agency_id} persisted {final.name}")
     return final

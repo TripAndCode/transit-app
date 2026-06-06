@@ -109,10 +109,18 @@ export function RangeBadge() {
           {presets.map((p) => {
             const selected = ctx.from === p.from() && ctx.to === p.to();
             return (
-              <div
+              <button
                 key={p.key}
+                type="button"
                 onClick={() => applyPreset(p)}
+                aria-pressed={selected}
                 style={{
+                  appearance: "none",
+                  border: "none",
+                  font: "inherit",
+                  textAlign: "left",
+                  display: "block",
+                  width: "100%",
                   padding: "8px 12px",
                   cursor: "pointer",
                   borderRadius: 4,
@@ -123,7 +131,7 @@ export function RangeBadge() {
                 }}
               >
                 {p.label}
-              </div>
+              </button>
             );
           })}
           <div style={{ borderTop: "1px solid var(--border-soft)", margin: "6px 0" }} />

@@ -752,7 +752,7 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     valid_idx = [h for h in range(24) if by_hour[h] is not None]
     if not valid_idx:
         return None
-    peak_h = max(valid_idx, key=lambda h: by_hour[h])
+    peak_h = max(valid_idx, key=lambda h: by_hour[h] or 0.0)
     return {
         "by_hour": by_hour,
         "peak_hour": peak_h,
@@ -903,12 +903,17 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn) -
     history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4)
 
     def _entry(code, dm, dp, direction):
+        """Serialize one mover row (deltas, absolute averages, streak, sparkline)."""
         pts = [v for v in history.get(code, []) if v is not None]
         return {
             "route_code": code,
             "route_short_name": names.get(code),
             "delta_min": dm,
             "delta_pct": dp,
+            # Absolute averages for both windows so the UI can show
+            # "last week X min → this week Y min" instead of a bare Δ%.
+            "current_avg_min": round(cur[code][0], 1),
+            "previous_avg_min": round(prv[code][0], 1),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
             "sparkline_points": pts,
         }

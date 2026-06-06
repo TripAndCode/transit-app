@@ -35,12 +35,13 @@ export function OverviewModal({ isOpen, onClose, title, children }: Props) {
   return (
     <div
       className="ov-modal-backdrop"
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       role="presentation"
     >
       <div
         className="ov-modal"
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={title}

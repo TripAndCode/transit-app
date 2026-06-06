@@ -55,7 +55,7 @@ def test_first_provider_success(monkeypatch):
     assert msg is fake_message
     assert kind is None
     assert mock_openai.call_count == 1
-    args, kwargs = mock_openai.call_args
+    _args, kwargs = mock_openai.call_args
     assert kwargs.get("base_url") == "https://api.cerebras.ai/v1"
 
 

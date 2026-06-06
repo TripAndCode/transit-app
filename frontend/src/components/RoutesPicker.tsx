@@ -150,7 +150,21 @@ export function RoutesPicker({
                   }}
                   onChange={() => toggleGroup(g)}
                 />
-                <span style={{ flex: 1, cursor: "pointer" }} onClick={() => toggleGroup(g)}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(g)}
+                  style={{
+                    appearance: "none",
+                    background: "transparent",
+                    border: "none",
+                    font: "inherit",
+                    color: "inherit",
+                    textAlign: "left",
+                    flex: 1,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
                   <span style={{ fontWeight: 600 }}>{g.name}</span>
                   {topSuffix && (
                     <span style={{ color: "var(--text-secondary)" }}> {topSuffix}</span>
@@ -158,7 +172,7 @@ export function RoutesPicker({
                   {multi && (
                     <span style={{ color: "var(--text-tertiary)" }}> {t("filters.routes.variant_count", { count: g.variants.length })}</span>
                   )}
-                </span>
+                </button>
                 {multi && (
                   <button
                     type="button"
@@ -182,9 +196,8 @@ export function RoutesPicker({
                   {g.variants.map((v) => {
                     const on = selected.includes(v.code);
                     return (
-                      <div
+                      <label
                         key={v.code}
-                        onClick={() => toggleCode(v.code)}
                         style={{
                           padding: "5px 10px",
                           cursor: "pointer",
@@ -196,7 +209,7 @@ export function RoutesPicker({
                           borderTop: "1px dashed var(--border-soft)",
                         }}
                       >
-                        <input type="checkbox" checked={on} readOnly />
+                        <input type="checkbox" checked={on} onChange={() => toggleCode(v.code)} />
                         <span style={{ color: "var(--text-secondary)", flex: 1 }}>{variantLabel(v)}</span>
                         <span
                           style={{
@@ -207,7 +220,7 @@ export function RoutesPicker({
                         >
                           {v.code}
                         </span>
-                      </div>
+                      </label>
                     );
                   })}
                 </div>

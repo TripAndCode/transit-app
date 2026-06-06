@@ -168,8 +168,7 @@ export function MapTab() {
 
   // Close any open popup before the heatmap re-renders. Without this, a
   // popup anchored to stop A would persist (showing stale numbers) after
-  // a filter change drops stop A from the visible set. Matches the
-  // pre-split behavior baked into the old applyData() body.
+  // a filter change drops stop A from the visible set.
   useEffect(() => {
     popupRef.current?.remove();
     popupRef.current = null;

@@ -9,10 +9,10 @@
 import { useState, useRef, useEffect } from "react";
 
 /** A single option entry for {@link SegmentedPill}. */
-export type SegmentedOption = { value: string; label: string };
+type SegmentedOption = { value: string; label: string };
 
 /** Props for {@link SegmentedPill}. */
-export type SegmentedPillProps = {
+type SegmentedPillProps = {
   label: string;
   value: string;
   options: SegmentedOption[];

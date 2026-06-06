@@ -116,4 +116,4 @@ async def answer_followup(
     return content.strip(), None
 
 
-__all__ = ["answer_followup", "is_enabled", "MAX_QUESTION_CHARS"]
+__all__ = ["MAX_QUESTION_CHARS", "answer_followup", "is_enabled"]

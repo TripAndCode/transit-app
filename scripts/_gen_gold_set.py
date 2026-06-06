@@ -6,8 +6,9 @@ Run:
 Builder and paraphrase entries are hand-authored below.  Commit both this
 script and the resulting JSONL so future contributors can regenerate.
 
-NOTE (Phase ③.5): The 24-chip catalog was removed.  chip_entries() is
-commented out.  P11 will replace it with 20 parameterized-card entries.
+The 24-chip catalog was removed, so there are no chip entries.  The
+parameterized-card gold entries now live in scripts/_gen_phase35_gold.py,
+which is the generator the CI gate consumes.
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ from pipeline.query.intent import canonicalize
 EVAL_CTX = {"from_date": date(2026, 5, 1), "to_date": date(2026, 5, 30)}
 
 
-# chip_entries() removed in Phase ③.5 — chip catalog deleted.
-# P11 will add parameterized-card entries here.
+# The chip catalog was deleted, so there is no chip_entries() here.
+# Parameterized-card entries live in scripts/_gen_phase35_gold.py.
 
 
 # Hand-authored builder entries — cover all 5 build-form tools with varied
