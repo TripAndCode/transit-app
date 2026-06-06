@@ -13,8 +13,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  return request<T>(path, { method: "GET" });
+/** GET. Pass react-query's `signal` so in-flight requests are aborted when
+ * the query key changes or the consuming component unmounts — without it,
+ * rapid filter changes leave orphaned fetches racing each other. */
+export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
+  return request<T>(path, { method: "GET", signal: opts?.signal });
 }
 
 /** GET that returns null on 401. Used for the anonymous-allowed `/api/me` probe. */

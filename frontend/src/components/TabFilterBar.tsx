@@ -228,8 +228,8 @@ export function TabFilterBar() {
       {agencyIdNum !== null && (
         <PresetMenu
           agencyId={agencyIdNum}
-          currentRangeCtx={ctx as unknown as Record<string, unknown>}
-          onSelect={(rc) => setCtx({ ...ctx, ...rc } as typeof ctx)}
+          currentRangeCtx={ctx}
+          onSelect={(rc) => setCtx(rc)}
         />
       )}
       <button

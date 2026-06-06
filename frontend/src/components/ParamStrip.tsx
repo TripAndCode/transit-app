@@ -8,6 +8,7 @@
  * while a query is in flight.
  */
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { CardTemplate, ParamSpec } from "./askCardTemplates";
 import { SegmentedPill } from "./paramPills/SegmentedPill";
 import { LimitPill } from "./paramPills/LimitPill";
@@ -57,7 +58,7 @@ export function ParamStrip({
         const isMissing = missing.includes(spec.name);
         return (
           <span key={spec.name} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-            {renderPill(spec, values, onChange, agencyId, busy, t as unknown as (k: string, opts?: object) => string)}
+            {renderPill(spec, values, onChange, agencyId, busy, t)}
             {isMissing && (
               <span
                 aria-label={t("ask.dock.required_marker")}
@@ -105,7 +106,7 @@ function renderPill(
   onChange: (name: string, next: unknown) => void,
   agencyId: number,
   busy: boolean,
-  t: (k: string, opts?: object) => string,
+  t: TFunction,
 ) {
   const v = values[spec.name];
   if (spec.kind === "limit") {

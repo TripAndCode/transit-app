@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 export type ParamSpec =
   | { kind: "route"; name: string; required?: boolean }
   | {
@@ -24,10 +26,7 @@ export type CardTemplate = {
   /** Parameter inputs to render. */
   params: ParamSpec[];
   /** Renders the user_summary preview string from current values. */
-  buildSummary: (
-    values: Record<string, unknown>,
-    t: (key: string, opts?: object) => string,
-  ) => string;
+  buildSummary: (values: Record<string, unknown>, t: TFunction) => string;
 };
 
 /**

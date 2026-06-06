@@ -9,9 +9,9 @@ type AppConfig = { auth_enabled: boolean };
 export function useConfig() {
   return useQuery({
     queryKey: ["config"],
-    queryFn: async (): Promise<AppConfig> => {
+    queryFn: async ({ signal }): Promise<AppConfig> => {
       try {
-        return await apiGet<AppConfig>("/api/config");
+        return await apiGet<AppConfig>("/api/config", { signal });
       } catch {
         return { auth_enabled: false };
       }

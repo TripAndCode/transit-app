@@ -21,7 +21,7 @@ export function useAdminUsers(params: { q?: string; role?: string; suspended?: s
   if (params.suspended) qs.set("suspended", params.suspended);
   return useQuery({
     queryKey: ["adminUsers", params],
-    queryFn: () => apiGet<AdminUserList>(`/api/admin/users?${qs}`),
+    queryFn: ({ signal }) => apiGet<AdminUserList>(`/api/admin/users?${qs}`, { signal }),
   });
 }
 

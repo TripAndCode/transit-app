@@ -231,6 +231,7 @@
       "count_suffix": "{{count}} routes",
       "search_placeholder": "Search (name / code)",
       "variant_count": "({{count}} routes)",
+      "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes."
     }
