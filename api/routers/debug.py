@@ -2,7 +2,12 @@
 
 Both endpoints are hidden from the OpenAPI schema (``include_in_schema=False``)
 and return 404 when ``PERF_DEBUG_ENABLED`` is not set to a truthy value
-(``1``, ``true``, or ``yes``). Set it to ``false`` in production.
+(``1``, ``true``, or ``yes``).
+
+**Disabled by default.** Set ``PERF_DEBUG_ENABLED=true`` in your dev ``.env``
+to enable. The surface is unauthenticated when enabled — never enable on an
+internet-reachable deploy. The reset endpoint wipes all caches, which is a
+cheap DoS lever if exposed.
 
 No user dependency — matches sibling read-routers (reports, overview,
 ask_dashboard). The env gate is the access control.
@@ -32,7 +37,7 @@ def _require_enabled() -> None:
     Uses 404 rather than 403 so that the surface appears non-existent when
     disabled, rather than advertising itself as forbidden.
     """
-    enabled = os.environ.get("PERF_DEBUG_ENABLED", "true").lower() in ("1", "true", "yes")
+    enabled = os.environ.get("PERF_DEBUG_ENABLED", "false").lower() in ("1", "true", "yes")
     if not enabled:
         raise HTTPException(status_code=404, detail="Not found")
 

@@ -678,7 +678,11 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
 
     # Pool-gather path — spin up a fresh pool against the same test DB.
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    # Use _init_connection (SET TIME ZONE 'Asia/Tokyo') so pooled conns
+    # mirror production setup exactly.
+    from api.main import _init_connection
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
     finally:
