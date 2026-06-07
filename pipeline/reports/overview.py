@@ -1,4 +1,26 @@
-"""The 概況 magazine payload and its private helper functions."""
+"""The 概況 magazine payload and its private stage-query helpers.
+
+Public surface
+--------------
+compute_overview_summary(agency_id, ctx, conn, locale, *, pool=None) -> dict
+    Build the full Overview tab payload.  Pass ``pool`` to run the ten
+    stage queries concurrently (each task acquires its own connection);
+    omit it (or pass ``None``) for the sequential single-connection path
+    used by tests and ad-hoc callers.
+
+Fast vs slow paths
+------------------
+Most helpers have two internal branches:
+
+* **Fast path** (``ctx.time_band == "all"``) — reads the pre-aggregated
+  ``agg_daily_trend`` / ``agg_route_hour`` tables, sub-millisecond even
+  over multi-month ranges.
+* **Slow path** (any other time_band) — falls back to the live ``updates``
+  table via the dedup CTE so the hour-of-day filter is honoured.
+
+``_peak_hour_by_dow`` always uses the slow path because ``agg_route_hour``
+carries no date column and therefore cannot answer a DOW-restricted query.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +31,6 @@ from api.range import RangeCtx, build_updates_filter
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _dedup_cte, _time_band_sql_on
-
-# ---------------------------------------------------------------------------
-# Overview tab
-# ---------------------------------------------------------------------------
 
 
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn) -> date | None:
@@ -615,7 +633,6 @@ async def compute_overview_summary(
     per-stage timed_blocks is used unchanged, preserving behaviour for
     tests and ad-hoc callers.
     """
-    # _latest_data_date anchors the window; must run first regardless of path.
     async with perf.timed_block("overview.latest_date"):
         latest = await _latest_data_date(agency_id, ctx, conn)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
@@ -646,9 +663,6 @@ async def compute_overview_summary(
     )
 
     if pool is None:
-        # ----------------------------------------------------------------
-        # Sequential path — unchanged; per-stage timed_blocks preserved.
-        # ----------------------------------------------------------------
         async with perf.timed_block("overview.headline"):
             avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
             baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
@@ -676,19 +690,19 @@ async def compute_overview_summary(
             sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
 
     else:
-        # ----------------------------------------------------------------
         # Pool-gather path — each task acquires its own pooled connection
-        # so all ten queries can run concurrently.  A single asyncpg
+        # so all ten queries can run concurrently. A single asyncpg
         # connection cannot multiplex queries; pool.acquire() queues when
         # saturated, so concurrency is naturally bounded by pool size.
         # No per-stage timed_blocks here; the top-level reports.overview
         # label captures the wall-clock total.
-        # ----------------------------------------------------------------
         async def _own_conn(fn, *args):
+            """Acquire a pool connection, call ``fn(*args, conn)``, release."""
             async with pool.acquire() as c:
                 return await fn(*args, c)
 
-        async def _peak_dow(group):
+        async def _peak_dow(group: str) -> dict | None:
+            """Acquire a pool connection and run ``_peak_hour_by_dow`` for ``group``."""
             async with pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group)
 

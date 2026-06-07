@@ -632,8 +632,6 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     twice on the same seeded data: once with conn only (sequential) and
     once with pool=<real pool> (gather). Both results must be equal.
     """
-    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
-
     # Seed agg_daily_trend rows for headline / movers / concentration /
     # service_split / sparkline (fast-path callers).
     for i in range(4):
