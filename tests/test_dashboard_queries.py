@@ -9,6 +9,7 @@ import asyncpg
 import pytest
 
 from api.range import RangeCtx
+from pipeline import perf
 from pipeline.dashboard_queries import (
     AnomalyTimeline,
     DelayHeatmap,
@@ -19,6 +20,20 @@ from pipeline.dashboard_queries import (
 )
 
 DATABASE_URL = os.environ["DATABASE_URL"]
+
+
+@pytest.fixture(autouse=True)
+def _clear_dashboard_caches():
+    """Clear all three module-level caches before every test in this file.
+
+    async_lru_cache entries persist for the process lifetime; without this,
+    test B that seeds different rows under the same (agency_id, ctx) key as
+    test A would get test A's stale result back from cache.
+    """
+    delay_heatmap.cache_clear()
+    anomaly_timeline.cache_clear()
+    movers.cache_clear()
+    yield
 
 
 @pytest.fixture
@@ -143,3 +158,23 @@ async def test_movers_returns_delta(conn_with_seed):
     # Ordered by abs(delta) DESC
     deltas = [abs(r["delta"]) for r in result.rows]
     assert deltas == sorted(deltas, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_delay_heatmap_cache_hit(conn_with_seed):
+    """Second call with identical args returns cached result: 1 miss + 1 hit."""
+    pool, agency = conn_with_seed
+    ctx = _ctx()
+
+    perf.reset()
+
+    async with pool.acquire() as c:
+        result1 = await delay_heatmap(c, agency_id=agency, ctx=ctx, dimension="dow", top_routes=20)
+    async with pool.acquire() as c:
+        result2 = await delay_heatmap(c, agency_id=agency, ctx=ctx, dimension="dow", top_routes=20)
+
+    snap = perf.snapshot()
+    cache_stats = snap["caches"]["delay_heatmap"]
+    assert cache_stats["misses"] == 1, f"expected 1 miss, got {cache_stats['misses']}"
+    assert cache_stats["hits"] == 1, f"expected 1 hit, got {cache_stats['hits']}"
+    assert result1 == result2
