@@ -15,6 +15,8 @@ from httpx import ASGITransport
 
 from pipeline import perf
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+
 
 @pytest.fixture(autouse=True)
 def reset_perf():
@@ -26,9 +28,14 @@ def reset_perf():
 
 @pytest.fixture
 async def debug_client(apply_schema):
+    """Yield an HTTPX client wired to the FastAPI app with a fresh pool.
+
+    The pool is created and closed per-test so concurrent tests cannot
+    share or step on ``app.state.pool``, matching the pattern in conftest.
+    """
     from api.main import app
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
