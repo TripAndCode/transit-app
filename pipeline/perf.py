@@ -24,7 +24,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, AsyncIterator, Awaitable, Callable, TypeVar
+from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine, TypeVar
 
 T = TypeVar("T")
 
@@ -71,13 +71,15 @@ def record_cache(label: str, hit: bool) -> None:
     c["hits" if hit else "misses"] += 1
 
 
-def timed(label: str) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
+def timed(
+    label: str,
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Coroutine[Any, Any, T]]]:
     """Decorate an async function so every call is recorded under ``label``.
 
     Records on exception too — a slow failure is still a slow call.
     """
 
-    def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+    def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Coroutine[Any, Any, T]]:
         @wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             t0 = time.perf_counter()
