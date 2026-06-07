@@ -19,7 +19,7 @@ import pytest
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline.db import _DEDUP_INNER as DB_DEDUP_INNER
-from pipeline.reports import _dedup_cte
+from pipeline.reports.filters import _dedup_cte
 
 _SEED = [
     # (file_name, captured_at_offset_sec, dep_delay)
