@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 
 from api.range import RangeCtx, build_updates_filter
@@ -594,6 +595,8 @@ async def compute_overview_summary(
     ctx: RangeCtx,
     conn,
     locale: str = "ja",
+    *,
+    pool=None,
 ) -> dict:
     """Build the 概況 payload for one agency over ``ctx``.
 
@@ -602,7 +605,17 @@ async def compute_overview_summary(
     copy is honest regardless of how the user has widened the ctx range.
     Concentration / peak / service_split / sparkline still aggregate over
     the full ctx to surface broader patterns.
+
+    When ``pool`` is supplied (non-None), the ten stage queries are
+    dispatched as concurrent asyncio tasks, each acquiring its own
+    connection from the pool so they can truly run in parallel.  The two
+    ``_peak_hour_by_dow`` calls — identified as 96 % of cold-load time in
+    the baseline measurement — are the primary beneficiaries.  When
+    ``pool`` is None (the default) the existing sequential path with
+    per-stage timed_blocks is used unchanged, preserving behaviour for
+    tests and ad-hoc callers.
     """
+    # _latest_data_date anchors the window; must run first regardless of path.
     async with perf.timed_block("overview.latest_date"):
         latest = await _latest_data_date(agency_id, ctx, conn)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
@@ -632,31 +645,83 @@ async def compute_overview_summary(
         routes=ctx.routes,
     )
 
-    async with perf.timed_block("overview.headline"):
-        avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
-        baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
+    if pool is None:
+        # ----------------------------------------------------------------
+        # Sequential path — unchanged; per-stage timed_blocks preserved.
+        # ----------------------------------------------------------------
+        async with perf.timed_block("overview.headline"):
+            avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
+            baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
 
-    delta_min = None
-    delta_pct = None
-    if avg_min is not None and baseline_avg is not None:
-        delta_min = round(avg_min - baseline_avg, 2)
-        if baseline_avg != 0:
-            delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
+        delta_min = None
+        delta_pct = None
+        if avg_min is not None and baseline_avg is not None:
+            delta_min = round(avg_min - baseline_avg, 2)
+            if baseline_avg != 0:
+                delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
-    async with perf.timed_block("overview.movers"):
-        movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
-    async with perf.timed_block("overview.concentration"):
-        concentration = await _concentration(agency_id, ctx, conn)
-    async with perf.timed_block("overview.peaks"):
-        peak = await _peak_hour(agency_id, ctx, conn)
-        peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
-        peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend")
-    async with perf.timed_block("overview.service_split"):
-        service_split = await _service_split(agency_id, ctx, conn)
-        service_split_daily = await _service_split_daily(agency_id, ctx, conn)
-    async with perf.timed_block("overview.sparkline"):
-        # Hero card slices `.slice(-7)`; modal shows full series.
-        sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
+        async with perf.timed_block("overview.movers"):
+            movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
+        async with perf.timed_block("overview.concentration"):
+            concentration = await _concentration(agency_id, ctx, conn)
+        async with perf.timed_block("overview.peaks"):
+            peak = await _peak_hour(agency_id, ctx, conn)
+            peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
+            peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend")
+        async with perf.timed_block("overview.service_split"):
+            service_split = await _service_split(agency_id, ctx, conn)
+            service_split_daily = await _service_split_daily(agency_id, ctx, conn)
+        async with perf.timed_block("overview.sparkline"):
+            # Hero card slices `.slice(-7)`; modal shows full series.
+            sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
+
+    else:
+        # ----------------------------------------------------------------
+        # Pool-gather path — each task acquires its own pooled connection
+        # so all ten queries can run concurrently.  A single asyncpg
+        # connection cannot multiplex queries; pool.acquire() queues when
+        # saturated, so concurrency is naturally bounded by pool size.
+        # No per-stage timed_blocks here; the top-level reports.overview
+        # label captures the wall-clock total.
+        # ----------------------------------------------------------------
+        async def _own_conn(fn, *args):
+            async with pool.acquire() as c:
+                return await fn(*args, c)
+
+        async def _peak_dow(group):
+            async with pool.acquire() as c:
+                return await _peak_hour_by_dow(agency_id, ctx, c, group)
+
+        (
+            (avg_min, samples),
+            (baseline_avg, _),
+            movers,
+            concentration,
+            peak,
+            peak_weekday,
+            peak_weekend,
+            service_split,
+            service_split_daily,
+            sparkline_points,
+        ) = await asyncio.gather(
+            _own_conn(_headline_stats, agency_id, cur_ctx),
+            _own_conn(_headline_stats, agency_id, base_ctx),
+            _own_conn(_movers, agency_id, cur_ctx, base_ctx),
+            _own_conn(_concentration, agency_id, ctx),
+            _own_conn(_peak_hour, agency_id, ctx),
+            _peak_dow("weekday"),
+            _peak_dow("weekend"),
+            _own_conn(_service_split, agency_id, ctx),
+            _own_conn(_service_split_daily, agency_id, ctx),
+            _own_conn(_daily_sparkline, agency_id, ctx),
+        )
+
+        delta_min = None
+        delta_pct = None
+        if avg_min is not None and baseline_avg is not None:
+            delta_min = round(avg_min - baseline_avg, 2)
+            if baseline_avg != 0:
+                delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
     return {
         "headline": {

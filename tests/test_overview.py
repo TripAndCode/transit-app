@@ -7,8 +7,10 @@ loads stay sub-second on multi-month windows. Tests seed both layers:
 stay covered, while ``agg_*`` is what the Overview reads.
 """
 
+import os
 from datetime import date, datetime, time, timedelta, timezone
 
+import asyncpg
 import pytest
 
 from api.range import RangeCtx
@@ -619,3 +621,76 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
     assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
     assert by_date["2026-05-20"]["weekday"] is None
     assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_pool_path_matches_sequential_path(aconn, aagency_id):
+    """Pool-gather path and sequential path return identical payloads.
+
+    Seeds a representative dataset (agg_daily_trend + agg_route_hour +
+    updates for the live-path callers) then calls compute_overview_summary
+    twice on the same seeded data: once with conn only (sequential) and
+    once with pool=<real pool> (gather). Both results must be equal.
+    """
+    base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
+
+    # Seed agg_daily_trend rows for headline / movers / concentration /
+    # service_split / sparkline (fast-path callers).
+    for i in range(4):
+        d = date(2026, 5, 18) + timedelta(days=i)
+        await _seed_agg_daily(aconn, aagency_id, d, "R_PP", "平日", 2.0 + i * 0.5, 5)
+    # One baseline-week row so delta is non-None.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 11), "R_PP", "平日", 1.5, 5)
+
+    # Seed agg_route_hour for _peak_hour (fast-path).
+    await _seed_agg_route_hour(aconn, aagency_id, "R_PP", "平日", "08:00", 4.0, 5)
+    await _seed_agg_route_hour(aconn, aagency_id, "R_PP", "平日", "17:00", 2.0, 3)
+
+    # Seed updates rows for _peak_hour_by_dow (live-path only callers).
+    # 2026-05-19 is Tuesday (weekday), 2026-05-23 is Saturday (weekend).
+    weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
+    weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
+    for i, (cap, sched, dep) in enumerate([
+        (weekday_dt, "08:00", 480),
+        (weekday_dt + timedelta(minutes=1), "08:00", 360),
+        (weekend_dt, "17:00", 300),
+        (weekend_dt + timedelta(minutes=1), "17:00", 240),
+    ]):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_pp_' || $4, '平日', ($5::text)::time, 'R_PP', $6, $7)",
+            aagency_id,
+            f"pp_{i}",
+            cap,
+            str(i),
+            sched,
+            i + 1,
+            dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
+
+    # Sequential path (pool=None, the existing default).
+    seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+
+    # Pool-gather path — spin up a fresh pool against the same test DB.
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    try:
+        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
+    finally:
+        await pool.close()
+
+    # Both paths must produce structurally identical payloads.
+    assert pool_out["headline"] == seq_out["headline"]
+    assert pool_out["movers"] == seq_out["movers"]
+    assert pool_out["concentration"] == seq_out["concentration"]
+    assert pool_out["peak_hour"] == seq_out["peak_hour"]
+    assert pool_out["peak_hour_weekday"] == seq_out["peak_hour_weekday"]
+    assert pool_out["peak_hour_weekend"] == seq_out["peak_hour_weekend"]
+    assert pool_out["service_split"] == seq_out["service_split"]
+    assert pool_out["service_split_daily"] == seq_out["service_split_daily"]
+    assert pool_out["sparkline_points"] == seq_out["sparkline_points"]
