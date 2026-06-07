@@ -36,6 +36,7 @@ TARGETS = [
 
 
 def _request_ms(client: httpx.Client, url: str) -> float:
+    """GET ``url`` and return wall-clock duration in milliseconds (raises on non-2xx)."""
     t0 = time.perf_counter()
     r = client.get(url)
     r.raise_for_status()
@@ -43,6 +44,7 @@ def _request_ms(client: httpx.Client, url: str) -> float:
 
 
 def main() -> int:
+    """Run the bench against every TARGET and print a cold/p50/p95 table."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--agency", type=int, default=1)

@@ -7,10 +7,6 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _dedup_cte
 
-# ---------------------------------------------------------------------------
-# Reports
-# ---------------------------------------------------------------------------
-
 
 @perf.timed("reports.ranking")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
