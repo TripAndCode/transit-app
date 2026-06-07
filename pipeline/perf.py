@@ -10,6 +10,9 @@ same trade-off as :mod:`pipeline.cache`.
 Durations above ``PERF_SLOW_MS`` (env, default 500) emit one WARNING line;
 the request_id ContextVar from api.logging_config rides along via the
 normal logging format, so slow ops are correlatable to requests.
+
+Not thread-safe: assumes a single asyncio event loop — do not call from
+executor threads.
 """
 
 from __future__ import annotations
@@ -106,7 +109,11 @@ def _percentile(sorted_vals: list[float], q: float) -> float:
 
 
 def snapshot() -> dict[str, Any]:
-    """JSON-able dump: per-label op stats + per-function cache stats."""
+    """JSON-able dump: per-label op stats + per-function cache stats.
+
+    Window semantics differ: ``count``/``avg_ms``/``max_ms`` are lifetime,
+    ``p50_ms``/``p95_ms`` cover only the last ``_RING_SIZE`` samples.
+    """
     ops: dict[str, Any] = {}
     for label in sorted(_stats):
         st = _stats[label]
