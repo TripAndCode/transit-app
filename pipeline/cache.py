@@ -70,10 +70,31 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
 
             # Stampede coalescing: if a compute is already in flight for
             # this key, join it rather than launching another.
-            fut = inflight.get(key)
-            if fut is not None:
+            #
+            # Waiter re-election: CancelGETOnDisconnectMiddleware cancels GET
+            # handlers on client disconnect; if that handler is the coalescing
+            # leader its Future is cancelled. Waiters use asyncio.shield() so
+            # their own Task is NOT cancelled, but the shield unblocks with
+            # CancelledError when the underlying Future is cancelled. We must
+            # distinguish "leader died" (fut.cancelled()) from "we ourselves
+            # were cancelled" (fut still running/done) and re-elect in the
+            # former case so healthy waiters still get a result.
+            while True:
+                fut = inflight.get(key)
+                if fut is None:
+                    break
                 perf.record_cache(label, hit=True)  # coalesced — no recompute
-                return await asyncio.shield(fut)
+                try:
+                    return await asyncio.shield(fut)
+                except asyncio.CancelledError:
+                    if fut.cancelled():
+                        # Leader was cancelled (e.g. client disconnect) — not us.
+                        # Re-elect: fall through the loop to become leader or join
+                        # the next one. Record a miss for the new leader attempt.
+                        perf.record_cache(label, hit=False)
+                        continue
+                    # We ourselves were cancelled; propagate immediately.
+                    raise
 
             perf.record_cache(label, hit=False)
             fut = asyncio.get_running_loop().create_future()
@@ -84,7 +105,15 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             try:
                 value = await fn(*args, **kwargs)
                 fut.set_result(value)
+            except asyncio.CancelledError:
+                # Leader was cancelled (e.g. CancelGETOnDisconnectMiddleware).
+                # Cancel the future so waiters' shield() unblocks and they can
+                # detect fut.cancelled() == True and re-elect a new leader.
+                fut.cancel()
+                raise
             except BaseException as exc:
+                # Other exceptions are forwarded to waiters directly so they
+                # surface the real error rather than retrying indefinitely.
                 fut.set_exception(exc)
                 raise
             finally:
