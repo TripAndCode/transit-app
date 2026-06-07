@@ -22,20 +22,6 @@ from pipeline.dashboard_queries import (
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-@pytest.fixture(autouse=True)
-def _clear_dashboard_caches():
-    """Clear all three module-level caches before every test in this file.
-
-    async_lru_cache entries persist for the process lifetime; without this,
-    test B that seeds different rows under the same (agency_id, ctx) key as
-    test A would get test A's stale result back from cache.
-    """
-    delay_heatmap.cache_clear()
-    anomaly_timeline.cache_clear()
-    movers.cache_clear()
-    yield
-
-
 @pytest.fixture
 async def conn_with_seed(apply_schema):
     """Pool + agency + a small seed of static_routes + updates rows."""

@@ -97,6 +97,21 @@ def apply_schema():
     conn.close()
 
 
+@pytest.fixture(autouse=True)
+def _clear_compute_caches():
+    """Clear every async_lru_cache before each test.
+
+    Module-level caches outlive the per-test TRUNCATE: a test that seeds
+    different rows under the same (agency_id, ctx) key as an earlier test
+    would otherwise read the earlier test's stale cached result. Agency-id
+    churn usually hides this, but it is order-dependent — clear globally.
+    """
+    from pipeline.cache import clear_all
+
+    clear_all()
+    yield
+
+
 @pytest.fixture
 def pg_conn(apply_schema):
     conn = psycopg2.connect(DATABASE_URL)
