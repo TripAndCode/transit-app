@@ -9,6 +9,12 @@ import pytest
 from pipeline import perf
 
 
+# Override the session-scoped DB fixture — pure-Python tests, no DB needed.
+@pytest.fixture(scope="session", autouse=True)
+def apply_schema():
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _clean_registry():
     perf.reset()
