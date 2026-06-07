@@ -16,6 +16,7 @@ from typing import Any
 import asyncpg
 
 from api.range import RangeCtx, build_updates_filter
+from pipeline import perf
 
 
 def _deduped_cte(agency_id: int, ctx: RangeCtx) -> tuple[str, list]:
@@ -71,6 +72,7 @@ class Movers:
 _DOW_LABELS = ["月", "火", "水", "木", "金", "土", "日"]  # 0..6 (Mon..Sun)
 
 
+@perf.timed("dashboard.heatmap")
 async def delay_heatmap(
     conn: asyncpg.Connection,
     *,
@@ -165,6 +167,7 @@ async def delay_heatmap(
     )
 
 
+@perf.timed("dashboard.anomalies")
 async def anomaly_timeline(
     conn: asyncpg.Connection,
     *,
@@ -200,6 +203,7 @@ async def anomaly_timeline(
     return AnomalyTimeline(series=series, mean=round(mean, 3), std=round(std, 3), anomalies=anomalies)
 
 
+@perf.timed("dashboard.movers")
 async def movers(
     conn: asyncpg.Connection,
     *,

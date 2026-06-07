@@ -17,7 +17,19 @@ import time
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, TypeVar
 
+from pipeline import perf
+
 T = TypeVar("T")
+
+# Every decorated function registers its cache_clear here so the perf debug
+# endpoint can wipe all caches for cold-run benchmarking.
+_REGISTERED_CLEARS: list[Callable[[], None]] = []
+
+
+def clear_all() -> None:
+    """Clear every async_lru_cache in the process (bench cold runs)."""
+    for clear in _REGISTERED_CLEARS:
+        clear()
 
 
 def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
@@ -30,6 +42,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
 
     def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
+        label = fn.__name__
 
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
@@ -43,8 +56,10 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 ts, value = entry
                 if now - ts <= ttl_seconds:
                     cache.move_to_end(key)
+                    perf.record_cache(label, hit=True)
                     return value
                 del cache[key]
+            perf.record_cache(label, hit=False)
             value = await fn(*args, **kwargs)
             cache[key] = (now, value)
             cache.move_to_end(key)
@@ -53,6 +68,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             return value
 
         wrapper.cache_clear = cache.clear  # type: ignore[attr-defined]
+        _REGISTERED_CLEARS.append(cache.clear)
         return wrapper
 
     return decorator
