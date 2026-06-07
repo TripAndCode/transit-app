@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from api.range import RangeCtx, build_updates_filter
+from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _dedup_cte, _time_band_sql_on
 
@@ -586,6 +587,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn) -> list[float]:
     return pts
 
 
+@perf.timed("reports.overview")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_overview_summary(
     agency_id: int,
@@ -601,7 +603,8 @@ async def compute_overview_summary(
     Concentration / peak / service_split / sparkline still aggregate over
     the full ctx to surface broader patterns.
     """
-    latest = await _latest_data_date(agency_id, ctx, conn)
+    async with perf.timed_block("overview.latest_date"):
+        latest = await _latest_data_date(agency_id, ctx, conn)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
@@ -629,8 +632,9 @@ async def compute_overview_summary(
         routes=ctx.routes,
     )
 
-    avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
-    baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
+    async with perf.timed_block("overview.headline"):
+        avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn)
+        baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn)
 
     delta_min = None
     delta_pct = None
@@ -639,15 +643,20 @@ async def compute_overview_summary(
         if baseline_avg != 0:
             delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
-    movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
-    concentration = await _concentration(agency_id, ctx, conn)
-    peak = await _peak_hour(agency_id, ctx, conn)
-    peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
-    peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend")
-    service_split = await _service_split(agency_id, ctx, conn)
-    service_split_daily = await _service_split_daily(agency_id, ctx, conn)
-    # Hero card slices `.slice(-7)`; modal shows full series.
-    sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
+    async with perf.timed_block("overview.movers"):
+        movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
+    async with perf.timed_block("overview.concentration"):
+        concentration = await _concentration(agency_id, ctx, conn)
+    async with perf.timed_block("overview.peaks"):
+        peak = await _peak_hour(agency_id, ctx, conn)
+        peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
+        peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend")
+    async with perf.timed_block("overview.service_split"):
+        service_split = await _service_split(agency_id, ctx, conn)
+        service_split_daily = await _service_split_daily(agency_id, ctx, conn)
+    async with perf.timed_block("overview.sparkline"):
+        # Hero card slices `.slice(-7)`; modal shows full series.
+        sparkline_points = await _daily_sparkline(agency_id, ctx, conn)
 
     return {
         "headline": {

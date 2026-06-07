@@ -32,6 +32,7 @@ from datetime import date, timedelta
 from typing import Any, Literal
 
 from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType
+from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.tool_queries import (
@@ -721,44 +722,45 @@ async def dispatch(
     }
     tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
 
-    # Card templates use "route_code" as the arg name (matches the param
-    # definition), but all handlers read "route".  Normalise before dispatch.
-    # "k" → "n" remapping is intentionally NOT done here — handlers accept both
-    # (BUG-2 fix).
-    if "route_code" in arguments and "route" not in arguments:
-        raw_rc = arguments["route_code"]
-        arguments = {k: v for k, v in arguments.items() if k != "route_code"}
-        arguments = {"route": raw_rc, **arguments}
+    async with perf.timed_block(f"ask.tool.{tool_name}"):
+        # Card templates use "route_code" as the arg name (matches the param
+        # definition), but all handlers read "route".  Normalise before dispatch.
+        # "k" → "n" remapping is intentionally NOT done here — handlers accept both
+        # (BUG-2 fix).
+        if "route_code" in arguments and "route" not in arguments:
+            raw_rc = arguments["route_code"]
+            arguments = {k: v for k, v in arguments.items() if k != "route_code"}
+            arguments = {"route": raw_rc, **arguments}
 
-    handler = _HANDLERS.get(tool_name)
-    if handler is None:
-        return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
+        handler = _HANDLERS.get(tool_name)
+        if handler is None:
+            return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
 
-    from pipeline.query.schema_linker import resolve_route
+        from pipeline.query.schema_linker import resolve_route
 
-    if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
-        raw_route = arguments.get("route")
-        if raw_route:
-            resolution = await resolve_route(str(raw_route), conn, agency_id)
-            if resolution.route_code is not None:
-                arguments = {**arguments, "route": resolution.route_code}
-            elif resolution.candidates:
-                cand_txt = " / ".join(
-                    _summary("did_you_mean_candidate", lang=locale, code=code, name=name)
-                    for code, name in resolution.candidates[:5]
-                )
-                return ToolResult(
-                    kind="empty",
-                    summary=_summary(
-                        "route_did_you_mean",
-                        lang=locale,
-                        raw=raw_route,
-                        candidates=cand_txt,
-                    ),
-                )
+        if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
+            raw_route = arguments.get("route")
+            if raw_route:
+                resolution = await resolve_route(str(raw_route), conn, agency_id)
+                if resolution.route_code is not None:
+                    arguments = {**arguments, "route": resolution.route_code}
+                elif resolution.candidates:
+                    cand_txt = " / ".join(
+                        _summary("did_you_mean_candidate", lang=locale, code=code, name=name)
+                        for code, name in resolution.candidates[:5]
+                    )
+                    return ToolResult(
+                        kind="empty",
+                        summary=_summary(
+                            "route_did_you_mean",
+                            lang=locale,
+                            raw=raw_route,
+                            candidates=cand_txt,
+                        ),
+                    )
 
-    effective_ctx = _apply_date_overrides(ctx, arguments)
-    return await handler(arguments, effective_ctx, conn, agency_id, locale)
+        effective_ctx = _apply_date_overrides(ctx, arguments)
+        return await handler(arguments, effective_ctx, conn, agency_id, locale)
 
 
 # ---------------------------------------------------------------------------

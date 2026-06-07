@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.range import RangeCtx, build_updates_filter
+from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _dedup_cte
 
@@ -11,6 +12,7 @@ from pipeline.reports.filters import _dedup_cte
 # ---------------------------------------------------------------------------
 
 
+@perf.timed("reports.ranking")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_ranking(
     agency_id: int,
@@ -44,6 +46,7 @@ async def compute_ranking(
     return [tuple(r) for r in rows]
 
 
+@perf.timed("reports.on_time")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_on_time(
     agency_id: int,
@@ -78,6 +81,7 @@ async def compute_on_time(
     return [tuple(r) for r in rows]
 
 
+@perf.timed("reports.worst_5min")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_worst_5min(
     agency_id: int,
@@ -103,6 +107,7 @@ async def compute_worst_5min(
     return [tuple(r) for r in rows]
 
 
+@perf.timed("reports.dow_ranking")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_dow_ranking(
     agency_id: int,
@@ -143,6 +148,7 @@ async def compute_dow_ranking(
     return [tuple(r) for r in rows]
 
 
+@perf.timed("reports.compare_ranking")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_compare_ranking(
     agency_id: int,
@@ -223,6 +229,7 @@ async def compute_compare_ranking(
 # ---------------------------------------------------------------------------
 
 
+@perf.timed("reports.hourly_heatmap")
 @async_lru_cache(maxsize=16, ttl_seconds=300)
 async def compute_hourly_heatmap(
     agency_id: int,
@@ -260,6 +267,7 @@ async def compute_hourly_heatmap(
     ]
 
 
+@perf.timed("reports.trend_series")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def compute_trend_series(
     agency_id: int,
