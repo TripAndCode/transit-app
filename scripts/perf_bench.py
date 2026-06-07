@@ -59,8 +59,10 @@ def main() -> int:
             url = path.format(agency=args.agency)
             reset = client.post("/api/debug/perf/reset")
             if reset.status_code != 200:
-                print(f"FATAL: reset returned {reset.status_code} — is the server up "
-                      f"with PERF_DEBUG_ENABLED?", file=sys.stderr)
+                print(
+                    f"FATAL: reset returned {reset.status_code} — is the server up with PERF_DEBUG_ENABLED?",
+                    file=sys.stderr,
+                )
                 return 1
             try:
                 cold = _request_ms(client, url)

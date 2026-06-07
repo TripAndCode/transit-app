@@ -39,8 +39,8 @@ def test_ring_buffer_bounded():
         perf.record("op.ring", float(i))
     snap = perf.snapshot()
     st = snap["ops"]["op.ring"]
-    assert st["count"] == 600          # lifetime count keeps counting
-    assert st["p50_ms"] >= 100.0       # percentiles from last 500 only (100..599)
+    assert st["count"] == 600  # lifetime count keeps counting
+    assert st["p50_ms"] >= 100.0  # percentiles from last 500 only (100..599)
 
 
 def test_reset_clears_everything():

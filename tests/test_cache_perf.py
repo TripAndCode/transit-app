@@ -29,9 +29,9 @@ def test_cache_records_hit_and_miss():
         return x * 2
 
     async def run():
-        await fn(1)   # miss
-        await fn(1)   # hit
-        await fn(2)   # miss
+        await fn(1)  # miss
+        await fn(1)  # hit
+        await fn(2)  # miss
 
     asyncio.run(run())
     assert calls["n"] == 2
@@ -51,7 +51,7 @@ def test_clear_all_empties_every_registered_cache():
     async def run():
         await fn(1)
         cache.clear_all()
-        await fn(1)   # must recompute after clear_all
+        await fn(1)  # must recompute after clear_all
 
     asyncio.run(run())
     assert calls["n"] == 2
