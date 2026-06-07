@@ -648,12 +648,14 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     # 2026-05-19 is Tuesday (weekday), 2026-05-23 is Saturday (weekend).
     weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
     weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
-    for i, (cap, sched, dep) in enumerate([
-        (weekday_dt, "08:00", 480),
-        (weekday_dt + timedelta(minutes=1), "08:00", 360),
-        (weekend_dt, "17:00", 300),
-        (weekend_dt + timedelta(minutes=1), "17:00", 240),
-    ]):
+    for i, (cap, sched, dep) in enumerate(
+        [
+            (weekday_dt, "08:00", 480),
+            (weekday_dt + timedelta(minutes=1), "08:00", 360),
+            (weekend_dt, "17:00", 300),
+            (weekend_dt + timedelta(minutes=1), "17:00", 240),
+        ]
+    ):
         await aconn.execute(
             "INSERT INTO updates "
             "(agency_id, file_name, captured_at, trip_id, service_type, "

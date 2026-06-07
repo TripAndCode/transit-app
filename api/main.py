@@ -112,9 +112,7 @@ async def lifespan(app: FastAPI):
     # out to ~10 concurrent per-task connections while the request's own
     # get_conn dependency still holds a slot — default sizing left the
     # fan-out one slot short and serialized a stage on every cold request.
-    app.state.pool = await asyncpg.create_pool(
-        DATABASE_URL, init=_init_connection, min_size=10, max_size=20
-    )
+    app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
     # Phase 2: warm the embedding model so first request doesn't pay the
     # load cost. Non-fatal: if the model can't load, the router will fall
