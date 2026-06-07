@@ -12,6 +12,7 @@ to a distributed cache only when we run multiple replicas.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import time
 from collections import OrderedDict
@@ -38,10 +39,17 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
     Cache key is built from positional args and sorted kwargs items, with
     asyncpg ``Connection`` objects ignored (they are not part of the
     semantic key).
+
+    Concurrent identical misses are coalesced: only the first coroutine
+    executes the underlying function; the rest await its Future and count
+    as hits (stampede prevention — N concurrent cold overviews previously
+    fanned out N×10 pool connections).
     """
 
     def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
-        cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
+        _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
+        # Per-key futures for in-flight computes (stampede coalescing).
+        inflight: dict[Any, asyncio.Future[T]] = {}
         label = fn.__name__
 
         @functools.wraps(fn)
@@ -51,24 +59,80 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 tuple(sorted((k, _keyable(v)) for k, v in kwargs.items())),
             )
             now = time.monotonic()
-            entry = cache.get(key)
+            entry = _cache.get(key)
             if entry is not None:
                 ts, value = entry
                 if now - ts <= ttl_seconds:
-                    cache.move_to_end(key)
+                    _cache.move_to_end(key)
                     perf.record_cache(label, hit=True)
                     return value
-                del cache[key]
+                del _cache[key]
+
+            # Stampede coalescing: if a compute is already in flight for
+            # this key, join it rather than launching another.
+            #
+            # Waiter re-election: CancelGETOnDisconnectMiddleware cancels GET
+            # handlers on client disconnect; if that handler is the coalescing
+            # leader its Future is cancelled. Waiters use asyncio.shield() so
+            # their own Task is NOT cancelled, but the shield unblocks with
+            # CancelledError when the underlying Future is cancelled. We must
+            # distinguish "leader died" (fut.cancelled()) from "we ourselves
+            # were cancelled" (fut still running/done) and re-elect in the
+            # former case so healthy waiters still get a result.
+            while True:
+                fut = inflight.get(key)
+                if fut is None:
+                    break
+                perf.record_cache(label, hit=True)  # coalesced — no recompute
+                try:
+                    return await asyncio.shield(fut)
+                except asyncio.CancelledError:
+                    if fut.cancelled():
+                        # Leader was cancelled (e.g. client disconnect) — not us.
+                        # Re-elect: fall through the loop to become leader or join
+                        # the next one. Record a miss for the new leader attempt.
+                        perf.record_cache(label, hit=False)
+                        continue
+                    # We ourselves were cancelled; propagate immediately.
+                    raise
+
             perf.record_cache(label, hit=False)
-            value = await fn(*args, **kwargs)
-            cache[key] = (now, value)
-            cache.move_to_end(key)
-            while len(cache) > maxsize:
-                cache.popitem(last=False)
+            fut = asyncio.get_running_loop().create_future()
+            # Suppress "exception was never retrieved" warnings when there
+            # are zero additional waiters and the compute raises.
+            fut.add_done_callback(lambda f: f.exception() if f.done() and not f.cancelled() else None)
+            inflight[key] = fut
+            try:
+                value = await fn(*args, **kwargs)
+                fut.set_result(value)
+            except asyncio.CancelledError:
+                # Leader was cancelled (e.g. CancelGETOnDisconnectMiddleware).
+                # Cancel the future so waiters' shield() unblocks and they can
+                # detect fut.cancelled() == True and re-elect a new leader.
+                fut.cancel()
+                raise
+            except BaseException as exc:
+                # Other exceptions are forwarded to waiters directly so they
+                # surface the real error rather than retrying indefinitely.
+                fut.set_exception(exc)
+                raise
+            finally:
+                inflight.pop(key, None)
+
+            # Cache only on success (exceptions must not be cached so that
+            # the next caller retries the underlying function).
+            _cache[key] = (time.monotonic(), value)
+            _cache.move_to_end(key)
+            while len(_cache) > maxsize:
+                _cache.popitem(last=False)
             return value
 
-        wrapper.cache_clear = cache.clear  # type: ignore[attr-defined]
-        _REGISTERED_CLEARS.append(cache.clear)
+        def _cache_clear() -> None:
+            _cache.clear()
+            inflight.clear()
+
+        wrapper.cache_clear = _cache_clear  # type: ignore[attr-defined]
+        _REGISTERED_CLEARS.append(_cache_clear)
         return wrapper
 
     return decorator

@@ -4,6 +4,7 @@ Contract:
 1. GET  /api/debug/perf  -> 200; body has ops, caches, pool {size, idle}.
 2. POST /api/debug/perf/reset -> 200; subsequent GET shows ops == {}.
 3. PERF_DEBUG_ENABLED=false -> 404 on both endpoints.
+4. No env var set (default) -> 404 on both endpoints (fail-closed).
 """
 
 import os
@@ -27,12 +28,17 @@ def reset_perf():
 
 
 @pytest.fixture
-async def debug_client(apply_schema):
+async def debug_client(apply_schema, monkeypatch):
     """Yield an HTTPX client wired to the FastAPI app with a fresh pool.
 
     The pool is created and closed per-test so concurrent tests cannot
     share or step on ``app.state.pool``, matching the pattern in conftest.
+
+    PERF_DEBUG_ENABLED is set to "true" here so the enabled-path tests work
+    with the new fail-closed default.
     """
+    monkeypatch.setenv("PERF_DEBUG_ENABLED", "true")
+
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -88,3 +94,28 @@ async def test_perf_disabled(monkeypatch, debug_client):
 
     post_resp = await debug_client.post("/api/debug/perf/reset")
     assert post_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_perf_default_is_closed(apply_schema, monkeypatch):
+    """With no PERF_DEBUG_ENABLED env var set, both endpoints return 404.
+
+    This verifies the fail-closed default: the surface must be explicitly
+    enabled in dev; it must never be reachable on a fresh/production deploy
+    that hasn't set the env var.
+    """
+    monkeypatch.delenv("PERF_DEBUG_ENABLED", raising=False)
+
+    from api.main import app
+
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    app.state.pool = pool
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            get_resp = await client.get("/api/debug/perf")
+            assert get_resp.status_code == 404
+
+            post_resp = await client.post("/api/debug/perf/reset")
+            assert post_resp.status_code == 404
+    finally:
+        await pool.close()

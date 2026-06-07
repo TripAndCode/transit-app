@@ -55,3 +55,70 @@ def test_clear_all_empties_every_registered_cache():
 
     asyncio.run(run())
     assert calls["n"] == 2
+
+
+def test_concurrent_misses_coalesce_to_single_compute():
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return x * 2
+
+    async def run():
+        results = await asyncio.gather(*(fn(1) for _ in range(5)))
+        assert results == [2] * 5
+
+    asyncio.run(run())
+    assert calls["n"] == 1
+    c = perf.snapshot()["caches"]["fn"]
+    assert c["misses"] == 1
+    assert c["hits"] == 4
+
+
+def test_leader_cancellation_does_not_poison_waiters():
+    """CancelGETOnDisconnectMiddleware can cancel the in-flight leader; healthy
+    waiters must re-elect a new leader and succeed, not inherit CancelledError."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return x * 2
+
+    async def run():
+        leader = asyncio.create_task(fn(1))
+        await asyncio.sleep(0.01)  # let leader become inflight
+        w1 = asyncio.create_task(fn(1))
+        w2 = asyncio.create_task(fn(1))
+        await asyncio.sleep(0.01)  # waiters joined
+        leader.cancel()
+        results = await asyncio.gather(leader, w1, w2, return_exceptions=True)
+        assert isinstance(results[0], asyncio.CancelledError)
+        assert results[1] == 2
+        assert results[2] == 2
+
+    asyncio.run(run())
+    assert calls["n"] == 2  # original leader + one re-elected leader
+
+
+def test_inflight_exception_propagates_to_all_waiters_and_not_cached():
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.sleep(0.02)
+        if calls["n"] == 1:
+            raise ValueError("boom")
+        return x
+
+    async def run():
+        results = await asyncio.gather(*(fn(1) for _ in range(3)), return_exceptions=True)
+        assert all(isinstance(r, ValueError) for r in results)
+        assert await fn(1) == 1  # next call recomputes — exception not cached
+
+    asyncio.run(run())
+    assert calls["n"] == 2

@@ -108,7 +108,11 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
         )
-    app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection)
+    # max_size=20 (asyncpg default 10): the overview pool-gather path fans
+    # out to ~10 concurrent per-task connections while the request's own
+    # get_conn dependency still holds a slot — default sizing left the
+    # fan-out one slot short and serialized a stage on every cold request.
+    app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
     # Phase 2: warm the embedding model so first request doesn't pay the
     # load cost. Non-fatal: if the model can't load, the router will fall

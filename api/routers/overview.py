@@ -125,5 +125,5 @@ async def overview_summary(
     (today: none — strings are frontend-side. Reserved for future
     qualitative labels). See spec section "Architecture".
     """
-    payload = await compute_overview_summary(agency_id, ctx, conn, locale)
+    payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool)
     return OverviewSummary(**payload)

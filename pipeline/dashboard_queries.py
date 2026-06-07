@@ -17,6 +17,7 @@ import asyncpg
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline import perf
+from pipeline.cache import async_lru_cache
 
 
 def _deduped_cte(agency_id: int, ctx: RangeCtx) -> tuple[str, list]:
@@ -73,6 +74,7 @@ _DOW_LABELS = ["月", "火", "水", "木", "金", "土", "日"]  # 0..6 (Mon..Su
 
 
 @perf.timed("dashboard.heatmap")
+@async_lru_cache(maxsize=32, ttl_seconds=300)
 async def delay_heatmap(
     conn: asyncpg.Connection,
     *,
@@ -168,6 +170,7 @@ async def delay_heatmap(
 
 
 @perf.timed("dashboard.anomalies")
+@async_lru_cache(maxsize=32, ttl_seconds=300)
 async def anomaly_timeline(
     conn: asyncpg.Connection,
     *,
@@ -204,6 +207,7 @@ async def anomaly_timeline(
 
 
 @perf.timed("dashboard.movers")
+@async_lru_cache(maxsize=32, ttl_seconds=300)
 async def movers(
     conn: asyncpg.Connection,
     *,
