@@ -7,11 +7,12 @@ POST /api/debug/perf/reset  -> clear registry AND all async_lru_caches
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from api.deps import get_current_user
 from pipeline import cache, perf
 
+# No user dependency — matches sibling read-routers (reports, overview, ask_dashboard).
+# The env gate below is the guard; set PERF_DEBUG_ENABLED=false in production.
 router = APIRouter(prefix="/api/debug", tags=["debug"], include_in_schema=False)
 
 
@@ -23,7 +24,7 @@ def _require_enabled() -> None:
 
 
 @router.get("/perf")
-async def perf_snapshot(request: Request, user=Depends(get_current_user)):
+async def perf_snapshot(request: Request):
     _require_enabled()
     snap = perf.snapshot()
     pool = request.app.state.pool
@@ -32,7 +33,7 @@ async def perf_snapshot(request: Request, user=Depends(get_current_user)):
 
 
 @router.post("/perf/reset")
-async def perf_reset(user=Depends(get_current_user)):
+async def perf_reset():
     _require_enabled()
     perf.reset()
     cache.clear_all()

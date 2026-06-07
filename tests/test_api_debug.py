@@ -26,20 +26,13 @@ def reset_perf():
 
 @pytest.fixture
 async def debug_client(apply_schema):
-    from api.deps import get_current_user
     from api.main import app
 
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     app.state.pool = pool
 
-    # Stub auth: return a sentinel user so require_user never hits the DB.
-    async def _fake_user():
-        return {"user_id": 0, "email": "test@example.com"}
-
-    app.dependency_overrides[get_current_user] = _fake_user
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
-    app.dependency_overrides.pop(get_current_user, None)
     await pool.close()
 
 
