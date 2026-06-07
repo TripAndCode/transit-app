@@ -34,6 +34,7 @@ from api.routers.ask import router as ask_router
 from api.routers.ask_dashboard import router as ask_dashboard_router
 from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
+from api.routers.debug import router as debug_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
 from api.routers.me import router as me_router
@@ -179,6 +180,7 @@ app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(me_router)
 app.include_router(overview_router)
