@@ -169,7 +169,7 @@ export function MapTab() {
     popupRef.current = null;
   }, [data, showSingleSampleStops, focusedSeverity]);
 
-  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity);
+  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id);
 
   useRouteOverlay(mapRef, styleLoadedRef, shape);
 
