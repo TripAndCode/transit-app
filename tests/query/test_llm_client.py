@@ -360,3 +360,39 @@ def test_rate_limit_preferred_over_later_connection(monkeypatch):
         msg, kind = llm_client.LLMClient().chat_completions(messages=[])
     assert msg is None
     assert kind == "rate_limit"
+
+
+def test_allowed_providers_filters_ladder(monkeypatch):
+    """allowed_providers restricts the ladder — an earlier but disallowed
+    provider (groq) is skipped in favour of the allowed one (cerebras)."""
+    _set_providers(monkeypatch, providers="groq,cerebras", CEREBRAS_API_KEY="c", GROQ_API_KEY="g")
+    fake_message = MagicMock(content="ok")
+    fake_response = MagicMock(choices=[MagicMock(message=fake_message)])
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.return_value = fake_response
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"cerebras"})
+    assert msg is fake_message and kind is None
+    assert mock_openai.call_count == 1  # groq never constructed
+    _args, kwargs = mock_openai.call_args
+    assert kwargs.get("base_url") == "https://api.cerebras.ai/v1"
+
+
+def test_allowed_providers_empty_intersection_degrades(monkeypatch):
+    """When no configured provider is allowed, return no_providers without any
+    network call — the caller degrades rather than using a disallowed one."""
+    _set_providers(monkeypatch, providers="groq", GROQ_API_KEY="g")
+    with patch("openai.OpenAI") as mock_openai:
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"cerebras"})
+    assert msg is None and kind == "no_providers"
+    assert mock_openai.call_count == 0  # no provider was attempted
+
+
+def test_followup_allowed_providers_defaults_to_cerebras(monkeypatch):
+    """The follow-up restricts itself to an injection-resistant provider."""
+    from pipeline.query import followup
+
+    monkeypatch.delenv("ASK_FOLLOWUP_PROVIDERS", raising=False)
+    assert followup._allowed_providers() == {"cerebras"}
+    monkeypatch.setenv("ASK_FOLLOWUP_PROVIDERS", "cerebras, ollama")
+    assert followup._allowed_providers() == {"cerebras", "ollama"}

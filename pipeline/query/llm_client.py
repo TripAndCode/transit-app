@@ -165,6 +165,7 @@ class LLMClient:
         temperature: float = 0.0,
         model_override: str | None = None,
         response_format: dict | None = None,
+        allowed_providers: set[str] | None = None,
     ) -> tuple[Any | None, str | None]:
         """Attempt each provider in order and return ``(message, error_kind)``.
 
@@ -173,6 +174,12 @@ class LLMClient:
         ``None`` on success and one of ``"rate_limit"``, ``"connection"``,
         ``"bad_request"``, ``"unexpected"``, or ``"no_providers"`` on failure,
         letting the caller select an honest user-facing degradation message.
+
+        ``allowed_providers``, when given, restricts the ladder to providers
+        whose name is in the set — used by callers that must avoid a provider
+        with a known weakness (e.g. the follow-up path excludes injection-prone
+        models). An empty intersection returns ``"no_providers"`` so the caller
+        degrades gracefully rather than silently using a disallowed provider.
 
         Per provider: retries ONCE on a refused/reset socket
         (``APIConnectionError``, no backoff — it fails instantly), descends
@@ -194,13 +201,16 @@ class LLMClient:
             RateLimitError,
         )
 
-        if not self._providers:
-            _log.error("CHAT_PROVIDERS resolves to zero usable providers")
+        ladder = self._providers
+        if allowed_providers is not None:
+            ladder = [c for c in ladder if c.name in allowed_providers]
+        if not ladder:
+            _log.error("no usable providers (allowed=%s)", allowed_providers)
             return None, "no_providers"
 
         seen_rate_limit = False
         last_kind: str | None = None
-        for cfg in self._providers:
+        for cfg in ladder:
             client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
             for attempt in (1, 2):
                 try:
