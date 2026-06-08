@@ -72,8 +72,9 @@ function buildHaloOpacityExpr(
 /**
  * Sync the heatmap SOURCE / LAYER / HALO_LAYER to the latest fetched
  * GeoJSON. Filters out single-sample stops unless `showSingleSampleStops`
- * is true. Fits bounds on the first non-empty payload only — subsequent
- * filter changes keep the user's pan/zoom.
+ * is true. Fits bounds on the first non-empty payload after each data-source
+ * (`agencyId`) switch — so changing agency re-pivots to the new region, while
+ * subsequent filter changes within an agency keep the user's pan/zoom.
  */
 export function useHeatmapLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
@@ -81,8 +82,16 @@ export function useHeatmapLayer(
   data: HeatmapCollection | undefined,
   showSingleSampleStops: boolean,
   focusedSeverity: SeverityKey | null,
+  agencyId: number | null,
 ): void {
   const fittedRef = useRef(false);
+
+  // Re-arm the bounds fit when the data source changes. Without this the
+  // camera latches on the first agency ever shown (e.g. Hiroshima) and never
+  // re-pivots when the user switches to another (e.g. Aomori).
+  useEffect(() => {
+    fittedRef.current = false;
+  }, [agencyId]);
 
   useEffect(() => {
     const m = mapRef.current;
