@@ -45,6 +45,20 @@ def is_enabled() -> bool:
     return os.environ.get("ASK_FOLLOWUP_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _allowed_providers() -> set[str]:
+    """Providers the follow-up may use, from ``ASK_FOLLOWUP_PROVIDERS``.
+
+    The free-text follow-up echoes a system prompt that forbids obeying
+    in-question instructions; some models (notably Groq ``llama-3.3-70b``)
+    ignore that and follow injected instructions, while Cerebras
+    ``gpt-oss-120b`` resists. Defaults to ``cerebras`` so the follow-up never
+    silently answers from an injection-prone fallback; operators widen it
+    explicitly. Empty/unset → the default.
+    """
+    raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "cerebras")
+    return {n.strip().lower() for n in raw.split(",") if n.strip()}
+
+
 def _serialize_context(tool: str | None, args: dict | None, result: dict | None) -> str:
     """Compact prompt-safe rendering of the prior tool result."""
     parts: list[str] = []
@@ -109,6 +123,7 @@ async def answer_followup(
         ],
         tools=None,
         temperature=0.0,
+        allowed_providers=_allowed_providers(),
     )
     if err is not None or msg is None:
         return "", err or "unexpected"
