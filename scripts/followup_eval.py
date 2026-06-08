@@ -81,23 +81,23 @@ _KV = {
 }
 _STOP_COUNT = "24"  # the only stop figure present
 
-# Refusal / uncertainty markers across both locales.
+# Explicit refusal / uncertainty markers across both locales. Kept deliberately
+# narrow: bare negations like "is not"/"cannot" also appear in confidently-wrong
+# answers, so matching them would let a fabrication false-pass a faithfulness
+# probe. Every marker here is a phrase a grounded refusal actually emits.
 _REFUSAL = (
     "判断できません",
     "ありません",
-    "含まれて",
+    "含まれていません",
     "データに",
     "データから",
-    "does not",
-    "not show",
+    "does not show",
+    "does not include",
+    "does not provide",
+    "not provided",
     "no data",
-    "cannot",
-    "can't",
-    "isn't",
-    "is not",
-    "not present",
+    "no information",
     "not in the",
-    "unable",
 )
 
 
@@ -107,17 +107,20 @@ _DASHES = "‐‑‒–—―−"
 
 
 def _norm(text: str) -> str:
+    """Fold assorted Unicode dashes to ASCII '-' so substring checks match."""
     for d in _DASHES:
         text = text.replace(d, "-")
     return text
 
 
 def _has_refusal(text: str) -> bool:
+    """True if the answer contains any locale's refusal/uncertainty marker."""
     low = text.lower()
     return any(m.lower() in low for m in _REFUSAL)
 
 
 async def _ask(question: str, locale: str, context: dict) -> tuple[str, str | None]:
+    """Call ``answer_followup`` for one probe; ``context_args`` is irrelevant to grading."""
     from pipeline.query.followup import answer_followup
 
     return await answer_followup(
@@ -130,6 +133,12 @@ async def _ask(question: str, locale: str, context: dict) -> tuple[str, str | No
 
 
 async def main() -> int:
+    """Run every probe against the live provider ladder; return the exit code.
+
+    Skips (returns 2) when no provider is configured. Otherwise runs a no-API
+    negative control, then each probe as a tuple of
+    ``(name, question, locale, context, grader(answer, err) -> (ok, note))``.
+    """
     _load_env()
 
     from pipeline.query.llm_client import get_client
@@ -147,7 +156,14 @@ async def main() -> int:
         return 1
     print("PASS  control:grounding-discriminates  [wrong answer correctly lacks 16080]")
 
-    # (name, question, locale, context, grader(answer, err) -> (ok, note))
+    # Negative control (no API): a fabricated value for an absent entity must NOT
+    # read as a refusal, else faithfulness probes rubber-stamp hallucinations.
+    fabrication = "Route 99999 averages 7.2 minutes on weekdays."
+    if _has_refusal(fabrication):
+        print("FAIL  control: refusal grader matches a fabrication", file=sys.stderr)
+        return 1
+    print("PASS  control:refusal-discriminates  [fabrication correctly not a refusal]")
+
     Probe = tuple[str, str, str, dict[str, Any], Callable[[str, str | None], tuple[bool, str]]]
     probes: list[Probe] = [
         # ── guards (no API call) ──────────────────────────────────────────────
