@@ -1,7 +1,13 @@
+/**
+ * One clickable triage row in the 最新観測 list: route name, severity dot,
+ * deviation-from-baseline label, baseline→today comparison, and sample count.
+ * Low-confidence routes render muted with a 要確認 marker.
+ */
 import type { TFunction } from "i18next";
 import type { RouteSummary } from "../../api/types";
 import { delayColor } from "../../styles/tokens";
 
+/** Whole-minute string for a second value (no sign). */
 function minStr(sec: number): string {
   return Math.round(sec / 60).toString();
 }

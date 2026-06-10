@@ -244,11 +244,16 @@ async def today_route_summary(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    """Per-route operational summary for the most recent observation date.
+    """Per-route triage summary for the most recent observation date.
 
-    Powers the 最新観測 tab. Each row is one route_code with:
-    - avg_delay_sec, worst_delay_sec, trips_observed, last_seen_at, service_type
-    Sorted by worst delay descending so problem routes float to the top.
+    Powers the 最新観測 tab. Each row carries today's figures
+    (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
+    ``last_seen_at``, ``service_type``) joined to the historical baseline in
+    ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
+    classifier (:func:`api.triage.classify_route`) then assigns each route a
+    ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
+    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
+    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
     """
     latest = await conn.fetchrow(
         "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
@@ -298,12 +303,8 @@ async def today_route_summary(
 
     routes = []
     for r in rows:
-        baseline_avg_sec = (
-            round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
-        )
-        baseline_p90_sec = (
-            round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
-        )
+        baseline_avg_sec = round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
+        baseline_p90_sec = round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
         bucket, deviation_sec, low_confidence = classify_route(
             r["avg_delay_sec"], baseline_avg_sec, baseline_p90_sec, r["samples"]
         )
@@ -345,7 +346,8 @@ async def route_trips(
     """
     latest = await conn.fetchrow(
         "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
-        agency_id, route_code,
+        agency_id,
+        route_code,
     )
     latest_ts = latest["ts"] if latest else None
     if latest_ts is None:
@@ -374,7 +376,9 @@ async def route_trips(
         GROUP BY d.trip_id
         ORDER BY avg_delay_sec DESC NULLS LAST
         """,
-        agency_id, route_code, latest_ts,
+        agency_id,
+        route_code,
+        latest_ts,
     )
     return {
         "date": latest_ts.date().isoformat(),
@@ -405,7 +409,8 @@ async def route_stop_profile(
     """
     latest = await conn.fetchrow(
         "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
-        agency_id, route_code,
+        agency_id,
+        route_code,
     )
     latest_ts = latest["ts"] if latest else None
     if latest_ts is None:
@@ -435,7 +440,9 @@ async def route_stop_profile(
         GROUP BY d.stop_sequence
         ORDER BY d.stop_sequence
         """,
-        agency_id, route_code, latest_ts,
+        agency_id,
+        route_code,
+        latest_ts,
     )
     return {
         "date": latest_ts.date().isoformat(),

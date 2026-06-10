@@ -1,8 +1,15 @@
+/**
+ * Slide-over panel for one route, opened from the 最新観測 list. Shows two
+ * views for the latest observation day: per-trip delay (worst first) and the
+ * per-stop delay profile (where delay builds along the route). A click-away
+ * scrim and a close button dismiss it.
+ */
 import type { TFunction } from "i18next";
 import { useRouteTrips, useRouteStopProfile } from "../../api/hooks";
 import { delayColor } from "../../styles/tokens";
 import { Spinner } from "../../components/Spinner";
 
+/** Signed whole-minute delay label via the shared i18n unit key. */
 function signedMin(sec: number, t: TFunction): string {
   const m = Math.round(sec / 60);
   return t("common.unit_min_signed", { sign: sec < 0 ? "-" : "+", value: Math.abs(m) });
@@ -31,7 +38,7 @@ export function RouteDrilldown({
       <div
         onClick={onClose}
         aria-hidden="true"
-        style={{ position: "fixed", inset: 0, background: "rgba(40,33,20,0.10)", zIndex: 39 }}
+        style={{ position: "fixed", inset: 0, background: "rgba(40,33,20,0.10)", zIndex: 55 }}
       />
       <aside
         aria-label={t("live.drill.title", { route: routeName })}
@@ -46,7 +53,7 @@ export function RouteDrilldown({
           boxShadow: "-8px 0 24px rgba(0,0,0,0.06)",
           padding: 20,
           overflowY: "auto",
-          zIndex: 40,
+          zIndex: 60,
         }}
       >
       <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>

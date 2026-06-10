@@ -1,3 +1,12 @@
+/**
+ * 最新観測 tab — baseline-relative triage list for the latest observation day.
+ *
+ * Fetches the per-route summary, groups routes into severity buckets
+ * (anomaly / watch / normal / no_baseline) ranked by deviation from each
+ * route's historical baseline, and opens a per-route drilldown
+ * ({@link RouteDrilldown}) on row click. Bucket order is fixed; the sort pills
+ * only reorder rows within a bucket.
+ */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -44,7 +53,6 @@ export function LiveTab() {
   const latest = data?.latest_captured_at;
   const stale = latest ? dataUpdatedAt - new Date(latest).getTime() > 60 * 60 * 1000 : false;
 
-  // Build filtered list
   const filtered: RouteSummary[] = data?.routes
     ? filter.trim()
       ? data.routes.filter((r) => {
@@ -63,7 +71,6 @@ export function LiveTab() {
 
   return (
     <div>
-      {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0, fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
           {t("live.title")} {data?.date && <span style={{ color: "var(--text-tertiary)", fontSize: 14 }}>({data.date})</span>}
@@ -111,7 +118,6 @@ export function LiveTab() {
         </button>
       </div>
 
-      {/* Filter + sort pills */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
         <input
           value={filter}
@@ -153,7 +159,6 @@ export function LiveTab() {
         />
       )}
 
-      {/* Bucket sections */}
       {!isLoading && groups.map((g) => {
         if (g.routes.length === 0) return null;
         const expanded = g.bucket === "anomaly" || g.bucket === "watch";
@@ -207,7 +212,6 @@ export function LiveTab() {
         );
       })}
 
-      {/* Drilldown panel */}
       {openRoute && id != null && (
         <RouteDrilldown
           agencyId={id}

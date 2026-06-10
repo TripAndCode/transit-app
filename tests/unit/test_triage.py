@@ -1,3 +1,5 @@
+"""Unit tests for the pure route-triage classifier (no DB)."""
+
 from api.triage import LOW_CONFIDENCE_SAMPLES, classify_route
 
 

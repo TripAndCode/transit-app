@@ -1,3 +1,7 @@
+/**
+ * Pure grouping helper for the 最新観測 triage list: partitions routes into the
+ * fixed severity-bucket order and orders rows within each bucket.
+ */
 import type { RouteSummary, RouteBucket } from "../../api/types";
 
 export const BUCKET_ORDER: RouteBucket[] = ["anomaly", "watch", "normal", "no_baseline"];
