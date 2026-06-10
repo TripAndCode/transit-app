@@ -3,7 +3,7 @@
     "overview": "概況",
     "map": "地図",
     "ask": "質問",
-    "live": "リアルタイム",
+    "live": "最新観測",
     "reports": "レポート"
   },
   "app": {
@@ -579,11 +579,32 @@
     "manual_refresh": "手動更新",
     "filter_placeholder": "路線で絞り込み",
     "sort_label": "並び順",
-    "sort": {
-      "worst": "最大遅延",
-      "avg": "平均遅延",
-      "trips": "運行便数",
-      "name": "名前順"
+    "sort": { "deviation": "平常比", "worst": "最大遅延", "avg": "平均遅延", "trips": "運行便数", "name": "名前順" },
+    "bucket": {
+      "anomaly": "異常",
+      "watch": "注意",
+      "normal": "平常",
+      "no_baseline": "基準なし",
+      "count": "{{count}}件"
+    },
+    "row": {
+      "deviation": "平常比 {{sign}}{{value}}分",
+      "deviation_flat": "平常どおり",
+      "baseline_today": "平常 {{baseline}} → 今日 {{today}}",
+      "no_baseline_note": "平常データ準備中",
+      "low_confidence": "要確認（観測少）",
+      "samples": "{{count}}観測"
+    },
+    "drill": {
+      "title": "{{route}} の詳細",
+      "trips_heading": "便ごとの遅延（遅い順）",
+      "stops_heading": "停留所ごとの平均遅延（経路順）",
+      "trip_label": "{{time}} {{headsign}}",
+      "trip_label_no_headsign": "{{time}}発",
+      "stop_label": "#{{seq}} {{name}}",
+      "stop_label_no_name": "停留所 #{{seq}}",
+      "close": "閉じる",
+      "empty": "この路線の便データがありません"
     },
     "updating": "更新中...",
     "updated_at": "更新: {{time}}",
