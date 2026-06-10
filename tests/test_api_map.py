@@ -252,6 +252,38 @@ async def test_route_trips_empty_when_no_data(map_client):
 
 
 @pytest.mark.asyncio
+async def test_route_stop_profile_drilldown(map_app):
+    app, agency_id = map_app
+    pool = app.state.pool
+    # seq 1: delays 60 & 120 -> avg 90; seq 2: 600 -> avg 600 (bottleneck)
+    await _seed_route(
+        pool, agency_id, "R_PROF", "平日",
+        [("A", 1, 60, "08:40"), ("B", 1, 120, "09:00"), ("A", 2, 600, "08:40")],
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES ($1,'s1','始発',ST_SetSRID(ST_MakePoint(140.7,40.8),4326)),"
+            "       ($1,'s2','中央病院前',ST_SetSRID(ST_MakePoint(140.71,40.81),4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "VALUES ($1,'A',1,'s1'),($1,'A',2,'s2'),($1,'B',1,'s1')",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_PROF/stop-profile")
+    assert resp.status_code == 200
+    stops = resp.json()["stops"]
+    assert [s["stop_sequence"] for s in stops] == [1, 2]  # ordered by sequence
+    assert stops[0]["stop_name"] == "始発"
+    assert stops[0]["avg_delay_sec"] == 90
+    assert stops[1]["stop_name"] == "中央病院前"
+    assert stops[1]["avg_delay_sec"] == 600
+
+
+@pytest.mark.asyncio
 async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
     """If trips have a shape_id but static_shapes has no matching row,
     geometry is null and stops are still populated."""
