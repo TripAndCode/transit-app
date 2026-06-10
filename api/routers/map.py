@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_agency, get_conn
 from api.range import RangeCtx, build_updates_filter, get_range_ctx
+from api.triage import classify_route
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
@@ -267,26 +268,46 @@ async def today_route_summary(
               AND dep_delay IS NOT NULL
               AND captured_at::date = $2::date
             ORDER BY trip_id, stop_sequence, captured_at DESC
+        ),
+        summary AS (
+            SELECT
+                route_code,
+                service_type,
+                ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
+                MAX(dep_delay) AS worst_delay_sec,
+                COUNT(DISTINCT trip_id) AS trips_observed,
+                COUNT(*) AS samples,
+                MAX(captured_at) AS last_seen_at
+            FROM dedup
+            GROUP BY route_code, service_type
         )
         SELECT
-            route_code,
-            service_type,
-            ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
-            MAX(dep_delay) AS worst_delay_sec,
-            COUNT(DISTINCT trip_id) AS trips_observed,
-            COUNT(*) AS samples,
-            MAX(captured_at) AS last_seen_at
-        FROM dedup
-        GROUP BY route_code, service_type
-        ORDER BY worst_delay_sec DESC NULLS LAST
+            s.*,
+            b.avg_min AS baseline_avg_min,
+            b.p90_min AS baseline_p90_min
+        FROM summary s
+        LEFT JOIN agg_route_stats b
+          ON b.agency_id = $1
+         AND b.route_code = s.route_code
+         AND b.service_type = s.service_type
+        ORDER BY s.worst_delay_sec DESC NULLS LAST
         """,
         agency_id,
         latest_ts,
     )
-    return {
-        "latest_captured_at": latest_ts.isoformat(),
-        "date": latest_ts.date().isoformat(),
-        "routes": [
+
+    routes = []
+    for r in rows:
+        baseline_avg_sec = (
+            round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
+        )
+        baseline_p90_sec = (
+            round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
+        )
+        bucket, deviation_sec, low_confidence = classify_route(
+            r["avg_delay_sec"], baseline_avg_sec, baseline_p90_sec, r["samples"]
+        )
+        routes.append(
             {
                 "route_code": r["route_code"],
                 "service_type": r["service_type"],
@@ -295,9 +316,18 @@ async def today_route_summary(
                 "trips_observed": r["trips_observed"],
                 "samples": r["samples"],
                 "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+                "baseline_avg_sec": baseline_avg_sec,
+                "baseline_p90_sec": baseline_p90_sec,
+                "deviation_sec": deviation_sec,
+                "bucket": bucket,
+                "low_confidence": low_confidence,
+                "has_baseline": baseline_avg_sec is not None,
             }
-            for r in rows
-        ],
+        )
+    return {
+        "latest_captured_at": latest_ts.isoformat(),
+        "date": latest_ts.date().isoformat(),
+        "routes": routes,
     }
 
 
