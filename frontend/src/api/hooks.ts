@@ -22,7 +22,9 @@ import type {
   ReportResponse,
   Route,
   RouteShapeResponse,
+  RouteStopProfileResponse,
   RouteSummaryResponse,
+  RouteTripsResponse,
 } from "./types";
 import { useSession } from "./auth";
 
@@ -126,6 +128,38 @@ export function useTodayRouteSummary(
     queryFn: ({ signal }) => apiGet<RouteSummaryResponse>(`/api/${agencyId}/today/route-summary`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+export function useRouteTrips(
+  agencyId: number | null,
+  routeCode: string | null,
+): UseQueryResult<RouteTripsResponse> {
+  return useQuery({
+    queryKey: ["route_trips", agencyId, routeCode],
+    queryFn: ({ signal }) =>
+      apiGet<RouteTripsResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!routeCode,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useRouteStopProfile(
+  agencyId: number | null,
+  routeCode: string | null,
+): UseQueryResult<RouteStopProfileResponse> {
+  return useQuery({
+    queryKey: ["route_stop_profile", agencyId, routeCode],
+    queryFn: ({ signal }) =>
+      apiGet<RouteStopProfileResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!routeCode,
+    staleTime: 60 * 1000,
   });
 }
 
