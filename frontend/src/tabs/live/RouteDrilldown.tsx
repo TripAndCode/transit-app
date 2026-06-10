@@ -25,21 +25,30 @@ export function RouteDrilldown({
   const stops = useRouteStopProfile(agencyId, routeCode);
 
   return (
-    <aside
-      style={{
-        position: "fixed",
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: "min(440px, 100%)",
-        background: "var(--bg-surface)",
-        borderLeft: "1px solid var(--border-soft)",
-        boxShadow: "-8px 0 24px rgba(0,0,0,0.06)",
-        padding: 20,
-        overflowY: "auto",
-        zIndex: 40,
-      }}
-    >
+    <>
+      {/* Light scrim: dims the list behind the panel and closes on click-away.
+          Calm — a faint warm-neutral wash, not a heavy modal backdrop. */}
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        style={{ position: "fixed", inset: 0, background: "rgba(40,33,20,0.10)", zIndex: 39 }}
+      />
+      <aside
+        aria-label={t("live.drill.title", { route: routeName })}
+        style={{
+          position: "fixed",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: "min(440px, 100%)",
+          background: "var(--bg-surface)",
+          borderLeft: "1px solid var(--border-soft)",
+          boxShadow: "-8px 0 24px rgba(0,0,0,0.06)",
+          padding: 20,
+          overflowY: "auto",
+          zIndex: 40,
+        }}
+      >
       <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, flex: 1 }}>{t("live.drill.title", { route: routeName })}</h3>
         <button type="button" onClick={onClose} style={{ background: "transparent", border: "1px solid var(--border-subtle)", borderRadius: 4, padding: "4px 12px" }}>
@@ -83,6 +92,7 @@ export function RouteDrilldown({
           <span style={{ fontSize: 12, fontWeight: 600, minWidth: 48, textAlign: "right" }}>{signedMin(s.avg_delay_sec, t)}</span>
         </div>
       ))}
-    </aside>
+      </aside>
+    </>
   );
 }
