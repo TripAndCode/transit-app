@@ -16,7 +16,7 @@ import { RouteDrilldown } from "./live/RouteDrilldown";
 type SortKey = "deviation" | "worst" | "avg" | "trips" | "name";
 
 /** Sort a group's routes by the given non-deviation key. Returns a new array. */
-function sortRoutes(routes: RouteSummary[], sort: SortKey, formatRoute: (rc: string) => string): RouteSummary[] {
+function sortRoutes(routes: RouteSummary[], sort: Exclude<SortKey, "deviation">, formatRoute: (rc: string) => string): RouteSummary[] {
   const copy = [...routes];
   copy.sort((a, b) => {
     if (sort === "worst") return b.worst_delay_sec - a.worst_delay_sec;
@@ -55,13 +55,11 @@ export function LiveTab() {
       : data.routes
     : [];
 
-  // For deviation sort, groupByBucket handles within-bucket ordering.
-  // For all other sorts, pre-sort then re-sort each group's routes after bucketing.
-  const preForGrouping = sort === "deviation" ? filtered : sortRoutes(filtered, sort, routeNames.format);
-  const rawGroups = groupByBucket(preForGrouping);
-  const groups: BucketGroup[] = sort === "deviation"
-    ? rawGroups
-    : rawGroups.map((g) => ({ ...g, routes: sortRoutes(g.routes, sort, routeNames.format) }));
+  const rawGroups = groupByBucket(filtered);
+  const groups: BucketGroup[] =
+    sort === "deviation"
+      ? rawGroups
+      : rawGroups.map((g) => ({ ...g, routes: sortRoutes(g.routes, sort, routeNames.format) }));
 
   return (
     <div>

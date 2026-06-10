@@ -612,11 +612,6 @@
       "with_last": "No observations to display yet (last received: {{when}})",
       "title": "No observations to display yet",
       "hint": "Waiting for the next ingest. Data will refresh automatically in a few minutes."
-    },
-    "card": {
-      "avg": "Avg",
-      "max": "Max",
-      "trip_samples": "{{trips}} trips / {{samples}} obs."
     }
   },
   "reports": {

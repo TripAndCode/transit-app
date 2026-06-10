@@ -48,6 +48,7 @@ describe("LiveTab", () => {
     renderTab();
     expect(screen.getByText(/Anomalous/)).toBeInTheDocument();
     expect(screen.getByText("BAD")).toBeInTheDocument();
+    expect(document.querySelector("details")).toBeInTheDocument();
   });
 
   it("opens the drilldown panel when a route row is clicked", async () => {
@@ -57,6 +58,6 @@ describe("LiveTab", () => {
     } as never);
     renderTab();
     await userEvent.click(screen.getByRole("button", { name: /BAD/ }));
-    expect(screen.getByText(/detail/)).toBeInTheDocument();
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
   });
 });
