@@ -218,6 +218,40 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app):
 
 
 @pytest.mark.asyncio
+async def test_route_trips_drilldown(map_app):
+    app, agency_id = map_app
+    pool = app.state.pool
+    # trip A: two stops, delays 600 & 540 -> avg 570; trip B: one stop, 120
+    await _seed_route(
+        pool, agency_id, "R_DRILL", "平日",
+        [("A", 1, 600, "08:40"), ("A", 2, 540, "08:40"), ("B", 1, 120, "12:05")],
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, trip_headsign) "
+            "VALUES ($1,'A','造道行'),($1,'B','八重田行')",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_DRILL/trips")
+    assert resp.status_code == 200
+    trips = resp.json()["trips"]
+    assert [t["trip_id"] for t in trips] == ["A", "B"]  # worst first
+    assert trips[0]["avg_delay_sec"] == 570
+    assert trips[0]["headsign"] == "造道行"
+    assert trips[0]["scheduled_time"] == "08:40"
+    assert trips[1]["avg_delay_sec"] == 120
+
+
+@pytest.mark.asyncio
+async def test_route_trips_empty_when_no_data(map_client):
+    client, agency_id = map_client
+    resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "trips": []}
+
+
+@pytest.mark.asyncio
 async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
     """If trips have a shape_id but static_shapes has no matching row,
     geometry is null and stops are still populated."""

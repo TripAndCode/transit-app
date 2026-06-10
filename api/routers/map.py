@@ -331,6 +331,66 @@ async def today_route_summary(
     }
 
 
+@router.get("/today/route/{route_code}/trips")
+async def route_trips(
+    route_code: str,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Per-trip delay for one route on the latest observation date.
+
+    One row per trip_id: representative scheduled departure (HH:MM), headsign
+    (from static_trips), and the trip's average dep_delay across its stops.
+    Sorted worst-first — answers "which buses were late". Read-only.
+    """
+    latest = await conn.fetchrow(
+        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
+        agency_id, route_code,
+    )
+    latest_ts = latest["ts"] if latest else None
+    if latest_ts is None:
+        return {"date": None, "trips": []}
+
+    rows = await conn.fetch(
+        """
+        WITH dedup AS (
+            SELECT DISTINCT ON (trip_id, stop_sequence)
+                trip_id, scheduled_time, dep_delay
+            FROM updates
+            WHERE agency_id=$1 AND route_code=$2
+              AND dep_delay IS NOT NULL
+              AND captured_at::date = $3::date
+            ORDER BY trip_id, stop_sequence, captured_at DESC
+        )
+        SELECT
+            d.trip_id,
+            to_char(MIN(d.scheduled_time), 'HH24:MI') AS scheduled_time,
+            MAX(t.trip_headsign) AS headsign,
+            ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
+            COUNT(*) AS samples
+        FROM dedup d
+        LEFT JOIN static_trips t
+          ON t.agency_id = $1 AND t.trip_id = d.trip_id
+        GROUP BY d.trip_id
+        ORDER BY avg_delay_sec DESC NULLS LAST
+        """,
+        agency_id, route_code, latest_ts,
+    )
+    return {
+        "date": latest_ts.date().isoformat(),
+        "trips": [
+            {
+                "trip_id": r["trip_id"],
+                "scheduled_time": r["scheduled_time"],
+                "headsign": r["headsign"],
+                "avg_delay_sec": r["avg_delay_sec"],
+                "samples": r["samples"],
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/delays/heatmap")
 async def delay_heatmap(
     agency_id: int = Depends(get_agency),
