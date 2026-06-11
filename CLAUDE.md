@@ -21,6 +21,8 @@ Conventions for AI-assisted work in this repo. The README covers architecture; t
 
 Backend: `make serve` (FastAPI :8000), `make test` (pytest — set DATABASE_URL to :5544, see above), `poetry run ruff check`, `poetry run mypy`.
 
+Test layout: `tests/unit/` holds **DB-free** tests — its `conftest.py` no-ops the session `apply_schema` fixture, so pure-logic tests run in <1s without Postgres. Everything else under `tests/` (and the domain subpackages `tests/api/`, `tests/query/`, `tests/scripts/`) inherits the root `conftest.py` that auto-migrates `transit_test`. Put a new pure test in `tests/unit/`; a DB/endpoint test in the matching subpackage. Tests needing the ML embedder must mock it (see `tests/scripts/test_promote_intent_cache.py`) or gate behind `@pytest.mark.slow` (`RUN_SLOW=1`).
+
 Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && npm run lint:i18n && npm run lint:i18n-strings` — all five must pass before a PR. `npm run dev` for the hot-reload loop (proxies `/api` to :8000).
 
 ## Frontend rules
