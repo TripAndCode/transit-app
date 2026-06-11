@@ -1,30 +1,52 @@
 import type { StyleSpecification } from "maplibre-gl";
 
-export type MapStyleId = "pale" | "std" | "photo";
+export type MapStyleId = "osm" | "pale" | "std" | "photo";
 
-export const DEFAULT_MAP_STYLE_ID: MapStyleId = "pale";
+// The original pre-feature basemap (OSM) stays the default; the GSI styles are
+// additional options. Changing this only affects users with no stored choice.
+export const DEFAULT_MAP_STYLE_ID: MapStyleId = "osm";
 
 const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
 const GSI_ATTRIBUTION = "© 国土地理院"; // i18n-ignore: legally-required GSI tile attribution (official source name, not UI chrome)
+const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
 
 type MapStyleDef = {
   id: MapStyleId;
   labelKey: string;
-  tiles: string;
-  tilesEn?: string;
+  tiles: string[];
+  tilesEn?: string[];
+  attribution: string;
   maxzoom: number;
 };
 
 export const MAP_STYLES: MapStyleDef[] = [
-  { id: "pale", labelKey: "map.style.pale", tiles: `${GSI}/pale/{z}/{x}/{y}.png`, maxzoom: 18 },
+  {
+    id: "osm",
+    labelKey: "map.style.osm",
+    tiles: [
+      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    attribution: OSM_ATTRIBUTION,
+    maxzoom: 19,
+  },
+  { id: "pale", labelKey: "map.style.pale", tiles: [`${GSI}/pale/{z}/{x}/{y}.png`], attribution: GSI_ATTRIBUTION, maxzoom: 18 },
   {
     id: "std",
     labelKey: "map.style.std",
-    tiles: `${GSI}/std/{z}/{x}/{y}.png`,
-    tilesEn: `${GSI}/english/{z}/{x}/{y}.png`,
+    tiles: [`${GSI}/std/{z}/{x}/{y}.png`],
+    tilesEn: [`${GSI}/english/{z}/{x}/{y}.png`],
+    attribution: GSI_ATTRIBUTION,
     maxzoom: 18,
   },
-  { id: "photo", labelKey: "map.style.photo", tiles: `${GSI}/seamlessphoto/{z}/{x}/{y}.jpg`, maxzoom: 18 },
+  {
+    id: "photo",
+    labelKey: "map.style.photo",
+    tiles: [`${GSI}/seamlessphoto/{z}/{x}/{y}.jpg`],
+    attribution: GSI_ATTRIBUTION,
+    maxzoom: 18,
+  },
 ];
 
 /** Build a MapLibre raster style for the given catalog id. English-label
@@ -36,9 +58,9 @@ export function buildStyle(id: MapStyleId, lang: string): StyleSpecification {
   return {
     version: 8,
     sources: {
-      gsi: { type: "raster", tiles: [tiles], tileSize: 256, maxzoom: def.maxzoom, attribution: GSI_ATTRIBUTION },
+      basemap: { type: "raster", tiles, tileSize: 256, maxzoom: def.maxzoom, attribution: def.attribution },
     },
-    layers: [{ id: "gsi", type: "raster", source: "gsi" }],
+    layers: [{ id: "basemap", type: "raster", source: "basemap" }],
   };
 }
 

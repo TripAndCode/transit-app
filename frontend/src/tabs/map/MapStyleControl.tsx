@@ -2,8 +2,9 @@ import { useState } from "react";
 import type { TFunction } from "i18next";
 import { MAP_STYLES, type MapStyleId } from "../../styles/mapStyle";
 
-// Representative GSI thumbnail tile (Aomori, z11) per style — decorative.
+// Representative thumbnail tile (Aomori, z11) per style — decorative.
 const THUMB: Record<MapStyleId, string> = {
+  osm: "https://a.tile.openstreetmap.org/11/1824/769.png",
   pale: "https://cyberjapandata.gsi.go.jp/xyz/pale/11/1824/769.png",
   std: "https://cyberjapandata.gsi.go.jp/xyz/std/11/1824/769.png",
   photo: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/11/1824/769.jpg",

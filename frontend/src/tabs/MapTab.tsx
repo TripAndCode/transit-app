@@ -190,7 +190,10 @@ export function MapTab() {
     }
     if (getMapStyleOverride()) return; // env override pins the style
     styleLoadedRef.current = false;
-    m.setStyle(buildStyle(styleId, i18n.language));
+    // diff:false forces a full style reload — with the default diff:true,
+    // MapLibre does an in-place diff that drops our imperatively-added overlay
+    // layers AND never fires `style.load`, so the re-attach never runs.
+    m.setStyle(buildStyle(styleId, i18n.language), { diff: false });
     m.once("style.load", () => {
       styleLoadedRef.current = true;
       setStyleEpoch((e) => e + 1);
