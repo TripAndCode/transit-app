@@ -15,6 +15,30 @@ from scripts.promote_intent_cache import promote
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
+_EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
+
+
+class _FakeEmbedder:
+    """Deterministic stand-in so promote() runs without the ML model.
+
+    These tests exercise the cache→rag_chunks promotion *logic* (eligibility,
+    idempotency, edited-action skip), not embedding quality. Mocking the
+    embedder keeps them fast and free of the flaky ~120MB model download that
+    otherwise made CI fail intermittently with "Embedder unavailable". Real
+    embedder behaviour is covered (gated) in tests/query/test_embeddings.py.
+    """
+
+    available = True
+    dim = _EMBED_DIM
+
+    def embed(self, text: str, *, mode: str) -> list[float]:
+        return [0.1] * _EMBED_DIM
+
+
+@pytest.fixture(autouse=True)
+def _fake_embedder(monkeypatch):
+    monkeypatch.setattr("scripts.promote_intent_cache.get_embedder", lambda: _FakeEmbedder())
+
 
 @pytest.fixture
 async def conn_with_agency(apply_schema):
