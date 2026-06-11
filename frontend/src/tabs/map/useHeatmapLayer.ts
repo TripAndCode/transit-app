@@ -190,6 +190,6 @@ export function useHeatmapLayer(
     }
 
     if (styleLoadedRef.current) applyData();
-    else m.once("load", applyData);
+    else m.once("style.load", applyData);
   }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
 }

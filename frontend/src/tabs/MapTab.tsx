@@ -152,6 +152,7 @@ export function MapTab() {
 
     mapRef.current = m;
     return () => {
+      isFirstStyleRun.current = true;
       popupRef.current?.remove();
       popupRef.current = null;
       m.off("click", LAYER, onStopClick);
@@ -164,6 +165,8 @@ export function MapTab() {
       mapRef.current = null;
       styleLoadedRef.current = false;
     };
+    // Map is created once; later styleId/language changes are handled by the
+    // style-switch effect below (adding them here would recreate the map).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -237,7 +240,7 @@ export function MapTab() {
         ref={containerRef}
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       >
-        <MapStyleControl value={styleId} onChange={setStyleId} t={t} />
+        {!getMapStyleOverride() && <MapStyleControl value={styleId} onChange={setStyleId} t={t} />}
       </div>
       <MapLegend
         showSingleSampleStops={showSingleSampleStops}

@@ -165,6 +165,6 @@ export function useRouteOverlay(
       return;
     }
     if (styleLoadedRef.current) drawOverlay();
-    else m.once("load", drawOverlay);
+    else m.once("style.load", drawOverlay);
   }, [shape, mapRef, styleLoadedRef, styleEpoch]);
 }
