@@ -1,6 +1,6 @@
 # Transit Delay App
 
-Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST API plus a React SPA (map heatmap, hourly heatmap, daily trend chart, route polyline overlay, CSV export, threaded Q&A with persistent conversations). The Ask tab is a chat-first interface: a bottom-pinned dock of five parameterized question chips (`top_n` / `on_time` / `trend` / `cmp_service` / `route_stats`) dispatches deterministic SQL tools — no LLM on the primary path. Optional LLM-grounded follow-up chips interpret the result that's already on screen, gated behind `ASK_FOLLOWUP_ENABLED` per the kill-switch policy.
+Real-time bus delay analysis for Japanese transit agencies. Ingests GTFS-RT protobuf feeds, aggregates delay statistics, and exposes them through a FastAPI REST API plus a React SPA (map heatmap, hourly heatmap, daily trend chart, route polyline overlay, CSV export, threaded Q&A with persistent conversations, and a 最新観測 triage tab that ranks routes by deviation from their historical baseline with per-trip / per-stop drilldown). The Ask tab is a chat-first interface: a bottom-pinned dock of five parameterized question chips (`top_n` / `on_time` / `trend` / `cmp_service` / `route_stats`) dispatches deterministic SQL tools — no LLM on the primary path. Optional LLM-grounded follow-up chips interpret the result that's already on screen, gated behind `ASK_FOLLOWUP_ENABLED` per the kill-switch policy.
 
 ---
 
@@ -588,7 +588,9 @@ Computes five aggregation tables used by all API queries:
 | `GET` | `/api/{agency_id}/delays/live` | Latest delay per trip |
 | `GET` | `/api/{agency_id}/delays/heatmap` | GeoJSON delay heatmap by stop (range/DOW/time-band/route filtered) |
 | `GET` | `/api/{agency_id}/route-shape` | Stop sequence + per-stop avg delay for one route (powers the map polyline) |
-| `GET` | `/api/{agency_id}/today/route-summary` | Per-route operational summary for the most recent observation date |
+| `GET` | `/api/{agency_id}/today/route-summary` | Per-route triage for the latest observation date: today vs historical baseline deviation + severity bucket (anomaly/watch/normal/no_baseline) |
+| `GET` | `/api/{agency_id}/today/route/{route_code}/trips` | Drilldown ①: per-trip avg delay for one route on the latest day (worst first) |
+| `GET` | `/api/{agency_id}/today/route/{route_code}/stop-profile` | Drilldown ②: per-stop-sequence avg delay along one route (where delay builds) |
 | `GET` | `/api/{agency_id}/routes` | Static route list (with derived `route_code`) |
 | `GET` | `/api/{agency_id}/stops` | Static stop list |
 | `GET` | `/api/auth/{provider}/login` | Start OAuth (provider = `google` \| `github`); 302 to provider |
@@ -717,7 +719,7 @@ Each row carries `ip`, `user_agent`, `provider`, optional `meta` JSONB, and `act
 
 ## Frontend
 
-Single-page React app at `frontend/` (React 19.2 + React Compiler, Vite 7, TypeScript strict, TanStack Query, react-router-dom, MapLibre GL, react-i18next). Tabs: Overview / Map / Ask / Live / Reports. Default route is the Ask tab. UI chrome is bilingual (ja / en) via locale switcher in the header.
+Single-page React app at `frontend/` (React 19.2 + React Compiler, Vite 7, TypeScript strict, TanStack Query, react-router-dom, MapLibre GL, react-i18next). Tabs: Overview / Map / Ask / Live (最新観測 — the triage tab) / Reports. Default route is the Ask tab. UI chrome is bilingual (ja / en) via locale switcher in the header.
 
 Platform notes (since the React 19 modernization, PRs #43/#46/#45):
 
