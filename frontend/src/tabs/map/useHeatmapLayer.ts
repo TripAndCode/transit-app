@@ -83,6 +83,7 @@ export function useHeatmapLayer(
   showSingleSampleStops: boolean,
   focusedSeverity: SeverityKey | null,
   agencyId: number | null,
+  styleEpoch: number,
 ): void {
   const fittedRef = useRef(false);
 
@@ -190,5 +191,5 @@ export function useHeatmapLayer(
 
     if (styleLoadedRef.current) applyData();
     else m.once("load", applyData);
-  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef]);
+  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
 }

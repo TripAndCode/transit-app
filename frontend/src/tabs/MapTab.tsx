@@ -5,7 +5,9 @@ import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import { useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
-import { getMapStyle } from "../styles/mapStyle";
+import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
+import { useMapStylePref } from "./map/useMapStylePref";
+import { MapStyleControl } from "./map/MapStyleControl";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
@@ -20,7 +22,7 @@ export function MapTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [ctx] = useRangeContext();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data, isFetching, error, refetch } = useHeatmap(id, ctx);
   // Single-route overlay: only fetch when exactly one route is selected.
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
@@ -32,6 +34,9 @@ export function MapTab() {
   const styleLoadedRef = useRef(false);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
   const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
+  const [styleId, setStyleId] = useMapStylePref();
+  const [styleEpoch, setStyleEpoch] = useState(0);
+  const isFirstStyleRun = useRef(true);
 
   // Click handlers are registered once at map init but must always see the
   // current filter context and language. useEffectEvent gives them a stable
@@ -111,7 +116,7 @@ export function MapTab() {
     if (!containerRef.current || mapRef.current) return;
     const m = new maplibregl.Map({
       container: containerRef.current,
-      style: getMapStyle(),
+      style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), i18n.language),
       center: [140.7474, 40.8246], // Aomori default
       zoom: 11,
     });
@@ -159,6 +164,7 @@ export function MapTab() {
       mapRef.current = null;
       styleLoadedRef.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Close any open popup before the heatmap re-renders. Without this, a
@@ -169,9 +175,28 @@ export function MapTab() {
     popupRef.current = null;
   }, [data, showSingleSampleStops, focusedSeverity]);
 
-  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id);
+  // Switch basemap when the user picks a style or the UI language changes.
+  // setStyle() wipes custom layers, so on style.load we mark the style ready
+  // and bump styleEpoch to re-run the (idempotent) overlay attach hooks.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    if (isFirstStyleRun.current) {
+      isFirstStyleRun.current = false; // map was created with this style already
+      return;
+    }
+    if (getMapStyleOverride()) return; // env override pins the style
+    styleLoadedRef.current = false;
+    m.setStyle(buildStyle(styleId, i18n.language));
+    m.once("style.load", () => {
+      styleLoadedRef.current = true;
+      setStyleEpoch((e) => e + 1);
+    });
+  }, [styleId, i18n.language]);
 
-  useRouteOverlay(mapRef, styleLoadedRef, shape);
+  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
+
+  useRouteOverlay(mapRef, styleLoadedRef, shape, styleEpoch);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
@@ -211,7 +236,9 @@ export function MapTab() {
       <div
         ref={containerRef}
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
-      />
+      >
+        <MapStyleControl value={styleId} onChange={setStyleId} t={t} />
+      </div>
       <MapLegend
         showSingleSampleStops={showSingleSampleStops}
         onShowSingleSampleStopsChange={setShowSingleSampleStops}

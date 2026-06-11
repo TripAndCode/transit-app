@@ -20,6 +20,7 @@ export function useRouteOverlay(
   mapRef: React.MutableRefObject<MLMap | null>,
   styleLoadedRef: React.MutableRefObject<boolean>,
   shape: RouteShapeResponse | undefined,
+  styleEpoch: number,
 ): void {
   useEffect(() => {
     const m = mapRef.current;
@@ -165,5 +166,5 @@ export function useRouteOverlay(
     }
     if (styleLoadedRef.current) drawOverlay();
     else m.once("load", drawOverlay);
-  }, [shape, mapRef, styleLoadedRef]);
+  }, [shape, mapRef, styleLoadedRef, styleEpoch]);
 }
