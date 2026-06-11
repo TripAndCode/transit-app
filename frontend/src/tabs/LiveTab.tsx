@@ -1,18 +1,41 @@
-import { useMemo, useState } from "react";
+/**
+ * 最新観測 tab — baseline-relative triage list for the latest observation day.
+ *
+ * Fetches the per-route summary, groups routes into severity buckets
+ * (anomaly / watch / normal / no_baseline) ranked by deviation from each
+ * route's historical baseline, and opens a per-route drilldown
+ * ({@link RouteDrilldown}) on row click. Bucket order is fixed; the sort pills
+ * only reorder rows within a bucket.
+ */
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import type { RouteSummary } from "../api/types";
-import { delayColor } from "../styles/tokens";
 import { relativeTime } from "../utils/relativeTime";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { Skeleton } from "../components/Skeleton";
+import { groupByBucket, type BucketGroup } from "./live/bucket";
+import { RouteRow } from "./live/RouteRow";
+import { RouteDrilldown } from "./live/RouteDrilldown";
 
-type SortKey = "worst" | "avg" | "trips" | "name";
+type SortKey = "deviation" | "worst" | "avg" | "trips" | "name";
+
+/** Sort a group's routes by the given non-deviation key. Returns a new array. */
+function sortRoutes(routes: RouteSummary[], sort: Exclude<SortKey, "deviation">, formatRoute: (rc: string) => string): RouteSummary[] {
+  const copy = [...routes];
+  copy.sort((a, b) => {
+    if (sort === "worst") return b.worst_delay_sec - a.worst_delay_sec;
+    if (sort === "avg") return b.avg_delay_sec - a.avg_delay_sec;
+    if (sort === "trips") return b.trips_observed - a.trips_observed;
+    // name
+    return formatRoute(a.route_code).localeCompare(formatRoute(b.route_code));
+  });
+  return copy;
+}
 
 export function LiveTab() {
   const { t } = useTranslation();
@@ -23,32 +46,28 @@ export function LiveTab() {
     autoRefresh,
   });
   const routeNames = useRouteNames(id);
-  const [sort, setSort] = useState<SortKey>("worst");
+  const [sort, setSort] = useState<SortKey>("deviation");
   const [filter, setFilter] = useState("");
+  const [openRoute, setOpenRoute] = useState<RouteSummary | null>(null);
 
-  const cards = useMemo<RouteSummary[]>(() => {
-    if (!data?.routes) return [];
-    const filtered = filter.trim()
+  const latest = data?.latest_captured_at;
+  const stale = latest ? dataUpdatedAt - new Date(latest).getTime() > 60 * 60 * 1000 : false;
+
+  const filtered: RouteSummary[] = data?.routes
+    ? filter.trim()
       ? data.routes.filter((r) => {
           const name = routeNames.format(r.route_code).toLowerCase();
           const q = filter.trim().toLowerCase();
           return name.includes(q) || r.route_code.includes(q);
         })
-      : data.routes;
-    const sorted = [...filtered].sort((a, b) => {
-      if (sort === "worst") return b.worst_delay_sec - a.worst_delay_sec;
-      if (sort === "avg") return b.avg_delay_sec - a.avg_delay_sec;
-      if (sort === "trips") return b.trips_observed - a.trips_observed;
-      return routeNames.format(a.route_code).localeCompare(routeNames.format(b.route_code));
-    });
-    return sorted;
-  }, [data, filter, sort, routeNames]);
+      : data.routes
+    : [];
 
-  const latest = data?.latest_captured_at;
-  // Age measured against the fetch timestamp (react-query's dataUpdatedAt)
-  // rather than Date.now() — render stays pure for the React Compiler, and
-  // the 30s auto-refresh keeps the reference point current anyway.
-  const stale = latest ? dataUpdatedAt - new Date(latest).getTime() > 60 * 60 * 1000 : false;
+  const rawGroups = groupByBucket(filtered);
+  const groups: BucketGroup[] =
+    sort === "deviation"
+      ? rawGroups
+      : rawGroups.map((g) => ({ ...g, routes: sortRoutes(g.routes, sort, routeNames.format) }));
 
   return (
     <div>
@@ -107,6 +126,7 @@ export function LiveTab() {
           style={{ flex: "1 1 240px", maxWidth: 320 }}
         />
         <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("live.sort_label")}</span>
+        <SortPill active={sort === "deviation"} onClick={() => setSort("deviation")}>{t("live.sort.deviation")}</SortPill>
         <SortPill active={sort === "worst"} onClick={() => setSort("worst")}>{t("live.sort.worst")}</SortPill>
         <SortPill active={sort === "avg"} onClick={() => setSort("avg")}>{t("live.sort.avg")}</SortPill>
         <SortPill active={sort === "trips"} onClick={() => setSort("trips")}>{t("live.sort.trips")}</SortPill>
@@ -124,8 +144,8 @@ export function LiveTab() {
 
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {isLoading && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-          {[...Array(6)].map((_, i) => <Skeleton key={i} height={120} />)}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[...Array(6)].map((_, i) => <Skeleton key={i} height={44} />)}
         </div>
       )}
       {data?.routes && data.routes.length === 0 && (
@@ -139,12 +159,67 @@ export function LiveTab() {
         />
       )}
 
-      {cards.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-          {cards.map((c) => (
-            <RouteCard key={`${c.route_code}|${c.service_type}`} card={c} formatRoute={routeNames.format} t={t} />
-          ))}
-        </div>
+      {!isLoading && groups.map((g) => {
+        if (g.routes.length === 0) return null;
+        const expanded = g.bucket === "anomaly" || g.bucket === "watch";
+        const heading = (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 10px",
+              background: "var(--bg-muted, #faf7f2)",
+              borderRadius: 4,
+              marginBottom: 2,
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            <span>{t(`live.bucket.${g.bucket}`)}</span>
+            <span style={{ fontWeight: 400, color: "var(--text-tertiary)" }}>
+              {t("live.bucket.count", { count: g.routes.length })}
+            </span>
+          </div>
+        );
+
+        const rows = g.routes.map((r) => (
+          <RouteRow
+            key={`${r.route_code}|${r.service_type}`}
+            route={r}
+            formatRoute={routeNames.format}
+            onOpen={setOpenRoute}
+            t={t}
+          />
+        ));
+
+        if (expanded) {
+          return (
+            <section key={g.bucket} style={{ marginBottom: 16 }}>
+              {heading}
+              {rows}
+            </section>
+          );
+        }
+
+        return (
+          <details key={g.bucket} style={{ marginBottom: 16 }}>
+            <summary style={{ listStyle: "none", cursor: "pointer" }}>
+              {heading}
+            </summary>
+            {rows}
+          </details>
+        );
+      })}
+
+      {openRoute && id != null && (
+        <RouteDrilldown
+          agencyId={id}
+          routeCode={openRoute.route_code}
+          routeName={routeNames.format(openRoute.route_code)}
+          onClose={() => setOpenRoute(null)}
+          t={t}
+        />
       )}
     </div>
   );
@@ -168,110 +243,6 @@ function SortPill({ active, onClick, children }: { active: boolean; onClick: () 
       {children}
     </button>
   );
-}
-
-function RouteCard({
-  card,
-  formatRoute,
-  t,
-}: {
-  card: RouteSummary;
-  formatRoute: (rc: string) => string;
-  t: TFunction;
-}) {
-  const avgMin = card.avg_delay_sec / 60;
-  const worstMin = card.worst_delay_sec / 60;
-  return (
-    <div
-      style={{
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-soft)",
-        borderRadius: "var(--radius-lg)",
-        padding: 14,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {formatRoute(card.route_code)}
-        </span>
-        {card.service_type && (
-          <span style={{ fontSize: 11, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>{card.service_type}</span>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 12 }}>
-        <Stat
-          label={t("live.card.avg")}
-          value={formatDelayMinutesRounded(card.avg_delay_sec, t)}
-          fullPrecision={formatDelay(card.avg_delay_sec, t)}
-          dotColor={delayColor(avgMin)}
-        />
-        <Stat
-          label={t("live.card.max")}
-          value={formatDelayMinutesRounded(card.worst_delay_sec, t)}
-          fullPrecision={formatDelay(card.worst_delay_sec, t)}
-          dotColor={delayColor(worstMin)}
-        />
-      </div>
-      <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-        {t("live.card.trip_samples", { trips: card.trips_observed, samples: card.samples.toLocaleString() })}
-      </div>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  fullPrecision,
-  dotColor,
-}: {
-  label: string;
-  value: string;
-  fullPrecision: string;
-  dotColor: string;
-}) {
-  return (
-    <div title={fullPrecision}>
-      <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 16,
-          fontWeight: 600,
-          color: "var(--text-primary)",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        <span aria-hidden="true" style={{ color: dotColor, fontSize: 10, lineHeight: 1 }}>
-          ●
-        </span>
-        <span>{value}</span>
-      </div>
-    </div>
-  );
-}
-
-function formatDelayMinutesRounded(seconds: number, t: TFunction): string {
-  const minutes = Math.round(Math.abs(seconds) / 60);
-  if (minutes === 0) return t("common.on_time");
-  const sign = seconds < 0 ? "-" : "+";
-  return t("common.unit_min_signed", { sign, value: minutes });
-}
-
-function formatDelay(seconds: number, t: TFunction): string {
-  if (seconds === 0) return t("common.on_time");
-  const sign = seconds < 0 ? "-" : "+";
-  const abs = Math.abs(seconds);
-  const m = Math.floor(abs / 60);
-  const s = abs % 60;
-  if (m === 0) return t("common.unit_sec_signed", { sign, value: s });
-  return t("common.unit_min_sec_signed", { sign, m, s: s.toString().padStart(2, "0") });
 }
 
 function formatLocal(ts: number): string {

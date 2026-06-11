@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_agency, get_conn
 from api.range import RangeCtx, build_updates_filter, get_range_ctx
+from api.triage import classify_route
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
@@ -243,11 +244,16 @@ async def today_route_summary(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    """Per-route operational summary for the most recent observation date.
+    """Per-route triage summary for the most recent observation date.
 
-    Powers the 最新観測 tab. Each row is one route_code with:
-    - avg_delay_sec, worst_delay_sec, trips_observed, last_seen_at, service_type
-    Sorted by worst delay descending so problem routes float to the top.
+    Powers the 最新観測 tab. Each row carries today's figures
+    (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
+    ``last_seen_at``, ``service_type``) joined to the historical baseline in
+    ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
+    classifier (:func:`api.triage.classify_route`) then assigns each route a
+    ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
+    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
+    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
     """
     latest = await conn.fetchrow(
         "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
@@ -267,26 +273,42 @@ async def today_route_summary(
               AND dep_delay IS NOT NULL
               AND captured_at::date = $2::date
             ORDER BY trip_id, stop_sequence, captured_at DESC
+        ),
+        summary AS (
+            SELECT
+                route_code,
+                service_type,
+                ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
+                MAX(dep_delay) AS worst_delay_sec,
+                COUNT(DISTINCT trip_id) AS trips_observed,
+                COUNT(*) AS samples,
+                MAX(captured_at) AS last_seen_at
+            FROM dedup
+            GROUP BY route_code, service_type
         )
         SELECT
-            route_code,
-            service_type,
-            ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
-            MAX(dep_delay) AS worst_delay_sec,
-            COUNT(DISTINCT trip_id) AS trips_observed,
-            COUNT(*) AS samples,
-            MAX(captured_at) AS last_seen_at
-        FROM dedup
-        GROUP BY route_code, service_type
-        ORDER BY worst_delay_sec DESC NULLS LAST
+            s.*,
+            b.avg_min AS baseline_avg_min,
+            b.p90_min AS baseline_p90_min
+        FROM summary s
+        LEFT JOIN agg_route_stats b
+          ON b.agency_id = $1
+         AND b.route_code = s.route_code
+         AND b.service_type = s.service_type
+        ORDER BY s.worst_delay_sec DESC NULLS LAST
         """,
         agency_id,
         latest_ts,
     )
-    return {
-        "latest_captured_at": latest_ts.isoformat(),
-        "date": latest_ts.date().isoformat(),
-        "routes": [
+
+    routes = []
+    for r in rows:
+        baseline_avg_sec = round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
+        baseline_p90_sec = round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
+        bucket, deviation_sec, low_confidence = classify_route(
+            r["avg_delay_sec"], baseline_avg_sec, baseline_p90_sec, r["samples"]
+        )
+        routes.append(
             {
                 "route_code": r["route_code"],
                 "service_type": r["service_type"],
@@ -295,6 +317,141 @@ async def today_route_summary(
                 "trips_observed": r["trips_observed"],
                 "samples": r["samples"],
                 "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+                "baseline_avg_sec": baseline_avg_sec,
+                "baseline_p90_sec": baseline_p90_sec,
+                "deviation_sec": deviation_sec,
+                "bucket": bucket,
+                "low_confidence": low_confidence,
+                "has_baseline": baseline_avg_sec is not None,
+            }
+        )
+    return {
+        "latest_captured_at": latest_ts.isoformat(),
+        "date": latest_ts.date().isoformat(),
+        "routes": routes,
+    }
+
+
+@router.get("/today/route/{route_code}/trips")
+async def route_trips(
+    route_code: str,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Per-trip delay for one route on the latest observation date.
+
+    One row per trip_id: representative scheduled departure (HH:MM), headsign
+    (from static_trips), and the trip's average dep_delay across its stops.
+    Sorted worst-first — answers "which buses were late". Read-only.
+    """
+    latest = await conn.fetchrow(
+        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
+        agency_id,
+        route_code,
+    )
+    latest_ts = latest["ts"] if latest else None
+    if latest_ts is None:
+        return {"date": None, "trips": []}
+
+    rows = await conn.fetch(
+        """
+        WITH dedup AS (
+            SELECT DISTINCT ON (trip_id, stop_sequence)
+                trip_id, scheduled_time, dep_delay
+            FROM updates
+            WHERE agency_id=$1 AND route_code=$2
+              AND dep_delay IS NOT NULL
+              AND captured_at::date = $3::date
+            ORDER BY trip_id, stop_sequence, captured_at DESC
+        )
+        SELECT
+            d.trip_id,
+            to_char(MIN(d.scheduled_time), 'HH24:MI') AS scheduled_time,
+            MAX(t.trip_headsign) AS headsign,
+            ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
+            COUNT(*) AS samples
+        FROM dedup d
+        LEFT JOIN static_trips t
+          ON t.agency_id = $1 AND t.trip_id = d.trip_id
+        GROUP BY d.trip_id
+        ORDER BY avg_delay_sec DESC NULLS LAST
+        """,
+        agency_id,
+        route_code,
+        latest_ts,
+    )
+    return {
+        "date": latest_ts.date().isoformat(),
+        "trips": [
+            {
+                "trip_id": r["trip_id"],
+                "scheduled_time": r["scheduled_time"],
+                "headsign": r["headsign"],
+                "avg_delay_sec": r["avg_delay_sec"],
+                "samples": r["samples"],
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/today/route/{route_code}/stop-profile")
+async def route_stop_profile(
+    route_code: str,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Average delay per stop_sequence along one route on the latest date.
+
+    Joins observed (trip_id, stop_sequence) to static_stops for a stop name,
+    ordered by sequence — answers "where on the route does delay build". The
+    name is best-effort (MAX over the sequence's mapped stop). Read-only.
+    """
+    latest = await conn.fetchrow(
+        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
+        agency_id,
+        route_code,
+    )
+    latest_ts = latest["ts"] if latest else None
+    if latest_ts is None:
+        return {"date": None, "stops": []}
+
+    rows = await conn.fetch(
+        """
+        WITH dedup AS (
+            SELECT DISTINCT ON (trip_id, stop_sequence)
+                trip_id, stop_sequence, dep_delay
+            FROM updates
+            WHERE agency_id=$1 AND route_code=$2
+              AND dep_delay IS NOT NULL
+              AND captured_at::date = $3::date
+            ORDER BY trip_id, stop_sequence, captured_at DESC
+        )
+        SELECT
+            d.stop_sequence,
+            MAX(ss.stop_name) AS stop_name,
+            ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
+            COUNT(*) AS samples
+        FROM dedup d
+        LEFT JOIN static_stop_times sst
+          ON sst.agency_id = $1 AND sst.trip_id = d.trip_id AND sst.stop_sequence = d.stop_sequence
+        LEFT JOIN static_stops ss
+          ON ss.agency_id = $1 AND ss.stop_id = sst.stop_id
+        GROUP BY d.stop_sequence
+        ORDER BY d.stop_sequence
+        """,
+        agency_id,
+        route_code,
+        latest_ts,
+    )
+    return {
+        "date": latest_ts.date().isoformat(),
+        "stops": [
+            {
+                "stop_sequence": r["stop_sequence"],
+                "stop_name": r["stop_name"],
+                "avg_delay_sec": r["avg_delay_sec"],
+                "samples": r["samples"],
             }
             for r in rows
         ],

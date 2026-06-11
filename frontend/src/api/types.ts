@@ -5,6 +5,8 @@ export type Agency = {
   static_url: string | null;
 };
 
+export type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
+
 export type RouteSummary = {
   route_code: string;
   service_type: string | null;
@@ -13,6 +15,37 @@ export type RouteSummary = {
   trips_observed: number;
   samples: number;
   last_seen_at: string | null;
+  baseline_avg_sec: number | null;
+  baseline_p90_sec: number | null;
+  deviation_sec: number | null;
+  bucket: RouteBucket;
+  low_confidence: boolean;
+  has_baseline: boolean;
+};
+
+export type RouteTrip = {
+  trip_id: string;
+  scheduled_time: string | null;
+  headsign: string | null;
+  avg_delay_sec: number;
+  samples: number;
+};
+
+export type RouteTripsResponse = {
+  date: string | null;
+  trips: RouteTrip[];
+};
+
+export type RouteStopProfileRow = {
+  stop_sequence: number;
+  stop_name: string | null;
+  avg_delay_sec: number;
+  samples: number;
+};
+
+export type RouteStopProfileResponse = {
+  date: string | null;
+  stops: RouteStopProfileRow[];
 };
 
 export type RouteSummaryResponse = {

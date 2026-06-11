@@ -3,7 +3,7 @@
     "overview": "Overview",
     "map": "Map",
     "ask": "Ask",
-    "live": "Live",
+    "live": "Latest observations",
     "reports": "Reports"
   },
   "app": {
@@ -579,11 +579,32 @@
     "manual_refresh": "Refresh now",
     "filter_placeholder": "Filter by route",
     "sort_label": "Sort",
-    "sort": {
-      "worst": "Max delay",
-      "avg": "Avg delay",
-      "trips": "Trips",
-      "name": "Name"
+    "sort": { "deviation": "vs normal", "worst": "Max delay", "avg": "Avg delay", "trips": "Trips", "name": "Name" },
+    "bucket": {
+      "anomaly": "Anomalous",
+      "watch": "Watch",
+      "normal": "Normal",
+      "no_baseline": "No baseline",
+      "count": "{{count}}"
+    },
+    "row": {
+      "deviation": "vs normal {{sign}}{{value}} min",
+      "deviation_flat": "as usual",
+      "baseline_today": "normal {{baseline}} → today {{today}}",
+      "no_baseline_note": "baseline pending",
+      "low_confidence": "low confidence (few obs.)",
+      "samples": "{{count}} obs."
+    },
+    "drill": {
+      "title": "{{route}} detail",
+      "trips_heading": "Delay by trip (worst first)",
+      "stops_heading": "Average delay by stop (in route order)",
+      "trip_label": "{{time}} {{headsign}}",
+      "trip_label_no_headsign": "{{time}}",
+      "stop_label": "#{{seq}} {{name}}",
+      "stop_label_no_name": "Stop #{{seq}}",
+      "close": "Close",
+      "empty": "No trip data for this route"
     },
     "updating": "Updating...",
     "updated_at": "Updated: {{time}}",
@@ -591,11 +612,6 @@
       "with_last": "No observations to display yet (last received: {{when}})",
       "title": "No observations to display yet",
       "hint": "Waiting for the next ingest. Data will refresh automatically in a few minutes."
-    },
-    "card": {
-      "avg": "Avg",
-      "max": "Max",
-      "trip_samples": "{{trips}} trips / {{samples}} obs."
     }
   },
   "reports": {

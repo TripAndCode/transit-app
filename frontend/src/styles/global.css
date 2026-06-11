@@ -55,6 +55,8 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
 }
 
+summary::-webkit-details-marker { display: none; }
+
 .skeleton {
   background: linear-gradient(90deg, #ececec 0%, #f5f5f5 50%, #ececec 100%);
   background-size: 200% 100%;
