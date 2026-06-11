@@ -279,6 +279,12 @@
     "empty": {
       "title": "No data to display yet",
       "hint": "The initial fetch may still be in progress. Data will appear automatically in a few minutes."
+    },
+    "style": {
+      "label": "Map style",
+      "pale": "Light",
+      "std": "Standard",
+      "photo": "Satellite"
     }
   },
   "ask": {
