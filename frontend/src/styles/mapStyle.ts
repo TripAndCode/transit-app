@@ -1,26 +1,72 @@
 import type { StyleSpecification } from "maplibre-gl";
 
-const OSM_RASTER: StyleSpecification = {
-  version: 8,
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: [
-        "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      ],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors",
-    },
-  },
-  layers: [
-    { id: "osm", type: "raster", source: "osm" },
-  ],
+export type MapStyleId = "pale" | "std" | "photo";
+
+export const DEFAULT_MAP_STYLE_ID: MapStyleId = "pale";
+
+const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
+const GSI_ATTRIBUTION = "© 国土地理院";
+
+type MapStyleDef = {
+  id: MapStyleId;
+  labelKey: string;
+  tiles: string;
+  tilesEn?: string;
+  maxzoom: number;
 };
 
-export function getMapStyle(): string | StyleSpecification {
+export const MAP_STYLES: MapStyleDef[] = [
+  { id: "pale", labelKey: "map.style.pale", tiles: `${GSI}/pale/{z}/{x}/{y}.png`, maxzoom: 18 },
+  {
+    id: "std",
+    labelKey: "map.style.std",
+    tiles: `${GSI}/std/{z}/{x}/{y}.png`,
+    tilesEn: `${GSI}/english/{z}/{x}/{y}.png`,
+    maxzoom: 18,
+  },
+  { id: "photo", labelKey: "map.style.photo", tiles: `${GSI}/seamlessphoto/{z}/{x}/{y}.jpg`, maxzoom: 18 },
+];
+
+/** Build a MapLibre raster style for the given catalog id. English-label
+ *  tiles are used only when `lang` starts with "en" AND the style defines
+ *  `tilesEn` (only `std` does — GSI publishes a single English style). */
+export function buildStyle(id: MapStyleId, lang: string): StyleSpecification {
+  const def = MAP_STYLES.find((s) => s.id === id) ?? MAP_STYLES[0];
+  const tiles = lang.startsWith("en") && def.tilesEn ? def.tilesEn : def.tiles;
+  return {
+    version: 8,
+    sources: {
+      gsi: { type: "raster", tiles: [tiles], tileSize: 256, maxzoom: def.maxzoom, attribution: GSI_ATTRIBUTION },
+    },
+    layers: [{ id: "gsi", type: "raster", source: "gsi" }],
+  };
+}
+
+/** Env escape hatch: if VITE_MAP_STYLE_URL is set it overrides the catalog
+ *  (returns the URL string); otherwise null and the catalog drives. */
+export function getMapStyleOverride(): string | null {
   const url = import.meta.env.VITE_MAP_STYLE_URL;
-  if (typeof url === "string" && url.length > 0) return url;
-  return OSM_RASTER;
+  return typeof url === "string" && url.length > 0 ? url : null;
+}
+
+const PREF_KEY = "transit.mapStyle";
+
+/** Read the persisted style id, validated against the catalog. */
+export function readMapStylePref(): MapStyleId {
+  try {
+    const v = localStorage.getItem(PREF_KEY);
+    if (v && MAP_STYLES.some((s) => s.id === v)) return v as MapStyleId;
+  } catch {
+    /* localStorage unavailable — fall through */
+  }
+  return DEFAULT_MAP_STYLE_ID;
+}
+
+/** Persist the chosen style id. No-ops if localStorage is unavailable. */
+export function writeMapStylePref(id: MapStyleId): void {
+  try {
+    localStorage.setItem(PREF_KEY, id);
+  } catch {
+    /* ignore */
+  }
 }
