@@ -5,7 +5,7 @@ export type MapStyleId = "pale" | "std" | "photo";
 export const DEFAULT_MAP_STYLE_ID: MapStyleId = "pale";
 
 const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
-const GSI_ATTRIBUTION = "© 国土地理院";
+const GSI_ATTRIBUTION = "© 国土地理院"; // i18n-ignore: legally-required GSI tile attribution (official source name, not UI chrome)
 
 type MapStyleDef = {
   id: MapStyleId;
