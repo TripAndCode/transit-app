@@ -2,15 +2,7 @@
 
 from datetime import time
 
-import pytest
-
 from pipeline.query.labels import dow_label, time_label
-
-
-# Override the session-scoped DB fixture — pure-Python tests, no DB needed.
-@pytest.fixture(scope="session", autouse=True)
-def apply_schema():
-    yield
 
 
 def test_dow_label_int_maps_to_japanese_char():

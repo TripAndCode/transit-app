@@ -4,18 +4,10 @@ Covers the 5 query_types api/routers/reports.py dispatches:
 ranking / on_time / worst_5min / compare_ranking / dow_ranking.
 
 Label-helper coverage (dow_label / time_label) lives in
-tests/test_labels.py.
+tests/unit/test_labels.py.
 """
 
-import pytest
-
 from pipeline.query.formatter import format_result
-
-
-# Override the session-scoped DB fixture — pure-Python tests, no DB needed.
-@pytest.fixture(scope="session", autouse=True)
-def apply_schema():
-    yield
 
 
 def test_fmt_ranking_basic():
