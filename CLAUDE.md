@@ -5,11 +5,14 @@ Conventions for AI-assisted work in this repo. The README covers architecture; t
 ## Databases — read this first
 
 - `postgresql://transit:transit@localhost:5433/transit` (the Makefile default, container `transit-pg`) is the **dev DB with ~1.8M rows of real ingested data**. Treat it as read-only: never run write SQL, migrations-down, resets, or `make db-reset`-style targets against it for testing. It has been wiped by careless test runs before.
-- Tests use a **throwaway Postgres on :5544** instead:
+- Tests use a **throwaway Postgres on :5544** instead. The schema needs
+  **PostGIS + pgvector + pg_trgm**, so build the image from `db/` — the bare
+  `pgvector/pgvector:pg16` image lacks PostGIS and migration `0001` fails on
+  `CREATE EXTENSION postgis`:
   ```bash
   docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
     -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \
-    -p 5544:5432 pgvector/pgvector:pg16
+    -p 5544:5432 "$(docker build -q db/)"
   DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run pytest
   ```
 - Verification against the dev DB (EXPLAIN, SELECT, API smoke tests) is fine — read-only only.
