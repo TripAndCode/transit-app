@@ -223,3 +223,55 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
             (agency_id,),
         )
         assert cur.fetchone()[0] > 0, "real route 44372 missing after analyze"
+
+
+def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
+    """Insert *n* deduped-distinct observations for one (route, service_type).
+
+    Varies trip_id + day so each row survives the dedup DISTINCT ON. Pass
+    ``service_type=None`` to simulate the rows that miss the static_join and
+    land with a NULL service_type (the agency-9 case).
+    """
+    with pg_conn.cursor() as cur:
+        for i in range(n):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"{route_code}_{service_type}_{i}.pb",
+                    f"2026-04-{(i % 25) + 1:02d}T08:10:00",
+                    f"trip_{route_code}_{service_type}_{i}",
+                    service_type,
+                    time(8, 10),
+                    route_code,
+                    1,
+                    60 + i * 5,
+                ),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id):
+    """Rows with a NULL service_type (failed static_join) must not abort analyze.
+
+    Regression for the agency-9 case: a NULL service_type group violated the
+    NOT NULL constraint on agg_route_stats.service_type and rolled back the
+    whole run, leaving aggregates stale. analyze must drop those rows and
+    materialise the rest.
+    """
+    _seed_route_group(pg_conn, agency_id, "R1", "平日")
+    _seed_route_group(pg_conn, agency_id, "R1", None)
+
+    analyze(agency_id, pg_conn)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_type FROM agg_route_stats WHERE agency_id = %s",
+            (agency_id,),
+        )
+        service_types = [r[0] for r in cur.fetchall()]
+    assert service_types, "expected at least the non-null service_type group"
+    assert all(st is not None for st in service_types), "NULL service_type leaked into agg_route_stats"
+    assert "平日" in service_types

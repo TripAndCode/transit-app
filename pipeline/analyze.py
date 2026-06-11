@@ -17,9 +17,16 @@ import logging
 
 import psycopg2.extras
 
-from pipeline.db import _DEDUP_INNER, _static_loaded
+from pipeline.db import _DEDUP_INNER, _static_loaded, build_dedup_inner_sql
 
 logger = logging.getLogger(__name__)
+
+# Aggregations keyed by service_type write into NOT NULL service_type columns.
+# Rows that miss the static_join land with a NULL service_type (notably agency
+# 9, 広島バス); without this filter a NULL group violates the constraint and
+# rolls back the whole run, leaving every aggregate stale. agg_stop_seq is not
+# keyed by service_type, so it keeps the unfiltered dedup (all observations).
+_DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -80,7 +87,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_route_stats ──────────────────────────────────────────────
         sql = f"""
-            WITH deduped AS ({_DEDUP_INNER}),
+            WITH deduped AS ({_DEDUP_TYPED}),
             ranked AS (
                 SELECT *, PERCENT_RANK() OVER (
                     PARTITION BY route_code, service_type ORDER BY dep_delay
@@ -123,7 +130,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = f"""
-            WITH deduped AS ({_DEDUP_INNER}),
+            WITH deduped AS ({_DEDUP_TYPED}),
             ranked AS (
                 SELECT *, PERCENT_RANK() OVER (
                     PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay
@@ -151,7 +158,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_route_dow ────────────────────────────────────────────────
         sql = f"""
-            WITH deduped AS ({_DEDUP_INNER})
+            WITH deduped AS ({_DEDUP_TYPED})
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,
@@ -173,7 +180,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_daily_trend ──────────────────────────────────────────────
         sql = f"""
-            WITH deduped AS ({_DEDUP_INNER})
+            WITH deduped AS ({_DEDUP_TYPED})
             SELECT
                 %(agency_id)s AS agency_id,
                 date::text, route_code, service_type,
