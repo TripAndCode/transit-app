@@ -10,6 +10,73 @@ const THUMB: Record<MapStyleId, string> = {
   photo: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/11/1824/769.jpg",
 };
 
+const THUMB_PX = 60;
+
+// Solid white + a real drop shadow + hairline border so the control reads on
+// ANY basemap — light (淡色/OSM), busy (標準), and dark imagery (航空写真).
+// (The previous translucent --bg-surface chip blended into light basemaps.)
+const PILL: React.CSSProperties = {
+  background: "#ffffff",
+  border: "1px solid rgba(0,0,0,0.14)",
+  borderRadius: 14,
+  boxShadow: "0 3px 14px rgba(0,0,0,0.28)",
+};
+
+function Tile({
+  styleId,
+  label,
+  active,
+  onClick,
+}: {
+  styleId: MapStyleId;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 5,
+        padding: 0,
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        width: THUMB_PX,
+      }}
+    >
+      <img
+        src={THUMB[styleId]}
+        alt=""
+        width={THUMB_PX}
+        height={THUMB_PX}
+        style={{
+          borderRadius: 12,
+          objectFit: "cover",
+          outline: active ? "3px solid var(--accent)" : "1px solid rgba(0,0,0,0.12)",
+          outlineOffset: active ? -1 : 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: 12,
+          lineHeight: 1.1,
+          fontWeight: active ? 700 : 500,
+          color: active ? "var(--accent)" : "var(--text-secondary)",
+          textAlign: "center",
+        }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export function MapStyleControl({
   value,
   onChange,
@@ -26,53 +93,55 @@ export function MapStyleControl({
     <div
       style={{
         position: "absolute",
-        left: 10,
+        left: 12,
         bottom: 28,
         zIndex: 2,
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-soft)",
-        borderRadius: 8,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
-        overflow: "hidden",
-        fontSize: 12,
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 8,
       }}
     >
+      {/* Entry button: current-style thumbnail + "Layers" — Google-style affordance. */}
       <button
         type="button"
         aria-label={t("map.style.label")}
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "transparent", border: "none", cursor: "pointer", width: "100%" }}
+        style={{
+          ...PILL,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 4,
+          padding: "8px 10px",
+          cursor: "pointer",
+        }}
       >
-        <img src={THUMB[current.id]} alt="" width={28} height={28} style={{ borderRadius: 4, objectFit: "cover" }} />
-        <span style={{ fontWeight: 600 }}>{t(current.labelKey)}</span>
+        <img
+          src={THUMB[current.id]}
+          alt=""
+          width={THUMB_PX}
+          height={THUMB_PX}
+          style={{ borderRadius: 12, objectFit: "cover", outline: "1px solid rgba(0,0,0,0.12)" }}
+        />
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+          {t("map.style.layers")}
+        </span>
       </button>
+
       {open && (
-        <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
+        <div style={{ ...PILL, display: "flex", gap: 14, padding: "10px 14px", maxWidth: "70vw", overflowX: "auto" }}>
           {MAP_STYLES.map((s) => (
-            <button
+            <Tile
               key={s.id}
-              type="button"
-              aria-pressed={s.id === value}
+              styleId={s.id}
+              label={t(s.labelKey)}
+              active={s.id === value}
               onClick={() => {
                 onChange(s.id);
                 setOpen(false);
               }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 10px",
-                width: "100%",
-                background: s.id === value ? "var(--accent-soft)" : "transparent",
-                color: s.id === value ? "var(--accent)" : "var(--text-primary)",
-                border: "none",
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              <img src={THUMB[s.id]} alt="" width={28} height={28} style={{ borderRadius: 4, objectFit: "cover" }} />
-              <span>{t(s.labelKey)}</span>
-            </button>
+            />
           ))}
         </div>
       )}

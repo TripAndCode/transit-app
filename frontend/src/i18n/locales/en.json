@@ -285,7 +285,8 @@
       "label": "Map style",
       "pale": "Light",
       "std": "Standard",
-      "photo": "Satellite"
+      "photo": "Satellite",
+      "layers": "Layers"
     }
   },
   "ask": {
