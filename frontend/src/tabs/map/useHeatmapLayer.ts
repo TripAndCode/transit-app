@@ -6,7 +6,7 @@ import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
-const HALO_LAYER = "delay-halos";
+const CASING_LAYER = "delay-casing";
 
 /**
  * Build the MapLibre filter expression that selects circles falling into a
@@ -60,7 +60,7 @@ function buildCasingOpacityExpr(
 }
 
 /**
- * Sync the heatmap SOURCE / LAYER / HALO_LAYER to the latest fetched
+ * Sync the heatmap SOURCE / LAYER / CASING_LAYER to the latest fetched
  * GeoJSON. Filters out single-sample stops unless `showSingleSampleStops`
  * is true. Fits bounds on the first non-empty payload after each data-source
  * (`agencyId`) switch — so changing agency re-pivots to the new region, while
@@ -97,7 +97,7 @@ export function useHeatmapLayer(
     function applyData() {
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
-      if (m.getLayer(HALO_LAYER)) m.removeLayer(HALO_LAYER);
+      if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
       m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
@@ -138,7 +138,7 @@ export function useHeatmapLayer(
       // the dot's perimeter (no dark disc behind the fill to muddy the color).
       // Pairs with the dot's white inner stroke for legibility on any basemap.
       m.addLayer({
-        id: HALO_LAYER,
+        id: CASING_LAYER,
         type: "circle",
         source: SOURCE,
         paint: {
