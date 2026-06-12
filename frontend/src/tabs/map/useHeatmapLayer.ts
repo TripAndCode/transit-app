@@ -6,7 +6,7 @@ import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
-const HALO_LAYER = "delay-halos";
+const CASING_LAYER = "delay-casing";
 
 /**
  * Build the MapLibre filter expression that selects circles falling into a
@@ -47,30 +47,20 @@ function buildCircleOpacityExpr(
   return ["case", severityMatchExpr(focused), base, 0];
 }
 
-function buildHaloOpacityExpr(
+// Dark casing ring opacity. Constant + focus-aware (non-focused dim to 0 so a
+// dimmed dot's ring fades with it). Gives every dot a dark outer ring that —
+// together with the dot's white inner stroke — reads on any basemap (white
+// separates on dark/satellite, dark separates on light/busy).
+function buildCasingOpacityExpr(
   focused: SeverityKey | null,
 ): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.20,
-      [">=", ["get", "avg_delay_min"], 5], 0.14,
-      0.0,
-    ],
-    [
-      "interpolate", ["exponential", 1.4], ["get", "samples"],
-      10, 0.06,
-      1000, 0.10,
-      50000, 0.16,
-    ],
-  ];
+  const base = 0.55;
   if (focused === null) return base;
   return ["case", severityMatchExpr(focused), base, 0];
 }
 
 /**
- * Sync the heatmap SOURCE / LAYER / HALO_LAYER to the latest fetched
+ * Sync the heatmap SOURCE / LAYER / CASING_LAYER to the latest fetched
  * GeoJSON. Filters out single-sample stops unless `showSingleSampleStops`
  * is true. Fits bounds on the first non-empty payload after each data-source
  * (`agencyId`) switch — so changing agency re-pivots to the new region, while
@@ -83,6 +73,7 @@ export function useHeatmapLayer(
   showSingleSampleStops: boolean,
   focusedSeverity: SeverityKey | null,
   agencyId: number | null,
+  styleEpoch: number,
 ): void {
   const fittedRef = useRef(false);
 
@@ -106,7 +97,7 @@ export function useHeatmapLayer(
     function applyData() {
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
-      if (m.getLayer(HALO_LAYER)) m.removeLayer(HALO_LAYER);
+      if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
       m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
@@ -120,32 +111,44 @@ export function useHeatmapLayer(
         10, DELAY_RAMP.severe,
       ];
 
-      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
+      // Dots scale with BOTH sample count and zoom so they stay legible when
+      // zoomed out (smaller, less overlap into a blob) and prominent when
+      // zoomed in against the detailed basemap. MapLibre requires `zoom` to be
+      // the TOP-LEVEL interpolate input, so the per-zoom stop outputs are the
+      // samples-driven expression scaled by a per-zoom factor.
+      const samplesDot = (k: number): maplibregl.ExpressionSpecification => [
         "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 6,
-        100, 10,
-        1000, 16,
-        10000, 26,
-        50000, 36,
+        10, 4 * k,
+        100, 6 * k,
+        1000, 7 * k,
+        10000, 12 * k,
+        50000, 18 * k,
       ];
       const DOT_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 4,
-        100, 6,
-        1000, 7,
-        10000, 12,
-        50000, 18,
+        "interpolate", ["linear"], ["zoom"],
+        8, samplesDot(0.5),
+        11, samplesDot(0.85),
+        13, samplesDot(1.1),
+        16, samplesDot(1.6),
+        18, samplesDot(2.1),
       ];
 
+      // Dark casing ring drawn UNDER the dot: a transparent-fill circle at the
+      // dot radius with a wide dark stroke, so only a dark ring shows around
+      // the dot's perimeter (no dark disc behind the fill to muddy the color).
+      // Pairs with the dot's white inner stroke for legibility on any basemap.
       m.addLayer({
-        id: HALO_LAYER,
+        id: CASING_LAYER,
         type: "circle",
         source: SOURCE,
         paint: {
-          "circle-radius": HALO_RADIUS,
-          "circle-color": colorExpr,
-          "circle-blur": 0.5,
-          "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
+          "circle-radius": DOT_RADIUS,
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-color": "#0f1115",
+          "circle-stroke-width": [
+            "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
+          ],
+          "circle-stroke-opacity": buildCasingOpacityExpr(focusedSeverity),
           "circle-pitch-alignment": "map",
         },
       });
@@ -158,12 +161,15 @@ export function useHeatmapLayer(
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
           "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
+          // White stroke reads against ANY basemap — light (淡色), busy/warm
+          // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
+          // stroke vanished. Thickens on hover for emphasis.
           "circle-stroke-width": [
-            "case", ["boolean", ["feature-state", "hover"], false], 2, 1,
+            "case", ["boolean", ["feature-state", "hover"], false], 3, 1.5,
           ],
-          "circle-stroke-color": [
-            "case", ["boolean", ["feature-state", "hover"], false],
-            "#ffffff", "rgba(0,0,0,0.35)",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-opacity": [
+            "case", ["boolean", ["feature-state", "hover"], false], 1, 0.9,
           ],
         },
       });
@@ -189,6 +195,6 @@ export function useHeatmapLayer(
     }
 
     if (styleLoadedRef.current) applyData();
-    else m.once("load", applyData);
-  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef]);
+    else m.once("style.load", applyData);
+  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
 }

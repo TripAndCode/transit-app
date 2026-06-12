@@ -279,6 +279,13 @@
     "empty": {
       "title": "No data to display yet",
       "hint": "The initial fetch may still be in progress. Data will appear automatically in a few minutes."
+    },
+    "style": {
+      "osm": "OSM",
+      "label": "Map style",
+      "pale": "Light",
+      "std": "Standard",
+      "photo": "Satellite"
     }
   },
   "ask": {
@@ -579,7 +586,13 @@
     "manual_refresh": "Refresh now",
     "filter_placeholder": "Filter by route",
     "sort_label": "Sort",
-    "sort": { "deviation": "vs normal", "worst": "Max delay", "avg": "Avg delay", "trips": "Trips", "name": "Name" },
+    "sort": {
+      "deviation": "vs normal",
+      "worst": "Max delay",
+      "avg": "Avg delay",
+      "trips": "Trips",
+      "name": "Name"
+    },
     "bucket": {
       "anomaly": "Anomalous",
       "watch": "Watch",

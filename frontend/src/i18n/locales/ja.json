@@ -279,6 +279,13 @@
     "empty": {
       "title": "まだ表示できるデータがありません",
       "hint": "初回データ取得中の可能性があります。数分後に自動で表示されます。"
+    },
+    "style": {
+      "osm": "OSM",
+      "label": "地図スタイル",
+      "pale": "淡色",
+      "std": "標準",
+      "photo": "航空写真"
     }
   },
   "ask": {
@@ -579,7 +586,13 @@
     "manual_refresh": "手動更新",
     "filter_placeholder": "路線で絞り込み",
     "sort_label": "並び順",
-    "sort": { "deviation": "平常比", "worst": "最大遅延", "avg": "平均遅延", "trips": "運行便数", "name": "名前順" },
+    "sort": {
+      "deviation": "平常比",
+      "worst": "最大遅延",
+      "avg": "平均遅延",
+      "trips": "運行便数",
+      "name": "名前順"
+    },
     "bucket": {
       "anomaly": "異常",
       "watch": "注意",
