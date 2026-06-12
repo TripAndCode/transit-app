@@ -62,7 +62,11 @@ export function useBasemapDim(
       }
     }
 
-    if (styleLoadedRef.current) apply();
+    // Guard on the map's own `isStyleLoaded()` rather than the styleLoadedRef
+    // boolean (which the `load` event sets only after tiles finish): a re-run
+    // after `style.load` has already fired must apply immediately, not wait for
+    // a `once("style.load")` that will never fire again.
+    if (m.isStyleLoaded()) apply();
     else m.once("style.load", apply);
   }, [mapRef, styleLoadedRef, styleEpoch]);
 }

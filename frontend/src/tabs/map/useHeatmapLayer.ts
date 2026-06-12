@@ -7,6 +7,7 @@ import type { SeverityKey } from "../../components/MapLegend";
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
 export const CLUSTER_LAYER = "delay-clusters";
+const CLUSTER_COUNT_LAYER = "delay-cluster-count";
 const CASING_LAYER = "delay-casing";
 
 // Stops within ~50px collapse into one bubble until this zoom; past it they
@@ -114,6 +115,7 @@ export function useHeatmapLayer(
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
+      if (m.getLayer(CLUSTER_COUNT_LAYER)) m.removeLayer(CLUSTER_COUNT_LAYER);
       if (m.getLayer(CLUSTER_LAYER)) m.removeLayer(CLUSTER_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
@@ -157,6 +159,26 @@ export function useHeatmapLayer(
           "circle-stroke-width": 2.5,
           "circle-stroke-color": "#ffffff",
           "circle-opacity": 0.95,
+        },
+      });
+
+      // Stop-count label on each bubble — an empty colored circle reads as
+      // "creepy"; the number tells the user how many stops collapsed here.
+      m.addLayer({
+        id: CLUSTER_COUNT_LAYER,
+        type: "symbol",
+        source: SOURCE,
+        filter: IS_CLUSTER,
+        layout: {
+          "text-field": ["get", "point_count_abbreviated"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 13,
+          "text-allow-overlap": true,
+        },
+        paint: {
+          "text-color": "#ffffff",
+          "text-halo-color": "rgba(0,0,0,0.25)",
+          "text-halo-width": 1,
         },
       });
 
@@ -254,7 +276,12 @@ export function useHeatmapLayer(
       }
     }
 
-    if (styleLoadedRef.current) applyData();
+    // Guard on the map's own `isStyleLoaded()`, NOT the styleLoadedRef boolean:
+    // this effect re-runs when `data` arrives, which can be AFTER `style.load`
+    // already fired (e.g. slow basemap tiles delay the `load` event that sets
+    // the ref). Registering `once("style.load")` then would wait for an event
+    // that never fires again — the overlay would silently never attach.
+    if (m.isStyleLoaded()) applyData();
     else m.once("style.load", applyData);
   }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
 }

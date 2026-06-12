@@ -54,6 +54,17 @@ describe("useHeatmapLayer (clustering)", () => {
     expect(ids.indexOf(CLUSTER_LAYER)).toBeLessThan(ids.indexOf(LAYER));
   });
 
+  it("labels each bubble with its stop count", () => {
+    const map = makeMockMap();
+    run(map);
+    const count = map.getLayer("delay-cluster-count") as MockLayer;
+    expect(count?.type).toBe("symbol");
+    expect(count.filter).toEqual(["has", "point_count"]);
+    expect((count.layout as Record<string, unknown>)["text-field"]).toEqual([
+      "get", "point_count_abbreviated",
+    ]);
+  });
+
   it("filters the casing + dot layers to individual (unclustered) stops only", () => {
     const map = makeMockMap();
     run(map);

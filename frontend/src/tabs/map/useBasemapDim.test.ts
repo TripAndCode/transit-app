@@ -47,10 +47,11 @@ describe("useBasemapDim", () => {
   });
 
   it("defers apply until style.load when the style is not yet loaded", () => {
-    const map = makeMockMap();
-    run(map, false); // styleLoaded=false → hook registers once("style.load")
+    // style not loaded yet → hook must register once("style.load"), not apply now
+    const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
+    run(map);
     expect(map.getLayer(SCRIM_LAYER)).toBeUndefined(); // nothing applied yet
-    map.fireOnce("style.load");
+    map.fireOnce("style.load"); // flips isStyleLoaded() true + runs the handler
     expect(map.getLayer(SCRIM_LAYER)).toBeDefined(); // applied after the event
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
       "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,

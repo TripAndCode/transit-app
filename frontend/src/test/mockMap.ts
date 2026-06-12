@@ -9,10 +9,14 @@ export interface MockLayer {
   [k: string]: unknown;
 }
 
-export function makeMockMap(initialLayers: MockLayer[] = [{ id: "basemap", type: "raster" }]) {
+export function makeMockMap(
+  initialLayers: MockLayer[] = [{ id: "basemap", type: "raster" }],
+  styleLoaded = true,
+) {
   const layers: MockLayer[] = [...initialLayers];
   const sources: Record<string, unknown> = {};
   const paint: Record<string, unknown> = {};
+  let styleLoadedFlag = styleLoaded;
   const map = {
     layers,
     sources,
@@ -39,11 +43,14 @@ export function makeMockMap(initialLayers: MockLayer[] = [{ id: "basemap", type:
     },
     getPaintProperty: (layerId: string, prop: string) => paint[`${layerId}|${prop}`],
     getStyle: () => ({ layers }),
+    isStyleLoaded: () => styleLoadedFlag,
     _onceHandlers: {} as Record<string, () => void>,
     once: (event: string, cb: () => void) => {
       map._onceHandlers[event] = cb;
     },
     fireOnce: (event: string) => {
+      // a real `style.load` means the style is now loaded
+      if (event === "style.load") styleLoadedFlag = true;
       const cb = map._onceHandlers[event];
       if (cb) {
         delete map._onceHandlers[event];
