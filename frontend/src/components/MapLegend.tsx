@@ -36,10 +36,10 @@ type MapLegendProps = {
  * fixed-position child of the map container. Position persists in localStorage
  * across reloads. Header strip is the drag handle.
  *
- * Clicking a delay-ramp swatch focuses that severity band: matching circles
- * keep their full severity-floored opacity; circles outside the band go to
- * opacity 0 (fully invisible). Click the same band again, or 選択を解除, // i18n-ignore: JSDoc
- * to clear focus.
+ * Clicking a delay-ramp swatch focuses that severity band: the map is FILTERED
+ * to stops in that band (cluster bubbles + dots re-form from only those stops),
+ * not merely dimmed. Bands with zero stops are shown but disabled. Click the
+ * same band again, or 選択を解除, to clear focus. // i18n-ignore: JSDoc
  */
 export function MapLegend({
   showSingleSampleStops,

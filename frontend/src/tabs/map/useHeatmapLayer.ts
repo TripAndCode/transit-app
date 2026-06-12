@@ -7,7 +7,7 @@ import type { SeverityKey } from "../../components/MapLegend";
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
 export const CLUSTER_LAYER = "delay-clusters";
-const CLUSTER_COUNT_LAYER = "delay-cluster-count";
+export const CLUSTER_COUNT_LAYER = "delay-cluster-count";
 const CASING_LAYER = "delay-casing";
 
 // Stops within ~50px collapse into one bubble until this zoom; past it they
