@@ -252,6 +252,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_stop_daily (raw observations; powers the fast heatmap path) ──
         if has_static:
+            # Same expr used in SELECT and GROUP BY below — one call keeps them in sync.
             band_case = time_band_case_sql("u.scheduled_time")
             sql = f"""
                 INSERT INTO agg_stop_daily
@@ -265,7 +266,7 @@ def analyze(agency_id: int, conn) -> None:
                   ON sst.agency_id = %(agency_id)s
                  AND sst.trip_id = u.trip_id
                  AND sst.stop_sequence = u.stop_sequence
-                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
+                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL AND u.service_type IS NOT NULL
                 GROUP BY sst.stop_id, u.captured_at::date, u.service_type, {band_case}
             """
             with conn.cursor() as cur:
