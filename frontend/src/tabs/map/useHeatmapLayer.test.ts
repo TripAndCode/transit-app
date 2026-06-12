@@ -73,11 +73,14 @@ describe("useHeatmapLayer (clustering)", () => {
     expect((map.getLayer("delay-casing") as MockLayer).filter).toEqual(stopFilter);
   });
 
-  it("dots use a plain (non-zoom-faded) data-driven opacity", () => {
+  it("sizes dots by delay severity, not sample count", () => {
     const map = makeMockMap();
     run(map);
-    const op = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
-    // top-level op is `max` (samples/severity), NOT an `interpolate` over zoom
-    expect((op["circle-opacity"] as unknown[])[0]).toBe("max");
+    const paint = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
+    const radius = JSON.stringify(paint["circle-radius"]);
+    expect(radius).toContain("avg_delay_min"); // size driven by delay
+    expect(radius).not.toContain("samples"); // NOT by data volume
+    // solid fill (no focus) — opacity no longer encodes samples
+    expect(paint["circle-opacity"]).toBe(0.92);
   });
 });

@@ -246,10 +246,11 @@
       "band_5_10": "5 – 10分",
       "band_gt_10": "> 10分",
       "clear_selection": "選択を解除",
-      "size_density": "サイズ・濃度",
-      "few_to_many": "少 → 多",
+      "size_density": "ドットの大きさ",
+      "few_to_many": "遅延 小 → 大",
       "color_explainer": "色: 平均遅延の段階",
-      "size_explainer": "円の大きさ・濃度: サンプル数",
+      "bubble_explainer": "バブル: 停留所のまとまり（数字 = 停留所の数）",
+      "size_explainer": "ドットの大きさ: 遅延が大きいほど大きく",
       "drag_handle": "凡例を移動 (矢印キー)"
     },
     "popup": {
@@ -266,7 +267,7 @@
       "color_strong": "色",
       "color_meaning": "は平均遅延の段階、",
       "size_strong": "大きさ",
-      "size_meaning": "はサンプル数（観測の多さ）。",
+      "size_meaning": "は遅延の大きさ（大きいほど遅い）。",
       "body_1": "凡例の色をクリックすると該当の遅延帯だけを表示します。停留所をクリックすると詳細表示と拡大ができます。",
       "body_2": "経路を 1 つに絞ると、実際の道路形状で路線が描画されます。",
       "hotspots_intro": "ホットスポット（赤・大きい円）は",

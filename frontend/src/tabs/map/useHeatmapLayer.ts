@@ -40,23 +40,12 @@ function severityMatchExpr(focused: SeverityKey): maplibregl.ExpressionSpecifica
 function buildCircleOpacityExpr(
   focused: SeverityKey | null,
 ): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.7,
-      [">=", ["get", "avg_delay_min"], 5], 0.55,
-      0.0,
-    ],
-    [
-      "interpolate", ["linear"], ["get", "samples"],
-      1, 0.35,
-      50, 0.7,
-      500, 0.85,
-    ],
-  ];
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
+  // Solid fill — delay is encoded by color + dot SIZE, not opacity. (Opacity
+  // used to scale with sample count; tying the visual to data volume instead of
+  // the delay itself was unintuitive.) Focus dims non-matching bands to 0.
+  const SOLID = 0.92;
+  if (focused === null) return SOLID;
+  return ["case", severityMatchExpr(focused), SOLID, 0];
 }
 
 // Dark casing ring opacity. Constant + focus-aware (non-focused dim to 0 so a
@@ -191,26 +180,25 @@ export function useHeatmapLayer(
         10, DELAY_RAMP.severe,
       ];
 
-      // Dots scale with BOTH sample count and zoom so they stay legible when
-      // zoomed out (smaller, less overlap into a blob) and prominent when
-      // zoomed in against the detailed basemap. MapLibre requires `zoom` to be
-      // the TOP-LEVEL interpolate input, so the per-zoom stop outputs are the
-      // samples-driven expression scaled by a per-zoom factor.
-      const samplesDot = (k: number): maplibregl.ExpressionSpecification => [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 4 * k,
-        100, 6 * k,
-        1000, 7 * k,
-        10000, 12 * k,
-        50000, 18 * k,
+      // Dot SIZE encodes the DELAY itself — bigger = worse — so color and size
+      // reinforce the same signal. (Size used to scale with sample count, which
+      // just made data-rich stops loom large regardless of delay.) MapLibre
+      // requires `zoom` to be the TOP-LEVEL interpolate input, so each per-zoom
+      // stop output is the delay-driven size scaled by a per-zoom factor.
+      const delaySize = (k: number): maplibregl.ExpressionSpecification => [
+        "interpolate", ["linear"], ["get", "avg_delay_min"],
+        0, 4 * k,
+        2, 6 * k,
+        5, 9 * k,
+        10, 13 * k,
       ];
       const DOT_RADIUS: maplibregl.ExpressionSpecification = [
         "interpolate", ["linear"], ["zoom"],
-        8, samplesDot(0.5),
-        11, samplesDot(0.85),
-        13, samplesDot(1.1),
-        16, samplesDot(1.6),
-        18, samplesDot(2.1),
+        8, delaySize(0.5),
+        11, delaySize(0.85),
+        13, delaySize(1.1),
+        16, delaySize(1.6),
+        18, delaySize(2.1),
       ];
 
       // Dark casing ring drawn UNDER the dot: a transparent-fill circle at the

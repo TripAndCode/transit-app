@@ -246,10 +246,11 @@
       "band_5_10": "5–10 min",
       "band_gt_10": "> 10 min",
       "clear_selection": "Clear selection",
-      "size_density": "Size · density",
-      "few_to_many": "Few → many",
+      "size_density": "Dot size",
+      "few_to_many": "delay: low → high",
       "color_explainer": "Color: average delay band",
-      "size_explainer": "Circle size & opacity: sample count",
+      "bubble_explainer": "Bubble: a group of stops (number = how many stops)",
+      "size_explainer": "Dot size: bigger = longer delay",
       "drag_handle": "Move legend (arrow keys)"
     },
     "popup": {
@@ -266,7 +267,7 @@
       "color_strong": "Color",
       "color_meaning": "indicates the average delay band,",
       "size_strong": "size",
-      "size_meaning": "reflects sample count (how many observations).",
+      "size_meaning": "reflects how large the delay is (bigger = worse).",
       "body_1": "Click a legend color to filter to that delay band. Click a stop for details and zoom.",
       "body_2": "Narrow to a single route to see it drawn along the actual road geometry.",
       "hotspots_intro": "Hotspots (red, large circles) are",

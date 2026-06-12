@@ -215,13 +215,14 @@ export function MapLegend({
             {t("map.legend.size_density")}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Dot diameter={6} opacity={0.4} />
-            <Dot diameter={9} opacity={0.65} />
-            <Dot diameter={12} opacity={0.85} />
+            <Dot diameter={6} color={DELAY_RAMP.ok} />
+            <Dot diameter={10} color={DELAY_RAMP.mild} />
+            <Dot diameter={14} color={DELAY_RAMP.moderate} />
             <span style={{ color: "var(--text-tertiary)" }}>{t("map.legend.few_to_many")}</span>
           </div>
           <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
             {t("map.legend.color_explainer")}<br />
+            {t("map.legend.bubble_explainer")}<br />
             {t("map.legend.size_explainer")}
           </div>
         </div>
@@ -281,13 +282,21 @@ function Row({
   );
 }
 
-function Dot({ diameter, opacity }: { diameter: number; opacity: number }) {
+function Dot({
+  diameter,
+  opacity = 1,
+  color = DELAY_RAMP.moderate,
+}: {
+  diameter: number;
+  opacity?: number;
+  color?: string;
+}) {
   return (
     <span
       style={{
         width: diameter,
         height: diameter,
-        background: DELAY_RAMP.moderate,
+        background: color,
         borderRadius: "50%",
         opacity,
       }}
