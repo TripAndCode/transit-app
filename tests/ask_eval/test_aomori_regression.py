@@ -11,7 +11,7 @@ import pathlib
 
 from pipeline.ingest import _ts, parse_pb
 
-FIX_DIR = pathlib.Path(__file__).parent / "fixtures"
+FIX_DIR = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def test_aomori_parse_pb_matches_golden():

@@ -156,7 +156,7 @@ def test_load_static_zip_without_shapes_succeeds(pg_conn, agency_id, caplog):
 
 def test_load_static_populates_service_id_for_hiroden(pg_conn, tmp_path):
     """Hiroden's trips.txt has service_id; loader must populate the new column."""
-    zip_path = pathlib.Path(__file__).parent / "fixtures" / "hiroden_static.zip"
+    zip_path = pathlib.Path(__file__).parent.parent / "fixtures" / "hiroden_static.zip"
     if not zip_path.exists():
         pytest.skip("Hiroden static fixture not present")
     with pg_conn.cursor() as cur:
