@@ -117,22 +117,36 @@ export function useHeatmapLayer(
       // Overview density field: replaces the dot mass when zoomed out, fades out by
       // z14 as the dots fade in. Weighted by delay severity (low-delay barely paints)
       // and kept low-intensity/small-radius so it shows hotspots, not a red blanket.
+      const heatWeightExpr: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["get", "avg_delay_min"],
+        0, 0, 2, 0.22, 5, 0.7, 10, 1,
+      ];
+      const heatIntensityExpr: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["zoom"], 8, 0.25, 11, 0.5, 13, 0.8,
+      ];
+      const heatRadiusExpr: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["zoom"], 8, 9, 11, 15, 13, 22,
+      ];
+      const heatOpacityExpr: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["zoom"], 11, 0.85, 13, 0.55, 14, 0,
+      ];
+      const heatColorExpr: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["heatmap-density"],
+        ...(HEAT_RAMP.flatMap((s) => [s[0], s[1]]) as (number | string)[]),
+      ];
       m.addLayer({
         id: HEAT_LAYER,
         type: "heatmap",
         source: SOURCE,
         maxzoom: 15,
         paint: {
-          "heatmap-weight": [
-            "interpolate", ["linear"], ["get", "avg_delay_min"],
-            0, 0, 2, 0.22, 5, 0.7, 10, 1,
-          ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 8, 0.25, 11, 0.5, 13, 0.8],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 8, 9, 11, 15, 13, 22],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0.85, 13, 0.55, 14, 0],
-          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], ...HEAT_RAMP.flatMap((s) => [s[0], s[1]])],
+          "heatmap-weight": heatWeightExpr,
+          "heatmap-intensity": heatIntensityExpr,
+          "heatmap-radius": heatRadiusExpr,
+          "heatmap-opacity": heatOpacityExpr,
+          "heatmap-color": heatColorExpr,
         },
-      } as Parameters<typeof m.addLayer>[0]);
+      });
 
       const colorExpr: maplibregl.ExpressionSpecification = [
         "step",

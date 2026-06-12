@@ -31,10 +31,14 @@ describe("useHeatmapLayer", () => {
     const heat = map.getLayer(HEAT_LAYER) as MockLayer;
     expect(heat?.type).toBe("heatmap");
     expect(heat.source).toBe(SOURCE);
-    const expected = ["interpolate", ["linear"], ["heatmap-density"], ...HEAT_RAMP.flat()];
+    const expected = ["interpolate", ["linear"], ["heatmap-density"], ...HEAT_RAMP.flatMap((s) => [s[0], s[1]])];
     expect((heat.paint as Record<string, unknown>)["heatmap-color"]).toEqual(expected);
     const ids = map.layers.map((l) => l.id);
     expect(ids.indexOf(HEAT_LAYER)).toBeLessThan(ids.indexOf(LAYER));
+    const ho = (heat.paint as Record<string, unknown>)["heatmap-opacity"] as unknown[];
+    expect(ho[0]).toBe("interpolate");
+    expect(ho[2]).toEqual(["zoom"]);
+    expect(ho[3]).toBe(11);
   });
 
   it("fades the dots in with zoom — circle-opacity is a top-level zoom interpolate at 0 by z11", () => {
@@ -46,5 +50,16 @@ describe("useHeatmapLayer", () => {
     expect(op[2]).toEqual(["zoom"]); // zoom is the TOP-LEVEL input (gotcha guard)
     expect(op[3]).toBe(11); // first stop
     expect(op[4]).toBe(0); // fully transparent at overview
+  });
+
+  it("fades the casing ring in with zoom too", () => {
+    const map = makeMockMap();
+    run(map);
+    const casing = map.layers.find((l) => l.id === "delay-casing") as MockLayer;
+    const so = (casing.paint as Record<string, unknown>)["circle-stroke-opacity"] as unknown[];
+    expect(so[0]).toBe("interpolate");
+    expect(so[2]).toEqual(["zoom"]);
+    expect(so[3]).toBe(11);
+    expect(so[4]).toBe(0);
   });
 });
