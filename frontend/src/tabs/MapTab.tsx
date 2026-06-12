@@ -17,6 +17,7 @@ import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
 import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
+import { useBasemapDim } from "./map/useBasemapDim";
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -199,6 +200,10 @@ export function MapTab() {
       setStyleEpoch((e) => e + 1);
     });
   }, [styleId, i18n.language]);
+
+  // Before the overlay hooks so the scrim is inserted beneath their layers
+  // (effect order follows hook-call order).
+  useBasemapDim(mapRef, styleLoadedRef, styleEpoch);
 
   useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
 
