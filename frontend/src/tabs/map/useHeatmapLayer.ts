@@ -121,21 +121,42 @@ export function useHeatmapLayer(
         10, DELAY_RAMP.severe,
       ];
 
-      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
+      // Dots scale with BOTH sample count and zoom so they stay legible when
+      // zoomed out (smaller, less overlap into a blob) and prominent when
+      // zoomed in against the detailed basemap. MapLibre requires `zoom` to be
+      // the TOP-LEVEL interpolate input, so the per-zoom stop outputs are the
+      // samples-driven expression scaled by a per-zoom factor.
+      const samplesHalo = (k: number): maplibregl.ExpressionSpecification => [
         "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 6,
-        100, 10,
-        1000, 16,
-        10000, 26,
-        50000, 36,
+        10, 6 * k,
+        100, 10 * k,
+        1000, 16 * k,
+        10000, 26 * k,
+        50000, 36 * k,
+      ];
+      const samplesDot = (k: number): maplibregl.ExpressionSpecification => [
+        "interpolate", ["exponential", 1.4], ["get", "samples"],
+        10, 4 * k,
+        100, 6 * k,
+        1000, 7 * k,
+        10000, 12 * k,
+        50000, 18 * k,
+      ];
+      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
+        "interpolate", ["linear"], ["zoom"],
+        8, samplesHalo(0.5),
+        11, samplesHalo(0.85),
+        13, samplesHalo(1.1),
+        16, samplesHalo(1.6),
+        18, samplesHalo(2.1),
       ];
       const DOT_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 4,
-        100, 6,
-        1000, 7,
-        10000, 12,
-        50000, 18,
+        "interpolate", ["linear"], ["zoom"],
+        8, samplesDot(0.5),
+        11, samplesDot(0.85),
+        13, samplesDot(1.1),
+        16, samplesDot(1.6),
+        18, samplesDot(2.1),
       ];
 
       m.addLayer({
@@ -159,12 +180,15 @@ export function useHeatmapLayer(
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
           "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
+          // White stroke reads against ANY basemap — light (淡色), busy/warm
+          // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
+          // stroke vanished. Thickens on hover for emphasis.
           "circle-stroke-width": [
-            "case", ["boolean", ["feature-state", "hover"], false], 2, 1,
+            "case", ["boolean", ["feature-state", "hover"], false], 3, 1.5,
           ],
-          "circle-stroke-color": [
-            "case", ["boolean", ["feature-state", "hover"], false],
-            "#ffffff", "rgba(0,0,0,0.35)",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-opacity": [
+            "case", ["boolean", ["feature-state", "hover"], false], 1, 0.9,
           ],
         },
       });
