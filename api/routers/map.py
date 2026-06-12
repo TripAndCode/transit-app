@@ -22,7 +22,7 @@ import json
 from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_agency, get_conn
-from api.range import RangeCtx, build_updates_filter, get_range_ctx
+from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter, get_range_ctx
 from api.triage import classify_route
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
@@ -458,6 +458,34 @@ async def route_stop_profile(
     }
 
 
+def _heatmap_features(rows) -> dict:
+    """Build a GeoJSON FeatureCollection from query rows.
+
+    Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
+    stop_codes, route_codes, avg_delay_min, samples.  Those columns are mapped
+    to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
+    platform_code, avg_delay_min, samples, route_codes).
+    """
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [round(float(r["lon"]), 6), round(float(r["lat"]), 6)]},
+            "properties": {
+                "stop_id": r["stop_ids"],
+                "stop_name": r["stop_name"],
+                "stop_code": r["stop_codes"] or "",
+                "platform_code": r["platform_codes"] or "",
+                "avg_delay_min": float(r["avg_delay_min"]),
+                "samples": r["samples"],
+                "route_codes": r["route_codes"] or "",
+            },
+        }
+        for r in rows
+        if r["lon"] is not None and r["lat"] is not None
+    ]
+    return {"type": "FeatureCollection", "features": features}
+
+
 @router.get("/delays/heatmap")
 async def delay_heatmap(
     agency_id: int = Depends(get_agency),
@@ -475,73 +503,97 @@ async def delay_heatmap(
 
     Output coordinates are the centroid of the merged poles so the dot sits
     between paired platforms rather than on one of them.
+
+    When no route filter is set, serves from ``agg_stop_daily`` (fast aggregate
+    path). When a route filter IS set, falls back to the live ``updates`` query
+    so the filter can be applied exactly against raw rows.
     """
-    where_frag, params, _ = build_updates_filter(ctx, next_param=2)
-    rows = await conn.fetch(
-        f"""
-        SELECT
-            AVG(ST_X(ss.geom))::numeric AS lon,
-            AVG(ST_Y(ss.geom))::numeric AS lat,
-            string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
-            string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
-            string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
-                AS platform_codes,
-            string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
-                AS stop_codes,
-            string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code) AS route_codes,
-            ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
-            COUNT(*) AS samples
-        FROM updates u
-        JOIN static_stop_times sst
-            ON u.trip_id = sst.trip_id AND u.stop_sequence = sst.stop_sequence
-            AND sst.agency_id = $1
-        JOIN static_stops ss
-            ON sst.stop_id = ss.stop_id AND ss.agency_id = $1
-        WHERE u.agency_id = $1
-            AND u.dep_delay IS NOT NULL
-            AND ss.geom IS NOT NULL
-            AND {where_frag}
-        GROUP BY
-            CASE
-                WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                    THEN ss.stop_name
-                ELSE 'unnamed:' || ss.stop_id
-            END,
-            CASE
-                WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                    THEN ST_SnapToGrid(ss.geom, 0.05)
-                ELSE ST_SnapToGrid(ss.geom, 0.01)
-            END
-        """,
-        agency_id,
-        *params,
-    )
-    features = [
-        {
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [round(float(r["lon"]), 6), round(float(r["lat"]), 6)]},
-            "properties": {
-                "stop_id": r["stop_ids"],  # comma-joined list when clustered
-                "stop_name": r["stop_name"],
-                "stop_code": r["stop_codes"] or "",
-                "platform_code": r["platform_codes"] or "",
-                "avg_delay_min": float(r["avg_delay_min"]),
-                "samples": r["samples"],
-                "route_codes": r["route_codes"] or "",
-            },
-        }
-        for r in rows
-        if r["lon"] is not None and r["lat"] is not None
-    ]
-    return {
-        "type": "FeatureCollection",
-        "features": features,
-        "ctx": {
-            "from": ctx.from_date.isoformat(),
-            "to": ctx.to_date.isoformat(),
-            "dow": ctx.dow,
-            "time_band": ctx.time_band,
-            "service": ctx.service,
-            "routes": list(ctx.routes),
-        },
+    if ctx.routes:
+        # Route filter → live path (agg is not pre-split by route_code).
+        where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+        rows = await conn.fetch(
+            f"""
+            SELECT
+                AVG(ST_X(ss.geom))::numeric AS lon,
+                AVG(ST_Y(ss.geom))::numeric AS lat,
+                string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
+                string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
+                string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
+                    AS platform_codes,
+                string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
+                    AS stop_codes,
+                string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code) AS route_codes,
+                ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
+                COUNT(*) AS samples
+            FROM updates u
+            JOIN static_stop_times sst
+                ON u.trip_id = sst.trip_id AND u.stop_sequence = sst.stop_sequence
+                AND sst.agency_id = $1
+            JOIN static_stops ss
+                ON sst.stop_id = ss.stop_id AND ss.agency_id = $1
+            WHERE u.agency_id = $1
+                AND u.dep_delay IS NOT NULL
+                AND ss.geom IS NOT NULL
+                AND {where_frag}
+            GROUP BY
+                CASE
+                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                        THEN ss.stop_name
+                    ELSE 'unnamed:' || ss.stop_id
+                END,
+                CASE
+                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                        THEN ST_SnapToGrid(ss.geom, 0.05)
+                    ELSE ST_SnapToGrid(ss.geom, 0.01)
+                END
+            """,
+            agency_id,
+            *params,
+        )
+    else:
+        # No route filter → aggregate path (fast; reads from agg_stop_daily).
+        agg_where, params, _ = build_agg_stop_filter(ctx, next_param=2)
+        rows = await conn.fetch(
+            f"""
+            SELECT
+                AVG(ST_X(ss.geom))::numeric AS lon,
+                AVG(ST_Y(ss.geom))::numeric AS lat,
+                string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
+                string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
+                string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
+                    AS platform_codes,
+                string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
+                    AS stop_codes,
+                string_agg(DISTINCT r.route_codes, ',') AS route_codes,
+                ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                SUM(a.samples) AS samples
+            FROM agg_stop_daily a
+            JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
+            LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
+            WHERE a.agency_id = $1 AND ss.geom IS NOT NULL AND {agg_where}
+            GROUP BY
+                CASE
+                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                        THEN ss.stop_name
+                    ELSE 'unnamed:' || ss.stop_id
+                END,
+                CASE
+                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
+                        THEN ST_SnapToGrid(ss.geom, 0.05)
+                    ELSE ST_SnapToGrid(ss.geom, 0.01)
+                END
+            """,
+            agency_id,
+            *params,
+        )
+
+    fc = _heatmap_features(rows)
+    fc["ctx"] = {
+        "from": ctx.from_date.isoformat(),
+        "to": ctx.to_date.isoformat(),
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "routes": list(ctx.routes),
     }
+    return fc

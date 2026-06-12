@@ -200,6 +200,16 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
             "(agency_id, route_code, stop_sequence, stop_name, avg_min, samples)",
             "(%s, 'GHOST', 99, 'GHOST STOP', 99.9, 100)",
         ),
+        (
+            "agg_stop_daily",
+            "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples)",
+            "(%s, 'GHOST_STOP', '2099-01-01', '平日', 'morning', 999, 100)",
+        ),
+        (
+            "agg_stop_routes",
+            "(agency_id, stop_id, route_codes)",
+            "(%s, 'GHOST_STOP', 'GHOST_ROUTE')",
+        ),
     )
     with pg_conn.cursor() as cur:
         for table, cols, values in ghosts:
@@ -208,12 +218,20 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
 
     analyze(agency_id, pg_conn)
 
+    # Tables keyed by route_code use GHOST; the new stop tables use GHOST_STOP.
+    _stop_ghost_tables = {"agg_stop_daily", "agg_stop_routes"}
     with pg_conn.cursor() as cur:
         for table, _cols, _values in ghosts:
-            cur.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND route_code = 'GHOST'",
-                (agency_id,),
-            )
+            if table in _stop_ghost_tables:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND stop_id = 'GHOST_STOP'",
+                    (agency_id,),
+                )
+            else:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND route_code = 'GHOST'",
+                    (agency_id,),
+                )
             ghost_count = cur.fetchone()[0]
             assert ghost_count == 0, f"stale GHOST row survived analyze in {table}"
 
@@ -275,3 +293,78 @@ def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id):
     assert service_types, "expected at least the non-null service_type group"
     assert all(st is not None for st in service_types), "NULL service_type leaked into agg_route_stats"
     assert "平日" in service_types
+
+
+def _seed_for_stop_agg(pg_conn, agency_id):
+    from datetime import time
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s1','駅前',ST_SetSRID(ST_MakePoint(140.74,40.82),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'T',1,'s1')",
+            (agency_id,),
+        )
+        for i, delay in enumerate([60, 120, 180]):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES (%s,%s,'2026-06-09T08:10:00','T','平日',%s,'R1',1,%s)",
+                (agency_id, f"f{i}.pb", time(8, 10), delay),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_builds_agg_stop_daily(pg_conn, agency_id):
+    from pipeline.analyze import analyze
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT stop_id, service_type, time_band, delay_sum, samples FROM agg_stop_daily WHERE agency_id=%s",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    stop_id, svc, band, delay_sum, samples = rows[0]
+    assert (stop_id, svc, band) == ("s1", "平日", "morning")
+    assert delay_sum == 360 and samples == 3  # 60+120+180; raw count, not deduped
+
+
+def test_analyze_builds_agg_stop_routes(pg_conn, agency_id):
+    from pipeline.analyze import analyze
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s1'", (agency_id,))
+        assert cur.fetchone()[0] == "R1"
+
+
+def test_agg_stop_daily_skips_null_service_type(pg_conn, agency_id):
+    """NULL service_type rows (agency-9 case) must not abort the agg build."""
+    from datetime import time
+
+    from pipeline.analyze import analyze
+
+    _seed_for_stop_agg(pg_conn, agency_id)  # 3 valid rows, stop s1, service 平日
+    with pg_conn.cursor() as cur:
+        # a NULL-service_type observation for the same stop/trip
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'fnull.pb','2026-06-09T08:10:00','T',NULL,%s,'R1',1,240)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)  # must NOT raise NotNullViolation
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT service_type, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
+        rows = cur.fetchall()
+    # only the non-null service_type group survives; the 3 valid rows, NOT the null one
+    assert all(st is not None for st, _ in rows)
+    assert sum(s for _, s in rows) == 3

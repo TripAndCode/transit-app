@@ -17,6 +17,7 @@ import logging
 
 import psycopg2.extras
 
+from api.range import time_band_case_sql
 from pipeline.db import _DEDUP_INNER, _static_loaded, build_dedup_inner_sql
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ _AGG_TABLES_ORDERED = (
     "agg_route_dow",
     "agg_daily_trend",
     "agg_stop_seq",
+    "agg_stop_daily",
+    "agg_stop_routes",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -246,6 +249,47 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_stop_seq: {len(rows)} rows")
+
+        # ── agg_stop_daily (raw observations; powers the fast heatmap path) ──
+        if has_static:
+            # Same expr used in SELECT and GROUP BY below — one call keeps them in sync.
+            band_case = time_band_case_sql("u.scheduled_time")
+            sql = f"""
+                INSERT INTO agg_stop_daily
+                    (agency_id, stop_id, date, service_type, time_band, delay_sum, samples)
+                SELECT
+                    %(agency_id)s, sst.stop_id, u.captured_at::date, u.service_type,
+                    {band_case} AS time_band,
+                    SUM(u.dep_delay)::bigint, COUNT(*)
+                FROM updates u
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = u.trip_id
+                 AND sst.stop_sequence = u.stop_sequence
+                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL AND u.service_type IS NOT NULL
+                GROUP BY sst.stop_id, u.captured_at::date, u.service_type, {band_case}
+            """
+            with conn.cursor() as cur:
+                cur.execute(sql, p)
+                logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
+
+            # ── agg_stop_routes (distinct observed routes per stop) ──────────────
+            sql = """
+                INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
+                SELECT %(agency_id)s, sst.stop_id,
+                       string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code)
+                FROM updates u
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = u.trip_id
+                 AND sst.stop_sequence = u.stop_sequence
+                WHERE u.agency_id = %(agency_id)s
+                GROUP BY sst.stop_id
+            """
+            with conn.cursor() as cur:
+                cur.execute(sql, p)
+                logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
+
         conn.commit()
         logger.info("Analysis complete.")
     except Exception:

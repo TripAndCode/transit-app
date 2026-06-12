@@ -242,6 +242,51 @@ def build_updates_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int
     return " AND ".join(parts), params, n
 
 
+def time_band_case_sql(column: str) -> str:
+    """SQL CASE mapping a TIME column to its `_TIME_BAND_RANGES` band key.
+
+    Generated from `_TIME_BAND_RANGES` so analyze's bucketing can never drift
+    from `time_band_clause`'s filter. NULL / out-of-range -> 'none'.
+    """
+    arms = "\n".join(
+        f"            WHEN {column} >= '{start}'::time AND {column} < '{end}'::time THEN '{band}'"
+        for band, (start, end) in _TIME_BAND_RANGES.items()
+    )
+    return f"CASE\n            WHEN {column} IS NULL THEN 'none'\n{arms}\n            ELSE 'none'\n        END"
+
+
+def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """WHERE fragment for `agg_stop_daily` (date / DOW / service / time_band).
+
+    `time_band` matches the stored band KEY directly (analyze pre-bucketed it
+    via `time_band_case_sql`), not a scheduled_time range.
+    """
+    parts: list[str] = []
+    params: list = []
+    n = next_param
+
+    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
+    parts.append(frag)
+    params.extend(p)
+
+    frag, p, n = dow_clause("date", ctx, n)
+    if frag != "TRUE":
+        parts.append(frag)
+        params.extend(p)
+
+    if ctx.service != "all":
+        parts.append(f"service_type = ${n}")
+        params.append(ctx.service)
+        n += 1
+
+    if ctx.time_band != "all":
+        parts.append(f"time_band = ${n}")
+        params.append(ctx.time_band)
+        n += 1
+
+    return " AND ".join(parts), params, n
+
+
 def build_agg_daily_trend_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     """WHERE fragment for ``agg_daily_trend`` (aggregated; no time-band column)."""
     parts: list[str] = []
