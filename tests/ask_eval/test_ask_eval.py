@@ -12,7 +12,7 @@ def test_ask_eval_passes():
     # environments where the venv is already active (e.g. CI with poetry run).
     import shutil
 
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
     poetry_exe = shutil.which("poetry")
     if poetry_exe:
         r = subprocess.run(

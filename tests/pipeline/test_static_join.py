@@ -7,7 +7,7 @@ import pytest
 from pipeline.static_loader import load_static
 from pipeline.strategies import static_join
 
-FIX = pathlib.Path(__file__).parent / "fixtures"
+FIX = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def _hex_pb_with_one_trip(trip_id: str, route_id: str = "R1") -> bytes:
