@@ -1,13 +1,23 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
-import { DELAY_RAMP, HEAT_RAMP } from "../../styles/tokens";
+import { DELAY_RAMP } from "../../styles/tokens";
 import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
-export const HEAT_LAYER = "delay-heat";
+export const CLUSTER_LAYER = "delay-clusters";
 const CASING_LAYER = "delay-casing";
+
+// Stops within ~50px collapse into one bubble until this zoom; past it they
+// render individually as the bullseye dots. Kept in sync with the muted-basemap
+// ramp (useBasemapDim, z12->14) so the basemap quiets as the dots take over.
+const CLUSTER_RADIUS = 50;
+const CLUSTER_MAX_ZOOM = 13;
+// Selects clustered vs. unclustered features. Clusters carry `point_count`;
+// individual stops do not.
+const IS_CLUSTER: maplibregl.ExpressionSpecification = ["has", "point_count"];
+const IS_STOP: maplibregl.ExpressionSpecification = ["!", ["has", "point_count"]];
 
 /**
  * Build the MapLibre filter expression that selects circles falling into a
@@ -60,22 +70,17 @@ function buildCasingOpacityExpr(
   return ["case", severityMatchExpr(focused), base, 0];
 }
 
-// Fade an opacity in with zoom WITHOUT losing its data-driven value. MapLibre forbids
-// `["zoom"]` nested under arithmetic, so we can't multiply a zoom factor in; instead the
-// full (samples/focus-aware) expression is the STOP OUTPUT of a top-level zoom interpolate:
-// 0 at overview (heatmap is showing), reaching the full value by z13.5. Mirrors DOT_RADIUS.
-function zoomFadeIn(
-  full: maplibregl.DataDrivenPropertyValueSpecification<number>,
-): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  return ["interpolate", ["linear"], ["zoom"], 11, 0, 13.5, full, 18, full] as maplibregl.DataDrivenPropertyValueSpecification<number>;
-}
-
 /**
- * Sync the heatmap SOURCE / LAYER / CASING_LAYER to the latest fetched
- * GeoJSON. Filters out single-sample stops unless `showSingleSampleStops`
- * is true. Fits bounds on the first non-empty payload after each data-source
- * (`agencyId`) switch — so changing agency re-pivots to the new region, while
- * subsequent filter changes within an agency keep the user's pan/zoom.
+ * Sync the clustered SOURCE + its layers to the latest fetched GeoJSON:
+ *  - `CLUSTER_LAYER` — one bubble per cluster at overview (color = average
+ *    delay of its stops, size = stop count). Clicking it zooms in (handled in
+ *    MapTab via `getClusterExpansionZoom`).
+ *  - `CASING_LAYER` + `LAYER` — the bullseye dot for each individual stop once
+ *    it unclusters at detail zoom (filtered to non-cluster features).
+ * Filters out single-sample stops unless `showSingleSampleStops` is true. Fits
+ * bounds on the first non-empty payload after each data-source (`agencyId`)
+ * switch — so changing agency re-pivots to the new region, while subsequent
+ * filter changes within an agency keep the user's pan/zoom.
  */
 export function useHeatmapLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
@@ -109,42 +114,49 @@ export function useHeatmapLayer(
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
-      if (m.getLayer(HEAT_LAYER)) m.removeLayer(HEAT_LAYER);
+      if (m.getLayer(CLUSTER_LAYER)) m.removeLayer(CLUSTER_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
-      m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
+      m.addSource(SOURCE, {
+        type: "geojson",
+        data: filteredSnapshot,
+        generateId: true,
+        cluster: true,
+        clusterRadius: CLUSTER_RADIUS,
+        clusterMaxZoom: CLUSTER_MAX_ZOOM,
+        // Sum the member delays so the bubble can color by their average
+        // (dsum / point_count). MapLibre has no built-in average accumulator.
+        clusterProperties: { dsum: ["+", ["get", "avg_delay_min"]] },
+      });
 
-      // Overview density field: replaces the dot mass when zoomed out, fades out by
-      // z14 as the dots fade in. Weighted by delay severity (low-delay barely paints)
-      // and kept low-intensity/small-radius so it shows hotspots, not a red blanket.
-      const heatWeightExpr: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["get", "avg_delay_min"],
-        0, 0, 2, 0.22, 5, 0.7, 10, 1,
+      // Overview bubble: COLOR = average delay of the cluster's stops (the
+      // signal — "is it delayed here?"), SIZE = how many stops. No count label
+      // (color carries the message; a glyph source would be an extra dep) — the
+      // exact count + stops live in the click popup, and clicking zooms in.
+      const clusterAvgDelay: maplibregl.ExpressionSpecification = [
+        "/", ["get", "dsum"], ["get", "point_count"],
       ];
-      const heatIntensityExpr: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["zoom"], 8, 0.25, 11, 0.5, 13, 0.8,
+      const clusterColor: maplibregl.ExpressionSpecification = [
+        "step", clusterAvgDelay,
+        DELAY_RAMP.ok,
+        2, DELAY_RAMP.mild,
+        5, DELAY_RAMP.moderate,
+        10, DELAY_RAMP.severe,
       ];
-      const heatRadiusExpr: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["zoom"], 8, 9, 11, 15, 13, 22,
-      ];
-      const heatOpacityExpr: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["zoom"], 11, 0.85, 13, 0.55, 14, 0,
-      ];
-      const heatColorExpr: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["heatmap-density"],
-        ...(HEAT_RAMP.flatMap((s) => [s[0], s[1]]) as (number | string)[]),
+      const clusterRadius: maplibregl.ExpressionSpecification = [
+        "step", ["get", "point_count"], 15, 10, 19, 50, 25, 200, 32,
       ];
       m.addLayer({
-        id: HEAT_LAYER,
-        type: "heatmap",
+        id: CLUSTER_LAYER,
+        type: "circle",
         source: SOURCE,
-        maxzoom: 15,
+        filter: IS_CLUSTER,
         paint: {
-          "heatmap-weight": heatWeightExpr,
-          "heatmap-intensity": heatIntensityExpr,
-          "heatmap-radius": heatRadiusExpr,
-          "heatmap-opacity": heatOpacityExpr,
-          "heatmap-color": heatColorExpr,
+          "circle-color": clusterColor,
+          "circle-radius": clusterRadius,
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "#ffffff",
+          "circle-opacity": 0.95,
         },
       });
 
@@ -187,6 +199,7 @@ export function useHeatmapLayer(
         id: CASING_LAYER,
         type: "circle",
         source: SOURCE,
+        filter: IS_STOP,
         paint: {
           "circle-radius": DOT_RADIUS,
           "circle-color": "rgba(0,0,0,0)",
@@ -194,7 +207,7 @@ export function useHeatmapLayer(
           "circle-stroke-width": [
             "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
           ],
-          "circle-stroke-opacity": zoomFadeIn(buildCasingOpacityExpr(focusedSeverity)),
+          "circle-stroke-opacity": buildCasingOpacityExpr(focusedSeverity),
           "circle-pitch-alignment": "map",
         },
       });
@@ -203,10 +216,11 @@ export function useHeatmapLayer(
         id: LAYER,
         type: "circle",
         source: SOURCE,
+        filter: IS_STOP,
         paint: {
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
-          "circle-opacity": zoomFadeIn(buildCircleOpacityExpr(focusedSeverity)),
+          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
           // White stroke reads against ANY basemap — light (淡色), busy/warm
           // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
           // stroke vanished. Thickens on hover for emphasis.

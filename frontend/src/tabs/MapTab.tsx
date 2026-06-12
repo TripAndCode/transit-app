@@ -15,7 +15,7 @@ import { MapLegend, type SeverityKey } from "../components/MapLegend";
 import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
-import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
+import { CLUSTER_LAYER, LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
 import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
 import { useBasemapDim } from "./map/useBasemapDim";
 
@@ -143,10 +143,29 @@ export function MapTab() {
       }
     };
 
+    // Clicking a cluster bubble zooms to where it breaks apart into its stops.
+    const onClusterEnter = () => { m.getCanvas().style.cursor = "pointer"; };
+    const onClusterClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      const clusterId = f?.properties?.cluster_id;
+      const src = m.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (clusterId == null || !src || f?.geometry.type !== "Point") return;
+      const center = f.geometry.coordinates as [number, number];
+      // maplibre-gl 4.x returns a Promise here; ignore failures from a source
+      // that was swapped out by a basemap switch mid-click.
+      src
+        .getClusterExpansionZoom(clusterId)
+        .then((zoom) => m.easeTo({ center, zoom }))
+        .catch(() => {});
+    };
+
     m.on("load", () => { styleLoadedRef.current = true; });
     m.on("click", LAYER, onStopClick);
     m.on("mouseenter", LAYER, onEnter);
     m.on("mouseleave", LAYER, onLeave);
+    m.on("click", CLUSTER_LAYER, onClusterClick);
+    m.on("mouseenter", CLUSTER_LAYER, onClusterEnter);
+    m.on("mouseleave", CLUSTER_LAYER, onLeave);
     m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
     m.on("mouseenter", ROUTE_STOPS_LAYER, onEnter);
     m.on("mouseleave", ROUTE_STOPS_LAYER, onLeave);
@@ -159,6 +178,9 @@ export function MapTab() {
       m.off("click", LAYER, onStopClick);
       m.off("mouseenter", LAYER, onEnter);
       m.off("mouseleave", LAYER, onLeave);
+      m.off("click", CLUSTER_LAYER, onClusterClick);
+      m.off("mouseenter", CLUSTER_LAYER, onClusterEnter);
+      m.off("mouseleave", CLUSTER_LAYER, onLeave);
       m.off("click", ROUTE_STOPS_LAYER, onRouteStopClick);
       m.off("mouseenter", ROUTE_STOPS_LAYER, onEnter);
       m.off("mouseleave", ROUTE_STOPS_LAYER, onLeave);

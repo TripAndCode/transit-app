@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
-import { useHeatmapLayer, SOURCE, LAYER, HEAT_LAYER } from "./useHeatmapLayer";
-import { HEAT_RAMP } from "../../styles/tokens";
+import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER } from "./useHeatmapLayer";
 import type { HeatmapCollection } from "../../api/types";
 
 const DATA = {
@@ -24,42 +23,50 @@ function run(map: MockMap) {
   });
 }
 
-describe("useHeatmapLayer", () => {
-  it("adds a heatmap layer on SOURCE using HEAT_RAMP, beneath the dots", () => {
+describe("useHeatmapLayer (clustering)", () => {
+  it("creates a clustered source and no heatmap layer", () => {
     const map = makeMockMap();
     run(map);
-    const heat = map.getLayer(HEAT_LAYER) as MockLayer;
-    expect(heat?.type).toBe("heatmap");
-    expect(heat.source).toBe(SOURCE);
-    const expected = ["interpolate", ["linear"], ["heatmap-density"], ...HEAT_RAMP.flatMap((s) => [s[0], s[1]])];
-    expect((heat.paint as Record<string, unknown>)["heatmap-color"]).toEqual(expected);
+    const src = map.getSource(SOURCE) as Record<string, unknown>;
+    expect(src.cluster).toBe(true);
+    expect(src.clusterProperties).toEqual({ dsum: ["+", ["get", "avg_delay_min"]] });
+    // the rejected heatmap layer must be gone entirely
+    expect(map.layers.find((l) => l.type === "heatmap")).toBeUndefined();
+    expect(map.getLayer("delay-heat")).toBeUndefined();
+  });
+
+  it("adds a cluster bubble layer colored by AVG delay, sized by count, below the dots", () => {
+    const map = makeMockMap();
+    run(map);
+    const cluster = map.getLayer(CLUSTER_LAYER) as MockLayer;
+    expect(cluster?.type).toBe("circle");
+    expect(cluster.filter).toEqual(["has", "point_count"]);
+    const paint = cluster.paint as Record<string, unknown>;
+    // color steps on the cluster's average delay (sum / count)
+    expect(paint["circle-color"]).toEqual([
+      "step", ["/", ["get", "dsum"], ["get", "point_count"]],
+      "#8fb88f", 2, "#d4b878", 5, "#e07a3a", 10, "#d92121",
+    ]);
+    // size steps on the number of stops
+    expect((paint["circle-radius"] as unknown[])[1]).toEqual(["get", "point_count"]);
+    // cluster bubbles render beneath the individual dots
     const ids = map.layers.map((l) => l.id);
-    expect(ids.indexOf(HEAT_LAYER)).toBeLessThan(ids.indexOf(LAYER));
-    const ho = (heat.paint as Record<string, unknown>)["heatmap-opacity"] as unknown[];
-    expect(ho[0]).toBe("interpolate");
-    expect(ho[2]).toEqual(["zoom"]);
-    expect(ho[3]).toBe(11);
+    expect(ids.indexOf(CLUSTER_LAYER)).toBeLessThan(ids.indexOf(LAYER));
   });
 
-  it("fades the dots in with zoom — circle-opacity is a top-level zoom interpolate at 0 by z11", () => {
+  it("filters the casing + dot layers to individual (unclustered) stops only", () => {
     const map = makeMockMap();
     run(map);
-    const dot = map.getLayer(LAYER) as MockLayer;
-    const op = (dot.paint as Record<string, unknown>)["circle-opacity"] as unknown[];
-    expect(op[0]).toBe("interpolate");
-    expect(op[2]).toEqual(["zoom"]); // zoom is the TOP-LEVEL input (gotcha guard)
-    expect(op[3]).toBe(11); // first stop
-    expect(op[4]).toBe(0); // fully transparent at overview
+    const stopFilter = ["!", ["has", "point_count"]];
+    expect((map.getLayer(LAYER) as MockLayer).filter).toEqual(stopFilter);
+    expect((map.getLayer("delay-casing") as MockLayer).filter).toEqual(stopFilter);
   });
 
-  it("fades the casing ring in with zoom too", () => {
+  it("dots use a plain (non-zoom-faded) data-driven opacity", () => {
     const map = makeMockMap();
     run(map);
-    const casing = map.layers.find((l) => l.id === "delay-casing") as MockLayer;
-    const so = (casing.paint as Record<string, unknown>)["circle-stroke-opacity"] as unknown[];
-    expect(so[0]).toBe("interpolate");
-    expect(so[2]).toEqual(["zoom"]);
-    expect(so[3]).toBe(11);
-    expect(so[4]).toBe(0);
+    const op = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
+    // top-level op is `max` (samples/severity), NOT an `interpolate` over zoom
+    expect((op["circle-opacity"] as unknown[])[0]).toBe("max");
   });
 });
