@@ -47,24 +47,14 @@ function buildCircleOpacityExpr(
   return ["case", severityMatchExpr(focused), base, 0];
 }
 
-function buildHaloOpacityExpr(
+// Dark casing ring opacity. Constant + focus-aware (non-focused dim to 0 so a
+// dimmed dot's ring fades with it). Gives every dot a dark outer ring that —
+// together with the dot's white inner stroke — reads on any basemap (white
+// separates on dark/satellite, dark separates on light/busy).
+function buildCasingOpacityExpr(
   focused: SeverityKey | null,
 ): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base: maplibregl.DataDrivenPropertyValueSpecification<number> = [
-    "max",
-    [
-      "case",
-      [">=", ["get", "avg_delay_min"], 10], 0.20,
-      [">=", ["get", "avg_delay_min"], 5], 0.14,
-      0.0,
-    ],
-    [
-      "interpolate", ["exponential", 1.4], ["get", "samples"],
-      10, 0.06,
-      1000, 0.10,
-      50000, 0.16,
-    ],
-  ];
+  const base = 0.55;
   if (focused === null) return base;
   return ["case", severityMatchExpr(focused), base, 0];
 }
@@ -126,14 +116,6 @@ export function useHeatmapLayer(
       // zoomed in against the detailed basemap. MapLibre requires `zoom` to be
       // the TOP-LEVEL interpolate input, so the per-zoom stop outputs are the
       // samples-driven expression scaled by a per-zoom factor.
-      const samplesHalo = (k: number): maplibregl.ExpressionSpecification => [
-        "interpolate", ["exponential", 1.4], ["get", "samples"],
-        10, 6 * k,
-        100, 10 * k,
-        1000, 16 * k,
-        10000, 26 * k,
-        50000, 36 * k,
-      ];
       const samplesDot = (k: number): maplibregl.ExpressionSpecification => [
         "interpolate", ["exponential", 1.4], ["get", "samples"],
         10, 4 * k,
@@ -141,14 +123,6 @@ export function useHeatmapLayer(
         1000, 7 * k,
         10000, 12 * k,
         50000, 18 * k,
-      ];
-      const HALO_RADIUS: maplibregl.ExpressionSpecification = [
-        "interpolate", ["linear"], ["zoom"],
-        8, samplesHalo(0.5),
-        11, samplesHalo(0.85),
-        13, samplesHalo(1.1),
-        16, samplesHalo(1.6),
-        18, samplesHalo(2.1),
       ];
       const DOT_RADIUS: maplibregl.ExpressionSpecification = [
         "interpolate", ["linear"], ["zoom"],
@@ -159,15 +133,22 @@ export function useHeatmapLayer(
         18, samplesDot(2.1),
       ];
 
+      // Dark casing ring drawn UNDER the dot: a transparent-fill circle at the
+      // dot radius with a wide dark stroke, so only a dark ring shows around
+      // the dot's perimeter (no dark disc behind the fill to muddy the color).
+      // Pairs with the dot's white inner stroke for legibility on any basemap.
       m.addLayer({
         id: HALO_LAYER,
         type: "circle",
         source: SOURCE,
         paint: {
-          "circle-radius": HALO_RADIUS,
-          "circle-color": colorExpr,
-          "circle-blur": 0.5,
-          "circle-opacity": buildHaloOpacityExpr(focusedSeverity),
+          "circle-radius": DOT_RADIUS,
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-color": "#0f1115",
+          "circle-stroke-width": [
+            "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
+          ],
+          "circle-stroke-opacity": buildCasingOpacityExpr(focusedSeverity),
           "circle-pitch-alignment": "map",
         },
       });
