@@ -19,6 +19,9 @@ describe("useBasemapDim", () => {
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
       "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
     ]);
+    expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.12,
+    ]);
     expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
       "interpolate", ["linear"], ["zoom"], 12, 1, 14, 0.92,
     ]);
@@ -41,5 +44,16 @@ describe("useBasemapDim", () => {
     const { rerender } = run(map);
     rerender();
     expect(map.layers.filter((l) => l.id === SCRIM_LAYER).length).toBe(1);
+  });
+
+  it("defers apply until style.load when the style is not yet loaded", () => {
+    const map = makeMockMap();
+    run(map, false); // styleLoaded=false → hook registers once("style.load")
+    expect(map.getLayer(SCRIM_LAYER)).toBeUndefined(); // nothing applied yet
+    map.fireOnce("style.load");
+    expect(map.getLayer(SCRIM_LAYER)).toBeDefined(); // applied after the event
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import maplibregl, { type Map as MLMap } from "maplibre-gl";
+import { type Map as MLMap, type ExpressionSpecification } from "maplibre-gl";
 
 export const SCRIM_LAYER = "basemap-scrim";
 const BASEMAP_LAYER = "basemap";
@@ -7,16 +7,16 @@ const BASEMAP_LAYER = "basemap";
 // Zoom-gated mute: none at overview (the heatmap owns it and basemap context is
 // useful), ramping in z12->14 — the same window the detail dots fade in — so dots
 // pop without louder dots. Paint props on a raster layer accept zoom expressions.
-const DIM_SATURATION: maplibregl.ExpressionSpecification = [
+const DIM_SATURATION: ExpressionSpecification = [
   "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
 ];
-const DIM_CONTRAST: maplibregl.ExpressionSpecification = [
+const DIM_CONTRAST: ExpressionSpecification = [
   "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.12,
 ];
-const DIM_BRIGHTNESS_MAX: maplibregl.ExpressionSpecification = [
+const DIM_BRIGHTNESS_MAX: ExpressionSpecification = [
   "interpolate", ["linear"], ["zoom"], 12, 1, 14, 0.92,
 ];
-const SCRIM_OPACITY: maplibregl.ExpressionSpecification = [
+const SCRIM_OPACITY: ExpressionSpecification = [
   "interpolate", ["linear"], ["zoom"], 12, 0, 14, 0.2,
 ];
 

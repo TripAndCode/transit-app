@@ -39,7 +39,17 @@ export function makeMockMap(initialLayers: MockLayer[] = [{ id: "basemap", type:
     },
     getPaintProperty: (layerId: string, prop: string) => paint[`${layerId}|${prop}`],
     getStyle: () => ({ layers }),
-    once: () => {},
+    _onceHandlers: {} as Record<string, () => void>,
+    once: (event: string, cb: () => void) => {
+      map._onceHandlers[event] = cb;
+    },
+    fireOnce: (event: string) => {
+      const cb = map._onceHandlers[event];
+      if (cb) {
+        delete map._onceHandlers[event];
+        cb();
+      }
+    },
     flyTo: () => {},
     fitBounds: () => {},
   };
