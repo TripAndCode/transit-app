@@ -252,13 +252,7 @@ def time_band_case_sql(column: str) -> str:
         f"            WHEN {column} >= '{start}'::time AND {column} < '{end}'::time THEN '{band}'"
         for band, (start, end) in _TIME_BAND_RANGES.items()
     )
-    return (
-        "CASE\n"
-        f"            WHEN {column} IS NULL THEN 'none'\n"
-        f"{arms}\n"
-        "            ELSE 'none'\n"
-        "        END"
-    )
+    return f"CASE\n            WHEN {column} IS NULL THEN 'none'\n{arms}\n            ELSE 'none'\n        END"
 
 
 def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:

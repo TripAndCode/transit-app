@@ -361,8 +361,7 @@ async def _seed_heatmap(pool, agency_id):
             agency_id,
         )
         await c.execute(
-            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
-            "VALUES ($1,'T',1,'s1')",
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1,'T',1,'s1')",
             agency_id,
         )
         for i, d in enumerate([60, 90, 121]):
@@ -410,7 +409,7 @@ async def test_heatmap_agg_path_matches_raw(map_app):
     assert len(feats) == 1
     p = feats[0]["properties"]
     assert p["samples"] == 3
-    assert p["avg_delay_min"] == 1.51   # 271/3/60 rounded; guards against integer-division truncation
+    assert p["avg_delay_min"] == 1.51  # 271/3/60 rounded; guards against integer-division truncation
     assert "R1" in p["route_codes"]
 
 
