@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
-import { DELAY_RAMP } from "../../styles/tokens";
+import { DELAY_RAMP, HEAT_RAMP } from "../../styles/tokens";
 import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
 export const LAYER = "delay-circles";
+export const HEAT_LAYER = "delay-heat";
 const CASING_LAYER = "delay-casing";
 
 /**
@@ -54,9 +55,19 @@ function buildCircleOpacityExpr(
 function buildCasingOpacityExpr(
   focused: SeverityKey | null,
 ): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base = 0.55;
+  const base = 0.85;
   if (focused === null) return base;
   return ["case", severityMatchExpr(focused), base, 0];
+}
+
+// Fade an opacity in with zoom WITHOUT losing its data-driven value. MapLibre forbids
+// `["zoom"]` nested under arithmetic, so we can't multiply a zoom factor in; instead the
+// full (samples/focus-aware) expression is the STOP OUTPUT of a top-level zoom interpolate:
+// 0 at overview (heatmap is showing), reaching the full value by z13.5. Mirrors DOT_RADIUS.
+function zoomFadeIn(
+  full: maplibregl.DataDrivenPropertyValueSpecification<number>,
+): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  return ["interpolate", ["linear"], ["zoom"], 11, 0, 13.5, full, 18, full] as maplibregl.DataDrivenPropertyValueSpecification<number>;
 }
 
 /**
@@ -98,9 +109,30 @@ export function useHeatmapLayer(
       if (!m) return;
       if (m.getLayer(LAYER)) m.removeLayer(LAYER);
       if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
+      if (m.getLayer(HEAT_LAYER)) m.removeLayer(HEAT_LAYER);
       if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
       m.addSource(SOURCE, { type: "geojson", data: filteredSnapshot, generateId: true });
+
+      // Overview density field: replaces the dot mass when zoomed out, fades out by
+      // z14 as the dots fade in. Weighted by delay severity (low-delay barely paints)
+      // and kept low-intensity/small-radius so it shows hotspots, not a red blanket.
+      m.addLayer({
+        id: HEAT_LAYER,
+        type: "heatmap",
+        source: SOURCE,
+        maxzoom: 15,
+        paint: {
+          "heatmap-weight": [
+            "interpolate", ["linear"], ["get", "avg_delay_min"],
+            0, 0, 2, 0.22, 5, 0.7, 10, 1,
+          ],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 8, 0.25, 11, 0.5, 13, 0.8],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 8, 9, 11, 15, 13, 22],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0.85, 13, 0.55, 14, 0],
+          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], ...HEAT_RAMP.flatMap((s) => [s[0], s[1]])],
+        },
+      } as Parameters<typeof m.addLayer>[0]);
 
       const colorExpr: maplibregl.ExpressionSpecification = [
         "step",
@@ -148,7 +180,7 @@ export function useHeatmapLayer(
           "circle-stroke-width": [
             "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
           ],
-          "circle-stroke-opacity": buildCasingOpacityExpr(focusedSeverity),
+          "circle-stroke-opacity": zoomFadeIn(buildCasingOpacityExpr(focusedSeverity)),
           "circle-pitch-alignment": "map",
         },
       });
@@ -160,7 +192,7 @@ export function useHeatmapLayer(
         paint: {
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
-          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
+          "circle-opacity": zoomFadeIn(buildCircleOpacityExpr(focusedSeverity)),
           // White stroke reads against ANY basemap — light (淡色), busy/warm
           // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
           // stroke vanished. Thickens on hover for emphasis.
