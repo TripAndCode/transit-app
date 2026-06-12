@@ -459,8 +459,13 @@ async def route_stop_profile(
 
 
 def _heatmap_features(rows) -> dict:
-    """FeatureCollection from rows exposing lon/lat/stop_name/stop_ids/
-    platform_codes/stop_codes/route_codes/avg_delay_min/samples."""
+    """Build a GeoJSON FeatureCollection from query rows.
+
+    Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
+    stop_codes, route_codes, avg_delay_min, samples.  Those columns are mapped
+    to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
+    platform_code, avg_delay_min, samples, route_codes).
+    """
     features = [
         {
             "type": "Feature",
@@ -560,7 +565,7 @@ async def delay_heatmap(
                 string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
                     AS stop_codes,
                 string_agg(DISTINCT r.route_codes, ',') AS route_codes,
-                ROUND(SUM(a.delay_sum) / SUM(a.samples) / 60.0::numeric, 2) AS avg_delay_min,
+                ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
                 SUM(a.samples) AS samples
             FROM agg_stop_daily a
             JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
