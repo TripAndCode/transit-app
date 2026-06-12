@@ -26,7 +26,8 @@ async def map_app(apply_schema):
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_stop_seq, rag_chunks CASCADE"
+            "agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
+            "rag_chunks CASCADE"
         )
     await pool.close()
 
@@ -348,3 +349,75 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
     body = resp.json()
     assert body["geometry"] is None, body
     assert len(body["stops"]) >= 2
+
+
+async def _seed_heatmap(pool, agency_id):
+    from datetime import datetime, time, timezone
+
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES ($1,'s1','駅前',ST_SetSRID(ST_MakePoint(140.74,40.82),4326))",
+            agency_id,
+        )
+        await c.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "VALUES ($1,'T',1,'s1')",
+            agency_id,
+        )
+        for i, d in enumerate([60, 120, 180]):
+            await c.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,'T','平日',$4,'R1',1,$5)",
+                agency_id,
+                f"f{i}.pb",
+                datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+                time(8, 10),
+                d,
+            )
+
+
+def _run_analyze(agency_id):
+    import os
+
+    import psycopg2
+
+    from pipeline.analyze import analyze
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        analyze(agency_id, conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_heatmap_agg_path_matches_raw(map_app):
+    """No route filter -> aggregate path. avg=(60+120+180)/3=120s=2.0min, samples=3."""
+    app, agency_id = map_app
+    await _seed_heatmap(app.state.pool, agency_id)
+    _run_analyze(agency_id)  # populate agg_stop_daily + agg_stop_routes
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap")
+    assert resp.status_code == 200
+    feats = resp.json()["features"]
+    assert len(feats) == 1
+    p = feats[0]["properties"]
+    assert p["samples"] == 3
+    assert abs(p["avg_delay_min"] - 2.0) < 1e-6
+    assert "R1" in p["route_codes"]
+
+
+@pytest.mark.asyncio
+async def test_heatmap_route_filter_uses_live_path(map_app):
+    """Route filter -> live path; works even though agg was never built."""
+    app, agency_id = map_app
+    await _seed_heatmap(app.state.pool, agency_id)  # NOTE: no _run_analyze -> agg empty
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1")
+    assert resp.status_code == 200
+    feats = resp.json()["features"]
+    assert len(feats) == 1
+    assert feats[0]["properties"]["samples"] == 3  # live counts raw rows
