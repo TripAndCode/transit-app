@@ -26,6 +26,9 @@ type MapLegendProps = {
   onShowSingleSampleStopsChange: (v: boolean) => void;
   focusedSeverity: SeverityKey | null;
   onFocusedSeverityChange: (s: SeverityKey | null) => void;
+  /** Stop count per band; a band with 0 is shown but disabled (clicking it
+   *  would just blank the map). Omitted → all bands enabled, no counts. */
+  bandCounts?: Record<SeverityKey, number>;
 };
 
 /**
@@ -43,6 +46,7 @@ export function MapLegend({
   onShowSingleSampleStopsChange,
   focusedSeverity,
   onFocusedSeverityChange,
+  bandCounts,
 }: MapLegendProps) {
   const { t } = useTranslation();
   const [pos, setPos] = useState<Pos>(loadPos);
@@ -169,24 +173,28 @@ export function MapLegend({
           <Row
             color={DELAY_RAMP.ok}
             label={t("map.legend.band_lt_2")}
+            count={bandCounts?.ok}
             selected={focusedSeverity === "ok"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "ok" ? null : "ok")}
           />
           <Row
             color={DELAY_RAMP.mild}
             label={t("map.legend.band_2_5")}
+            count={bandCounts?.mild}
             selected={focusedSeverity === "mild"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "mild" ? null : "mild")}
           />
           <Row
             color={DELAY_RAMP.moderate}
             label={t("map.legend.band_5_10")}
+            count={bandCounts?.moderate}
             selected={focusedSeverity === "moderate"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "moderate" ? null : "moderate")}
           />
           <Row
             color={DELAY_RAMP.severe}
             label={t("map.legend.band_gt_10")}
+            count={bandCounts?.severe}
             selected={focusedSeverity === "severe"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "severe" ? null : "severe")}
           />
@@ -234,19 +242,27 @@ export function MapLegend({
 function Row({
   color,
   label,
+  count,
   selected,
   onClick,
 }: {
   color: string;
   label: string;
+  count?: number;
   selected: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
+  // A band with zero stops is shown (so the scale stays complete) but disabled —
+  // clicking it would filter the map to nothing.
+  const disabled = count === 0;
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       aria-pressed={selected}
+      title={disabled ? t("map.legend.band_empty") : undefined}
       style={{
         appearance: "none",
         border: "none",
@@ -259,7 +275,8 @@ function Row({
         marginBottom: 3,
         padding: "2px 4px",
         borderRadius: 4,
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.4 : 1,
         background: selected ? "var(--accent-soft)" : "transparent",
         color: selected ? "var(--accent)" : "inherit",
         fontWeight: selected ? 600 : 400,
@@ -278,6 +295,11 @@ function Row({
         }}
       />
       <span>{label}</span>
+      {count !== undefined && (
+        <span style={{ marginLeft: "auto", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }

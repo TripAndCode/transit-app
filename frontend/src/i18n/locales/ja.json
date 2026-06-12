@@ -245,6 +245,7 @@
       "band_2_5": "2 – 5分",
       "band_5_10": "5 – 10分",
       "band_gt_10": "> 10分",
+      "band_empty": "この範囲の停留所はありません",
       "clear_selection": "選択を解除",
       "size_density": "ドットの大きさ",
       "few_to_many": "遅延 小 → 大",

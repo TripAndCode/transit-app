@@ -245,6 +245,7 @@
       "band_2_5": "2–5 min",
       "band_5_10": "5–10 min",
       "band_gt_10": "> 10 min",
+      "band_empty": "No stops in this range",
       "clear_selection": "Clear selection",
       "size_density": "Dot size",
       "few_to_many": "delay: low → high",

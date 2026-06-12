@@ -231,6 +231,20 @@ export function MapTab() {
 
   useRouteOverlay(mapRef, styleLoadedRef, shape, styleEpoch);
 
+  // Stops per severity band (respecting the single-sample filter) so the legend
+  // can disable bands that match nothing — clicking an empty band would just
+  // blank the map. Mirrors the band thresholds in useHeatmapLayer.
+  const severityCounts = { ok: 0, mild: 0, moderate: 0, severe: 0 };
+  for (const f of data?.features ?? []) {
+    const p = f.properties ?? {};
+    if (!showSingleSampleStops && (p.samples ?? 0) < 2) continue;
+    const a = p.avg_delay_min ?? 0;
+    if (a < 2) severityCounts.ok += 1;
+    else if (a < 5) severityCounts.mild += 1;
+    else if (a < 10) severityCounts.moderate += 1;
+    else severityCounts.severe += 1;
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
       <TabFilterBar />
@@ -277,6 +291,7 @@ export function MapTab() {
         onShowSingleSampleStopsChange={setShowSingleSampleStops}
         focusedSeverity={focusedSeverity}
         onFocusedSeverityChange={setFocusedSeverity}
+        bandCounts={severityCounts}
       />
       {/* Empty state covers the map only when there's nothing to show.
           In single-route mode the route overlay (line + numbered stops)

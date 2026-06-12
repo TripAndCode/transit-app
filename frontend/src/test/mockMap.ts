@@ -27,8 +27,9 @@ export function makeMockMap(
       if (i >= 0) layers.splice(i, 1);
     },
     getSource: (id: string) => sources[id],
-    addSource: (id: string, def: unknown) => {
-      sources[id] = def;
+    addSource: (id: string, def: Record<string, unknown>) => {
+      // mirror maplibre: getSource(id) returns an object with setData()
+      sources[id] = { ...def, setData: (d: unknown) => { (sources[id] as Record<string, unknown>).data = d; } };
     },
     addLayer: (layer: MockLayer, beforeId?: string) => {
       if (beforeId) {

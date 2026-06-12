@@ -20,44 +20,29 @@ const CLUSTER_MAX_ZOOM = 13;
 const IS_CLUSTER: maplibregl.ExpressionSpecification = ["has", "point_count"];
 const IS_STOP: maplibregl.ExpressionSpecification = ["!", ["has", "point_count"]];
 
+// Solid fills — delay is encoded by color + dot SIZE, not by opacity, and a
+// focused band now FILTERS the data (below) rather than dimming non-matching
+// dots, so these are plain constants.
+const DOT_OPACITY = 0.92;
+const CASING_OPACITY = 0.85;
+
 /**
- * Build the MapLibre filter expression that selects circles falling into a
- * single severity band.
+ * JS predicate mirroring the legend's delay bands. Used to FILTER the stops fed
+ * to the (clustered) source when a band is focused: dimming non-matching dots
+ * stopped working once stops were clustered into bubbles, so instead we drop the
+ * non-matching stops entirely and let the clusters + dots re-form from the rest.
  */
-function severityMatchExpr(focused: SeverityKey): maplibregl.ExpressionSpecification {
-  switch (focused) {
+function inSeverityBand(avg: number, band: SeverityKey): boolean {
+  switch (band) {
     case "ok":
-      return ["<", ["get", "avg_delay_min"], 2];
+      return avg < 2;
     case "mild":
-      return ["all", [">=", ["get", "avg_delay_min"], 2], ["<", ["get", "avg_delay_min"], 5]];
+      return avg >= 2 && avg < 5;
     case "moderate":
-      return ["all", [">=", ["get", "avg_delay_min"], 5], ["<", ["get", "avg_delay_min"], 10]];
+      return avg >= 5 && avg < 10;
     case "severe":
-      return [">=", ["get", "avg_delay_min"], 10];
+      return avg >= 10;
   }
-}
-
-function buildCircleOpacityExpr(
-  focused: SeverityKey | null,
-): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  // Solid fill — delay is encoded by color + dot SIZE, not opacity. (Opacity
-  // used to scale with sample count; tying the visual to data volume instead of
-  // the delay itself was unintuitive.) Focus dims non-matching bands to 0.
-  const SOLID = 0.92;
-  if (focused === null) return SOLID;
-  return ["case", severityMatchExpr(focused), SOLID, 0];
-}
-
-// Dark casing ring opacity. Constant + focus-aware (non-focused dim to 0 so a
-// dimmed dot's ring fades with it). Gives every dot a dark outer ring that —
-// together with the dot's white inner stroke — reads on any basemap (white
-// separates on dark/satellite, dark separates on light/busy).
-function buildCasingOpacityExpr(
-  focused: SeverityKey | null,
-): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  const base = 0.85;
-  if (focused === null) return base;
-  return ["case", severityMatchExpr(focused), base, 0];
 }
 
 /**
@@ -93,21 +78,37 @@ export function useHeatmapLayer(
   useEffect(() => {
     const m = mapRef.current;
     if (!m || !data) return;
-    const filteredSnapshot = showSingleSampleStops
-      ? data
-      : {
-          ...data,
-          features: data.features.filter((f) => (f.properties?.samples ?? 0) >= 2),
-        };
+    // Filter the stops once, in JS: drop single-sample stops (unless shown) and,
+    // when a legend band is focused, drop everything outside that band so the
+    // clusters re-form from only the matching stops.
+    const features = data.features.filter((f) => {
+      const p = f.properties ?? {};
+      if (!showSingleSampleStops && (p.samples ?? 0) < 2) return false;
+      if (focusedSeverity && !inSeverityBand(p.avg_delay_min ?? 0, focusedSeverity)) return false;
+      return true;
+    });
+    const filteredSnapshot = { ...data, features };
 
     function applyData() {
       if (!m) return;
-      if (m.getLayer(LAYER)) m.removeLayer(LAYER);
-      if (m.getLayer(CASING_LAYER)) m.removeLayer(CASING_LAYER);
-      if (m.getLayer(CLUSTER_COUNT_LAYER)) m.removeLayer(CLUSTER_COUNT_LAYER);
-      if (m.getLayer(CLUSTER_LAYER)) m.removeLayer(CLUSTER_LAYER);
-      if (m.getSource(SOURCE)) m.removeSource(SOURCE);
 
+      // Flicker-free path: if the source already exists (a data/filter change on
+      // the same style), just swap its data — clustering + the layers re-render
+      // in place. Rebuilding source+layers on every filter toggle caused a
+      // visible flash. The source is only (re)built on first attach or after a
+      // basemap switch wiped it (styleEpoch).
+      const existing = m.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (existing) {
+        existing.setData(filteredSnapshot);
+      } else {
+        buildLayers();
+      }
+
+      if (!fittedRef.current) fitToData();
+    }
+
+    function buildLayers() {
+      if (!m) return;
       m.addSource(SOURCE, {
         type: "geojson",
         data: filteredSnapshot,
@@ -217,7 +218,7 @@ export function useHeatmapLayer(
           "circle-stroke-width": [
             "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
           ],
-          "circle-stroke-opacity": buildCasingOpacityExpr(focusedSeverity),
+          "circle-stroke-opacity": CASING_OPACITY,
           "circle-pitch-alignment": "map",
         },
       });
@@ -230,7 +231,7 @@ export function useHeatmapLayer(
         paint: {
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
-          "circle-opacity": buildCircleOpacityExpr(focusedSeverity),
+          "circle-opacity": DOT_OPACITY,
           // White stroke reads against ANY basemap — light (淡色), busy/warm
           // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
           // stroke vanished. Thickens on hover for emphasis.
@@ -244,23 +245,29 @@ export function useHeatmapLayer(
         },
       });
 
-      if (!fittedRef.current) {
-        if (filteredSnapshot.features.length === 1) {
-          const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
-          m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
-          fittedRef.current = true;
-        } else if (filteredSnapshot.features.length > 1) {
-          let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-          for (const f of filteredSnapshot.features) {
-            const [lon, lat] = f.geometry.coordinates;
-            if (lon < minLon) minLon = lon;
-            if (lon > maxLon) maxLon = lon;
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
-          }
-          m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
-          fittedRef.current = true;
+    }
+
+    // Fit the camera to the data on the first non-empty payload after an agency
+    // switch (fittedRef re-armed elsewhere). Runs for both the build and setData
+    // paths so switching agency re-pivots; subsequent filter toggles keep the
+    // user's pan/zoom because fittedRef is already set.
+    function fitToData() {
+      if (!m) return;
+      if (filteredSnapshot.features.length === 1) {
+        const [lon, lat] = filteredSnapshot.features[0].geometry.coordinates;
+        m.flyTo({ center: [lon, lat], zoom: 13, duration: 600 });
+        fittedRef.current = true;
+      } else if (filteredSnapshot.features.length > 1) {
+        let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+        for (const f of filteredSnapshot.features) {
+          const [lon, lat] = f.geometry.coordinates;
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
         }
+        m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
+        fittedRef.current = true;
       }
     }
 
