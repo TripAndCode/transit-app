@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 # rolls back the whole run, leaving every aggregate stale. agg_stop_seq is not
 # keyed by service_type, so it keeps the unfiltered dedup (all observations).
 _DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
+# Same dedup, plus raw captured_at — agg_route_daily needs a per-day last_seen_at.
+_DEDUP_TYPED_TS = build_dedup_inner_sql(extra_where="service_type IS NOT NULL", include_captured_at=True)
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -36,6 +38,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_hour",
     "agg_route_dow",
     "agg_daily_trend",
+    "agg_route_daily",
     "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
@@ -201,6 +204,43 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_daily_trend: {len(rows)} rows")
+
+        # ── agg_route_daily (per-route, per-day; powers the fast today/route-summary) ──
+        # Mirrors the route-summary endpoint's aggregation but precomputed for
+        # every day, so the endpoint reads one tiny row-set for the latest date
+        # instead of scanning raw `updates` (which the planner mis-estimates).
+        sql = f"""
+            WITH deduped AS ({_DEDUP_TYPED_TS})
+            SELECT
+                %(agency_id)s AS agency_id,
+                date::text, route_code, service_type,
+                ROUND(AVG(dep_delay))::int AS avg_delay_sec,
+                MAX(dep_delay)             AS worst_delay_sec,
+                COUNT(DISTINCT trip_id)    AS trips_observed,
+                COUNT(*)                   AS samples,
+                MAX(captured_at)           AS last_seen_at
+            FROM deduped
+            GROUP BY date, route_code, service_type
+            ORDER BY date, route_code
+        """
+        rows = _run_query(sql, p, conn)
+        _insert_agg(
+            "agg_route_daily",
+            [
+                "agency_id",
+                "date",
+                "route_code",
+                "service_type",
+                "avg_delay_sec",
+                "worst_delay_sec",
+                "trips_observed",
+                "samples",
+                "last_seen_at",
+            ],
+            rows,
+            conn,
+        )
+        logger.info(f"  agg_route_daily: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:

@@ -26,7 +26,7 @@ async def map_app(apply_schema):
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
+            "agg_daily_trend, agg_route_daily, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
             "rag_chunks CASCADE"
         )
     await pool.close()
@@ -139,9 +139,16 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
 
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
-    baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats."""
+    baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
+
+    Seeds raw `updates` (for the trips/stop-profile drilldowns, which still read
+    them) AND the precomputed `agg_route_daily` row the route-summary endpoint now
+    reads — computed here from day_rows rather than via a full analyze(), so the
+    hand-set baseline in agg_route_stats isn't clobbered. analyze()'s own builder
+    is covered separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
+    seeded_at = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
     async with pool.acquire() as conn:
         for i, (trip_id, seq, delay, sched) in enumerate(day_rows):
             # scheduled_time column is TIME WITHOUT TIME ZONE; asyncpg needs a
@@ -155,7 +162,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
                 "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
                 agency_id,
                 f"f{i}.pb",
-                datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc),
+                seeded_at,
                 trip_id,
                 service_type,
                 sched,
@@ -163,6 +170,22 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
                 seq,
                 delay,
             )
+        # The route-summary endpoint reads agg_route_daily; mirror what analyze()
+        # would compute for this day (rows are unique per (trip, stop) here).
+        delays = [d for (_, _, d, _) in day_rows]
+        await conn.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+            "VALUES ($1, DATE '2026-06-09', $2, $3, $4, $5, $6, $7, $8)",
+            agency_id,
+            route_code,
+            service_type,
+            round(sum(delays) / len(delays)),
+            max(delays),
+            len({t for (t, _, _, _) in day_rows}),
+            len(delays),
+            seeded_at,
+        )
         if baseline is not None:
             avg_min, p90_min, samples = baseline
             await conn.execute(
@@ -411,6 +434,55 @@ async def test_heatmap_agg_path_matches_raw(map_app):
     assert p["samples"] == 3
     assert p["avg_delay_min"] == 1.51  # 271/3/60 rounded; guards against integer-division truncation
     assert "R1" in p["route_codes"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_builds_agg_route_daily(map_app):
+    """analyze() populates agg_route_daily from raw updates, and route-summary
+    reads it end-to-end (no raw scan)."""
+    from datetime import datetime, time, timezone
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # route R1, 平日, 06-09: trip A stops 1&2 (60,120s), trip B stop 1 (600s)
+        for i, (trip, seq, d) in enumerate([("A", 1, 60), ("A", 2, 120), ("B", 1, 600)]):
+            await conn.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+                "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,$4,'平日',$5,'R1',$6,$7)",
+                agency_id,
+                f"f{i}.pb",
+                datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
+                trip,
+                time(10, 0),
+                seq,
+                d,
+            )
+    _run_analyze(agency_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R1'", agency_id
+        )
+    assert row is not None
+    assert row["service_type"] == "平日"
+    assert row["avg_delay_sec"] == 260  # (60+120+600)/3
+    assert row["worst_delay_sec"] == 600
+    assert row["trips_observed"] == 2  # A, B
+    assert row["samples"] == 3
+    # last_seen_at comes from include_captured_at on the dedup
+    assert row["last_seen_at"] == datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["date"] == "2026-06-09"
+    assert body["latest_captured_at"] == "2026-06-09T10:00:00+00:00"
+    r1 = next(r for r in body["routes"] if r["route_code"] == "R1")
+    assert r1["avg_delay_sec"] == 260
+    assert r1["worst_delay_sec"] == 600
+    assert r1["trips_observed"] == 2
 
 
 @pytest.mark.asyncio

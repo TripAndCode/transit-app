@@ -244,9 +244,9 @@ async def today_route_summary(
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    """Per-route triage summary for the most recent observation date.
+    """Per-route triage summary for the most recent analyzed date.
 
-    Powers the 最新観測 tab. Each row carries today's figures
+    Powers the 最新観測 tab. Each row carries the latest analyzed day's figures
     (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
     ``last_seen_at``, ``service_type``) joined to the historical baseline in
     ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
@@ -254,55 +254,42 @@ async def today_route_summary(
     ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
     (today vs baseline), and a ``low_confidence`` flag for thin samples. The
     client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
+
+    Reads the precomputed ``agg_route_daily`` (built by ``analyze``) for the
+    latest date instead of scanning raw ``updates`` — a small indexed read
+    regardless of agency size; "today" therefore means "as of the last analyze".
     """
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
+    latest_date = await conn.fetchval(
+        "SELECT MAX(date) FROM agg_route_daily WHERE agency_id=$1",
         agency_id,
     )
-    latest_ts = latest["ts"] if latest else None
-    if latest_ts is None:
+    if latest_date is None:
         return {"latest_captured_at": None, "date": None, "routes": []}
 
     rows = await conn.fetch(
         """
-        WITH dedup AS (
-            SELECT DISTINCT ON (trip_id, stop_sequence)
-                trip_id, route_code, service_type, dep_delay, captured_at
-            FROM updates
-            WHERE agency_id=$1
-              AND dep_delay IS NOT NULL
-              AND captured_at::date = $2::date
-            ORDER BY trip_id, stop_sequence, captured_at DESC
-        ),
-        summary AS (
-            SELECT
-                route_code,
-                service_type,
-                ROUND(AVG(dep_delay)::numeric, 0)::int AS avg_delay_sec,
-                MAX(dep_delay) AS worst_delay_sec,
-                COUNT(DISTINCT trip_id) AS trips_observed,
-                COUNT(*) AS samples,
-                MAX(captured_at) AS last_seen_at
-            FROM dedup
-            GROUP BY route_code, service_type
-        )
         SELECT
-            s.*,
+            d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
+            d.trips_observed, d.samples, d.last_seen_at,
             b.avg_min AS baseline_avg_min,
             b.p90_min AS baseline_p90_min
-        FROM summary s
+        FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
           ON b.agency_id = $1
-         AND b.route_code = s.route_code
-         AND b.service_type = s.service_type
-        ORDER BY s.worst_delay_sec DESC NULLS LAST
+         AND b.route_code = d.route_code
+         AND b.service_type = d.service_type
+        WHERE d.agency_id = $1 AND d.date = $2
+        ORDER BY d.worst_delay_sec DESC NULLS LAST
         """,
         agency_id,
-        latest_ts,
+        latest_date,
     )
 
     routes = []
+    latest_seen = None
     for r in rows:
+        if r["last_seen_at"] is not None and (latest_seen is None or r["last_seen_at"] > latest_seen):
+            latest_seen = r["last_seen_at"]
         baseline_avg_sec = round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
         baseline_p90_sec = round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
         bucket, deviation_sec, low_confidence = classify_route(
@@ -326,8 +313,8 @@ async def today_route_summary(
             }
         )
     return {
-        "latest_captured_at": latest_ts.isoformat(),
-        "date": latest_ts.date().isoformat(),
+        "latest_captured_at": latest_seen.isoformat() if latest_seen else None,
+        "date": latest_date.isoformat(),
         "routes": routes,
     }
 
