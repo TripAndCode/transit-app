@@ -585,6 +585,37 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
 
 
 @pytest.mark.asyncio
+async def test_route_summary_returns_only_latest_date(map_app):
+    """route-summary serves MAX(date) only: a route present on an older day but
+    not the latest must not leak into the response, and `date` is the latest."""
+    from datetime import datetime, time, timezone
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # R_OLD only on 06-08; R_NEW only on 06-09 (the latest)
+        for day, route in [(8, "R_OLD"), (9, "R_NEW")]:
+            await conn.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+                "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,'T1','平日',$4,$5,1,300)",
+                agency_id,
+                f"{route}.pb",
+                datetime(2026, 6, day, 10, 0, tzinfo=timezone.utc),
+                time(10, 0),
+                route,
+            )
+    _run_analyze(agency_id)
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["date"] == "2026-06-09"
+    codes = {r["route_code"] for r in body["routes"]}
+    assert codes == {"R_NEW"}  # R_OLD (older date only) excluded
+
+
+@pytest.mark.asyncio
 async def test_heatmap_route_filter_uses_live_path(map_app):
     """Route filter -> live path; works even though agg was never built."""
     app, agency_id = map_app

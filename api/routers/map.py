@@ -264,6 +264,10 @@ async def today_route_summary(
         agency_id,
     )
     if latest_date is None:
+        # Agency ingested but not yet analyzed (or brand-new): no agg rows yet.
+        # Return empty rather than falling back to a raw `updates` scan — the
+        # window is one cron cycle (ingest+analyze run together), and the live
+        # scan is exactly the cost this endpoint exists to avoid.
         return {"latest_captured_at": None, "date": None, "routes": []}
 
     rows = await conn.fetch(
