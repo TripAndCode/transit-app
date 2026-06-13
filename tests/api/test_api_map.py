@@ -455,11 +455,12 @@ async def _insert_update_at(pool, agency_id, trip_id, captured_iso, dep_delay=60
 
 
 # Session TZ is Asia/Tokyo (api/main.py), so the latest-day window buckets by JST.
-# The latest-day window is computed in the session timezone; these timestamps
-# fall on the same / a prior calendar day in ANY timezone, so the test is robust
-# whether the connection runs in UTC (test pool) or JST (prod). It guards the
-# regression that matters: a broken window (full-table scan, dropped
-# ::timestamptz, or an off-by-one bound) would pull the prior-day row in.
+# Guards that the latest-day window excludes a prior-day row and keeps recent
+# ones — the behavior the sargable rewrite must preserve. Timestamps fall on the
+# same / a prior calendar day in ANY timezone, so the test is robust to the
+# session tz (the pool resets to UTC on release; see the _init_connection note).
+# It does NOT assert performance (untestable via rows) nor the exact midnight
+# boundary (tz-dependent).
 #   LATEST  the MAX observation
 #   WITHIN  ~3h earlier  — same calendar day as LATEST in every tz  -> included
 #   PRIOR   ~33h earlier — a clearly prior calendar day in every tz -> excluded
