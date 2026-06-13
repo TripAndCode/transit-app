@@ -436,3 +436,69 @@ async def test_heatmap_agg_path_reads_agg_not_raw(map_app):
         resp = await client.get(f"/api/{agency_id}/delays/heatmap")
     assert resp.status_code == 200
     assert resp.json()["features"] == []
+
+
+async def _insert_update_at(pool, agency_id, trip_id, captured_iso, dep_delay=60):
+    """Insert one updates row at an exact captured_at (route R1, weekday, seq 1)."""
+    from datetime import datetime
+
+    await pool.execute(
+        "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+        "scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES ($1,$2,$3,$4,'weekday','09:00:00'::time,'R1',1,$5)",
+        agency_id,
+        f"{trip_id}.pb",
+        datetime.fromisoformat(captured_iso),
+        trip_id,
+        dep_delay,
+    )
+
+
+# Session TZ is Asia/Tokyo (api/main.py), so the latest-day window buckets by JST.
+# The latest-day window is computed in the session timezone; these timestamps
+# fall on the same / a prior calendar day in ANY timezone, so the test is robust
+# whether the connection runs in UTC (test pool) or JST (prod). It guards the
+# regression that matters: a broken window (full-table scan, dropped
+# ::timestamptz, or an off-by-one bound) would pull the prior-day row in.
+#   LATEST  the MAX observation
+#   WITHIN  ~3h earlier  — same calendar day as LATEST in every tz  -> included
+#   PRIOR   ~33h earlier — a clearly prior calendar day in every tz -> excluded
+_LATEST = "2026-06-09T14:59:59+00:00"
+_WITHIN = "2026-06-09T12:00:00+00:00"
+_PRIOR = "2026-06-08T06:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_window_excludes_prior_day(map_app):
+    app, agency_id = map_app
+    pool = app.state.pool
+    await _insert_update_at(pool, agency_id, "PRIOR", _PRIOR)
+    await _insert_update_at(pool, agency_id, "WITHIN", _WITHIN)
+    await _insert_update_at(pool, agency_id, "LATEST", _LATEST)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+
+    assert resp.status_code == 200
+    trip_ids = sorted(r["trip_id"] for r in resp.json()["rows"])
+    assert trip_ids == ["LATEST", "WITHIN"]  # PRIOR (prior day) excluded
+
+
+@pytest.mark.asyncio
+async def test_route_summary_window_excludes_prior_day(map_app):
+    app, agency_id = map_app
+    pool = app.state.pool
+    # PRIOR carries a huge delay; if the window leaked it in, worst/samples change.
+    await _insert_update_at(pool, agency_id, "PRIOR", _PRIOR, dep_delay=9999)
+    await _insert_update_at(pool, agency_id, "WITHIN", _WITHIN, dep_delay=60)
+    await _insert_update_at(pool, agency_id, "LATEST", _LATEST, dep_delay=90)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+
+    assert resp.status_code == 200
+    routes = resp.json()["routes"]
+    assert len(routes) == 1
+    r1 = routes[0]
+    assert r1["samples"] == 2  # only WITHIN + LATEST, PRIOR excluded
+    assert r1["worst_delay_sec"] == 90  # not 9999

@@ -87,10 +87,10 @@ def main() -> int:
     with httpx.Client(base_url=args.base_url, headers=headers, timeout=args.timeout) as client:
         route = _discover_route(client, args.agency)
         for name, path in TARGETS:
-            url = path.format(agency=args.agency, route=route, range=rng)
             if "{route}" in path and not route:
                 print(f"SKIP {name}: no route discovered", file=sys.stderr)
                 continue
+            url = path.format(agency=args.agency, route=route, range=rng)
             reset = client.post("/api/debug/perf/reset")
             if reset.status_code != 200:
                 print(
