@@ -224,7 +224,7 @@ def analyze(agency_id: int, conn) -> None:
                 COUNT(*)                   AS samples,
                 MAX(captured_at)           AS last_seen_at
             FROM deduped
-            GROUP BY date, route_code, service_type
+            GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
         """
         rows = _run_query(sql, p, conn)

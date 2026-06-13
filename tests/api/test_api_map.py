@@ -546,6 +546,45 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
 
 
 @pytest.mark.asyncio
+async def test_analyze_collapses_null_and_empty_service_type(map_app):
+    """A route with both a NULL and a genuine '' service_type on one day must
+    collapse to ONE agg row, not abort analyze on a duplicate PK. The builder
+    projects COALESCE(service_type,'') (NULL and '' both -> ''), so the GROUP BY
+    must group on the same COALESCE — grouping on the raw column yields two groups
+    that project to the same (agency_id, date, route_code, '') key and violate the
+    agg_route_daily PK, rolling back every agg table for the agency."""
+    from datetime import datetime, time, timezone
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        for trip, svc, d in [("T1", None, 100), ("T2", "", 200)]:
+            await conn.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+                "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,$4,$5,$6,'R_DUP',1,$7)",
+                agency_id,
+                f"{trip}.pb",
+                datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
+                trip,
+                svc,
+                time(10, 0),
+                d,
+            )
+    _run_analyze(agency_id)  # must not raise UniqueViolation
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_DUP'",
+            agency_id,
+        )
+    assert len(rows) == 1  # NULL and '' collapsed into one bucket
+    assert rows[0]["service_type"] == ""  # the sentinel
+    assert rows[0]["avg_delay_sec"] == 150  # (100+200)/2 across both
+    assert rows[0]["worst_delay_sec"] == 200
+    assert rows[0]["trips_observed"] == 2  # T1, T2
+
+
+@pytest.mark.asyncio
 async def test_heatmap_route_filter_uses_live_path(map_app):
     """Route filter -> live path; works even though agg was never built."""
     app, agency_id = map_app
