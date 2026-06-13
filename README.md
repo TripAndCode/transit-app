@@ -329,6 +329,8 @@ Path A is what production uses (the hourly cron hits
 `POST /internal/cron/ingest`). Path B is local-only — see
 [Path A vs Path B](#data-ingest-path-a-vs-path-b) for the why.
 
+See [Deployment](#deployment-railway) for how the deployed cron is wired.
+
 For one-off ad-hoc agency inserts:
 
 ```bash
@@ -395,7 +397,7 @@ Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
 row. **This is what production uses** — a GitHub Actions workflow hits
 `POST /internal/cron/ingest` hourly, and the FastAPI app runs `ingest_live`
 + `analyze` for every agency in a background task. See
-[Deployment](#deployment-linode-vps-tokyo) below.
+[Deployment](#deployment-railway) below.
 
 Path A does **not** load static GTFS (stops, routes, timetable) — for that
 you still need `make load_static` against a local zip, or set `static_url`
@@ -513,7 +515,7 @@ poetry run python gtfs_pipeline.py ingest_live
 poetry run python gtfs_pipeline.py ingest_live --agency-id 1
 ```
 
-Fetches the current GTFS-RT protobuf from each agency's `feed_url`. In production it is invoked hourly by a GitHub Actions workflow that hits the guarded `POST /internal/cron/ingest` endpoint — see [Deployment](#deployment-linode-vps-tokyo).
+Fetches the current GTFS-RT protobuf from each agency's `feed_url`. In production it is invoked hourly by a GitHub Actions workflow that hits the guarded `POST /internal/cron/ingest` endpoint — see [Deployment](#deployment-railway).
 
 ### Load static GTFS
 
@@ -857,36 +859,51 @@ DATABASE_URL=postgresql://transit:transit@localhost:5433/transit \
 
 ---
 
-## Deployment (Linode VPS, Tokyo)
+## Deployment (Railway)
 
-Single 2 GB Linode runs `docker compose --profile prod` — FastAPI + bundled SPA, Caddy (auto-HTTPS), and PostGIS+pgvector together on one box. ~$12/mo. Cron is a GitHub Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no always-on cron worker.
+Railway runs the two Docker images — the **app** (`Dockerfile`, with the SPA
+baked in, serving API + UI on one origin) and the **database** (custom
+`db/Dockerfile`: PostGIS + pgvector + pg_trgm, on a persistent volume) — with
+free TLS, a managed domain, and auto-deploy on `git push`. ~$10–18/mo,
+usage-based. No box to harden, no reverse proxy to run. Cron is a GitHub
+Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no
+always-on cron worker.
 
-Full step-by-step (provision → harden → docker → DNS → backups): [`docs/deploy-linode.md`](docs/deploy-linode.md).
+Full step-by-step (DB service → app service → data load → cron → custom
+domain → backups): [`docs/deploy-railway.md`](docs/deploy-railway.md).
+The app service config (Dockerfile builder, `/health` check, `migrate up`
+pre-deploy command) is pinned in [`railway.json`](railway.json).
 
 Domain ideas (portfolio): `transit-delay.app`, `gtfs-jp.dev`, `chien-map.app` (遅延 = delay), `jptransit.app`. Cheapest registrars for `.app`/`.dev` are Cloudflare Registrar (~$12–14/yr, no markup, free WHOIS privacy).
 
-### Required env (read by `compose.yml` prod profile)
+### Required env (set as Railway service Variables)
 
 | Variable | Notes |
 |---|---|
+| `DATABASE_URL` | `postgresql://transit:<POSTGRES_PASSWORD>@db.railway.internal:5432/transit` — the private hostname of the db service |
 | `GROQ_API_KEY` | from console.groq.com |
 | `CRON_SECRET` | `openssl rand -hex 32`; must match the GH Actions repo secret of the same name |
-| `POSTGRES_PASSWORD` | `openssl rand -hex 24`; used by db + injected into app's `DATABASE_URL` |
-| `CADDY_SITE_ADDRESS` | `:80` for IP-only first boot; your domain (e.g. `transit-delay.app`) once DNS is wired |
-| `CORS_ORIGINS` | leave empty — SPA + API are same-origin behind Caddy |
+| `POSTGRES_PASSWORD` | `openssl rand -hex 24`; set on the db service, reused in `DATABASE_URL` |
+| `CORS_ORIGINS` | leave empty — SPA + API are same-origin |
+
+`PORT` is injected by Railway automatically (the Dockerfile honours
+`${PORT:-8000}`); don't set it yourself.
 
 ### Required GitHub repo secrets
 
 | Name | Notes |
 |---|---|
-| `CRON_SECRET` | random 32 bytes; same value as `CRON_SECRET` in the server's `.env` |
-| `APP_BASE_URL` | e.g. `https://transit-delay.app` (the GH workflow `curl`s `${APP_BASE_URL}/internal/cron/ingest`) |
+| `CRON_SECRET` | random 32 bytes; same value as `CRON_SECRET` in the app's Railway Variables |
+| `APP_BASE_URL` | the Railway domain, e.g. `https://<app>.up.railway.app` (the GH workflow `curl`s `${APP_BASE_URL}/internal/cron/ingest`) |
 
 ### Operational notes
 
-- Migrations: not auto-run. After `git pull && docker compose --profile prod up -d --build`, run `docker compose exec app python gtfs_pipeline.py migrate up` if the pull included new migrations.
+- Migrations: auto-run. `railway.json`'s `preDeployCommand` runs
+  `python gtfs_pipeline.py migrate up` before every release (idempotent —
+  tracked in `schema_migrations`). No manual step on deploy.
 - The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run "Hourly Ingest"`.
 - `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.
+- The db service's **volume** (`/var/lib/postgresql/data`) is the only stateful piece — without it, data is wiped on every redeploy.
 
 ### Observability
 
@@ -902,9 +919,10 @@ emits one access-log line to the `api.access` logger:
 To debug an issue:
 1. Grab the `X-Request-Id` from the client's error (or from the user
    reporting it — the SPA echoes it on every response).
-2. `journalctl -u transit-api | grep request_id=<value>` (or
-   `docker logs … | grep …`) finds every log line emitted during that
-   request, including inner module-level loggers.
+2. Filter the app service's logs by `request_id=<value>` (Railway →
+   app service → Logs, or `railway logs --service app | grep …`) to find
+   every log line emitted during that request, including inner
+   module-level loggers.
 
 `LOG_LEVEL` env var (default `INFO`) sets the root level. Set to
 `DEBUG` for verbose investigations.
@@ -912,5 +930,4 @@ To debug an issue:
 `make serve` and the Docker entrypoint both pass `--no-access-log` so
 uvicorn's default access line doesn't double up with the `api.access`
 emission. Plan for ~150 B per access line; at 1 req/s that's ~13 MB/day
-— bound container logs with `--log-opt max-size=…` or rotate
-`journalctl` retention to taste.
+— Railway retains and rotates service logs for you.
