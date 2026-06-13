@@ -283,7 +283,7 @@ async def today_route_summary(
          AND b.route_code = d.route_code
          AND b.service_type = d.service_type
         WHERE d.agency_id = $1 AND d.date = $2
-        ORDER BY d.worst_delay_sec DESC NULLS LAST
+        ORDER BY d.worst_delay_sec DESC, d.route_code
         """,
         agency_id,
         latest_date,

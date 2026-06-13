@@ -3,6 +3,8 @@
 -- rows, so the endpoint reads a tiny table (routes × days × service) and never
 -- scans raw `updates` (which the planner mis-estimates for a single agency's
 -- latest day when other agencies concentrate on the same dates).
+-- `date` is bucketed by `captured_at::date` in the session timezone (the
+-- pipeline runs UTC), matching the old raw endpoint's day boundary — not JST.
 CREATE TABLE IF NOT EXISTS agg_route_daily (
     agency_id       INTEGER NOT NULL REFERENCES agencies(agency_id),
     date            DATE    NOT NULL,
