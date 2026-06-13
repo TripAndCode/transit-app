@@ -18,14 +18,48 @@ the same filter.
 """
 
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 
 from api.deps import get_agency, get_conn
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter, get_range_ctx
 from api.triage import classify_route
+from pipeline import perf
+from pipeline.cache import async_lru_cache
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
+
+
+@perf.timed("map.live")
+@async_lru_cache(maxsize=16, ttl_seconds=120)
+async def _live_rows(agency_id: int, conn, limit: int) -> tuple[datetime | None, list[dict]]:
+    """Latest-day rows, one per trip. Cached briefly (conn excluded from the key):
+    'live' tolerates ~2 min staleness in exchange for an instant warm path."""
+    latest = await conn.fetchrow("SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1", agency_id)
+    latest_ts = latest["ts"] if latest else None
+    if latest_ts is None:
+        return None, []
+    rows = await conn.fetch(
+        # Constant-bounded day range keeps the (agency_id, captured_at) index in
+        # play — `captured_at::date = $2` cast it away and forced a full seq scan.
+        """
+        SELECT DISTINCT ON (trip_id)
+            trip_id, route_code, service_type, scheduled_time,
+            dep_delay, captured_at
+        FROM updates
+        WHERE agency_id=$1
+          AND dep_delay IS NOT NULL
+          AND captured_at >= date_trunc('day', $2::timestamptz)
+          AND captured_at < date_trunc('day', $2::timestamptz) + interval '1 day'
+        ORDER BY trip_id, captured_at DESC
+        LIMIT $3
+        """,
+        agency_id,
+        latest_ts,
+        limit,
+    )
+    return latest_ts, [dict(r) for r in rows]
 
 
 @router.get("/delays/live")
@@ -35,34 +69,8 @@ async def live_delays(
     limit: int = Query(default=200, le=500),
 ):
     """Rows from the most recent observation date with a freshness header."""
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
-        agency_id,
-    )
-    latest_ts = latest["ts"] if latest else None
-    if latest_ts is None:
-        return {"latest_captured_at": None, "rows": []}
-
-    rows = await conn.fetch(
-        """
-        SELECT DISTINCT ON (trip_id)
-            trip_id, route_code, service_type, scheduled_time,
-            dep_delay, captured_at
-        FROM updates
-        WHERE agency_id=$1
-          AND dep_delay IS NOT NULL
-          AND captured_at::date = $2::date
-        ORDER BY trip_id, captured_at DESC
-        LIMIT $3
-        """,
-        agency_id,
-        latest_ts,
-        limit,
-    )
-    return {
-        "latest_captured_at": latest_ts.isoformat(),
-        "rows": [dict(r) for r in rows],
-    }
+    latest_ts, rows = await _live_rows(agency_id, conn, limit)
+    return {"latest_captured_at": latest_ts.isoformat() if latest_ts else None, "rows": rows}
 
 
 @router.get("/route-shape")
@@ -239,30 +247,15 @@ async def route_shape(
     }
 
 
-@router.get("/today/route-summary")
-async def today_route_summary(
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
-    """Per-route triage summary for the most recent observation date.
-
-    Powers the 最新観測 tab. Each row carries today's figures
-    (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
-    ``last_seen_at``, ``service_type``) joined to the historical baseline in
-    ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
-    classifier (:func:`api.triage.classify_route`) then assigns each route a
-    ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
-    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
-    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
-    """
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
-        agency_id,
-    )
+@perf.timed("map.route_summary")
+@async_lru_cache(maxsize=16, ttl_seconds=120)
+async def _route_summary_rows(agency_id: int, conn) -> tuple[datetime | None, list[dict]]:
+    """Per-route latest-day summary joined to the historical baseline. Cached
+    briefly (conn excluded from the key); the classifier runs per-request."""
+    latest = await conn.fetchrow("SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1", agency_id)
     latest_ts = latest["ts"] if latest else None
     if latest_ts is None:
-        return {"latest_captured_at": None, "date": None, "routes": []}
-
+        return None, []
     rows = await conn.fetch(
         """
         WITH dedup AS (
@@ -271,7 +264,10 @@ async def today_route_summary(
             FROM updates
             WHERE agency_id=$1
               AND dep_delay IS NOT NULL
-              AND captured_at::date = $2::date
+              -- Sargable latest-day range (see _live_rows) — keeps the
+              -- (agency_id, captured_at) index in play instead of a seq scan.
+              AND captured_at >= date_trunc('day', $2::timestamptz)
+              AND captured_at < date_trunc('day', $2::timestamptz) + interval '1 day'
             ORDER BY trip_id, stop_sequence, captured_at DESC
         ),
         summary AS (
@@ -300,6 +296,28 @@ async def today_route_summary(
         agency_id,
         latest_ts,
     )
+    return latest_ts, [dict(r) for r in rows]
+
+
+@router.get("/today/route-summary")
+async def today_route_summary(
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Per-route triage summary for the most recent observation date.
+
+    Powers the 最新観測 tab. Each row carries today's figures
+    (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
+    ``last_seen_at``, ``service_type``) joined to the historical baseline in
+    ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
+    classifier (:func:`api.triage.classify_route`) then assigns each route a
+    ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
+    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
+    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    """
+    latest_ts, rows = await _route_summary_rows(agency_id, conn)
+    if latest_ts is None:
+        return {"latest_captured_at": None, "date": None, "routes": []}
 
     routes = []
     for r in rows:
