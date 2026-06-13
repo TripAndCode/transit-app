@@ -486,6 +486,66 @@ async def test_analyze_builds_agg_route_daily(map_app):
 
 
 @pytest.mark.asyncio
+async def test_route_summary_keeps_null_service_routes(map_app):
+    """NULL service_type routes (no typed baseline) must still surface in triage —
+    the old raw endpoint never filtered them, so the agg path must not either."""
+    from datetime import datetime, time, timezone
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+            "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'f.pb',$2,'T1',NULL,$3,'R_NULL',1,1680)",
+            agency_id,
+            datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
+            time(10, 0),
+        )
+    _run_analyze(agency_id)
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    r = next((x for x in resp.json()["routes"] if x["route_code"] == "R_NULL"), None)
+    assert r is not None, "NULL-service route was dropped from triage"
+    assert r["service_type"] is None  # '' sentinel mapped back to None
+    assert r["worst_delay_sec"] == 1680
+    assert r["bucket"] == "no_baseline"  # no typed baseline for NULL service
+    assert r["has_baseline"] is False
+
+
+@pytest.mark.asyncio
+async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
+    """avg_delay_sec rounds half-away-from-zero (SQL ROUND), not Python banker's
+    rounding — guards the builder's rounding if anyone reimplements it in Python."""
+    from datetime import datetime, time, timezone
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        for i, (trip, seq, d) in enumerate([("Z", 1, 2), ("Z", 2, 3)]):  # avg 2.5
+            await conn.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+                "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,$4,'平日',$5,'R_RND',$6,$7)",
+                agency_id,
+                f"f{i}.pb",
+                datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
+                trip,
+                time(10, 0),
+                seq,
+                d,
+            )
+    _run_analyze(agency_id)
+    async with pool.acquire() as conn:
+        avg = await conn.fetchval(
+            "SELECT avg_delay_sec FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_RND'",
+            agency_id,
+        )
+    assert avg == 3  # ROUND(2.5) = 3 (SQL), not 2 (Python banker's)
+
+
+@pytest.mark.asyncio
 async def test_heatmap_route_filter_uses_live_path(map_app):
     """Route filter -> live path; works even though agg was never built."""
     app, agency_id = map_app

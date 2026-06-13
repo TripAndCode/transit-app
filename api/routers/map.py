@@ -285,11 +285,15 @@ async def today_route_summary(
         latest_date,
     )
 
+    # Freshness header reflects INGEST recency (what DataStalenessBanner means),
+    # not analyze recency — a cheap index-only MAX, independent of the agg.
+    latest_ts = await conn.fetchval(
+        "SELECT MAX(captured_at) FROM updates WHERE agency_id=$1",
+        agency_id,
+    )
+
     routes = []
-    latest_seen = None
     for r in rows:
-        if r["last_seen_at"] is not None and (latest_seen is None or r["last_seen_at"] > latest_seen):
-            latest_seen = r["last_seen_at"]
         baseline_avg_sec = round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
         baseline_p90_sec = round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
         bucket, deviation_sec, low_confidence = classify_route(
@@ -298,7 +302,8 @@ async def today_route_summary(
         routes.append(
             {
                 "route_code": r["route_code"],
-                "service_type": r["service_type"],
+                # '' is the NULL-service sentinel from agg_route_daily — map back.
+                "service_type": r["service_type"] or None,
                 "avg_delay_sec": r["avg_delay_sec"],
                 "worst_delay_sec": r["worst_delay_sec"],
                 "trips_observed": r["trips_observed"],
@@ -313,7 +318,7 @@ async def today_route_summary(
             }
         )
     return {
-        "latest_captured_at": latest_seen.isoformat() if latest_seen else None,
+        "latest_captured_at": latest_ts.isoformat() if latest_ts else None,
         "date": latest_date.isoformat(),
         "routes": routes,
     }

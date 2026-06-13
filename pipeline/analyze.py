@@ -1,7 +1,7 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
 Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's five agg_* tables and rewrites them from freshly computed
+agency's agg_* tables and rewrites them from freshly computed
 SELECTs in one transaction, so re-running is idempotent and a crash
 mid-run rolls back to the prior snapshot.
 
@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 # rolls back the whole run, leaving every aggregate stale. agg_stop_seq is not
 # keyed by service_type, so it keeps the unfiltered dedup (all observations).
 _DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
-# Same dedup, plus raw captured_at — agg_route_daily needs a per-day last_seen_at.
-_DEDUP_TYPED_TS = build_dedup_inner_sql(extra_where="service_type IS NOT NULL", include_captured_at=True)
+# UNTYPED dedup + raw captured_at — agg_route_daily must keep NULL-service routes
+# (the 最新観測 triage tab surfaced them; the old endpoint did not filter
+# service_type), and needs captured_at for a per-day last_seen_at. NULL service is
+# coalesced to '' below so it fits the NOT NULL PK; the endpoint maps it back.
+_DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -58,7 +61,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 
     Caller guarantees the table is empty for the agency_id being
     materialised. No commit — `analyze` controls the transaction so the
-    DELETE + 5 INSERTs land atomically.
+    DELETE + INSERTs land atomically.
     """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
@@ -74,7 +77,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 def analyze(agency_id: int, conn) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
-    Wipes the 5 agg_* rows for this agency, then INSERTs the freshly
+    Wipes this agency's agg_* rows, then INSERTs the freshly
     computed set, all in one transaction. A crash mid-run rolls back to
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
@@ -210,10 +213,11 @@ def analyze(agency_id: int, conn) -> None:
         # every day, so the endpoint reads one tiny row-set for the latest date
         # instead of scanning raw `updates` (which the planner mis-estimates).
         sql = f"""
-            WITH deduped AS ({_DEDUP_TYPED_TS})
+            WITH deduped AS ({_DEDUP_TS})
             SELECT
                 %(agency_id)s AS agency_id,
-                date::text, route_code, service_type,
+                date::text, route_code,
+                COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay))::int AS avg_delay_sec,
                 MAX(dep_delay)             AS worst_delay_sec,
                 COUNT(DISTINCT trip_id)    AS trips_observed,
