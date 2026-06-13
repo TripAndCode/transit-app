@@ -19,54 +19,10 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── prod profile: app + caddy ────────────────────────────────────────────────
-  # `make db` (no profile) skips these. Server runs:
-  #   docker compose --profile prod up -d --build
-  app:
-    profiles: ["prod"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: transit-app
-    environment:
-      DATABASE_URL: postgresql://transit:${POSTGRES_PASSWORD:-transit}@db:5432/transit
-      PORT: "8080"
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      CRON_SECRET: ${CRON_SECRET}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    expose:
-      - "8080"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health',timeout=3).status==200 else 1)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-
-  caddy:
-    profiles: ["prod"]
-    image: caddy:2-alpine
-    container_name: transit-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      app:
-        condition: service_healthy
+# This compose file is for LOCAL DEVELOPMENT only — it brings up the
+# PostGIS+pgvector database (`make db`) that `make serve` connects to.
+# Production runs on Railway (app + a separate DB service built from the
+# same `db/Dockerfile`), push-to-deploy — see docs/deploy-railway.md.
 
 volumes:
   transit_pgdata:
-  caddy_data:
-  caddy_config:
