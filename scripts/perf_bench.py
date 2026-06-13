@@ -51,10 +51,16 @@ TARGETS = [
 
 
 def _discover_route(client: httpx.Client, agency: int) -> str:
-    """Return a real route_code for the agency (first one), for route-scoped targets."""
-    r = client.get(f"/api/{agency}/routes")
-    r.raise_for_status()
-    rows = r.json()
+    """Return a real route_code for the agency (first one), for route-scoped targets.
+
+    Returns "" on any failure — the caller then skips route-scoped targets rather
+    than aborting the whole bench."""
+    try:
+        r = client.get(f"/api/{agency}/routes")
+        r.raise_for_status()
+        rows = r.json()
+    except (httpx.HTTPError, ValueError):
+        return ""
     return str(rows[0].get("route_code") or rows[0].get("code") or "") if rows else ""
 
 

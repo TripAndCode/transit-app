@@ -454,7 +454,6 @@ async def _insert_update_at(pool, agency_id, trip_id, captured_iso, dep_delay=60
     )
 
 
-# Session TZ is Asia/Tokyo (api/main.py), so the latest-day window buckets by JST.
 # Guards that the latest-day window excludes a prior-day row and keeps recent
 # ones — the behavior the sargable rewrite must preserve. Timestamps fall on the
 # same / a prior calendar day in ANY timezone, so the test is robust to the
