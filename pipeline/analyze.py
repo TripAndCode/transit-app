@@ -10,7 +10,10 @@ Aggregation tables produced:
 - agg_route_hour    — delay by scheduled departure time
 - agg_route_dow     — delay by day-of-week (ISODOW 1=Mon..7=Sun)
 - agg_daily_trend   — per-day delay averages for trend queries
+- agg_route_daily   — per-route, per-day summary (powers today/route-summary)
 - agg_stop_seq      — per-stop delay (requires static data)
+- agg_stop_daily    — per-stop, per-day delay (powers the heatmap)
+- agg_stop_routes   — routes serving each stop (heatmap labels)
 """
 
 import logging
@@ -31,7 +34,8 @@ _DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
 # UNTYPED dedup + raw captured_at — agg_route_daily must keep NULL-service routes
 # (the 最新観測 triage tab surfaced them; the old endpoint did not filter
 # service_type), and needs captured_at for a per-day last_seen_at. NULL service is
-# coalesced to '' below so it fits the NOT NULL PK; the endpoint maps it back.
+# coalesced to '' below so it fits the NOT NULL PK; the endpoint maps it back
+# ('' is assumed never a genuine service_type — true across all ingested data).
 _DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
 
 # Order matters only for log/diff determinism; FK independence means
