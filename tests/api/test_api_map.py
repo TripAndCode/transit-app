@@ -461,9 +461,7 @@ async def test_analyze_builds_agg_route_daily(map_app):
             )
     _run_analyze(agency_id)
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R1'", agency_id
-        )
+        row = await conn.fetchrow("SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R1'", agency_id)
     assert row is not None
     assert row["service_type"] == "平日"
     assert row["avg_delay_sec"] == 260  # (60+120+600)/3
