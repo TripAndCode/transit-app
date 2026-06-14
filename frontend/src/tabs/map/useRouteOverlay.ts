@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse } from "../../api/types";
 import { DELAY_RAMP } from "../../styles/tokens";
-import { LAYER } from "./useHeatmapLayer";
+import { whenStyleReady } from "./styleReady";
+import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
 const ROUTE_SOURCE = "route-line";
 const ROUTE_STOPS_SOURCE = "route-line-stops";
@@ -11,14 +12,25 @@ export const ROUTE_STOPS_LAYER = "route-stops";
 const ROUTE_UNOBS_SOURCE = "route-unobserved";
 const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
 
+// Every layer of the agency-wide delay overlay (dots + cluster bubbles + their
+// count labels). Single-route mode hides ALL of them, not just the dots —
+// otherwise the whole agency's cluster bubbles bleed over the focused route.
+const DELAY_OVERLAY_LAYERS = [LAYER, CLUSTER_LAYER, CLUSTER_COUNT_LAYER];
+
+function setDelayOverlayVisibility(m: MLMap, visibility: "visible" | "none") {
+  for (const id of DELAY_OVERLAY_LAYERS) {
+    if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", visibility);
+  }
+}
+
 /**
  * Draw the single-route overlay when `shape` is present (polyline + numbered
- * stops + hollow unobserved-stop rings); strip it and re-show the heatmap
- * LAYER when it isn't. Fits bounds to the route on focus.
+ * stops + hollow unobserved-stop rings); strip it and re-show the agency-wide
+ * delay overlay (dots + clusters + count labels) when it isn't. Fits bounds to
+ * the route on focus.
  */
 export function useRouteOverlay(
   mapRef: React.MutableRefObject<MLMap | null>,
-  styleLoadedRef: React.MutableRefObject<boolean>,
   shape: RouteShapeResponse | undefined,
   styleEpoch: number,
 ): void {
@@ -39,7 +51,7 @@ export function useRouteOverlay(
     function drawOverlay() {
       if (!m || !shape || shape.stops.length < 2) {
         clearOverlay();
-        if (m && m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
+        if (m) setDelayOverlayVisibility(m, "visible");
         return;
       }
       clearOverlay();
@@ -49,7 +61,7 @@ export function useRouteOverlay(
           ? (geomCoords as [number, number][])
           : shape.stops.map((s) => [s.lon, s.lat]);
 
-      if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "none");
+      setDelayOverlayVisibility(m, "none");
 
       m.addSource(ROUTE_SOURCE, {
         type: "geojson",
@@ -157,14 +169,15 @@ export function useRouteOverlay(
       m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
     }
 
+    // Re-attach when the style is fully ready (re-arms on `styledata`, not the
+    // one-shot `style.load`) so a re-run after style.load but before basemap
+    // tiles finish still applies instead of waiting on an event that won't fire.
     if (!shape) {
-      if (styleLoadedRef.current) {
+      return whenStyleReady(m, () => {
         clearOverlay();
-        if (m.getLayer(LAYER)) m.setLayoutProperty(LAYER, "visibility", "visible");
-      }
-      return;
+        setDelayOverlayVisibility(m, "visible");
+      });
     }
-    if (styleLoadedRef.current) drawOverlay();
-    else m.once("style.load", drawOverlay);
-  }, [shape, mapRef, styleLoadedRef, styleEpoch]);
+    return whenStyleReady(m, drawOverlay);
+  }, [shape, mapRef, styleEpoch]);
 }

@@ -52,11 +52,18 @@ export const MAP_STYLES: MapStyleDef[] = [
 /** Build a MapLibre raster style for the given catalog id. English-label
  *  tiles are used only when `lang` starts with "en" AND the style defines
  *  `tilesEn` (only `std` does — GSI publishes a single English style). */
+// Keyless glyph endpoint so symbol layers (the cluster-count labels) can render
+// text — our raster basemaps carry no glyphs of their own. MapLibre's hosted
+// Noto Sans set; swap for a self-hosted `/fonts/{fontstack}/{range}.pbf` if we
+// ever want zero external font dependency.
+const GLYPHS_URL = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
+
 export function buildStyle(id: MapStyleId, lang: string): StyleSpecification {
   const def = MAP_STYLES.find((s) => s.id === id) ?? MAP_STYLES[0];
   const tiles = lang.startsWith("en") && def.tilesEn ? def.tilesEn : def.tiles;
   return {
     version: 8,
+    glyphs: GLYPHS_URL,
     sources: {
       basemap: { type: "raster", tiles, tileSize: 256, maxzoom: def.maxzoom, attribution: def.attribution },
     },

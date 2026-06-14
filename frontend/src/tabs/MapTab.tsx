@@ -15,8 +15,9 @@ import { MapLegend, type SeverityKey } from "../components/MapLegend";
 import { renderStopPopupHTML } from "../components/MapPopupHTML";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
-import { LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
+import { CLUSTER_LAYER, LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
 import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
+import { useBasemapDim } from "./map/useBasemapDim";
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -31,7 +32,6 @@ export function MapTab() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
-  const styleLoadedRef = useRef(false);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
   const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
   const [styleId, setStyleId] = useMapStylePref();
@@ -142,10 +142,28 @@ export function MapTab() {
       }
     };
 
-    m.on("load", () => { styleLoadedRef.current = true; });
+    // Clicking a cluster bubble zooms to where it breaks apart into its stops.
+    const onClusterEnter = () => { m.getCanvas().style.cursor = "pointer"; };
+    const onClusterClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      const clusterId = f?.properties?.cluster_id;
+      const src = m.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (clusterId == null || !src || f?.geometry.type !== "Point") return;
+      const center = f.geometry.coordinates as [number, number];
+      // maplibre-gl 4.x returns a Promise here; ignore failures from a source
+      // that was swapped out by a basemap switch mid-click.
+      src
+        .getClusterExpansionZoom(clusterId)
+        .then((zoom) => m.easeTo({ center, zoom }))
+        .catch(() => {});
+    };
+
     m.on("click", LAYER, onStopClick);
     m.on("mouseenter", LAYER, onEnter);
     m.on("mouseleave", LAYER, onLeave);
+    m.on("click", CLUSTER_LAYER, onClusterClick);
+    m.on("mouseenter", CLUSTER_LAYER, onClusterEnter);
+    m.on("mouseleave", CLUSTER_LAYER, onLeave);
     m.on("click", ROUTE_STOPS_LAYER, onRouteStopClick);
     m.on("mouseenter", ROUTE_STOPS_LAYER, onEnter);
     m.on("mouseleave", ROUTE_STOPS_LAYER, onLeave);
@@ -158,12 +176,14 @@ export function MapTab() {
       m.off("click", LAYER, onStopClick);
       m.off("mouseenter", LAYER, onEnter);
       m.off("mouseleave", LAYER, onLeave);
+      m.off("click", CLUSTER_LAYER, onClusterClick);
+      m.off("mouseenter", CLUSTER_LAYER, onClusterEnter);
+      m.off("mouseleave", CLUSTER_LAYER, onLeave);
       m.off("click", ROUTE_STOPS_LAYER, onRouteStopClick);
       m.off("mouseenter", ROUTE_STOPS_LAYER, onEnter);
       m.off("mouseleave", ROUTE_STOPS_LAYER, onLeave);
       m.remove();
       mapRef.current = null;
-      styleLoadedRef.current = false;
     };
     // Map is created once; later styleId/language changes are handled by the
     // style-switch effect below (adding them here would recreate the map).
@@ -179,8 +199,8 @@ export function MapTab() {
   }, [data, showSingleSampleStops, focusedSeverity]);
 
   // Switch basemap when the user picks a style or the UI language changes.
-  // setStyle() wipes custom layers, so on style.load we mark the style ready
-  // and bump styleEpoch to re-run the (idempotent) overlay attach hooks.
+  // setStyle() wipes custom layers, so on style.load we bump styleEpoch to
+  // re-run the (idempotent) overlay attach hooks.
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
@@ -189,20 +209,34 @@ export function MapTab() {
       return;
     }
     if (getMapStyleOverride()) return; // env override pins the style
-    styleLoadedRef.current = false;
     // diff:false forces a full style reload — with the default diff:true,
     // MapLibre does an in-place diff that drops our imperatively-added overlay
     // layers AND never fires `style.load`, so the re-attach never runs.
     m.setStyle(buildStyle(styleId, i18n.language), { diff: false });
-    m.once("style.load", () => {
-      styleLoadedRef.current = true;
-      setStyleEpoch((e) => e + 1);
-    });
+    m.once("style.load", () => setStyleEpoch((e) => e + 1));
   }, [styleId, i18n.language]);
 
-  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
+  // Before the overlay hooks so the scrim is inserted beneath their layers
+  // (effect order follows hook-call order).
+  useBasemapDim(mapRef, styleEpoch);
 
-  useRouteOverlay(mapRef, styleLoadedRef, shape, styleEpoch);
+  useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
+
+  useRouteOverlay(mapRef, shape, styleEpoch);
+
+  // Stops per severity band (respecting the single-sample filter) so the legend
+  // can disable bands that match nothing — clicking an empty band would just
+  // blank the map. Mirrors the band thresholds in useHeatmapLayer.
+  const severityCounts = { ok: 0, mild: 0, moderate: 0, severe: 0 };
+  for (const f of data?.features ?? []) {
+    const p = f.properties ?? {};
+    if (!showSingleSampleStops && (p.samples ?? 0) < 2) continue;
+    const a = p.avg_delay_min ?? 0;
+    if (a < 2) severityCounts.ok += 1;
+    else if (a < 5) severityCounts.mild += 1;
+    else if (a < 10) severityCounts.moderate += 1;
+    else severityCounts.severe += 1;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
@@ -250,6 +284,7 @@ export function MapTab() {
         onShowSingleSampleStopsChange={setShowSingleSampleStops}
         focusedSeverity={focusedSeverity}
         onFocusedSeverityChange={setFocusedSeverity}
+        bandCounts={severityCounts}
       />
       {/* Empty state covers the map only when there's nothing to show.
           In single-route mode the route overlay (line + numbered stops)
