@@ -1,7 +1,7 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
 Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's five agg_* tables and rewrites them from freshly computed
+agency's agg_* tables and rewrites them from freshly computed
 SELECTs in one transaction, so re-running is idempotent and a crash
 mid-run rolls back to the prior snapshot.
 
@@ -10,7 +10,10 @@ Aggregation tables produced:
 - agg_route_hour    — delay by scheduled departure time
 - agg_route_dow     — delay by day-of-week (ISODOW 1=Mon..7=Sun)
 - agg_daily_trend   — per-day delay averages for trend queries
+- agg_route_daily   — per-route, per-day summary (powers today/route-summary)
 - agg_stop_seq      — per-stop delay (requires static data)
+- agg_stop_daily    — per-stop, per-day delay (powers the heatmap)
+- agg_stop_routes   — routes serving each stop (heatmap labels)
 """
 
 import logging
@@ -28,6 +31,12 @@ logger = logging.getLogger(__name__)
 # rolls back the whole run, leaving every aggregate stale. agg_stop_seq is not
 # keyed by service_type, so it keeps the unfiltered dedup (all observations).
 _DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
+# UNTYPED dedup + raw captured_at — agg_route_daily must keep NULL-service routes
+# (the 最新観測 triage tab surfaced them; the old endpoint did not filter
+# service_type), and needs captured_at for a per-day last_seen_at. NULL service is
+# coalesced to '' below so it fits the NOT NULL PK; the endpoint maps it back
+# ('' is assumed never a genuine service_type — true across all ingested data).
+_DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -36,6 +45,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_hour",
     "agg_route_dow",
     "agg_daily_trend",
+    "agg_route_daily",
     "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
@@ -55,7 +65,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 
     Caller guarantees the table is empty for the agency_id being
     materialised. No commit — `analyze` controls the transaction so the
-    DELETE + 5 INSERTs land atomically.
+    DELETE + INSERTs land atomically.
     """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
@@ -71,7 +81,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 def analyze(agency_id: int, conn) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
-    Wipes the 5 agg_* rows for this agency, then INSERTs the freshly
+    Wipes this agency's agg_* rows, then INSERTs the freshly
     computed set, all in one transaction. A crash mid-run rolls back to
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
@@ -201,6 +211,44 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_daily_trend: {len(rows)} rows")
+
+        # ── agg_route_daily (per-route, per-day; powers the fast today/route-summary) ──
+        # Mirrors the route-summary endpoint's aggregation but precomputed for
+        # every day, so the endpoint reads one tiny row-set for the latest date
+        # instead of scanning raw `updates` (which the planner mis-estimates).
+        sql = f"""
+            WITH deduped AS ({_DEDUP_TS})
+            SELECT
+                %(agency_id)s AS agency_id,
+                date::text, route_code,
+                COALESCE(service_type, '') AS service_type,
+                ROUND(AVG(dep_delay))::int AS avg_delay_sec,
+                MAX(dep_delay)             AS worst_delay_sec,
+                COUNT(DISTINCT trip_id)    AS trips_observed,
+                COUNT(*)                   AS samples,
+                MAX(captured_at)           AS last_seen_at
+            FROM deduped
+            GROUP BY date, route_code, COALESCE(service_type, '')
+            ORDER BY date, route_code
+        """
+        rows = _run_query(sql, p, conn)
+        _insert_agg(
+            "agg_route_daily",
+            [
+                "agency_id",
+                "date",
+                "route_code",
+                "service_type",
+                "avg_delay_sec",
+                "worst_delay_sec",
+                "trips_observed",
+                "samples",
+                "last_seen_at",
+            ],
+            rows,
+            conn,
+        )
+        logger.info(f"  agg_route_daily: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:

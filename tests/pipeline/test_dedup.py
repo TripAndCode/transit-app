@@ -86,3 +86,14 @@ async def test_reports_dedup_cte_picks_latest_observation(aconn, aagency_id):
     assert rows[0]["dep_delay"] == 120, (
         f"expected latest (120s), got {rows[0]['dep_delay']} (would be 300 under old MAX semantics)"
     )
+
+
+def test_include_captured_at_flag_adds_projection():
+    """include_captured_at=True surfaces the raw captured_at (used by
+    agg_route_daily's last_seen_at); default keeps only captured_at::date."""
+    from pipeline.db import build_dedup_inner_sql
+
+    assert "dep_delay, captured_at " in build_dedup_inner_sql(include_captured_at=True)
+    assert "dep_delay, captured_at " not in build_dedup_inner_sql()
+    # both still project the truncated date and dedup identically
+    assert "captured_at::date AS date" in build_dedup_inner_sql()

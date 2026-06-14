@@ -18,6 +18,7 @@ def build_dedup_inner_sql(
     *,
     placeholder: str = "%(agency_id)s",
     extra_where: str = "",
+    include_captured_at: bool = False,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -35,16 +36,21 @@ def build_dedup_inner_sql(
     (reports.py, pipeline.query.tool_queries). `extra_where` is ANDed
     onto the inner WHERE; pass server-built SQL only.
 
+    `include_captured_at` adds the raw `captured_at` to the projection (the
+    DISTINCT ON already keeps the latest row per group, so it's that row's
+    timestamp) — used by agg_route_daily for a per-day `last_seen_at`.
+
     The trailing `id DESC` makes the dedup deterministic when two rows
     share the same `captured_at` (different files, same poll second).
     """
     # Wrap in parens so a fragment containing top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
+    captured = ", captured_at" if include_captured_at else ""
     return (
         "SELECT DISTINCT ON (route_code, service_type, scheduled_time, "
         "trip_id, captured_at::date, stop_sequence) "
         "route_code, service_type, scheduled_time, trip_id, "
-        "captured_at::date AS date, stop_sequence, dep_delay "
+        f"captured_at::date AS date, stop_sequence, dep_delay{captured} "
         "FROM updates "
         f"WHERE dep_delay IS NOT NULL AND agency_id = {placeholder}{extra} "
         "ORDER BY route_code, service_type, scheduled_time, trip_id, "
