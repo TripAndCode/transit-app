@@ -23,7 +23,7 @@ import logging
 import psycopg2.extras
 
 from api.range import time_band_case_sql
-from pipeline.db import _DEDUP_INNER, _static_loaded, build_dedup_inner_sql
+from pipeline.db import _static_loaded, build_dedup_inner_sql
 from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
@@ -41,17 +41,15 @@ _BUCKET_EXPR = (
 # every row stores exactly N_BUCKETS counts regardless of which bins are empty.
 _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
 
-# Aggregations keyed by service_type write into NOT NULL service_type columns.
-# Rows that miss the static_join land with a NULL service_type (notably agency
-# 9, 広島バス); without this filter a NULL group violates the constraint and
-# rolls back the whole run, leaving every aggregate stale. agg_stop_seq is not
-# keyed by service_type, so it keeps the unfiltered dedup (all observations).
-_DEDUP_TYPED = build_dedup_inner_sql(extra_where="service_type IS NOT NULL")
-# UNTYPED dedup + raw captured_at — agg_route_daily must keep NULL-service routes
-# (the 最新観測 triage tab surfaced them; the old endpoint did not filter
-# service_type), and needs captured_at for a per-day last_seen_at. NULL service is
-# coalesced to '' below so it fits the NOT NULL PK; the endpoint maps it back
-# ('' is assumed never a genuine service_type — true across all ingested data).
+# The deduped fact slice is materialised ONCE per agency into a TEMP TABLE (see
+# analyze()), because the dedup is the expensive full-partition scan+sort and
+# every aggregate needs it. _DEDUP_TS is the SUPERSET every builder reads from:
+# UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス — which the
+# reports + route-summary surface), plus raw captured_at (agg_route_daily needs a
+# per-day last_seen_at). The service_type-keyed aggregates (route_stats/hour/dow)
+# filter `service_type IS NOT NULL` over the materialised set — equivalent to a
+# typed dedup because service_type is part of the dedup key. NULL service is
+# coalesced to '' where it must fit a NOT NULL column; the endpoints map it back.
 _DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
 
 # Order matters only for log/diff determinism; FK independence means
@@ -116,9 +114,21 @@ def analyze(agency_id: int, conn) -> None:
             for tbl in _AGG_TABLES_ORDERED:
                 cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
 
+        # ── Materialise the deduped fact slice ONCE ──────────────────────
+        # The dedup is a full-partition seq-scan + sort; previously every
+        # aggregate re-derived it (9 scans/agency). Build it once into a TEMP
+        # table and have all builders read from it. ON COMMIT DROP ties its
+        # lifetime to this txn (safe for the per-agency analyze loop on one
+        # connection); ANALYZE gives the planner stats for the downstream
+        # GROUP BYs.
+        with conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
+            cur.execute(f"CREATE TEMP TABLE _analyze_deduped ON COMMIT DROP AS ({_DEDUP_TS})", p)
+            cur.execute("ANALYZE _analyze_deduped")
+
         # ── agg_route_stats ──────────────────────────────────────────────
-        sql = f"""
-            WITH deduped AS ({_DEDUP_TYPED}),
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
             ranked AS (
                 SELECT *, PERCENT_RANK() OVER (
                     PARTITION BY route_code, service_type ORDER BY dep_delay
@@ -160,8 +170,8 @@ def analyze(agency_id: int, conn) -> None:
         logger.info(f"  agg_route_stats: {len(rows)} rows")
 
         # ── agg_route_hour ───────────────────────────────────────────────
-        sql = f"""
-            WITH deduped AS ({_DEDUP_TYPED}),
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
             ranked AS (
                 SELECT *, PERCENT_RANK() OVER (
                     PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay
@@ -188,8 +198,8 @@ def analyze(agency_id: int, conn) -> None:
         logger.info(f"  agg_route_hour: {len(rows)} rows")
 
         # ── agg_route_dow ────────────────────────────────────────────────
-        sql = f"""
-            WITH deduped AS ({_DEDUP_TYPED})
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,
@@ -217,8 +227,8 @@ def analyze(agency_id: int, conn) -> None:
         # column) so NULL and '' can't split into duplicate keys. Readers that
         # surface service_type map '' back to None; the service-split panels
         # naturally ignore '' (no 平日/土日祝 match).
-        sql = f"""
-            WITH deduped AS ({_DEDUP_INNER})
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
                 %(agency_id)s AS agency_id,
                 date::text, route_code,
@@ -242,8 +252,8 @@ def analyze(agency_id: int, conn) -> None:
         # Mirrors the route-summary endpoint's aggregation but precomputed for
         # every day, so the endpoint reads one tiny row-set for the latest date
         # instead of scanning raw `updates` (which the planner mis-estimates).
-        sql = f"""
-            WITH deduped AS ({_DEDUP_TS})
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
                 %(agency_id)s AS agency_id,
                 date::text, route_code,
@@ -284,7 +294,7 @@ def analyze(agency_id: int, conn) -> None:
         # coalesced to '' in the inner CTE so GROUP BY service_type — and the
         # NOT NULL PK — see the sentinel, never a raw NULL/'' split.
         sql = f"""
-            WITH deduped AS ({_DEDUP_INNER}),
+            WITH deduped AS (SELECT * FROM _analyze_deduped),
             bucketed AS (
                 SELECT date, route_code,
                     COALESCE(service_type, '') AS service_type,
@@ -328,8 +338,8 @@ def analyze(agency_id: int, conn) -> None:
         # hour-of-day across every route; a service/route filter falls back to
         # the live path on read. (The reports/trend hourly heatmap is the same
         # grain and a natural future consumer, but is not wired here yet.)
-        sql = f"""
-            WITH deduped AS ({_DEDUP_INNER})
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
                 %(agency_id)s AS agency_id,
                 date,
@@ -352,8 +362,8 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:
-            sql = f"""
-                WITH deduped AS ({_DEDUP_INNER})
+            sql = """
+                WITH deduped AS (SELECT * FROM _analyze_deduped)
                 SELECT
                     %(agency_id)s AS agency_id,
                     d.route_code, d.stop_sequence,
@@ -375,8 +385,8 @@ def analyze(agency_id: int, conn) -> None:
                 ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) DESC
             """
         else:
-            sql = f"""
-                WITH deduped AS ({_DEDUP_INNER})
+            sql = """
+                WITH deduped AS (SELECT * FROM _analyze_deduped)
                 SELECT
                     %(agency_id)s AS agency_id,
                     route_code, stop_sequence,
