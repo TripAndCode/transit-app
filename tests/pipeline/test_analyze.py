@@ -116,6 +116,25 @@ def test_analyze_creates_agg_daily_trend(pg_conn, agency_id):
     assert count > 0
 
 
+def test_analyze_creates_agg_hour_daily(pg_conn, agency_id):
+    # _seed_updates schedules every row at 11:37 → all land in hour 11.
+    _seed_updates(pg_conn, agency_id)
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT hour FROM agg_hour_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        hours = sorted(r[0] for r in cur.fetchall())
+        cur.execute(
+            "SELECT bool_and(samples > 0 AND avg_min IS NOT NULL) FROM agg_hour_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        well_formed = cur.fetchone()[0]
+    assert hours == [11]  # every seeded row is at 11:37
+    assert well_formed
+
+
 def test_analyze_agency_isolated(pg_conn):
     """analyze() only touches rows for its own agency_id."""
     with pg_conn.cursor() as cur:
@@ -168,7 +187,7 @@ def test_analyze_agency_isolated(pg_conn):
 def test_analyze_purges_stale_rows(pg_conn, agency_id):
     """A row that the current analyze SELECT would NOT produce (e.g. a
     fabricated GHOST route) must be removed from every agg_* table by the
-    next analyze run. Pins the wipe-and-rewrite semantics across all 5
+    next analyze run. Pins the wipe-and-rewrite semantics across all the
     tables so a future drift back to plain UPSERT, or a missed table in
     the DELETE loop, is caught."""
     _seed_updates(pg_conn, agency_id)
@@ -196,6 +215,11 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
             "(%s, '2099-01-01', 'GHOST', '平日', 99.9, 100)",
         ),
         (
+            "agg_hour_daily",
+            "(agency_id, date, hour, avg_min, samples)",
+            "(%s, '2099-01-01', 11, 99.9, 100)",
+        ),
+        (
             "agg_stop_seq",
             "(agency_id, route_code, stop_sequence, stop_name, avg_min, samples)",
             "(%s, 'GHOST', 99, 'GHOST STOP', 99.9, 100)",
@@ -218,20 +242,19 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
 
     analyze(agency_id, pg_conn)
 
-    # Tables keyed by route_code use GHOST; the new stop tables use GHOST_STOP.
+    # Tables keyed by route_code use GHOST; stop tables use GHOST_STOP;
+    # agg_hour_daily has neither, so its ghost is the 2099 date.
     _stop_ghost_tables = {"agg_stop_daily", "agg_stop_routes"}
+    _date_ghost_tables = {"agg_hour_daily"}
     with pg_conn.cursor() as cur:
         for table, _cols, _values in ghosts:
             if table in _stop_ghost_tables:
-                cur.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND stop_id = 'GHOST_STOP'",
-                    (agency_id,),
-                )
+                pred = "stop_id = 'GHOST_STOP'"
+            elif table in _date_ghost_tables:
+                pred = "date = '2099-01-01'"
             else:
-                cur.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND route_code = 'GHOST'",
-                    (agency_id,),
-                )
+                pred = "route_code = 'GHOST'"
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s AND {pred}", (agency_id,))
             ghost_count = cur.fetchone()[0]
             assert ghost_count == 0, f"stale GHOST row survived analyze in {table}"
 

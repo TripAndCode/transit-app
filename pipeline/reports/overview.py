@@ -371,11 +371,25 @@ async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str)
     """24-hour avg delay restricted to weekday (``'weekday'``) or weekend
     (``'weekend'``) only.
 
-    Uses the live ``updates`` path because ``agg_route_hour`` has no
-    date column and so cannot answer a DOW-restricted query. The cost
-    is one extra dedup-CTE query per modal open per locale — bounded by
-    the existing 5-min cache on ``compute_overview_summary``.
+    Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
+    DOW), a sample-weighted average across the range — sub-second instead of
+    the raw dedup scan that was ~96% of Overview's cold load. That table is
+    aggregated across all routes/services, so a ``service``/``routes`` filter,
+    or any ``time_band`` other than ``'all'``, falls back to the live path.
     """
+    if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
+        dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
+        sql = (
+            "SELECT hour AS h,\n"
+            "       SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min\n"
+            "FROM agg_hour_daily\n"
+            "WHERE agency_id = $1 AND date >= ($2::text)::date AND date <= ($3::text)::date\n"
+            f"  AND EXTRACT(ISODOW FROM date) {dow_pred}\n"
+            "GROUP BY hour"
+        )
+        rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date))
+        return _peak_from_hour_rows(rows)
+
     overridden = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
@@ -394,6 +408,11 @@ async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str)
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
     )
     rows = await conn.fetch(sql, agency_id, *params)
+    return _peak_from_hour_rows(rows)
+
+
+def _peak_from_hour_rows(rows) -> dict | None:
+    """Shape ``(h, avg_min)`` rows into the ``by_hour[24]`` + peak payload."""
     if not rows:
         return None
     by_hour: list[float | None] = [None] * 24
