@@ -46,8 +46,8 @@ export function useBasemapDim(
       if (!m.getLayer(SCRIM_LAYER)) {
         // First non-basemap layer = the lowest overlay (if any yet). Insert the
         // scrim before it so it sits ABOVE basemap but BELOW the overlay; if no
-        // overlay exists yet (fresh style.load) it appends just above basemap and
-        // the overlay layers added afterwards land on top.
+        // overlay exists yet (freshly reloaded style) it appends just above
+        // basemap and the overlay layers added afterwards land on top.
         const before = m
           .getStyle()
           .layers.map((l) => l.id)

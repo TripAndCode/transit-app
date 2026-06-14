@@ -35,6 +35,19 @@ describe("useHeatmapLayer (clustering)", () => {
     expect(map.getLayer("delay-heat")).toBeUndefined();
   });
 
+  it("attaches the cluster source via the idle backstop after a style reload", () => {
+    // Reproduces the locale/basemap-switch regression on the heatmap hook: the
+    // style was just reloaded (isStyleLoaded() false, tiles loading) and only
+    // `idle` signals readiness. The clusters must still attach, not vanish.
+    const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
+    run(map);
+    expect(map.getSource(SOURCE)).toBeUndefined(); // nothing while loading
+    map.settleViaIdle();
+    expect(map.getSource(SOURCE)).toBeDefined();
+    expect(map.getLayer(CLUSTER_LAYER)).toBeDefined();
+    expect(map.getLayer(LAYER)).toBeDefined();
+  });
+
   it("adds a cluster bubble layer colored by AVG delay, sized by count, below the dots", () => {
     const map = makeMockMap();
     run(map);
