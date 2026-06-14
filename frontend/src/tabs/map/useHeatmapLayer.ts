@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
+import { whenStyleReady } from "./styleReady";
 import { DELAY_RAMP } from "../../styles/tokens";
 import type { SeverityKey } from "../../components/MapLegend";
 
@@ -271,12 +272,10 @@ export function useHeatmapLayer(
       }
     }
 
-    // Guard on the map's own `isStyleLoaded()`, NOT the styleLoadedRef boolean:
-    // this effect re-runs when `data` arrives, which can be AFTER `style.load`
-    // already fired (e.g. slow basemap tiles delay the `load` event that sets
-    // the ref). Registering `once("style.load")` then would wait for an event
-    // that never fires again — the overlay would silently never attach.
-    if (m.isStyleLoaded()) applyData();
-    else m.once("style.load", applyData);
+    // Re-attach when the style is fully ready. whenStyleReady re-arms on
+    // `styledata` rather than the one-shot `style.load`, so a re-run that lands
+    // after style.load but before basemap tiles finish (isStyleLoaded() false)
+    // still attaches instead of waiting on an event that won't fire again.
+    return whenStyleReady(m, applyData);
   }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
 }

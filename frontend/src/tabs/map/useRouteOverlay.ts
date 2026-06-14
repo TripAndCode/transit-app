@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse } from "../../api/types";
 import { DELAY_RAMP } from "../../styles/tokens";
+import { whenStyleReady } from "./styleReady";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
 const ROUTE_SOURCE = "route-line";
@@ -169,21 +170,15 @@ export function useRouteOverlay(
       m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, duration: 600 });
     }
 
-    // Guard on the map's own isStyleLoaded() (not the tile-gated styleLoadedRef)
-    // so a late re-run after style.load doesn't register a once() that never fires.
+    // Re-attach when the style is fully ready (re-arms on `styledata`, not the
+    // one-shot `style.load`) so a re-run after style.load but before basemap
+    // tiles finish still applies instead of waiting on an event that won't fire.
     if (!shape) {
-      if (m.isStyleLoaded()) {
+      return whenStyleReady(m, () => {
         clearOverlay();
         setDelayOverlayVisibility(m, "visible");
-      } else {
-        m.once("style.load", () => {
-          clearOverlay();
-          setDelayOverlayVisibility(m, "visible");
-        });
-      }
-      return;
+      });
     }
-    if (m.isStyleLoaded()) drawOverlay();
-    else m.once("style.load", drawOverlay);
+    return whenStyleReady(m, drawOverlay);
   }, [shape, mapRef, styleLoadedRef, styleEpoch]);
 }

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { type Map as MLMap, type ExpressionSpecification } from "maplibre-gl";
+import { whenStyleReady } from "./styleReady";
 
 export const SCRIM_LAYER = "basemap-scrim";
 const BASEMAP_LAYER = "basemap";
@@ -62,11 +63,9 @@ export function useBasemapDim(
       }
     }
 
-    // Guard on the map's own `isStyleLoaded()` rather than the styleLoadedRef
-    // boolean (which the `load` event sets only after tiles finish): a re-run
-    // after `style.load` has already fired must apply immediately, not wait for
-    // a `once("style.load")` that will never fire again.
-    if (m.isStyleLoaded()) apply();
-    else m.once("style.load", apply);
+    // Re-attach when the style is fully ready (re-arms on `styledata`, not the
+    // one-shot `style.load`) so the scrim survives a basemap/language reload
+    // even when basemap tiles finish after style.load fires.
+    return whenStyleReady(m, apply);
   }, [mapRef, styleLoadedRef, styleEpoch]);
 }

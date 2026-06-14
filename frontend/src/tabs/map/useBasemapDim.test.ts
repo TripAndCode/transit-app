@@ -46,15 +46,39 @@ describe("useBasemapDim", () => {
     expect(map.layers.filter((l) => l.id === SCRIM_LAYER).length).toBe(1);
   });
 
-  it("defers apply until style.load when the style is not yet loaded", () => {
-    // style not loaded yet → hook must register once("style.load"), not apply now
+  it("defers apply until the style settles when not yet loaded", () => {
+    // style not loaded yet → hook re-arms on styledata, applies nothing now
     const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
     run(map);
     expect(map.getLayer(SCRIM_LAYER)).toBeUndefined(); // nothing applied yet
-    map.fireOnce("style.load"); // flips isStyleLoaded() true + runs the handler
-    expect(map.getLayer(SCRIM_LAYER)).toBeDefined(); // applied after the event
+    map.settleStyle(); // isStyleLoaded() → true + emits styledata
+    expect(map.getLayer(SCRIM_LAYER)).toBeDefined(); // applied once ready
     expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
       "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
     ]);
+  });
+
+  it("re-attaches even when a styledata fires before the style is ready", () => {
+    // The race that broke the locale switch: a styledata arrives while
+    // isStyleLoaded() is still false (tiles loading). whenStyleReady must keep
+    // listening and apply on the LATER styledata once the style is ready,
+    // rather than giving up like the old one-shot once("style.load").
+    const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
+    run(map);
+    map.fire("styledata"); // early event, style not ready yet → must NOT apply
+    expect(map.getLayer(SCRIM_LAYER)).toBeUndefined();
+    map.settleStyle(); // now ready → applies
+    expect(map.getLayer(SCRIM_LAYER)).toBeDefined();
+  });
+
+  it("re-attaches via the idle backstop when no qualifying styledata fires", () => {
+    // The real raster-tile failure: isStyleLoaded() flips true but only `idle`
+    // signals it (tile loads emit sourcedata, not styledata). The scrim must
+    // still attach off `idle`, not hang waiting for a styledata that won't come.
+    const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
+    run(map);
+    expect(map.getLayer(SCRIM_LAYER)).toBeUndefined();
+    map.settleViaIdle(); // only `idle` fires
+    expect(map.getLayer(SCRIM_LAYER)).toBeDefined();
   });
 });

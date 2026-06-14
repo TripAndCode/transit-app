@@ -58,6 +58,33 @@ export function makeMockMap(
         cb();
       }
     },
+    _handlers: {} as Record<string, Array<() => void>>,
+    on: (event: string, cb: () => void) => {
+      (map._handlers[event] ||= []).push(cb);
+    },
+    off: (event: string, cb: () => void) => {
+      const a = map._handlers[event];
+      if (a) {
+        const i = a.indexOf(cb);
+        if (i >= 0) a.splice(i, 1);
+      }
+    },
+    fire: (event: string) => {
+      (map._handlers[event] || []).slice().forEach((cb) => cb());
+    },
+    // Simulate the style + its sources finishing via a qualifying `styledata`
+    // (the fast path): flips isStyleLoaded() true and emits styledata.
+    settleStyle: () => {
+      styleLoadedFlag = true;
+      map.fire("styledata");
+    },
+    // Simulate the real raster-tile case: the style becomes loaded but the
+    // transition is only signalled by `idle` (no further `styledata`), which is
+    // the backstop whenStyleReady must rely on.
+    settleViaIdle: () => {
+      styleLoadedFlag = true;
+      map.fire("idle");
+    },
     flyTo: () => {},
     fitBounds: () => {},
   };
