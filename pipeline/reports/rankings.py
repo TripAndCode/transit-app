@@ -8,7 +8,7 @@ from api.range import RangeCtx, build_updates_filter
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import percentile_from_hist
-from pipeline.reports.filters import _dedup_cte, _dist_filter
+from pipeline.reports.filters import _agg_filter, _dedup_cte, _dist_filter
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
@@ -297,8 +297,31 @@ async def compute_dow_ranking(
         service="all",
         routes=ctx.routes,
     )
-    where, params, n = build_updates_filter(overridden, next_param=2)
     label = "週末" if dow_group == "weekend" else "平日"
+    if ctx.time_band != "all":
+        return await _dow_ranking_live(agency_id, overridden, conn, label, limit)
+
+    # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
+    where, params, n = _agg_filter(overridden, next_param=2)
+    sql = (
+        # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
+        f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
+        "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
+        "       SUM(samples)::int AS samples\n"
+        "FROM agg_daily_trend\n"
+        f"WHERE agency_id = $1 AND {where}\n"
+        "GROUP BY route_code, service_type\n"
+        "HAVING SUM(samples) > 10\n"
+        "ORDER BY avg_min DESC NULLS LAST\n"
+        f"LIMIT ${n}"
+    )
+    rows = await conn.fetch(sql, agency_id, *params, limit)
+    return [tuple(r) for r in rows]
+
+
+async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, label: str, limit: int) -> list[tuple]:
+    """Live raw-scan dow-ranking — fallback for time_band-filtered queries."""
+    where, params, n = build_updates_filter(overridden, next_param=2)
     sql = (
         f"WITH {_dedup_cte(where)}\n"
         f"SELECT route_code, service_type, '{label}' AS dow,\n"
@@ -327,6 +350,51 @@ async def compute_compare_ranking(
     Drops the user's ``service`` filter (same reason as compute_dow_ranking)
     but preserves ``routes`` so route-restricted comparisons work.
     """
+    if ctx.time_band != "all":
+        return await _compare_ranking_live(agency_id, ctx, conn, limit)
+
+    # Both DOW sides from one agg_daily_trend pass (dow split via FILTER), summed
+    # across service/date per route. dow='all' so _agg_filter emits no DOW clause.
+    agg_ctx = RangeCtx(
+        from_date=ctx.from_date,
+        to_date=ctx.to_date,
+        dow="all",
+        time_band=ctx.time_band,
+        service="all",
+        routes=ctx.routes,
+    )
+    where, params, n = _agg_filter(agg_ctx, next_param=2)
+    wd = "EXTRACT(ISODOW FROM date::date) BETWEEN 1 AND 5"
+    we = "EXTRACT(ISODOW FROM date::date) IN (6, 7)"
+    sql = (
+        "WITH per_route AS (\n"
+        "    SELECT route_code,\n"
+        f"           SUM(avg_min * samples) FILTER (WHERE {wd})\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd}), 0) AS wd_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {wd}) AS wd_n,\n"
+        f"           SUM(avg_min * samples) FILTER (WHERE {we})\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {we}), 0) AS we_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {we}) AS we_n\n"
+        "    FROM agg_daily_trend\n"
+        f"    WHERE agency_id = $1 AND {where}\n"
+        "    GROUP BY route_code\n"
+        ")\n"
+        "SELECT route_code,\n"
+        "       ROUND(wd_avg::numeric, 2) AS heijitsu,\n"
+        "       ROUND(we_avg::numeric, 2) AS kyujitsu,\n"
+        "       ROUND(ABS(wd_avg - we_avg)::numeric, 2) AS abs_delta,\n"
+        "       ROUND((we_avg - wd_avg)::numeric, 2) AS signed_delta\n"
+        "FROM per_route\n"
+        "WHERE wd_n > 10 AND we_n > 10\n"
+        "ORDER BY ABS(wd_avg - we_avg) DESC\n"
+        f"LIMIT ${n}"
+    )
+    rows = await conn.fetch(sql, agency_id, *params, limit)
+    return [tuple(r) for r in rows]
+
+
+async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, conn, limit: int) -> list[tuple]:
+    """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
     weekday_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=ctx.to_date,
@@ -409,23 +477,35 @@ async def compute_hourly_heatmap(
     ``scheduled_time`` (a TIME column post migration 0011); cells with too
     few samples (<3) are dropped to keep the rendering signal-strong.
     """
-    where, params, _ = build_updates_filter(ctx, next_param=2)
-    sql = (
-        f"WITH {_dedup_cte(where)}\n"
-        "SELECT date, EXTRACT(HOUR FROM scheduled_time)::int AS hour,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       COUNT(*) AS samples\n"
-        "FROM deduped\n"
-        "WHERE scheduled_time IS NOT NULL\n"
-        "GROUP BY date, EXTRACT(HOUR FROM scheduled_time)::int\n"
-        "HAVING COUNT(*) >= 3\n"
-        "ORDER BY date, hour"
-    )
+    # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
+    # a direct read. It has no service/route/hour-band dimension, so any of those
+    # filters fall back to the live dedup scan. DOW (on the date column) is fine.
+    if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
+        where, params, _ = _dist_filter(ctx, next_param=2)
+        sql = (
+            "SELECT date, hour, avg_min, samples\n"
+            "FROM agg_hour_daily\n"
+            f"WHERE agency_id = $1 AND {where} AND samples >= 3\n"
+            "ORDER BY date, hour"
+        )
+    else:
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        sql = (
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT date, EXTRACT(HOUR FROM scheduled_time)::int AS hour,\n"
+            "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+            "       COUNT(*) AS samples\n"
+            "FROM deduped\n"
+            "WHERE scheduled_time IS NOT NULL\n"
+            "GROUP BY date, EXTRACT(HOUR FROM scheduled_time)::int\n"
+            "HAVING COUNT(*) >= 3\n"
+            "ORDER BY date, hour"
+        )
     rows = await conn.fetch(sql, agency_id, *params)
     return [
         {
             "date": r["date"].isoformat(),
-            "hour": r["hour"],
+            "hour": int(r["hour"]),
             "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,
             "samples": r["samples"],
         }
@@ -449,26 +529,38 @@ async def compute_trend_series(
     ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``
     where ``date`` is the bucket start date (ISO string).
     """
-    where, params, _ = build_updates_filter(ctx, next_param=2)
-
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
 
-    # Single SQL: build dedup + per_bucket in one CTE chain.
-    # date_trunc on a DATE requires casting to timestamp and back to date.
-    sql = (
-        f"WITH {_dedup_cte(where)},\n"
-        "per_bucket AS (\n"
-        f"    SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
-        "           route_code, service_type,\n"
-        "           ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "           COUNT(*) AS samples\n"
-        "    FROM deduped GROUP BY bucket, route_code, service_type\n"
-        "    HAVING COUNT(*) > 5\n"
-        ")\n"
-        "SELECT * FROM per_bucket"
-    )
+    if ctx.time_band == "all":
+        # Sum agg_daily_trend (already per date/route/service) into time buckets.
+        where, params, _ = _agg_filter(ctx, next_param=2)
+        sql = (
+            f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
+            "       route_code, NULLIF(service_type, '') AS service_type,\n"
+            "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
+            "       SUM(samples)::int AS samples\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id = $1 AND {where}\n"
+            "GROUP BY bucket, route_code, service_type\n"
+            "HAVING SUM(samples) > 5"
+        )
+    else:
+        # time_band filter needs the hour-of-day, only on raw updates.
+        where, params, _ = build_updates_filter(ctx, next_param=2)
+        sql = (
+            f"WITH {_dedup_cte(where)},\n"
+            "per_bucket AS (\n"
+            f"    SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
+            "           route_code, service_type,\n"
+            "           ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
+            "           COUNT(*) AS samples\n"
+            "    FROM deduped GROUP BY bucket, route_code, service_type\n"
+            "    HAVING COUNT(*) > 5\n"
+            ")\n"
+            "SELECT * FROM per_bucket"
+        )
     per_day = await conn.fetch(sql, agency_id, *params)
 
     by_date_samples: dict = {}

@@ -97,14 +97,14 @@ async def _seed_route(pool, agency_id, route_code, service_type, day, delays):
                 " stop_sequence, dep_delay, captured_at, file_name) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 agency_id,
-                f"{route_code}-trip-{i}",
+                f"{route_code}-{day}-trip-{i}",
                 route_code,
                 service_type,
                 time(10, 0),
                 1,
                 d,
                 datetime.fromisoformat(f"{day}T10:{i // 60:02d}:{i % 60:02d}"),
-                f"test/{route_code}/{i}.pb",
+                f"test/{route_code}/{day}/{i}.pb",
             )
 
 
@@ -192,6 +192,71 @@ async def test_reports_get_empty_aggregates_renders_no_data(reports_client):
     assert data["report_type"] == "ranking"
     assert data["rows"] == []
     assert isinstance(data["text"], str) and len(data["text"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_reports_dow_weekend_reads_agg(reports_client):
+    """dow_weekend reads agg_daily_trend (weekend dates only). 2026-05-23 is a
+    Saturday; >10 samples to clear the HAVING."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_WE", "土日祝", "2026-05-23", [300] * 15)
+    _run_analyze(agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "R_WE")
+    assert r[2] == "週末"  # dow label
+    assert float(r[3]) == 5.0  # 300s = 5.0 min
+
+
+@pytest.mark.asyncio
+async def test_reports_compare_ranking_reads_agg(reports_client):
+    """compare_ranking reads agg_daily_trend: weekday (Tue 05-19) vs weekend
+    (Sat 05-23) per-route avg + delta."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_CMP", "平日", "2026-05-19", [120] * 15)  # 2.0 min weekday
+    await _seed_route(pool, agency_id, "R_CMP", "土日祝", "2026-05-23", [360] * 15)  # 6.0 min weekend
+    _run_analyze(agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "R_CMP")
+    assert float(r[1]) == 2.0  # heijitsu (weekday)
+    assert float(r[2]) == 6.0  # kyujitsu (weekend)
+    assert float(r[3]) == 4.0  # abs delta
+
+
+@pytest.mark.asyncio
+async def test_reports_trend_reads_agg(reports_client):
+    """trend reads agg_daily_trend (daily series) + agg_hour_daily (hourly cells)."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_TR", "平日", "2026-05-19", [180] * 12)
+    await _seed_route(pool, agency_id, "R_TR", "平日", "2026-05-20", [240] * 12)
+    _run_analyze(agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/trend?from=2026-05-18&to=2026-05-24")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    days = rows[0]["days"]
+    assert len(days) == 2  # two seeded days
+    assert {d["date"] for d in days} == {"2026-05-19", "2026-05-20"}
+    # hourly heatmap cells present (scheduled_time 10:00 → hour 10, ≥3 samples)
+    hourly = rows[0]["hourly"]
+    assert any(c["hour"] == 10 for c in hourly)
+
+
+@pytest.mark.asyncio
+async def test_reports_dow_keeps_null_service_routes(reports_client):
+    """NULL-service routes (広島's unmatched rows) must still appear in dow —
+    agg_daily_trend keeps them via the '' sentinel, mapped back to None. Guards
+    the regression where the typed-dedup agg dropped whole routes."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_NULL", None, "2026-05-23", [300] * 15)
+    _run_analyze(agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
+    assert resp.status_code == 200
+    r = next((x for x in resp.json()["rows"] if x[0] == "R_NULL"), None)
+    assert r is not None, "NULL-service route dropped from dow report"
+    assert r[1] is None  # '' sentinel mapped back to None
 
 
 @pytest.mark.asyncio
