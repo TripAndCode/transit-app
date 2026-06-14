@@ -72,6 +72,22 @@ async def _seed_agg_route_hour(
     )
 
 
+async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples):
+    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day)."""
+    iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
+    await aconn.execute(
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples) "
+        "VALUES ($1, ($2::text)::date, $3, $4, $5) "
+        "ON CONFLICT (agency_id, date, hour) DO UPDATE "
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        agency_id,
+        iso,
+        int(hour),
+        float(avg_min),
+        int(samples),
+    )
+
+
 @pytest.mark.asyncio
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
     """An agency with no `updates` rows in range returns a zero-filled
@@ -533,21 +549,63 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_weekday_weekend_split_uses_live_path(aconn, aagency_id):
-    """``peak_hour_weekday`` / ``peak_hour_weekend`` partition the same
-    rows by ISO day-of-week. Tuesday rows feed the weekday bucket;
-    Saturday rows feed the weekend bucket; the two buckets agree on
-    nothing.
+async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
+    """``peak_hour_weekday`` / ``peak_hour_weekend`` partition by ISO
+    day-of-week, reading the per-day/hour ``agg_hour_daily`` fast path
+    (sample-weighted across the range).
 
     2026-05-19 is a Tuesday (weekday); 2026-05-23 is a Saturday (weekend).
     """
+    # Weekday Tue rows at hour 8 (weighted avg 9.0); weekend Sat at hour 17 (5.5).
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 9.0, 2)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 23), 17, 5.5, 2)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    pk_we = out["peak_hour_weekend"]
+    assert pk_wd is not None
+    assert pk_we is not None
+    assert pk_wd["peak_hour"] == 8
+    assert pk_we["peak_hour"] == 17
+    assert pk_wd["by_hour"][8] == pytest.approx(9.0, abs=0.1)
+    assert pk_we["by_hour"][17] == pytest.approx(5.5, abs=0.1)
+    # Cross-bucket cells stay None.
+    assert pk_wd["by_hour"][17] is None
+    assert pk_we["by_hour"][8] is None
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
+    """The agg fast path weights each day's hourly avg by its sample count, not
+    a plain mean — two weekday Tuesdays at hour 8 with unequal weights."""
+    # (9.0 * 10 + 4.0 * 2) / 12 = 8.1667 -> 8.17, not the plain mean 6.5.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 9.0, 10)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 26), 8, 4.0, 2)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    assert pk_wd is not None
+    assert pk_wd["peak_hour"] == 8
+    assert pk_wd["by_hour"][8] == pytest.approx(8.17, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id):
+    """A service filter (the agg has no service dimension) routes peak-hour to
+    the live scan, which still partitions weekday/weekend correctly."""
     weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
     weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
     rows = [
-        (weekday_dt, "08:00", 600),  # weekday morning peak (10 min)
-        (weekday_dt + timedelta(minutes=1), "08:00", 480),  # 8 min
-        (weekend_dt, "17:00", 300),  # weekend evening peak (5 min)
-        (weekend_dt + timedelta(minutes=1), "17:00", 360),  # 6 min
+        (weekday_dt, "08:00", 600),
+        (weekday_dt + timedelta(minutes=1), "08:00", 480),
+        (weekend_dt, "17:00", 300),
+        (weekend_dt + timedelta(minutes=1), "17:00", 360),
     ]
     for i, (cap, sched, dep) in enumerate(rows):
         await aconn.execute(
@@ -566,21 +624,16 @@ async def test_peak_hour_weekday_weekend_split_uses_live_path(aconn, aagency_id)
 
     from pipeline.reports import compute_overview_summary
 
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    # service != 'all' forces the live path (agg_hour_daily has no service column).
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), service="平日")
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     pk_wd = out["peak_hour_weekday"]
     pk_we = out["peak_hour_weekend"]
-    assert pk_wd is not None
-    assert pk_we is not None
+    assert pk_wd is not None and pk_we is not None
     assert pk_wd["peak_hour"] == 8
     assert pk_we["peak_hour"] == 17
-    # Weekday peak averages the two weekday rows at 08:00 -> 9.0 min.
     assert pk_wd["by_hour"][8] == pytest.approx(9.0, abs=0.1)
-    # Weekend peak averages the two weekend rows at 17:00 -> 5.5 min.
     assert pk_we["by_hour"][17] == pytest.approx(5.5, abs=0.1)
-    # Cross-bucket cells stay None.
-    assert pk_wd["by_hour"][17] is None
-    assert pk_we["by_hour"][8] is None
 
 
 @pytest.mark.asyncio

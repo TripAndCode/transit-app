@@ -14,7 +14,17 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 def _get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL)
+    # Pin JST so `captured_at::date` buckets every aggregate on the same civil
+    # day the API reads it under (api/main pins Asia/Tokyo; tests too). The
+    # server default is UTC, which mis-bucketed ~20% of observations by date —
+    # silently diverging the agg fast paths from the live fallbacks they replace.
+    # Committed up front (autocommit) so it survives analyze's txn rollback.
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+    conn.autocommit = False
+    return conn
 
 
 def _require_agency(args, conn) -> int:

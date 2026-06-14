@@ -11,6 +11,7 @@ Aggregation tables produced:
 - agg_route_dow        — delay by day-of-week (ISODOW 1=Mon..7=Sun)
 - agg_daily_trend      — per-day delay averages for trend queries
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
+- agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
 - agg_stop_seq         — per-stop delay (requires static data)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
@@ -54,6 +55,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_dow",
     "agg_daily_trend",
     "agg_route_daily_dist",
+    "agg_hour_daily",
     "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
@@ -265,6 +267,34 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_route_daily_dist: {len(rows)} rows")
+
+        # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
+        # Powers Overview's peak-hour-by-DOW (its ~96% cold cost). UNTYPED dedup
+        # (all observations, no service filter) since that panel aggregates
+        # hour-of-day across every route; a service/route filter falls back to
+        # the live path on read. (The reports/trend hourly heatmap is the same
+        # grain and a natural future consumer, but is not wired here yet.)
+        sql = f"""
+            WITH deduped AS ({_DEDUP_INNER})
+            SELECT
+                %(agency_id)s AS agency_id,
+                date,
+                EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
+                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples
+            FROM deduped
+            WHERE scheduled_time IS NOT NULL
+            GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
+            ORDER BY date, hour
+        """
+        rows = _run_query(sql, p, conn)
+        _insert_agg(
+            "agg_hour_daily",
+            ["agency_id", "date", "hour", "avg_min", "samples"],
+            rows,
+            conn,
+        )
+        logger.info(f"  agg_hour_daily: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:
