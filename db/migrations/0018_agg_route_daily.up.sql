@@ -3,8 +3,9 @@
 -- rows, so the endpoint reads a tiny table (routes × days × service) and never
 -- scans raw `updates` (which the planner mis-estimates for a single agency's
 -- latest day when other agencies concentrate on the same dates).
--- `date` is bucketed by `captured_at::date` in the session timezone (the
--- pipeline runs UTC), matching the old raw endpoint's day boundary — not JST.
+-- `date` is bucketed by `captured_at::date` in the session timezone, which
+-- analyze pins to Asia/Tokyo (gtfs_pipeline._get_conn) — the same JST civil day
+-- the API reads under, so the agg fast path and the live fallback agree.
 CREATE TABLE IF NOT EXISTS agg_route_daily (
     agency_id       INTEGER NOT NULL REFERENCES agencies(agency_id),
     date            DATE    NOT NULL,

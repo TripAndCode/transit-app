@@ -475,6 +475,10 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 | `0014_ask_intent_cache` | `ask_intent_cache` table for the canonical-intent cache (Phase ②) |
 | `0015_ask_intent_cache_composite_pk` | Composite PK on `(agency_id, signature_hash)` for per-agency cache isolation |
 | `0016_ask_conversations` | `ask_conversations` + `ask_conversation_messages` for threaded Q&A (Phase ③) |
+| `0017_agg_stop_daily` | `agg_stop_daily` + `agg_stop_routes` — per-stop, per-day delay for the map heatmap |
+| `0018_agg_route_daily` | `agg_route_daily` — per-route, per-day summary for the fast `today/route-summary` |
+| `0019_agg_route_daily_dist` | `agg_route_daily_dist` — per-day delay distribution (histogram) for range-scoped reports |
+| `0020_agg_hour_daily` | `agg_hour_daily` — per-day, per-hour-of-day delay for Overview peak-hour-by-DOW |
 
 > **2026-05-22 note on type changes:** migration `0011` retypes
 > `scheduled_time` from `TEXT` to `TIME` and `agg_route_dow.dow` from

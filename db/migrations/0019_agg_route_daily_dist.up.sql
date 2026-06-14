@@ -10,8 +10,9 @@
 -- (see pipeline/histogram.py); p50/p90 are interpolated from the merged buckets
 -- over the range (approximation bounded by one bucket width — fine for ranking).
 --
--- `date` is captured_at::date in the session timezone (the pipeline runs UTC),
--- matching the existing report queries' day boundary.
+-- `date` is captured_at::date in the session timezone, which analyze pins to
+-- Asia/Tokyo (gtfs_pipeline._get_conn) — the same JST civil day the API reads
+-- under, so the agg fast path and the live fallback agree.
 CREATE TABLE IF NOT EXISTS agg_route_daily_dist (
     agency_id     INTEGER NOT NULL REFERENCES agencies(agency_id),
     date          DATE    NOT NULL,
