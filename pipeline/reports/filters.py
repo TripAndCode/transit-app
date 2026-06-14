@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from api.range import RangeCtx, build_agg_daily_trend_filter
+from api.range import RangeCtx, build_agg_daily_trend_filter, dow_clause
 from pipeline.db import build_dedup_inner_sql
 
 
@@ -30,6 +30,36 @@ def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     """
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param)
     parts: list[str] = [frag] if frag else []
+    if ctx.service != "all":
+        parts.append(f"service_type = ${n}")
+        params.append(ctx.service)
+        n += 1
+    if ctx.routes:
+        parts.append(f"route_code = ANY(${n}::text[])")
+        params.append(list(ctx.routes))
+        n += 1
+    return " AND ".join(parts), params, n
+
+
+def _dist_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """WHERE fragment for ``agg_route_daily_dist`` (date + DOW + service + routes).
+
+    Like :func:`_agg_filter` but the date predicate is kept **sargable on the
+    real DATE column** — ``date >= $a AND date <= $b`` with the cast on the
+    *parameter* side, not the column. ``agg_daily_trend`` stores ISO date
+    *text* (forcing a ``date::date`` cast), but this table's ``date`` is a true
+    DATE, so leaving the column uncast lets the ``(agency_id, date)`` PK prefix
+    serve the range scan. ``time_band`` is unrepresentable here — callers fall
+    back to the live path when ``ctx.time_band != 'all'``.
+    """
+    parts: list[str] = [f"date >= (${next_param}::text)::date AND date <= (${next_param + 1}::text)::date"]
+    params: list = [str(ctx.from_date), str(ctx.to_date)]
+    n = next_param + 2
+
+    frag, p, n = dow_clause("date", ctx, n)
+    if frag != "TRUE":
+        parts.append(frag)
+        params.extend(p)
     if ctx.service != "all":
         parts.append(f"service_type = ${n}")
         params.append(ctx.service)
