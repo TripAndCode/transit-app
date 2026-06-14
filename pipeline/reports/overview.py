@@ -18,8 +18,10 @@ Most helpers have two internal branches:
 * **Slow path** (any other time_band) — falls back to the live ``updates``
   table via the dedup CTE so the hour-of-day filter is honoured.
 
-``_peak_hour_by_dow`` always uses the slow path because ``agg_route_hour``
-carries no date column and therefore cannot answer a DOW-restricted query.
+``_peak_hour_by_dow`` reads the per-day ``agg_hour_daily`` (filtering dates by
+DOW) on the fast path; ``agg_route_hour`` can't serve it (no date column). It
+falls back to the live path under a ``service``/``routes`` filter, since that
+table aggregates across all routes/services.
 """
 
 from __future__ import annotations
@@ -347,24 +349,7 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
     )
     rows = await conn.fetch(sql, agency_id, *params)
-    if not rows:
-        return None
-    by_hour: list[float | None] = [None] * 24
-    for r in rows:
-        if r["avg_min"] is None:
-            continue
-        h = int(r["h"])
-        if 0 <= h < 24:
-            by_hour[h] = round(float(r["avg_min"]), 2)
-    valid_idx = [h for h in range(24) if by_hour[h] is not None]
-    if not valid_idx:
-        return None
-    peak_h = max(valid_idx, key=lambda h: by_hour[h] or 0.0)
-    return {
-        "by_hour": by_hour,
-        "peak_hour": peak_h,
-        "peak_avg_min": by_hour[peak_h],
-    }
+    return _peak_from_hour_rows(rows)
 
 
 async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str) -> dict | None:

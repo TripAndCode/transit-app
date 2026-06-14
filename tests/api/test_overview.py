@@ -578,6 +578,24 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
+    """The agg fast path weights each day's hourly avg by its sample count, not
+    a plain mean — two weekday Tuesdays at hour 8 with unequal weights."""
+    # (9.0 * 10 + 4.0 * 2) / 12 = 8.1667 -> 8.17, not the plain mean 6.5.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 8, 9.0, 10)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 26), 8, 4.0, 2)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    assert pk_wd is not None
+    assert pk_wd["peak_hour"] == 8
+    assert pk_wd["by_hour"][8] == pytest.approx(8.17, abs=0.01)
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id):
     """A service filter (the agg has no service dimension) routes peak-hour to
     the live scan, which still partitions weekday/weekend correctly."""

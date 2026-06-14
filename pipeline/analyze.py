@@ -1,7 +1,7 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
 Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's five agg_* tables and rewrites them from freshly computed
+agency's agg_* tables and rewrites them from freshly computed
 SELECTs in one transaction, so re-running is idempotent and a crash
 mid-run rolls back to the prior snapshot.
 
@@ -10,8 +10,10 @@ Aggregation tables produced:
 - agg_route_hour    — delay by scheduled departure time
 - agg_route_dow     — delay by day-of-week (ISODOW 1=Mon..7=Sun)
 - agg_daily_trend   — per-day delay averages for trend queries
-- agg_hour_daily    — per-day, per-hour-of-day delay (peak-hour + hourly heatmap)
+- agg_hour_daily    — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
 - agg_stop_seq      — per-stop delay (requires static data)
+- agg_stop_daily    — per-stop, per-day delay (powers the heatmap)
+- agg_stop_routes   — routes serving each stop (heatmap labels)
 """
 
 import logging
@@ -57,7 +59,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 
     Caller guarantees the table is empty for the agency_id being
     materialised. No commit — `analyze` controls the transaction so the
-    DELETE + 5 INSERTs land atomically.
+    DELETE + INSERTs land atomically.
     """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
@@ -205,15 +207,16 @@ def analyze(agency_id: int, conn) -> None:
         logger.info(f"  agg_daily_trend: {len(rows)} rows")
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its ~96% cold cost) and the
-        # reports/trend hourly heatmap. UNTYPED dedup (all observations, no
-        # service filter) since these panels aggregate hour-of-day across every
-        # route; a service/route filter falls back to the live path on read.
+        # Powers Overview's peak-hour-by-DOW (its ~96% cold cost). UNTYPED dedup
+        # (all observations, no service filter) since that panel aggregates
+        # hour-of-day across every route; a service/route filter falls back to
+        # the live path on read. (The reports/trend hourly heatmap is the same
+        # grain and a natural future consumer, but is not wired here yet.)
         sql = f"""
             WITH deduped AS ({_DEDUP_INNER})
             SELECT
                 %(agency_id)s AS agency_id,
-                date::text,
+                date,
                 EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 COUNT(*) AS samples

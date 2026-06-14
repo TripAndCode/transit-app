@@ -135,6 +135,39 @@ def test_analyze_creates_agg_hour_daily(pg_conn, agency_id):
     assert well_formed
 
 
+def test_analyze_buckets_dates_in_jst(pg_conn, agency_id):
+    """`captured_at::date` must bucket on the JST civil day the API reads under,
+    not UTC. A 23:30 UTC observation is 08:30 the NEXT day in JST, so it must
+    land on that next date in agg_hour_daily — guards the analyze-connection TZ
+    pin (the API/tests are JST; the server default is UTC)."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+            "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                agency_id,
+                "tz.pb",
+                "2026-05-19T23:30:00+00:00",  # 08:30 JST on 2026-05-20
+                "tz_trip",
+                "平日",
+                time(8, 30),
+                "R_TZ",
+                1,
+                120,
+            ),
+        )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date FROM agg_hour_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        dates = [str(r[0]) for r in cur.fetchall()]
+    assert dates == ["2026-05-20"]  # JST date, not the 2026-05-19 UTC date
+
+
 def test_analyze_agency_isolated(pg_conn):
     """analyze() only touches rows for its own agency_id."""
     with pg_conn.cursor() as cur:
