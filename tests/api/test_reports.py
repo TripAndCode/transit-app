@@ -245,6 +245,21 @@ async def test_reports_trend_reads_agg(reports_client):
 
 
 @pytest.mark.asyncio
+async def test_reports_dow_keeps_null_service_routes(reports_client):
+    """NULL-service routes (広島's unmatched rows) must still appear in dow —
+    agg_daily_trend keeps them via the '' sentinel, mapped back to None. Guards
+    the regression where the typed-dedup agg dropped whole routes."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_NULL", None, "2026-05-23", [300] * 15)
+    _run_analyze(agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
+    assert resp.status_code == 200
+    r = next((x for x in resp.json()["rows"] if x[0] == "R_NULL"), None)
+    assert r is not None, "NULL-service route dropped from dow report"
+    assert r[1] is None  # '' sentinel mapped back to None
+
+
+@pytest.mark.asyncio
 async def test_reports_unknown_agency_returns_404(reports_client):
     client, _, _ = reports_client
     resp = await client.get("/api/99999/reports")

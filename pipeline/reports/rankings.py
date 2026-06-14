@@ -304,7 +304,8 @@ async def compute_dow_ranking(
     # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
     where, params, n = _agg_filter(overridden, next_param=2)
     sql = (
-        f"SELECT route_code, service_type, '{label}' AS dow,\n"
+        # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
+        f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
         "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
         "       SUM(samples)::int AS samples\n"
         "FROM agg_daily_trend\n"
@@ -537,7 +538,7 @@ async def compute_trend_series(
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
             f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
-            "       route_code, service_type,\n"
+            "       route_code, NULLIF(service_type, '') AS service_type,\n"
             "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
             "       SUM(samples)::int AS samples\n"
             "FROM agg_daily_trend\n"

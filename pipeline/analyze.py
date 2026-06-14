@@ -202,15 +202,23 @@ def analyze(agency_id: int, conn) -> None:
         logger.info(f"  agg_route_dow: {len(rows)} rows")
 
         # ── agg_daily_trend ──────────────────────────────────────────────
+        # UNTYPED dedup so NULL-service routes (e.g. 広島's unmatched rows) are
+        # kept — the reports (dow/compare/trend) and overview that read this
+        # table never filtered them on their live paths. NULL is coalesced to ''
+        # for the NOT NULL column; GROUP BY the same COALESCE (not the raw
+        # column) so NULL and '' can't split into duplicate keys. Readers that
+        # surface service_type map '' back to None; the service-split panels
+        # naturally ignore '' (no 平日/土日祝 match).
         sql = f"""
-            WITH deduped AS ({_DEDUP_TYPED})
+            WITH deduped AS ({_DEDUP_INNER})
             SELECT
                 %(agency_id)s AS agency_id,
-                date::text, route_code, service_type,
+                date::text, route_code,
+                COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 COUNT(*) AS samples
             FROM deduped
-            GROUP BY date, route_code, service_type
+            GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
         """
         rows = _run_query(sql, p, conn)
