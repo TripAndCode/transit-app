@@ -2,10 +2,86 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from api.range import RangeCtx, build_updates_filter
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.reports.filters import _dedup_cte
+from pipeline.histogram import percentile_from_hist
+from pipeline.reports.filters import _agg_filter, _dedup_cte
+
+# Reports read the precomputed per-day distribution (agg_route_daily_dist) and
+# sum across the range. The aggregate has no hour-of-day column, so a time_band
+# filter can't be served from it — those queries fall back to the live scan.
+_MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
+
+
+def _service_or_none(service_type: str) -> str | None:
+    """Map the '' NOT-NULL PK sentinel back to None (NULL-service routes)."""
+    return service_type or None
+
+
+def _avg_min(sum_delay_sec: int, samples: int) -> Decimal:
+    """Mean delay in minutes, 2 dp — matches live ROUND(AVG(dep_delay)/60, 2)."""
+    return (Decimal(sum_delay_sec) / samples / 60).quantize(_MIN)
+
+
+def _sec_to_min(sec: float | None) -> Decimal | None:
+    """Seconds → 2-dp minutes, or None for an empty histogram."""
+    return None if sec is None else (Decimal(sec) / 60).quantize(_MIN)
+
+
+async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
+    """Range-scan agg_route_daily_dist, summing the exact per-route scalars.
+
+    Used by on_time / worst_5min (no percentiles needed). DOW/service/route
+    filters apply; time_band is the caller's responsibility (see module note).
+    """
+    where, params, _ = _agg_filter(ctx, next_param=2)
+    sql = (
+        "SELECT route_code, service_type,\n"
+        "       SUM(samples) AS samples,\n"
+        "       SUM(sum_delay_sec) AS sum_delay_sec,\n"
+        "       SUM(on_time_count) AS on_time_count,\n"
+        "       SUM(late5_count) AS late5_count\n"
+        "FROM agg_route_daily_dist\n"
+        f"WHERE agency_id = $1 AND {where}\n"
+        "GROUP BY route_code, service_type"
+    )
+    return await conn.fetch(sql, agency_id, *params)
+
+
+async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
+    """Range-scan agg_route_daily_dist, summing scalars AND merging histograms.
+
+    The histograms are summed element-wise (unnest WITH ORDINALITY → regroup →
+    array_agg) so p50/p90 can be interpolated from the merged buckets in Python.
+    """
+    where, params, _ = _agg_filter(ctx, next_param=2)
+    sql = (
+        "WITH ranged AS (\n"
+        "    SELECT route_code, service_type, samples, sum_delay_sec, hist\n"
+        "    FROM agg_route_daily_dist\n"
+        f"    WHERE agency_id = $1 AND {where}\n"
+        "),\n"
+        "merged_hist AS (\n"
+        "    SELECT route_code, service_type, i, SUM(h) AS c\n"
+        "    FROM ranged, unnest(hist) WITH ORDINALITY u(h, i)\n"
+        "    GROUP BY route_code, service_type, i\n"
+        "),\n"
+        "hists AS (\n"
+        "    SELECT route_code, service_type, array_agg(c ORDER BY i) AS hist\n"
+        "    FROM merged_hist GROUP BY route_code, service_type\n"
+        "),\n"
+        "scalars AS (\n"
+        "    SELECT route_code, service_type,\n"
+        "           SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec\n"
+        "    FROM ranged GROUP BY route_code, service_type\n"
+        ")\n"
+        "SELECT s.route_code, s.service_type, s.samples, s.sum_delay_sec, h.hist\n"
+        "FROM scalars s JOIN hists h USING (route_code, service_type)"
+    )
+    return await conn.fetch(sql, agency_id, *params)
 
 
 @perf.timed("reports.ranking")
@@ -17,7 +93,38 @@ async def compute_ranking(
     sort_order: str = "desc",
     limit: int = 100,
 ) -> list[tuple]:
-    """Routes ranked by average delay over ctx. ``sort_order='asc'`` → best first."""
+    """Routes ranked by average delay over ctx. ``sort_order='asc'`` → best first.
+
+    Reads agg_route_daily_dist: avg/samples are exact; p50/p90 are interpolated
+    from the merged delay histogram (approximate within one bucket — fine for
+    ranking). A time_band filter falls back to the live scan.
+    """
+    if ctx.time_band != "all":
+        return await _ranking_live(agency_id, ctx, conn, sort_order, limit)
+
+    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    out: list[tuple] = []
+    for r in rows:
+        samples = r["samples"]
+        if samples <= 20:  # mirror live HAVING COUNT(*) > 20
+            continue
+        out.append(
+            (
+                r["route_code"],
+                _service_or_none(r["service_type"]),
+                _avg_min(r["sum_delay_sec"], samples),
+                _sec_to_min(percentile_from_hist(r["hist"], 0.5)),
+                _sec_to_min(percentile_from_hist(r["hist"], 0.9)),
+                samples,
+            )
+        )
+    # avg_min is element 2; None never occurs (samples > 20), so plain sort.
+    out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
+    return out[:limit]
+
+
+async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, sort_order: str, limit: int) -> list[tuple]:
+    """Live raw-scan ranking — fallback for time_band-filtered queries."""
     where, params, n = build_updates_filter(ctx, next_param=2)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     sql = (
@@ -56,7 +163,38 @@ async def compute_on_time(
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
     ``sort_order='asc'`` returns worst routes first (lowest %) for BUG-3.
+
+    Reads agg_route_daily_dist (exact). The on-time threshold is baked into
+    ``on_time_count`` (<=60s) at analyze time, so a non-default ``threshold_sec``
+    or a time_band filter falls back to the live scan.
     """
+    if ctx.time_band != "all" or threshold_sec != 60:
+        return await _on_time_live(agency_id, ctx, conn, threshold_sec, limit, sort_order)
+
+    rows = await _read_dist_scalars(agency_id, ctx, conn)
+    out: list[tuple] = []
+    for r in rows:
+        samples = r["samples"]
+        if samples <= 20:
+            continue
+        on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"))
+        out.append(
+            (
+                r["route_code"],
+                _service_or_none(r["service_type"]),
+                on_time_pct,
+                _avg_min(r["sum_delay_sec"], samples),
+                samples,
+            )
+        )
+    out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
+    return out[:limit]
+
+
+async def _on_time_live(
+    agency_id: int, ctx: RangeCtx, conn, threshold_sec: int, limit: int, sort_order: str
+) -> list[tuple]:
+    """Live raw-scan on-time — fallback for time_band / custom-threshold queries."""
     where, params, n = build_updates_filter(ctx, next_param=2)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     sql = (
@@ -85,7 +223,35 @@ async def compute_worst_5min(
     conn,
     limit: int = 100,
 ) -> list[tuple]:
-    """Routes ranked by count of >5min late observations."""
+    """Routes ranked by count of >5min late observations.
+
+    Reads agg_route_daily_dist (``late5_count`` is exact, >300s baked in at
+    analyze time). A time_band filter falls back to the live scan.
+    """
+    if ctx.time_band != "all":
+        return await _worst_5min_live(agency_id, ctx, conn, limit)
+
+    rows = await _read_dist_scalars(agency_id, ctx, conn)
+    out: list[tuple] = []
+    for r in rows:
+        late5 = r["late5_count"]
+        if late5 <= 0:  # mirror live HAVING SUM(...) > 0
+            continue
+        out.append(
+            (
+                r["route_code"],
+                _service_or_none(r["service_type"]),
+                late5,
+                _avg_min(r["sum_delay_sec"], r["samples"]),
+                r["samples"],
+            )
+        )
+    out.sort(key=lambda t: t[2], reverse=True)
+    return out[:limit]
+
+
+async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, limit: int) -> list[tuple]:
+    """Live raw-scan worst-5min — fallback for time_band-filtered queries."""
     where, params, n = build_updates_filter(ctx, next_param=2)
     sql = (
         f"WITH {_dedup_cte(where)}\n"

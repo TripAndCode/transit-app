@@ -1,16 +1,19 @@
 """Materialise per-agency aggregation tables from the `updates` fact table.
 
 Called by `gtfs_pipeline.py analyze` after ingestion. Each run wipes the
-agency's five agg_* tables and rewrites them from freshly computed
+agency's agg_* tables and rewrites them from freshly computed
 SELECTs in one transaction, so re-running is idempotent and a crash
 mid-run rolls back to the prior snapshot.
 
 Aggregation tables produced:
-- agg_route_stats   — overall delay stats per route/service_type
-- agg_route_hour    — delay by scheduled departure time
-- agg_route_dow     — delay by day-of-week (ISODOW 1=Mon..7=Sun)
-- agg_daily_trend   — per-day delay averages for trend queries
-- agg_stop_seq      — per-stop delay (requires static data)
+- agg_route_stats      — overall delay stats per route/service_type
+- agg_route_hour       — delay by scheduled departure time
+- agg_route_dow        — delay by day-of-week (ISODOW 1=Mon..7=Sun)
+- agg_daily_trend      — per-day delay averages for trend queries
+- agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
+- agg_stop_seq         — per-stop delay (requires static data)
+- agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
+- agg_stop_routes      — routes serving each stop (heatmap labels)
 """
 
 import logging
@@ -19,8 +22,22 @@ import psycopg2.extras
 
 from api.range import time_band_case_sql
 from pipeline.db import _DEDUP_INNER, _static_loaded, build_dedup_inner_sql
+from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
+
+# SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
+# with the read path by deriving both from the same LO/HI/WIDTH constants.
+# Operands are non-negative inside the inner range, so SQL integer division
+# matches Python floor division.
+_BUCKET_EXPR = (
+    f"CASE WHEN dep_delay < {LO} THEN 0 "
+    f"WHEN dep_delay >= {HI} THEN {N_BUCKETS - 1} "
+    f"ELSE 1 + (dep_delay - ({LO})) / {WIDTH} END"
+)
+# Fixed-length bucket-count array (one COUNT FILTER per bucket) — guarantees
+# every row stores exactly N_BUCKETS counts regardless of which bins are empty.
+_HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
 
 # Aggregations keyed by service_type write into NOT NULL service_type columns.
 # Rows that miss the static_join land with a NULL service_type (notably agency
@@ -36,6 +53,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_hour",
     "agg_route_dow",
     "agg_daily_trend",
+    "agg_route_daily_dist",
     "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
@@ -55,7 +73,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
 
     Caller guarantees the table is empty for the agency_id being
     materialised. No commit — `analyze` controls the transaction so the
-    DELETE + 5 INSERTs land atomically.
+    DELETE + INSERTs land atomically.
     """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
@@ -201,6 +219,52 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_daily_trend: {len(rows)} rows")
+
+        # ── agg_route_daily_dist (per-day delay distribution for reports) ──
+        # Exact scalars (sum/count, threshold counts) + a fixed-width delay
+        # histogram so range-scoped ranking/on_time/worst_5min read this tiny
+        # table instead of scanning raw `updates`. UNTYPED dedup keeps
+        # NULL-service routes (the live reports never filtered them); NULL is
+        # coalesced to '' in the inner CTE so GROUP BY service_type — and the
+        # NOT NULL PK — see the sentinel, never a raw NULL/'' split.
+        sql = f"""
+            WITH deduped AS ({_DEDUP_INNER}),
+            bucketed AS (
+                SELECT date, route_code,
+                    COALESCE(service_type, '') AS service_type,
+                    dep_delay, {_BUCKET_EXPR} AS b
+                FROM deduped
+            )
+            SELECT
+                %(agency_id)s AS agency_id,
+                date::text, route_code, service_type,
+                COUNT(*)                              AS samples,
+                SUM(dep_delay)                        AS sum_delay_sec,
+                COUNT(*) FILTER (WHERE dep_delay <= 60)  AS on_time_count,
+                COUNT(*) FILTER (WHERE dep_delay > 300)  AS late5_count,
+                {_HIST_ARRAY}                         AS hist
+            FROM bucketed
+            GROUP BY date, route_code, service_type
+            ORDER BY date, route_code
+        """
+        rows = _run_query(sql, p, conn)
+        _insert_agg(
+            "agg_route_daily_dist",
+            [
+                "agency_id",
+                "date",
+                "route_code",
+                "service_type",
+                "samples",
+                "sum_delay_sec",
+                "on_time_count",
+                "late5_count",
+                "hist",
+            ],
+            rows,
+            conn,
+        )
+        logger.info(f"  agg_route_daily_dist: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:
