@@ -10,6 +10,25 @@ from pipeline.query.tools import dispatch
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
+def _analyze_sync(agency_id):
+    """Build the agg_* tables (JST-pinned, like the real pipeline) so the
+    aggregate-backed tool paths have data."""
+    import psycopg2
+
+    from pipeline.analyze import analyze
+
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+    conn.autocommit = False
+    try:
+        analyze(agency_id, conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 async def conn_routes(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -153,6 +172,8 @@ async def conn_two_routes_obs(apply_schema):
                 for s in range(1, 7)  # 6 stop_sequences per day → 6 dedup-unique rows
             ],
         )
+    # time_series → compute_trend_series reads agg_daily_trend; build it.
+    _analyze_sync(agency_id)
     yield pool, agency_id
     async with pool.acquire() as c:
         await c.execute("TRUNCATE agencies CASCADE")
