@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from api.range import RangeCtx, build_updates_filter
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import percentile_from_hist
-from pipeline.reports.filters import _agg_filter, _dedup_cte
+from pipeline.reports.filters import _dedup_cte, _dist_filter
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
@@ -22,13 +22,17 @@ def _service_or_none(service_type: str) -> str | None:
 
 
 def _avg_min(sum_delay_sec: int, samples: int) -> Decimal:
-    """Mean delay in minutes, 2 dp — matches live ROUND(AVG(dep_delay)/60, 2)."""
-    return (Decimal(sum_delay_sec) / samples / 60).quantize(_MIN)
+    """Mean delay in minutes, 2 dp — matches live ROUND(AVG(dep_delay)/60, 2).
+
+    ROUND_HALF_UP mirrors Postgres ROUND (half away from zero); Decimal's
+    default ROUND_HALF_EVEN would diverge at exact-half 2-dp boundaries.
+    """
+    return (Decimal(sum_delay_sec) / samples / 60).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 def _sec_to_min(sec: float | None) -> Decimal | None:
     """Seconds → 2-dp minutes, or None for an empty histogram."""
-    return None if sec is None else (Decimal(sec) / 60).quantize(_MIN)
+    return None if sec is None else (Decimal(sec) / 60).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
@@ -37,7 +41,7 @@ async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
     Used by on_time / worst_5min (no percentiles needed). DOW/service/route
     filters apply; time_band is the caller's responsibility (see module note).
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
+    where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "SELECT route_code, service_type,\n"
         "       SUM(samples) AS samples,\n"
@@ -57,7 +61,7 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
     The histograms are summed element-wise (unnest WITH ORDINALITY → regroup →
     array_agg) so p50/p90 can be interpolated from the merged buckets in Python.
     """
-    where, params, _ = _agg_filter(ctx, next_param=2)
+    where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "WITH ranged AS (\n"
         "    SELECT route_code, service_type, samples, sum_delay_sec, hist\n"
@@ -177,7 +181,7 @@ async def compute_on_time(
         samples = r["samples"]
         if samples <= 20:
             continue
-        on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"))
+        on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
         out.append(
             (
                 r["route_code"],

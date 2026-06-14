@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS agg_route_daily_dist (
     on_time_count INTEGER NOT NULL,  -- dep_delay <= 60s
     late5_count   INTEGER NOT NULL,  -- dep_delay > 300s
     hist          INTEGER[] NOT NULL,  -- bucket counts; length = histogram.N_BUCKETS
-    -- The (agency_id, date) PK prefix serves the range scan WHERE agency_id=? AND
-    -- date BETWEEN ? AND ?, so no secondary index is needed.
-    PRIMARY KEY (agency_id, date, route_code, service_type)
+    -- The (agency_id, date) PK prefix serves the sargable range scan
+    -- (WHERE agency_id=? AND date BETWEEN ? AND ?), so no secondary index.
+    PRIMARY KEY (agency_id, date, route_code, service_type),
+    -- Guard the fixed histogram width (histogram.N_BUCKETS) so any future
+    -- bucket-count drift fails loudly at write time instead of silently
+    -- mis-merging in the read path's element-wise array sum.
+    CONSTRAINT agg_route_daily_dist_hist_len CHECK (array_length(hist, 1) = 37)
 );

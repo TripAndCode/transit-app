@@ -58,15 +58,17 @@ def percentile_from_hist(counts: list[int], q: float) -> float | None:
         return None
     target = q * total
     cumulative = 0
+    last_populated = 0
     for index, c in enumerate(counts):
         if c == 0:
             continue
+        last_populated = index
         if cumulative + c >= target:
             low, high = _bucket_bounds(index)
             # Fraction into this bucket where the target rank falls.
             frac = (target - cumulative) / c
             return low + frac * (high - low)
         cumulative += c
-    # Floating-point slack: target == total falls through to the last bucket.
-    low, high = _bucket_bounds(len(counts) - 1)
-    return high
+    # Floating-point slack (target == total) falls through — return the top
+    # edge of the last POPULATED bucket, not the fixed overflow edge.
+    return _bucket_bounds(last_populated)[1]
