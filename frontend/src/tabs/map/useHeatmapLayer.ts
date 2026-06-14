@@ -60,7 +60,6 @@ function inSeverityBand(avg: number, band: SeverityKey): boolean {
  */
 export function useHeatmapLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
-  styleLoadedRef: React.MutableRefObject<boolean>,
   data: HeatmapCollection | undefined,
   showSingleSampleStops: boolean,
   focusedSeverity: SeverityKey | null,
@@ -277,5 +276,5 @@ export function useHeatmapLayer(
     // after style.load but before basemap tiles finish (isStyleLoaded() false)
     // still attaches instead of waiting on an event that won't fire again.
     return whenStyleReady(m, applyData);
-  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleLoadedRef, styleEpoch]);
+  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch]);
 }

@@ -32,7 +32,6 @@ export function MapTab() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
-  const styleLoadedRef = useRef(false);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
   const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
   const [styleId, setStyleId] = useMapStylePref();
@@ -159,7 +158,6 @@ export function MapTab() {
         .catch(() => {});
     };
 
-    m.on("load", () => { styleLoadedRef.current = true; });
     m.on("click", LAYER, onStopClick);
     m.on("mouseenter", LAYER, onEnter);
     m.on("mouseleave", LAYER, onLeave);
@@ -186,7 +184,6 @@ export function MapTab() {
       m.off("mouseleave", ROUTE_STOPS_LAYER, onLeave);
       m.remove();
       mapRef.current = null;
-      styleLoadedRef.current = false;
     };
     // Map is created once; later styleId/language changes are handled by the
     // style-switch effect below (adding them here would recreate the map).
@@ -202,8 +199,8 @@ export function MapTab() {
   }, [data, showSingleSampleStops, focusedSeverity]);
 
   // Switch basemap when the user picks a style or the UI language changes.
-  // setStyle() wipes custom layers, so on style.load we mark the style ready
-  // and bump styleEpoch to re-run the (idempotent) overlay attach hooks.
+  // setStyle() wipes custom layers, so on style.load we bump styleEpoch to
+  // re-run the (idempotent) overlay attach hooks.
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
@@ -212,24 +209,20 @@ export function MapTab() {
       return;
     }
     if (getMapStyleOverride()) return; // env override pins the style
-    styleLoadedRef.current = false;
     // diff:false forces a full style reload — with the default diff:true,
     // MapLibre does an in-place diff that drops our imperatively-added overlay
     // layers AND never fires `style.load`, so the re-attach never runs.
     m.setStyle(buildStyle(styleId, i18n.language), { diff: false });
-    m.once("style.load", () => {
-      styleLoadedRef.current = true;
-      setStyleEpoch((e) => e + 1);
-    });
+    m.once("style.load", () => setStyleEpoch((e) => e + 1));
   }, [styleId, i18n.language]);
 
   // Before the overlay hooks so the scrim is inserted beneath their layers
   // (effect order follows hook-call order).
-  useBasemapDim(mapRef, styleLoadedRef, styleEpoch);
+  useBasemapDim(mapRef, styleEpoch);
 
-  useHeatmapLayer(mapRef, styleLoadedRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
+  useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
 
-  useRouteOverlay(mapRef, styleLoadedRef, shape, styleEpoch);
+  useRouteOverlay(mapRef, shape, styleEpoch);
 
   // Stops per severity band (respecting the single-sample filter) so the legend
   // can disable bands that match nothing — clicking an empty band would just

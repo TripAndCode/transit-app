@@ -31,7 +31,6 @@ function setDelayOverlayVisibility(m: MLMap, visibility: "visible" | "none") {
  */
 export function useRouteOverlay(
   mapRef: React.MutableRefObject<MLMap | null>,
-  styleLoadedRef: React.MutableRefObject<boolean>,
   shape: RouteShapeResponse | undefined,
   styleEpoch: number,
 ): void {
@@ -180,5 +179,5 @@ export function useRouteOverlay(
       });
     }
     return whenStyleReady(m, drawOverlay);
-  }, [shape, mapRef, styleLoadedRef, styleEpoch]);
+  }, [shape, mapRef, styleEpoch]);
 }

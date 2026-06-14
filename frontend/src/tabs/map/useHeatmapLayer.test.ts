@@ -18,8 +18,7 @@ const DATA = {
 function run(map: MockMap) {
   return renderHook(() => {
     const mapRef = useRef(map as never);
-    const styleLoadedRef = useRef(true);
-    useHeatmapLayer(mapRef, styleLoadedRef, DATA, true, null, 1, 0);
+    useHeatmapLayer(mapRef, DATA, true, null, 1, 0);
   });
 }
 

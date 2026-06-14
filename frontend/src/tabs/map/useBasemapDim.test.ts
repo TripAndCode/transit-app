@@ -4,11 +4,10 @@ import { useRef } from "react";
 import { makeMockMap, type MockMap } from "../../test/mockMap";
 import { useBasemapDim, SCRIM_LAYER } from "./useBasemapDim";
 
-function run(map: MockMap, styleLoaded = true, epoch = 0) {
+function run(map: MockMap, epoch = 0) {
   return renderHook(() => {
     const mapRef = useRef(map as never);
-    const styleLoadedRef = useRef(styleLoaded);
-    useBasemapDim(mapRef, styleLoadedRef, epoch);
+    useBasemapDim(mapRef, epoch);
   });
 }
 

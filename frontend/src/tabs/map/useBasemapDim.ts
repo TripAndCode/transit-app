@@ -31,7 +31,6 @@ const SCRIM_OPACITY: ExpressionSpecification = [
  */
 export function useBasemapDim(
   mapRef: React.MutableRefObject<MLMap | null>,
-  styleLoadedRef: React.MutableRefObject<boolean>,
   styleEpoch: number,
 ): void {
   useEffect(() => {
@@ -67,5 +66,5 @@ export function useBasemapDim(
     // one-shot `style.load`) so the scrim survives a basemap/language reload
     // even when basemap tiles finish after style.load fires.
     return whenStyleReady(m, apply);
-  }, [mapRef, styleLoadedRef, styleEpoch]);
+  }, [mapRef, styleEpoch]);
 }
