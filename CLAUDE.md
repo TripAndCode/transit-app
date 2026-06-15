@@ -40,6 +40,7 @@ Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && 
 
 ## Git / PRs
 
+- Default branch is `main` (not master); diff and open PRs against `main`.
 - Squash merges to `main`; Conventional Commits subjects.
 - Stacked PRs: merge bottom-up, but **don't `--delete-branch` while a dependent PR still targets that branch** — GitHub closes (not retargets) the dependent PR and it can't be reopened once its base is gone. Retarget the next PR to `main` first; delete branches at the end.
 - Phase-sized features get functional reviews on live data before merge (see `review-branch.md` flow).
