@@ -29,6 +29,36 @@ from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on a believable departure delay, in seconds (120 min). Observations
+# beyond ±this are excluded from the per-stop heatmap aggregates as data-quality
+# faults, not delays.
+#
+# WHY THIS EXISTS — root-cause from a 2026-06-07 investigation:
+#   The map showed 馬木料金所前 (an expressway tollgate stop on route 550332996)
+#   at a 72.2-min AVERAGE delay — a bright-red ">10 min" dot. That stop is
+#   actually fine: median 3 min, p90 4 min. The mean was hijacked by two trips
+#   on 2026-06-07 whose realtime TripUpdate feed FROZE and kept re-emitting an
+#   impossible delay — 976 min (16.3 h) and 715 min (11.9 h) — once every ~30 s
+#   for several minutes. Because the heatmap aggregates raw `updates` rows
+#   (COUNT(*) / SUM, no trip-level dedup), ~35 frozen-feed polls from just two
+#   incidents dragged a ~3-min stop up to 72 min. No city bus is 16 h late: that
+#   magnitude is a stale/stuck feed, not a delay.
+#
+# This clamp removes the physically-impossible tail BEFORE averaging, so the dot
+# reflects reality. The ceiling is set well above any plausible real delay, so a
+# genuinely very-late bus (e.g. 40 min) still counts and still warms the dot.
+#
+# DELIBERATELY NOT DONE HERE (documented follow-ups, separate review):
+#   1. Trip-level dedup of repeated 30-s polls — fixes inflated *sample counts*
+#      (this stop reports "417 samples" from only 3 distinct trips); the repo's
+#      shared dedup CTE handles this for other aggregates but the heatmap path
+#      reads raw rows. Cosmetic vs. this fix, which corrects the delay value.
+#   2. Median (p50) instead of mean for the dot colour — robust by construction.
+#   3. Extending the clamp into the shared dedup path so reports/route-summary
+#      get the same protection (these spikes pollute those means too).
+#   4. Surfacing the excluded count in a feed-health view (only logged for now).
+MAX_PLAUSIBLE_DELAY_SEC = 7200
+
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
 # Operands are non-negative inside the inner range, so SQL integer division
@@ -104,7 +134,7 @@ def analyze(agency_id: int, conn) -> None:
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
     """
-    p = {"agency_id": agency_id}
+    p = {"agency_id": agency_id, "max_delay": MAX_PLAUSIBLE_DELAY_SEC}
     # Resolved BEFORE the txn opens: _static_loaded calls conn.rollback() in
     # its UndefinedTable branch, which would silently wipe our DELETE + partial
     # INSERTs if it fired mid-run. Hoisting the probe keeps analyze's
@@ -412,8 +442,28 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_stop_daily (raw observations; powers the fast heatmap path) ──
         if has_static:
+            # Feed-health signal: how many observations the delay clamp rejects as
+            # implausible (frozen/stale TripUpdate spikes — see MAX_PLAUSIBLE_DELAY_SEC).
+            # Logged, not stored; a non-trivial count means a feed had stuck trips.
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM updates u
+                    WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
+                      AND ABS(u.dep_delay) > %(max_delay)s
+                    """,
+                    p,
+                )
+                clamped = cur.fetchone()[0]
+                if clamped:
+                    logger.info(
+                        f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
+                    )
+
             # Same expr used in SELECT and GROUP BY below — one call keeps them in sync.
             band_case = time_band_case_sql("u.scheduled_time")
+            # `dep_delay BETWEEN -max AND max` drops implausible feed spikes before they
+            # skew the per-stop mean (see MAX_PLAUSIBLE_DELAY_SEC for the root cause).
             sql = f"""
                 INSERT INTO agg_stop_daily
                     (agency_id, stop_id, date, service_type, time_band, delay_sum, samples)
@@ -427,6 +477,7 @@ def analyze(agency_id: int, conn) -> None:
                  AND sst.trip_id = u.trip_id
                  AND sst.stop_sequence = u.stop_sequence
                 WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL AND u.service_type IS NOT NULL
+                  AND u.dep_delay BETWEEN -%(max_delay)s AND %(max_delay)s
                 GROUP BY sst.stop_id, u.captured_at::date, u.service_type, {band_case}
             """
             with conn.cursor() as cur:
@@ -457,6 +508,8 @@ def analyze(agency_id: int, conn) -> None:
             # `service_type IS NOT NULL` filter) so output matches the live route heatmap,
             # which does not drop NULL-service rows. COALESCE repeated in GROUP BY so the
             # grouped column binds the sentinel, not the raw NULL.
+            # The dep_delay clamp (MAX_PLAUSIBLE_DELAY_SEC) is an intentional deviation
+            # from the old live route query — it drops implausible feed spikes here too.
             band_case = time_band_case_sql("u.scheduled_time")
             sql = f"""
                 INSERT INTO agg_route_stop_daily
@@ -472,6 +525,7 @@ def analyze(agency_id: int, conn) -> None:
                  AND sst.trip_id = u.trip_id
                  AND sst.stop_sequence = u.stop_sequence
                 WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
+                  AND u.dep_delay BETWEEN -%(max_delay)s AND %(max_delay)s
                 GROUP BY u.route_code, sst.stop_id, u.captured_at::date,
                          COALESCE(u.service_type, ''), {band_case}
             """

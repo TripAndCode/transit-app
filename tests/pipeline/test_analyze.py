@@ -455,3 +455,32 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
     assert all(rc == "R1" for rc, *_ in rows)
     assert by_svc["平日"] == (360, 3)  # 60+120+180; raw count
     assert by_svc[""] == (240, 1)  # NULL service KEPT as '' sentinel, not dropped
+
+
+def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
+    """A frozen-feed spike (|delay| > MAX_PLAUSIBLE_DELAY_SEC) is excluded from
+    BOTH heatmap aggregates, so it can't hijack the per-stop mean. Regression for
+    the 2026-06-07 馬木料金所前 72-min false reading."""
+    from datetime import time
+
+    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC, analyze
+
+    _seed_for_stop_agg(pg_conn, agency_id)  # 3 plausible rows (60/120/180s), stop s1, route R1, 平日
+    with pg_conn.cursor() as cur:
+        # an implausible spike well over the ceiling (e.g. a stuck 16h feed value)
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'fspike.pb','2026-06-09T08:10:00','T','平日',%s,'R1',1,%s)",
+            (agency_id, time(8, 10), MAX_PLAUSIBLE_DELAY_SEC + 1),
+        )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT delay_sum, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone() == (360, 3)  # spike excluded: only 60+120+180 / 3 rows
+        cur.execute(
+            "SELECT delay_sum, samples FROM agg_route_stop_daily WHERE agency_id=%s AND service_type='平日'",
+            (agency_id,),
+        )
+        assert cur.fetchone() == (360, 3)  # spike excluded here too
