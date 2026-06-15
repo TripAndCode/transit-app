@@ -505,8 +505,10 @@ async def delay_heatmap(
     so the filter can be applied exactly against raw rows.
     """
     if ctx.routes:
-        # Route filter → live path (agg is not pre-split by route_code).
-        where_frag, params, _ = build_updates_filter(ctx, next_param=2)
+        # Route filter → aggregate path (agg_route_stop_daily is pre-split by route_code).
+        # Mirrors the no-route branch's spatial grouping; adds a route_code = ANY($2)
+        # filter. $1=agency_id, $2=route list, so the ctx filter starts at $3.
+        agg_where, params, _ = build_agg_stop_filter(ctx, next_param=3)
         rows = await conn.fetch(
             f"""
             SELECT
@@ -518,19 +520,13 @@ async def delay_heatmap(
                     AS platform_codes,
                 string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
                     AS stop_codes,
-                string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code) AS route_codes,
-                ROUND(AVG(u.dep_delay) / 60.0::numeric, 2) AS avg_delay_min,
-                COUNT(*) AS samples
-            FROM updates u
-            JOIN static_stop_times sst
-                ON u.trip_id = sst.trip_id AND u.stop_sequence = sst.stop_sequence
-                AND sst.agency_id = $1
-            JOIN static_stops ss
-                ON sst.stop_id = ss.stop_id AND ss.agency_id = $1
-            WHERE u.agency_id = $1
-                AND u.dep_delay IS NOT NULL
-                AND ss.geom IS NOT NULL
-                AND {where_frag}
+                string_agg(DISTINCT a.route_code, ',' ORDER BY a.route_code) AS route_codes,
+                ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                SUM(a.samples) AS samples
+            FROM agg_route_stop_daily a
+            JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
+            WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND ss.geom IS NOT NULL
+                AND {agg_where}
             GROUP BY
                 CASE
                     WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
@@ -544,6 +540,7 @@ async def delay_heatmap(
                 END
             """,
             agency_id,
+            list(ctx.routes),
             *params,
         )
     else:
