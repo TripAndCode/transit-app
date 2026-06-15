@@ -853,12 +853,15 @@ make test      # pytest (requires DATABASE_URL + running container)
 make check     # fmt + lint + test
 ```
 
-Run a specific test file:
+Run a specific test file. **Point `DATABASE_URL` at the throwaway test DB on
+`:5544`, never the dev DB on `:5433`** — the test suite auto-migrates its
+target, and the dev DB holds ~1.8M rows of real data (see `CLAUDE.md` ▸
+Databases for the one-line container build):
 
 ```bash
-DATABASE_URL=postgresql://transit:transit@localhost:5433/transit \
+DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
   GROQ_API_KEY=test-key \
-  poetry run pytest tests/test_tool_queries.py -v
+  poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
 ---
