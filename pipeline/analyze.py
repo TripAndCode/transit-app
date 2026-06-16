@@ -18,6 +18,7 @@ Aggregation tables produced:
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
+- agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
 """
 
 import logging

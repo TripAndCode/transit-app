@@ -9,8 +9,14 @@ excluded so the continuously-lagging current day never trips the check.
 
 All day arithmetic is pinned to Asia/Tokyo via explicit AT TIME ZONE, matching
 how analyze() buckets `captured_at::date`. This keeps the check correct
-regardless of the caller's session timezone — the cron path
-(api/routers/internal.py) connects without pinning JST.
+regardless of the caller's session timezone. (analyze must still bucket under
+JST for the comparison to hold — every analyze path, including the cron task,
+pins Asia/Tokyo on its connection.)
+
+Only the newest completed day is compared, which catches the realistic failure
+modes (cron crashed mid-loop, forgot to re-analyze). It does NOT detect an
+interior missing day — analyze's atomic per-agency wipe-and-rewrite cannot
+produce one, so a mid-range gap would only arise from manual row surgery.
 """
 
 from collections.abc import Iterable
