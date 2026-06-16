@@ -67,6 +67,20 @@ def _run_ingest_and_analyze() -> None:
                 analyze(aid, conn)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
+
+        # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
+        # completed day, surface it loudly. Read-only; never aborts the run.
+        from pipeline.freshness import check_agg_freshness
+
+        stale = check_agg_freshness(conn, agency_ids)
+        if stale:
+            _log.error(
+                "cron: %d agency(ies) have stale aggregates after analyze: %s",
+                len(stale),
+                [s.agency_id for s in stale],
+            )
+        else:
+            _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
         conn.close()
 

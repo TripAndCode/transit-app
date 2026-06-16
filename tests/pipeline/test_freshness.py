@@ -110,3 +110,25 @@ def test_analyze_writes_agg_meta(pg_conn, agency_id):
     assert row is not None
     assert row[0] is not None  # analyzed_at stamped
     assert row[1] is not None  # max_updates_captured_at populated (rows exist)
+
+
+def test_cron_path_logs_fresh(pg_conn, agency_id, monkeypatch, caplog):
+    """_run_ingest_and_analyze runs the freshness check after analyzing.
+
+    ingest_live is stubbed (no network); analyze runs for real against seeded
+    rows. The cron path opens its OWN connection without pinning JST, so this
+    also exercises that the JST-in-SQL check is correct under a UTC session.
+    """
+    import logging
+
+    import api.routers.internal as internal
+    import pipeline.ingest
+
+    _seed_two_days(pg_conn, agency_id)
+    monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn: None)
+
+    with caplog.at_level(logging.INFO, logger="api.routers.internal"):
+        internal._run_ingest_and_analyze()
+
+    assert "fresh aggregates" in caplog.text
+    assert "stale aggregates" not in caplog.text
