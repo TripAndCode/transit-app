@@ -410,9 +410,14 @@ def analyze(agency_id: int, conn) -> None:
         )
         logger.info(f"  agg_stop_seq: {len(rows)} rows")
 
-        # ── agg_stop_daily (raw observations; powers the fast heatmap path) ──
+        # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
+        # Reads the deduped temp (one row per trip-stop event, latest estimate,
+        # already clamped via build_dedup_inner_sql) — NOT raw `updates`. So
+        # `samples` counts observations, not feed polls (a frozen/heavily-polled
+        # trip no longer inflates the count), and the per-stop mean matches the
+        # reports/route-summary surfaces, which read the same deduped set.
         if has_static:
-            # Feed-health signal: how many observations the delay clamp rejects as
+            # Feed-health signal: how many RAW observations the clamp rejects as
             # implausible (frozen/stale TripUpdate spikes — see MAX_PLAUSIBLE_DELAY_SEC).
             # Logged, not stored; a non-trivial count means a feed had stuck trips.
             with conn.cursor() as cur:
@@ -430,31 +435,30 @@ def analyze(agency_id: int, conn) -> None:
                         f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
                     )
 
-            # Same expr used in SELECT and GROUP BY below — one call keeps them in sync.
-            band_case = time_band_case_sql("u.scheduled_time")
-            # `dep_delay BETWEEN -max AND max` drops implausible feed spikes before they
-            # skew the per-stop mean (see MAX_PLAUSIBLE_DELAY_SEC for the root cause).
+            # Same expr in SELECT and GROUP BY — one call keeps them in sync.
+            band_case = time_band_case_sql("d.scheduled_time")
             sql = f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
                 INSERT INTO agg_stop_daily
                     (agency_id, stop_id, date, service_type, time_band, delay_sum, samples)
                 SELECT
-                    %(agency_id)s, sst.stop_id, u.captured_at::date, u.service_type,
+                    %(agency_id)s, sst.stop_id, d.date, d.service_type,
                     {band_case} AS time_band,
-                    SUM(u.dep_delay)::bigint, COUNT(*)
-                FROM updates u
+                    SUM(d.dep_delay)::bigint, COUNT(*)
+                FROM deduped d
                 JOIN static_stop_times sst
                   ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = u.trip_id
-                 AND sst.stop_sequence = u.stop_sequence
-                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL AND u.service_type IS NOT NULL
-                  AND u.dep_delay BETWEEN -%(max_delay)s AND %(max_delay)s
-                GROUP BY sst.stop_id, u.captured_at::date, u.service_type, {band_case}
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date, d.service_type, {band_case}
             """
             with conn.cursor() as cur:
                 cur.execute(sql, p)
                 logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
 
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
+            # Raw `updates` is fine here: it's a DISTINCT route_code set, unaffected
+            # by poll duplication, and doesn't read dep_delay.
             sql = """
                 INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
                 SELECT %(agency_id)s, sst.stop_id,
@@ -472,29 +476,28 @@ def analyze(agency_id: int, conn) -> None:
                 logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
 
             # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
-            # Mirrors agg_stop_daily but adds route_code to the grain. Reads raw `updates`
-            # (NOT the dedup temp). Built UNTYPED: NULL service_type is kept as '' sentinel
-            # (no `service_type IS NOT NULL` filter) so a route's NULL-service rows still
-            # show on the heatmap. COALESCE repeated in GROUP BY so the grouped column binds
-            # the sentinel, not the raw NULL. Clamps dep_delay like agg_stop_daily.
-            band_case = time_band_case_sql("u.scheduled_time")
+            # Same deduped source as agg_stop_daily, plus route_code in the grain.
+            # Built UNTYPED: NULL service_type is kept as '' sentinel (reads the full
+            # deduped set, no service_type filter) so a route's NULL-service rows still
+            # show. COALESCE repeated in GROUP BY so the grouped column binds the
+            # sentinel, not the raw NULL.
+            band_case = time_band_case_sql("d.scheduled_time")
             sql = f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped)
                 INSERT INTO agg_route_stop_daily
                     (agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples)
                 SELECT
-                    %(agency_id)s, u.route_code, sst.stop_id, u.captured_at::date,
-                    COALESCE(u.service_type, '') AS service_type,
+                    %(agency_id)s, d.route_code, sst.stop_id, d.date,
+                    COALESCE(d.service_type, '') AS service_type,
                     {band_case} AS time_band,
-                    SUM(u.dep_delay)::bigint, COUNT(*)
-                FROM updates u
+                    SUM(d.dep_delay)::bigint, COUNT(*)
+                FROM deduped d
                 JOIN static_stop_times sst
                   ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = u.trip_id
-                 AND sst.stop_sequence = u.stop_sequence
-                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
-                  AND u.dep_delay BETWEEN -%(max_delay)s AND %(max_delay)s
-                GROUP BY u.route_code, sst.stop_id, u.captured_at::date,
-                         COALESCE(u.service_type, ''), {band_case}
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY d.route_code, sst.stop_id, d.date,
+                         COALESCE(d.service_type, ''), {band_case}
             """
             with conn.cursor() as cur:
                 cur.execute(sql, p)

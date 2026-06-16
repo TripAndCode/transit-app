@@ -454,14 +454,40 @@ def _run_analyze(agency_id):
 
 
 @pytest.mark.asyncio
-async def test_heatmap_agg_path_matches_raw(map_app):
-    """No route filter -> aggregate path.
+async def test_heatmap_agg_path_averages_deduped_observations(map_app):
+    """No route filter -> aggregate path, averaging DEDUPED observations.
 
-    Delays [60, 90, 121]: mean = 271/3 = 90.333...s / 60 = 1.5055... -> ROUND(...,2) = 1.51.
-    With integer-division bug: 271//3 = 90 /60 = 1.50 (wrong), so this assertion guards Fix 1.
-    """
+    Three DISTINCT trips (T1/T2/T3) serve stop s1 once each, delays [60, 90, 121]:
+    each is its own dedup group, so all three survive → samples=3, mean = 271/3 =
+    90.33s / 60 = 1.5055 -> ROUND(...,2) = 1.51. Guards two things: (1) float (not
+    integer) division in the avg — 271//3//60 would give 1.50; (2) distinct trips
+    are NOT collapsed by the dedup (only repeated polls of the SAME event are)."""
+    from datetime import datetime, time, timezone
+
     app, agency_id = map_app
-    await _seed_heatmap(app.state.pool, agency_id)
+    async with app.state.pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES ($1,'s1','駅前',ST_SetSRID(ST_MakePoint(140.74,40.82),4326))",
+            agency_id,
+        )
+        for trip, d in [("T1", 60), ("T2", 90), ("T3", 121)]:
+            await c.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1,$2,1,'s1')",
+                agency_id,
+                trip,
+            )
+            await c.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,$4,'平日',$5,'R1',1,$6)",
+                agency_id,
+                f"{trip}.pb",
+                datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+                trip,
+                time(8, 10),
+                d,
+            )
     _run_analyze(agency_id)  # populate agg_stop_daily + agg_stop_routes
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/delays/heatmap")
@@ -469,8 +495,8 @@ async def test_heatmap_agg_path_matches_raw(map_app):
     feats = resp.json()["features"]
     assert len(feats) == 1
     p = feats[0]["properties"]
-    assert p["samples"] == 3
-    assert p["avg_delay_min"] == 1.51  # 271/3/60 rounded; guards against integer-division truncation
+    assert p["samples"] == 3  # three distinct trips, each a separate observation
+    assert p["avg_delay_min"] == 1.51  # 271/3/60 rounded; guards float division
     assert "R1" in p["route_codes"]
 
 
@@ -655,7 +681,8 @@ async def test_route_summary_returns_only_latest_date(map_app):
 async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
     """Route filter -> agg_route_stop_daily, NOT raw updates. Without analyze the
     agg is empty -> 0 features (proving the source switched off the live path);
-    after analyze, one dot with the raw sample count preserved in the aggregate."""
+    after analyze, one dot whose 3 same-event polls dedup to a single observation
+    (samples == 1)."""
     app, agency_id = map_app
     await _seed_heatmap(app.state.pool, agency_id)  # raw updates seeded; agg not yet built
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -668,7 +695,8 @@ async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
     assert resp.status_code == 200
     feats = resp.json()["features"]
     assert len(feats) == 1
-    assert feats[0]["properties"]["samples"] == 3  # raw count preserved in agg
+    # 3 polls of one trip-stop event dedup to a single observation in the agg
+    assert feats[0]["properties"]["samples"] == 1
 
 
 @pytest.mark.asyncio

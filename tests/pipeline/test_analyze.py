@@ -388,7 +388,9 @@ def test_analyze_builds_agg_stop_daily(pg_conn, agency_id):
     assert len(rows) == 1
     stop_id, svc, band, delay_sum, samples = rows[0]
     assert (stop_id, svc, band) == ("s1", "平日", "morning")
-    assert delay_sum == 360 and samples == 3  # 60+120+180; raw count, not deduped
+    # The 3 rows are repeated polls of ONE trip-stop event (same dedup key) → they
+    # collapse to a single observation carrying the latest estimate (180s).
+    assert delay_sum == 180 and samples == 1
 
 
 def test_analyze_builds_agg_stop_routes(pg_conn, agency_id):
@@ -421,9 +423,10 @@ def test_agg_stop_daily_skips_null_service_type(pg_conn, agency_id):
     with pg_conn.cursor() as cur:
         cur.execute("SELECT service_type, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
         rows = cur.fetchall()
-    # only the non-null service_type group survives; the 3 valid rows, NOT the null one
+    # only the non-null service_type group survives (NULL one is dropped); the three
+    # 平日 polls dedup to a single observation
     assert all(st is not None for st, _ in rows)
-    assert sum(s for _, s in rows) == 3
+    assert sum(s for _, s in rows) == 1
 
 
 def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
@@ -453,7 +456,7 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
         rows = cur.fetchall()
     by_svc = {svc: (delay_sum, samples) for _, svc, _, delay_sum, samples in rows}
     assert all(rc == "R1" for rc, *_ in rows)
-    assert by_svc["平日"] == (360, 3)  # 60+120+180; raw count
+    assert by_svc["平日"] == (180, 1)  # 3 polls of one event dedup to latest (180s)
     assert by_svc[""] == (240, 1)  # NULL service KEPT as '' sentinel, not dropped
 
 
@@ -478,9 +481,10 @@ def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
     analyze(agency_id, pg_conn)
     with pg_conn.cursor() as cur:
         cur.execute("SELECT delay_sum, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
-        assert cur.fetchone() == (360, 3)  # spike excluded: only 60+120+180 / 3 rows
+        # spike clamped out; the 3 valid polls dedup to one observation (latest 180s)
+        assert cur.fetchone() == (180, 1)
         cur.execute(
             "SELECT delay_sum, samples FROM agg_route_stop_daily WHERE agency_id=%s AND service_type='平日'",
             (agency_id,),
         )
-        assert cur.fetchone() == (360, 3)  # spike excluded here too
+        assert cur.fetchone() == (180, 1)  # spike excluded + deduped here too
