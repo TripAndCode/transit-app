@@ -88,6 +88,43 @@ async def test_reports_dedup_cte_picks_latest_observation(aconn, aagency_id):
     )
 
 
+def test_dedup_excludes_implausible_delay_spikes(pg_conn, agency_id):
+    """The shared dedup drops |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC (frozen-feed
+    spikes), so every aggregate/report built from it is protected — not just the
+    heatmap. Regression for the 2026-06-07 馬木料金所前 false average."""
+    from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+
+    now = datetime.now(timezone.utc)
+    with pg_conn.cursor() as cur:
+        # one plausible trip and one frozen-feed spike trip, same day
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'ok.pb',%s,'trip_ok','平日','10:00','R1',1,180)",
+            (agency_id, now),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'spike.pb',%s,'trip_spike','平日','10:05','R1',2,%s)",
+            (agency_id, now, MAX_PLAUSIBLE_DELAY_SEC + 1),
+        )
+    pg_conn.commit()
+    sql = f"WITH deduped AS ({DB_DEDUP_INNER}) SELECT dep_delay FROM deduped ORDER BY dep_delay"
+    with pg_conn.cursor() as cur:
+        cur.execute(sql, {"agency_id": agency_id})
+        delays = [r[0] for r in cur.fetchall()]
+    assert delays == [180], f"spike should be excluded; got {delays}"
+
+
+def test_delay_ceiling_is_single_source_of_truth():
+    """analyze.py must reuse db.py's constant, not redefine its own (drift guard)."""
+    import pipeline.analyze as analyze
+    import pipeline.db as db
+
+    assert analyze.MAX_PLAUSIBLE_DELAY_SEC is db.MAX_PLAUSIBLE_DELAY_SEC
+
+
 def test_include_captured_at_flag_adds_projection():
     """include_captured_at=True surfaces the raw captured_at (used by
     agg_route_daily's last_seen_at); default keeps only captured_at::date."""
