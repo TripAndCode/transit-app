@@ -27,7 +27,7 @@ async def map_app(apply_schema):
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, agg_route_dow, "
             "agg_daily_trend, agg_route_daily, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
-            "rag_chunks CASCADE"
+            "agg_route_stop_daily, rag_chunks CASCADE"
         )
     await pool.close()
 
@@ -80,6 +80,44 @@ async def test_stops_list_empty(map_client):
     resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_heatmap_route_filter_from_aggregate(map_app):
+    """Route-filtered heatmap reads agg_route_stop_daily (not raw updates): one dot
+    per stop with the route's avg delay; the route_codes label comes from the agg."""
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'S1', '駅前', 40.0, 140.0, ST_SetSRID(ST_MakePoint(140.0, 40.0), 4326))",
+            agency_id,
+        )
+        # Two agg rows for R1/S1 on the same date/band: 60s/1 and 120s/1 -> avg 90s = 1.5min
+        await conn.execute(
+            "INSERT INTO agg_route_stop_daily "
+            "(agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples) "
+            "VALUES ($1,'R1','S1','2026-06-06','weekday','morning',60,1), "
+            "       ($1,'R1','S1','2026-06-06','','morning',120,1)",
+            agency_id,
+        )
+        # A different route on the same stop must NOT leak into an R1-filtered request
+        await conn.execute(
+            "INSERT INTO agg_route_stop_daily "
+            "(agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples) "
+            "VALUES ($1,'R2','S1','2026-06-06','weekday','morning',6000,1)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1&from=2026-06-06&to=2026-06-06")
+    assert resp.status_code == 200
+    feats = resp.json()["features"]
+    assert len(feats) == 1
+    props = feats[0]["properties"]
+    assert props["avg_delay_min"] == 1.5  # (60+120)/2/60; R2 excluded
+    assert props["samples"] == 2
+    assert props["route_codes"] == "R1"
 
 
 @pytest.mark.asyncio
@@ -614,16 +652,23 @@ async def test_route_summary_returns_only_latest_date(map_app):
 
 
 @pytest.mark.asyncio
-async def test_heatmap_route_filter_uses_live_path(map_app):
-    """Route filter -> live path; works even though agg was never built."""
+async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
+    """Route filter -> agg_route_stop_daily, NOT raw updates. Without analyze the
+    agg is empty -> 0 features (proving the source switched off the live path);
+    after analyze, one dot with the raw sample count preserved in the aggregate."""
     app, agency_id = map_app
-    await _seed_heatmap(app.state.pool, agency_id)  # NOTE: no _run_analyze -> agg empty
+    await _seed_heatmap(app.state.pool, agency_id)  # raw updates seeded; agg not yet built
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1")
+        assert resp.status_code == 200
+        assert resp.json()["features"] == []  # not live: raw updates ignored
+
+        _run_analyze(agency_id)
         resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1")
     assert resp.status_code == 200
     feats = resp.json()["features"]
     assert len(feats) == 1
-    assert feats[0]["properties"]["samples"] == 3  # live counts raw rows
+    assert feats[0]["properties"]["samples"] == 3  # raw count preserved in agg
 
 
 @pytest.mark.asyncio

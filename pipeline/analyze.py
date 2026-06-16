@@ -16,6 +16,7 @@ Aggregation tables produced:
 - agg_stop_seq         — per-stop delay (requires static data)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
+- agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 """
 
 import logging
@@ -65,6 +66,7 @@ _AGG_TABLES_ORDERED = (
     "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
+    "agg_route_stop_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -447,6 +449,35 @@ def analyze(agency_id: int, conn) -> None:
             with conn.cursor() as cur:
                 cur.execute(sql, p)
                 logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
+
+            # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
+            # Mirrors agg_stop_daily but adds route_code to the grain. Reads raw `updates`
+            # (NOT the dedup temp) to match agg_stop_daily and the live route query it
+            # replaces. Built UNTYPED: NULL service_type is kept as '' sentinel (no
+            # `service_type IS NOT NULL` filter) so output matches the live route heatmap,
+            # which does not drop NULL-service rows. COALESCE repeated in GROUP BY so the
+            # grouped column binds the sentinel, not the raw NULL.
+            band_case = time_band_case_sql("u.scheduled_time")
+            sql = f"""
+                INSERT INTO agg_route_stop_daily
+                    (agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples)
+                SELECT
+                    %(agency_id)s, u.route_code, sst.stop_id, u.captured_at::date,
+                    COALESCE(u.service_type, '') AS service_type,
+                    {band_case} AS time_band,
+                    SUM(u.dep_delay)::bigint, COUNT(*)
+                FROM updates u
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = u.trip_id
+                 AND sst.stop_sequence = u.stop_sequence
+                WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
+                GROUP BY u.route_code, sst.stop_id, u.captured_at::date,
+                         COALESCE(u.service_type, ''), {band_case}
+            """
+            with conn.cursor() as cur:
+                cur.execute(sql, p)
+                logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
         conn.commit()
         logger.info("Analysis complete.")

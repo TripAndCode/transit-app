@@ -424,3 +424,34 @@ def test_agg_stop_daily_skips_null_service_type(pg_conn, agency_id):
     # only the non-null service_type group survives; the 3 valid rows, NOT the null one
     assert all(st is not None for st, _ in rows)
     assert sum(s for _, s in rows) == 3
+
+
+def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
+    """Route-stop aggregate keeps route_code in the key and, unlike agg_stop_daily,
+    KEEPS NULL service_type as '' sentinel (parity with the live route heatmap)."""
+    from datetime import time
+
+    from pipeline.analyze import analyze
+
+    _seed_for_stop_agg(pg_conn, agency_id)  # R1, service 平日, 3 rows on s1 (delay 60/120/180)
+    with pg_conn.cursor() as cur:
+        # a NULL-service observation for the same stop/route/band
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'fnull.pb','2026-06-09T08:10:00','T',NULL,%s,'R1',1,240)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, service_type, time_band, delay_sum, samples "
+            "FROM agg_route_stop_daily WHERE agency_id=%s ORDER BY service_type",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+    by_svc = {svc: (delay_sum, samples) for _, svc, _, delay_sum, samples in rows}
+    assert all(rc == "R1" for rc, *_ in rows)
+    assert by_svc["平日"] == (360, 3)  # 60+120+180; raw count
+    assert by_svc[""] == (240, 1)  # NULL service KEPT as '' sentinel, not dropped
