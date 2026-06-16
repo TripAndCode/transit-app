@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
+import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -26,6 +27,7 @@ export default function App() {
       <GuestPrompt />
       <Header />
       <DataStalenessBanner />
+      <FeedHealthBanner />
       <ActivityStrip />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar />

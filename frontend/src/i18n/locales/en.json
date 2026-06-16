@@ -11,6 +11,10 @@
       "banner": "Data is out of date — last ingest: {{when}}",
       "dismiss_aria": "Dismiss"
     },
+    "feed_health": {
+      "banner": "Feed health: {{count}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+      "dismiss_aria": "Dismiss"
+    },
     "loading": {
       "banner": "Loading data..."
     }

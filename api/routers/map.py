@@ -268,7 +268,7 @@ async def today_route_summary(
         # Return empty rather than falling back to a raw `updates` scan — the
         # window is one cron cycle (ingest+analyze run together), and the live
         # scan is exactly the cost this endpoint exists to avoid.
-        return {"latest_captured_at": None, "date": None, "routes": []}
+        return {"latest_captured_at": None, "date": None, "routes": [], "raw_samples": 0, "clamp_count": 0}
 
     rows = await conn.fetch(
         """
@@ -294,6 +294,18 @@ async def today_route_summary(
     latest_ts = await conn.fetchval(
         "SELECT MAX(captured_at) FROM updates WHERE agency_id=$1",
         agency_id,
+    )
+
+    # Feed-health over the last 7 analyzed days (not just the latest): frozen/stale
+    # feeds recur across days, so a single clean latest day must not hide a feed
+    # that froze earlier in the window. Powers FeedHealthBanner; small indexed read,
+    # defaults to 0 when no rows (pre-migration / not re-analyzed).
+    fh = await conn.fetchrow(
+        "SELECT COALESCE(SUM(raw_samples), 0) AS raw_samples, "
+        "       COALESCE(SUM(clamp_count), 0) AS clamp_count "
+        "FROM agg_feed_health WHERE agency_id=$1 AND date >= $2::date - 6",
+        agency_id,
+        latest_date,
     )
 
     routes = []
@@ -325,6 +337,8 @@ async def today_route_summary(
         "latest_captured_at": latest_ts.isoformat() if latest_ts else None,
         "date": latest_date.isoformat(),
         "routes": routes,
+        "raw_samples": fh["raw_samples"] if fh else 0,
+        "clamp_count": fh["clamp_count"] if fh else 0,
     }
 
 
