@@ -17,6 +17,7 @@ Aggregation tables produced:
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
+- agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
 """
 
 import logging
@@ -67,6 +68,7 @@ _AGG_TABLES_ORDERED = (
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",
+    "agg_feed_health",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -410,6 +412,36 @@ def analyze(agency_id: int, conn) -> None:
         )
         logger.info(f"  agg_stop_seq: {len(rows)} rows")
 
+        # ── agg_feed_health (per-day data-quality signal) ────────────────
+        # Per-day raw observation count and how many were implausible (frozen/
+        # stale TripUpdate spikes, |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC — the same
+        # rows the dedup clamp drops). Persisted (not just logged) so the app can
+        # surface a feed-health banner. Agency-wide — does NOT require static data,
+        # so it runs outside the has_static block. One scan of the agency partition.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count)
+                SELECT %(agency_id)s, captured_at::date,
+                       COUNT(*),
+                       COUNT(*) FILTER (WHERE ABS(dep_delay) > %(max_delay)s)
+                FROM updates
+                WHERE agency_id = %(agency_id)s AND dep_delay IS NOT NULL
+                GROUP BY captured_at::date
+                """,
+                p,
+            )
+            logger.info(f"  agg_feed_health: {cur.rowcount} rows")
+            cur.execute(
+                "SELECT COALESCE(SUM(clamp_count), 0) FROM agg_feed_health WHERE agency_id = %(agency_id)s",
+                p,
+            )
+            clamped = cur.fetchone()[0]
+            if clamped:
+                logger.info(
+                    f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
+                )
+
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
         # already clamped via build_dedup_inner_sql) — NOT raw `updates`. So
@@ -417,24 +449,6 @@ def analyze(agency_id: int, conn) -> None:
         # trip no longer inflates the count), and the per-stop mean matches the
         # reports/route-summary surfaces, which read the same deduped set.
         if has_static:
-            # Feed-health signal: how many RAW observations the clamp rejects as
-            # implausible (frozen/stale TripUpdate spikes — see MAX_PLAUSIBLE_DELAY_SEC).
-            # Logged, not stored; a non-trivial count means a feed had stuck trips.
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM updates u
-                    WHERE u.agency_id = %(agency_id)s AND u.dep_delay IS NOT NULL
-                      AND ABS(u.dep_delay) > %(max_delay)s
-                    """,
-                    p,
-                )
-                clamped = cur.fetchone()[0]
-                if clamped:
-                    logger.info(
-                        f"  delay clamp: excluded {clamped} implausible observation(s) (|delay| > {p['max_delay']}s)"
-                    )
-
             # Same expr in SELECT and GROUP BY — one call keeps them in sync.
             band_case = time_band_case_sql("d.scheduled_time")
             sql = f"""

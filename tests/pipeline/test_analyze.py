@@ -488,3 +488,34 @@ def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
             (agency_id,),
         )
         assert cur.fetchone() == (180, 1)  # spike excluded + deduped here too
+
+
+def test_analyze_builds_agg_feed_health(pg_conn, agency_id):
+    """agg_feed_health persists per-day raw vs implausible-delay counts as a
+    data-quality signal (agency-wide; does not require static data)."""
+    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC, analyze
+
+    seed = [
+        ("2026-06-09T08:10:00", 120),  # normal
+        ("2026-06-09T08:11:00", 180),  # normal
+        ("2026-06-09T08:12:00", MAX_PLAUSIBLE_DELAY_SEC + 1),  # implausible spike
+        ("2026-06-10T08:10:00", 90),  # normal, different day
+    ]
+    with pg_conn.cursor() as cur:
+        for i, (ts, d) in enumerate(seed):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES (%s,%s,%s,%s,'平日',%s,'R1',1,%s)",
+                (agency_id, f"f{i}.pb", ts, f"T{i}", time(8, 10), d),
+            )
+    pg_conn.commit()
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, raw_samples, clamp_count FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): (raw, clamp) for d, raw, clamp in cur.fetchall()}
+    assert by_date["2026-06-09"] == (3, 1)  # 3 raw observations, 1 implausible
+    assert by_date["2026-06-10"] == (1, 0)

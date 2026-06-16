@@ -27,7 +27,7 @@ async def map_app(apply_schema):
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, agg_route_dow, "
             "agg_daily_trend, agg_route_daily, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
-            "agg_route_stop_daily, rag_chunks CASCADE"
+            "agg_route_stop_daily, agg_feed_health, rag_chunks CASCADE"
         )
     await pool.close()
 
@@ -644,6 +644,79 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
     assert rows[0]["avg_delay_sec"] == 150  # (100+200)/2 across both
     assert rows[0]["worst_delay_sec"] == 200
     assert rows[0]["trips_observed"] == 2  # T1, T2
+
+
+@pytest.mark.asyncio
+async def test_route_summary_exposes_feed_health(map_app):
+    """route-summary surfaces the per-day clamp/raw counts from agg_feed_health
+    for the latest analyzed date (powers FeedHealthBanner)."""
+    from datetime import datetime, time, timezone
+
+    from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # one normal + one implausible spike on the same date → analyze builds
+        # agg_route_daily (normal survives dedup/clamp) AND agg_feed_health (counts both raw)
+        for i, d in enumerate([120, MAX_PLAUSIBLE_DELAY_SEC + 1]):
+            await conn.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+                "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1,$2,$3,$4,'平日',$5,'R1',1,$6)",
+                agency_id,
+                f"f{i}.pb",
+                datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+                f"T{i}",
+                time(8, 10),
+                d,
+            )
+    _run_analyze(agency_id)
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["raw_samples"] == 2  # both raw observations
+    assert body["clamp_count"] == 1  # the spike
+
+
+@pytest.mark.asyncio
+async def test_route_summary_feed_health_uses_7day_window(map_app):
+    """Feed-health sums the last 7 days, so a spike on an EARLIER day still shows
+    even when the latest analyzed day is clean (frozen feeds recur across days)."""
+    from datetime import datetime, time, timezone
+
+    from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # spike on 06-07 (clamped out of agg_route_daily) ...
+        await conn.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+            "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'spike.pb',$2,'TE','平日',$3,'R1',1,$4)",
+            agency_id,
+            datetime(2026, 6, 7, 8, 10, tzinfo=timezone.utc),
+            time(8, 10),
+            MAX_PLAUSIBLE_DELAY_SEC + 1,
+        )
+        # ... and a clean observation on the LATER, latest day 06-09
+        await conn.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, "
+            "service_type, scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'ok.pb',$2,'TN','平日',$3,'R1',1,120)",
+            agency_id,
+            datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+            time(8, 10),
+        )
+    _run_analyze(agency_id)
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["date"] == "2026-06-09"  # latest day is the clean one
+    assert body["clamp_count"] == 1  # but the 06-07 spike is still surfaced (within 7 days)
 
 
 @pytest.mark.asyncio
