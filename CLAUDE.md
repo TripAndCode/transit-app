@@ -6,7 +6,7 @@ Conventions for AI-assisted work in this repo. The README covers architecture; t
 
 ## Databases — read this first
 
-- `postgresql://transit:transit@localhost:5433/transit` (the Makefile default, container `transit-pg`) is the **dev DB with ~1.8M rows of real ingested data**. Treat it as read-only: never run write SQL, migrations-down, resets, or `make db-reset`-style targets against it for testing. It has been wiped by careless test runs before.
+- `postgresql://transit:transit@localhost:5433/transit` (the Makefile default, container `transit-pg`) is the **dev DB with real ingested data (~34M `updates` rows / ~11GB as of 2026-06)**. Treat it as read-only: never run write SQL, migrations-down, resets, or `make db-reset`-style targets against it for testing. It has been wiped by careless test runs before. (Too large to clone whole — to demo on real data, slice one agency + a bounded date window with read-only `\copy (SELECT … WHERE …)` into a throwaway DB.)
 - Tests use a **throwaway Postgres on :5544** instead. The schema needs
   **PostGIS + pgvector + pg_trgm**, so build the image from `db/` — the bare
   `pgvector/pgvector:pg16` image lacks PostGIS and migration `0001` fails on
@@ -23,7 +23,7 @@ Conventions for AI-assisted work in this repo. The README covers architecture; t
 
 Backend: `make serve` (FastAPI :8000), `make test` (pytest — set DATABASE_URL to :5544, see above), `make check` (fmt + lint + test), `poetry run ruff check`, `poetry run mypy`. After any fresh ingest, `make analyze` recomputes the `agg_*` tables that every read endpoint serves from.
 
-Focused test run — **use :5544, not :5433**. The README's single-test example (`README.md` ▸ Development) points `DATABASE_URL` at the dev DB; because the root `conftest.py` auto-migrates, that recipe runs migrations against the 1.8M-row dev DB. Safe form:
+Focused test run — **use :5544, not :5433**. The README's single-test example (`README.md` ▸ Development) points `DATABASE_URL` at the dev DB; because the root `conftest.py` auto-migrates, that recipe runs migrations against the ~34M-row dev DB. Safe form:
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
   poetry run pytest tests/query/test_tool_queries.py -k some_name -v
