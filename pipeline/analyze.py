@@ -517,6 +517,22 @@ def analyze(agency_id: int, conn) -> None:
                 cur.execute(sql, p)
                 logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
+        # ── agg_meta: audit record of this build (NOT load-bearing) ──────
+        # Upserted (not in the DELETE/rebuild loop) — one row per agency.
+        # The freshness gate derives staleness from the aggs themselves; this
+        # only answers "when was this agency last analyzed".
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(captured_at) FROM updates WHERE agency_id = %(agency_id)s", p)
+            max_cap = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at) "
+                "VALUES (%s, now(), %s) "
+                "ON CONFLICT (agency_id) DO UPDATE SET "
+                "analyzed_at = EXCLUDED.analyzed_at, "
+                "max_updates_captured_at = EXCLUDED.max_updates_captured_at",
+                (agency_id, max_cap),
+            )
+
         conn.commit()
         logger.info("Analysis complete.")
     except Exception:

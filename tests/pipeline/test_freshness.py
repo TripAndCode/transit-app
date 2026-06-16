@@ -96,3 +96,17 @@ def test_multi_agency_only_stale_returned(pg_conn, agency_id):
     stale = check_agg_freshness(pg_conn, [agency_id, second_id])
     assert len(stale) == 1
     assert stale[0].agency_id == second_id
+
+
+def test_analyze_writes_agg_meta(pg_conn, agency_id):
+    _seed_two_days(pg_conn, agency_id)
+    analyze(agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT analyzed_at, max_updates_captured_at FROM agg_meta WHERE agency_id = %s",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] is not None  # analyzed_at stamped
+    assert row[1] is not None  # max_updates_captured_at populated (rows exist)
