@@ -500,9 +500,10 @@ async def delay_heatmap(
     Output coordinates are the centroid of the merged poles so the dot sits
     between paired platforms rather than on one of them.
 
-    When no route filter is set, serves from ``agg_stop_daily`` (fast aggregate
-    path). When a route filter IS set, falls back to the live ``updates`` query
-    so the filter can be applied exactly against raw rows.
+    Served entirely from precomputed aggregates (no live ``updates`` scan): the
+    no-route case reads ``agg_stop_daily``; a route filter reads
+    ``agg_route_stop_daily`` (pre-split by ``route_code``). Both aggregates are
+    deduped to one row per trip-stop event, so ``samples`` is an observation count.
     """
     if ctx.routes:
         # Route filter → aggregate path (agg_route_stop_daily is pre-split by route_code).
