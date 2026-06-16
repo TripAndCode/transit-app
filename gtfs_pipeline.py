@@ -199,6 +199,61 @@ def cmd_analyze(args):
     conn.close()
 
 
+def cmd_analyze_all(args):
+    """Analyze every agency; report all failures and exit nonzero if any failed.
+
+    Run-all-then-report: one agency raising does not abort the others, so a
+    single run surfaces every failure at once. Replaces the silent per-agency
+    loop as the canonical full rebuild.
+    """
+    from pipeline.analyze import analyze
+
+    conn = _get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+        agency_ids = [r[0] for r in cur.fetchall()]
+    if not agency_ids:
+        logger.info("No agencies found.")
+        conn.close()
+        return
+    failed = []
+    for aid in agency_ids:
+        try:
+            logger.info(f"--- analyze agency_id={aid} ---")
+            analyze(aid, conn)
+        except Exception:
+            logger.exception(f"analyze failed for agency {aid}")
+            failed.append(aid)
+    conn.close()
+    if failed:
+        logger.error(f"analyze-all: {len(failed)} of {len(agency_ids)} agencies failed: {failed}")
+        sys.exit(1)
+    logger.info(f"analyze-all: all {len(agency_ids)} agencies analyzed.")
+
+
+def cmd_check_aggs(args):
+    """Report agencies whose aggregates lag their newest completed day.
+
+    Exits nonzero if any agency is stale — the post-merge / monitoring guard.
+    """
+    from pipeline.freshness import check_agg_freshness
+
+    conn = _get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+        agency_ids = [r[0] for r in cur.fetchall()]
+    stale = check_agg_freshness(conn, agency_ids)
+    conn.close()
+    if stale:
+        for s in stale:
+            logger.error(
+                f"STALE agency {s.agency_id}: aggs cover {s.agg_max_day}, "
+                f"live completed through {s.live_max_completed_day}"
+            )
+        sys.exit(1)
+    logger.info(f"check-aggs: all {len(agency_ids)} agencies fresh.")
+
+
 def cmd_ingest_live(args):
     """Fetch and ingest the live GTFS-RT feed for one or all agencies."""
     from pipeline.ingest import ingest_live
@@ -322,6 +377,9 @@ def main():
     p_analyze = sub.add_parser("analyze")
     p_analyze.add_argument("--agency-id", default=None)
 
+    sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
+    sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
+
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
@@ -351,6 +409,10 @@ def main():
         cmd_load_static(args)
     elif args.command == "analyze":
         cmd_analyze(args)
+    elif args.command == "analyze_all":
+        cmd_analyze_all(args)
+    elif args.command == "check_aggs":
+        cmd_check_aggs(args)
     elif args.command == "ingest_live":
         cmd_ingest_live(args)
     elif args.command == "refresh-static":
