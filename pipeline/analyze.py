@@ -24,40 +24,10 @@ import logging
 import psycopg2.extras
 
 from api.range import time_band_case_sql
-from pipeline.db import _static_loaded, build_dedup_inner_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_inner_sql
 from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
-
-# Upper bound on a believable departure delay, in seconds (120 min). Observations
-# beyond ±this are excluded from the per-stop heatmap aggregates as data-quality
-# faults, not delays.
-#
-# WHY THIS EXISTS — root-cause from a 2026-06-07 investigation:
-#   The map showed 馬木料金所前 (an expressway tollgate stop on route 550332996)
-#   at a 72.2-min AVERAGE delay — a bright-red ">10 min" dot. That stop is
-#   actually fine: median 3 min, p90 4 min. The mean was hijacked by two trips
-#   on 2026-06-07 whose realtime TripUpdate feed FROZE and kept re-emitting an
-#   impossible delay — 976 min (16.3 h) and 715 min (11.9 h) — once every ~30 s
-#   for several minutes. Because the heatmap aggregates raw `updates` rows
-#   (COUNT(*) / SUM, no trip-level dedup), ~35 frozen-feed polls from just two
-#   incidents dragged a ~3-min stop up to 72 min. No city bus is 16 h late: that
-#   magnitude is a stale/stuck feed, not a delay.
-#
-# This clamp removes the physically-impossible tail BEFORE averaging, so the dot
-# reflects reality. The ceiling is set well above any plausible real delay, so a
-# genuinely very-late bus (e.g. 40 min) still counts and still warms the dot.
-#
-# DELIBERATELY NOT DONE HERE (documented follow-ups, separate review):
-#   1. Trip-level dedup of repeated 30-s polls — fixes inflated *sample counts*
-#      (this stop reports "417 samples" from only 3 distinct trips); the repo's
-#      shared dedup CTE handles this for other aggregates but the heatmap path
-#      reads raw rows. Cosmetic vs. this fix, which corrects the delay value.
-#   2. Median (p50) instead of mean for the dot colour — robust by construction.
-#   3. Extending the clamp into the shared dedup path so reports/route-summary
-#      get the same protection (these spikes pollute those means too).
-#   4. Surfacing the excluded count in a feed-health view (only logged for now).
-MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
@@ -503,13 +473,10 @@ def analyze(agency_id: int, conn) -> None:
 
             # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
             # Mirrors agg_stop_daily but adds route_code to the grain. Reads raw `updates`
-            # (NOT the dedup temp) to match agg_stop_daily and the live route query it
-            # replaces. Built UNTYPED: NULL service_type is kept as '' sentinel (no
-            # `service_type IS NOT NULL` filter) so output matches the live route heatmap,
-            # which does not drop NULL-service rows. COALESCE repeated in GROUP BY so the
-            # grouped column binds the sentinel, not the raw NULL.
-            # The dep_delay clamp (MAX_PLAUSIBLE_DELAY_SEC) is an intentional deviation
-            # from the old live route query — it drops implausible feed spikes here too.
+            # (NOT the dedup temp). Built UNTYPED: NULL service_type is kept as '' sentinel
+            # (no `service_type IS NOT NULL` filter) so a route's NULL-service rows still
+            # show on the heatmap. COALESCE repeated in GROUP BY so the grouped column binds
+            # the sentinel, not the raw NULL. Clamps dep_delay like agg_stop_daily.
             band_case = time_band_case_sql("u.scheduled_time")
             sql = f"""
                 INSERT INTO agg_route_stop_daily
