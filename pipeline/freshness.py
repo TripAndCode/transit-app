@@ -13,6 +13,7 @@ regardless of the caller's session timezone — the cron path
 (api/routers/internal.py) connects without pinning JST.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 
@@ -53,7 +54,7 @@ _LIVE_MAX_COMPLETED_SQL = """
 _AGG_MAX_SQL = "SELECT MAX(date) FROM agg_route_daily WHERE agency_id = %s"
 
 
-def check_agg_freshness(conn, agency_ids) -> list[StaleAgency]:
+def check_agg_freshness(conn, agency_ids: "Iterable[int]") -> list[StaleAgency]:
     """Return agencies whose aggregates lag their newest completed civil day.
 
     Read-only. Empty list means every agency is fresh.
