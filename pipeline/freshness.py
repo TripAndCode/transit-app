@@ -36,3 +36,35 @@ def is_stale(agg_max_day: "date | None", live_max_completed_day: "date | None") 
     if agg_max_day is None:
         return True
     return agg_max_day < live_max_completed_day
+
+
+# Newest COMPLETED JST civil day for an agency. Uses MAX(captured_at) (index-
+# friendly on idx_updates_agency_at) bounded to instants strictly before JST
+# midnight today, then converts that instant to its JST date. Returns None when
+# the agency has no rows before today.
+_LIVE_MAX_COMPLETED_SQL = """
+    SELECT (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date
+    FROM updates
+    WHERE agency_id = %s
+      AND captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
+                        AT TIME ZONE 'Asia/Tokyo'
+"""
+
+_AGG_MAX_SQL = "SELECT MAX(date) FROM agg_route_daily WHERE agency_id = %s"
+
+
+def check_agg_freshness(conn, agency_ids) -> list[StaleAgency]:
+    """Return agencies whose aggregates lag their newest completed civil day.
+
+    Read-only. Empty list means every agency is fresh.
+    """
+    stale: list[StaleAgency] = []
+    with conn.cursor() as cur:
+        for aid in agency_ids:
+            cur.execute(_LIVE_MAX_COMPLETED_SQL, (aid,))
+            live_max = cur.fetchone()[0]
+            cur.execute(_AGG_MAX_SQL, (aid,))
+            agg_max = cur.fetchone()[0]
+            if is_stale(agg_max, live_max):
+                stale.append(StaleAgency(aid, agg_max, live_max))
+    return stale
