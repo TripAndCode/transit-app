@@ -25,7 +25,7 @@ class StaleAgency:
     live_max_completed_day: date
 
 
-def is_stale(agg_max_day: "date | None", live_max_completed_day: "date | None") -> bool:
+def is_stale(agg_max_day: date | None, live_max_completed_day: date | None) -> bool:
     """Pure staleness rule. Stale iff a completed day is owed but uncovered.
 
     - No completed days yet (live_max_completed_day is None): nothing owed → fresh.
@@ -54,7 +54,7 @@ _LIVE_MAX_COMPLETED_SQL = """
 _AGG_MAX_SQL = "SELECT MAX(date) FROM agg_route_daily WHERE agency_id = %s"
 
 
-def check_agg_freshness(conn, agency_ids: "Iterable[int]") -> list[StaleAgency]:
+def check_agg_freshness(conn, agency_ids: Iterable[int]) -> list[StaleAgency]:
     """Return agencies whose aggregates lag their newest completed civil day.
 
     Read-only. Empty list means every agency is fresh.

@@ -21,7 +21,7 @@ Conventions for AI-assisted work in this repo. The README covers architecture; t
 
 ## Commands
 
-Backend: `make serve` (FastAPI :8000), `make test` (pytest — set DATABASE_URL to :5544, see above), `make check` (fmt + lint + test), `poetry run ruff check`, `poetry run mypy`. After any fresh ingest, `make analyze` recomputes the `agg_*` tables that every read endpoint serves from.
+Backend: `make serve` (FastAPI :8000), `make test` (pytest — set DATABASE_URL to :5544, see above), `make check` (fmt + lint + test), `poetry run ruff check`, `poetry run mypy`. After any fresh ingest, `make analyze` recomputes the `agg_*` tables that every read endpoint serves from (one agency; pass `AGENCY_ID=`). For a full rebuild across **all** agencies use `make analyze-all` — it's fail-loud (nonzero exit if any agency fails), so a partial run can't pass silently. After a merge that changes analyze logic, run `make check-aggs` to confirm every agency's aggregates are fresh (it compares each agency's newest completed day in `updates` against `agg_route_daily` and exits nonzero if any lag). `analyze()` also stamps an audit row per agency in `agg_meta` (last-built time); it's forensic-only, nothing reads it for logic.
 
 Focused test run — **use :5544, not :5433**. The README's single-test example (`README.md` ▸ Development) points `DATABASE_URL` at the dev DB; because the root `conftest.py` auto-migrates, that recipe runs migrations against the ~34M-row dev DB. Safe form:
 ```bash
