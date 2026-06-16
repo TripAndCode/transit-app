@@ -8,7 +8,7 @@ cmd="$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.s
 # Only care about commands that touch the dev DB port/host/container.
 if printf '%s' "$cmd" | grep -Eqi 'localhost:5433|@[^ ]*:5433|transit-pg'; then
   if printf '%s' "$cmd" | grep -Eqi '\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE)\b|db-reset|migrate[^ ]*down|downgrade'; then
-    echo "BLOCKED: write/DDL SQL against dev DB :5433 (read-only, ~1.8M real rows). Use the :5544 test DB. See CLAUDE.md." >&2
+    echo "BLOCKED: write/DDL SQL against dev DB :5433 (read-only, ~34M real rows). Use the :5544 test DB. See CLAUDE.md." >&2
     exit 2
   fi
 fi

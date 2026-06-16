@@ -14,6 +14,7 @@ raw_archives_static/
 !.claude/commands/
 !.claude/agents/
 !.claude/hooks/
+!.claude/skills/
 !.claude/settings.json
 .claude/settings.local.json
 .claude/**/*.local.md
