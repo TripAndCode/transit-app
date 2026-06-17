@@ -3,6 +3,10 @@
 - delay_heatmap: top-N routes × dimension (DOW or hour-band) avg-delay grid
 - anomaly_timeline: 30-day daily avg + std-deviation outliers
 - movers: top-N routes by |Δ avg-delay| current-window vs prior-window
+
+All three are all-time/all-service overview cards served entirely from the
+precomputed aggregates. They honor date-range + dow + routes; service and
+time_band are NOT applied (the aggregates are untyped / have no band column).
 """
 
 from __future__ import annotations
@@ -15,38 +19,9 @@ from typing import Any
 
 import asyncpg
 
-from api.range import RangeCtx, build_updates_filter
+from api.range import RangeCtx, build_agg_daily_trend_filter
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-
-
-def _deduped_cte(agency_id: int, ctx: RangeCtx) -> tuple[str, list]:
-    """Return ``(cte_sql, params)`` for the deduped CTE.
-
-    BUG-4 fix: previously the CTE only filtered on agency_id + date range,
-    silently ignoring ctx.dow, ctx.time_band, ctx.service, and ctx.routes.
-    Now we use :func:`build_updates_filter` to apply the full context.
-
-    The CTE binds ``$1 = agency_id`` and then ``$2..`` from build_updates_filter.
-    Callers must append their own parameters starting at len(params)+1.
-    """
-    # $1 = agency_id; build_updates_filter starts at $2
-    filter_sql, filter_params, _ = build_updates_filter(ctx, next_param=2)
-    params: list = [agency_id, *filter_params]
-    sql = f"""
-WITH deduped AS (
-    SELECT DISTINCT ON (route_code, service_type, scheduled_time, trip_id,
-                        captured_at::date, stop_sequence)
-        route_code, service_type, scheduled_time, captured_at, dep_delay
-    FROM updates
-    WHERE agency_id = $1
-      AND dep_delay IS NOT NULL
-      AND {filter_sql}
-    ORDER BY route_code, service_type, scheduled_time, trip_id,
-             captured_at::date, stop_sequence, captured_at DESC
-)
-"""
-    return sql, params
 
 
 @dataclass(frozen=True)
@@ -85,18 +60,29 @@ async def delay_heatmap(
 ) -> DelayHeatmap:
     """Top-N routes × DOW or hour-band, avg delay (minutes) per cell.
 
+    All-time/all-service overview card served from the aggregates. Honors
+    date-range + dow + routes; service and time_band are not applied (the
+    aggregates are untyped / have no band column). The hour-band dimension
+    buckets by scheduled departure time (all-time, from ``agg_route_hour``).
+
     ``dimension``:
       - ``"dow"``     → 7 buckets (月..日)
       - ``"hour_band"`` → 4 buckets (朝 5-9, 昼 10-15, 夕 16-20, 夜 21-4)
     """
     if dimension not in ("dow", "hour_band"):
         raise ValueError(f"dimension must be 'dow' or 'hour_band', got {dimension!r}")
-    if ctx.service == "all" and ctx.time_band == "all":
-        return await _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes)
-    return await _heatmap_from_updates(conn, agency_id, ctx, dimension, top_routes)
+    return await _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes)
 
 
-async def _build_heatmap(conn, agency_id, route_codes, grid_rows, n_buckets, labels_list, normalize):
+async def _build_heatmap(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    route_codes: list[str],
+    grid_rows: list[asyncpg.Record],
+    n_buckets: int,
+    labels_list: list[str],
+    normalize: Any,
+) -> DelayHeatmap:
     """Shared assembly: route labels + dense routes×buckets cell grid."""
     labels = {
         r["route_code"]: (r["label"] or r["route_code"])
@@ -115,68 +101,15 @@ async def _build_heatmap(conn, agency_id, route_codes, grid_rows, n_buckets, lab
     return DelayHeatmap(routes=routes, dimensions=labels_list, cells=cells, baseline_min=1.0)
 
 
-async def _heatmap_from_updates(conn, agency_id, ctx, dimension, top_routes):
-    """Fallback: live deduped updates scan. Used when service/time_band filters are set.
-
-    Buckets captured_at (DOW or hour-band); preserves the original bucketing.
-    """
-    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
-    # next positional param after the CTE's params
-    p_top = len(cte_params) + 1
-    top_rows = await conn.fetch(
-        f"{cte_sql}"
-        "SELECT route_code, COUNT(*) AS samples "
-        "FROM deduped GROUP BY route_code "
-        f"ORDER BY samples DESC, route_code LIMIT ${p_top}",
-        *cte_params,
-        top_routes,
-    )
-    route_codes = [r["route_code"] for r in top_rows]
-    if not route_codes:
-        return DelayHeatmap(routes=[], dimensions=[], cells=[], baseline_min=1.0)
-
-    if dimension == "dow":
-        bucket_sql = "EXTRACT(DOW FROM captured_at)::int AS bucket"
-        n_buckets = 7
-        labels_list = _DOW_LABELS
-
-        # Postgres DOW: 0=Sun..6=Sat; remap to 0=Mon..6=Sun
-        def bucket_normalize(b: int) -> int:
-            return (b + 6) % 7
-    else:
-        # hour-band
-        bucket_sql = (
-            "CASE "
-            "WHEN EXTRACT(HOUR FROM captured_at)::int BETWEEN 5 AND 9 THEN 0 "
-            "WHEN EXTRACT(HOUR FROM captured_at)::int BETWEEN 10 AND 15 THEN 1 "
-            "WHEN EXTRACT(HOUR FROM captured_at)::int BETWEEN 16 AND 20 THEN 2 "
-            "ELSE 3 END AS bucket"
-        )
-        n_buckets = 4
-        labels_list = ["朝", "昼", "夕", "夜"]
-
-        def bucket_normalize(b: int) -> int:
-            return b
-
-    p_routes = len(cte_params) + 1
-    grid_rows = await conn.fetch(
-        f"{cte_sql}"
-        f"SELECT route_code, {bucket_sql}, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n "
-        f"FROM deduped WHERE route_code = ANY(${p_routes}::text[]) "
-        f"GROUP BY route_code, bucket",
-        *cte_params,
-        route_codes,
-    )
-    return await _build_heatmap(
-        conn, agency_id, route_codes, grid_rows, n_buckets, labels_list, bucket_normalize
-    )
-
-
-async def _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes):
-    """Fast path (service='all' AND time_band='all'). DOW from agg_daily_trend
-    (range-aware), hour-band from agg_route_hour (all-time). Honors ctx.routes."""
-    from api.range import build_agg_daily_trend_filter
-
+async def _heatmap_from_agg(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    ctx: RangeCtx,
+    dimension: str,
+    top_routes: int,
+) -> DelayHeatmap:
+    """DOW from agg_daily_trend (range-aware), hour-band from agg_route_hour
+    (all-time, by scheduled departure time). Honors ctx.routes + dow."""
     if dimension == "dow":
         frag, params, n = build_agg_daily_trend_filter(ctx, next_param=2)
         routes_clause = ""
@@ -205,7 +138,7 @@ async def _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes):
         )
         return await _build_heatmap(conn, agency_id, route_codes, grid, 7, _DOW_LABELS, lambda b: (b + 6) % 7)
 
-    # hour_band: all-time, agg_route_hour; service is 'all' on the fast path; honor routes
+    # hour_band: all-time, agg_route_hour (by scheduled departure time); honor routes
     routes_clause = ""
     rparams: list = []
     p_top = 2
@@ -237,10 +170,12 @@ async def _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes):
     return await _build_heatmap(conn, agency_id, route_codes, grid, 4, ["朝", "昼", "夕", "夜"], lambda b: b)
 
 
-async def _anomalies_series_from_agg(conn, agency_id, ctx):
-    """Fast path: deduped, sample-weighted daily avg from agg_daily_trend."""
-    from api.range import build_agg_daily_trend_filter
-
+async def _anomalies_series_from_agg(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    ctx: RangeCtx,
+) -> list[dict[str, Any]]:
+    """Deduped, sample-weighted daily avg from agg_daily_trend. Honors date+dow+routes."""
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param=2)
     routes_clause = ""
     if ctx.routes:
@@ -258,20 +193,6 @@ async def _anomalies_series_from_agg(conn, agency_id, ctx):
     ]
 
 
-async def _anomalies_series_from_updates(conn, agency_id, ctx):
-    """Fallback: live updates scan. Used when service/time_band filters are set."""
-    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
-    rows = await conn.fetch(
-        f"{cte_sql}SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min "
-        "FROM deduped GROUP BY d ORDER BY d",
-        *cte_params,
-    )
-    return [
-        {"date": r["d"].isoformat(), "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0}
-        for r in rows
-    ]
-
-
 @perf.timed("dashboard.anomalies")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def anomaly_timeline(
@@ -284,14 +205,12 @@ async def anomaly_timeline(
 ) -> AnomalyTimeline:
     """Per-day network avg delay (min) over the ctx range + ±sigma outliers.
 
-    Fast path (service='all' AND time_band='all') reads agg_daily_trend (deduped,
-    sample-weighted across routes). Falls back to a live updates scan when
-    service/time_band filters are set. Honors date+dow+routes on both paths.
+    All-time/all-service overview card served from agg_daily_trend (deduped,
+    sample-weighted across routes). Honors date-range + dow + routes; service
+    and time_band are not applied (agg_daily_trend is untyped / has no band
+    column).
     """
-    if ctx.service == "all" and ctx.time_band == "all":
-        series = await _anomalies_series_from_agg(conn, agency_id, ctx)
-    else:
-        series = await _anomalies_series_from_updates(conn, agency_id, ctx)
+    series = await _anomalies_series_from_agg(conn, agency_id, ctx)
     if len(series) < 2:
         return AnomalyTimeline(series=series, mean=0.0, std=0.0, anomalies=[])
     vals = [s["avg_delay"] for s in series]
@@ -306,10 +225,14 @@ async def anomaly_timeline(
     return AnomalyTimeline(series=series, mean=round(mean, 3), std=round(std, 3), anomalies=anomalies)
 
 
-async def _movers_from_agg(conn, agency_id, ctx, window_days, top):
-    """Fast path: read deduped agg_daily_trend. Honors date+dow (+routes)."""
-    from api.range import build_agg_daily_trend_filter
-
+async def _movers_from_agg(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    ctx: RangeCtx,
+    window_days: int,
+    top: int,
+) -> list[asyncpg.Record]:
+    """Read deduped agg_daily_trend. Honors date+dow (+routes)."""
     prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
                          to_date=ctx.to_date - timedelta(days=window_days))
     cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
@@ -352,37 +275,6 @@ async def _movers_from_agg(conn, agency_id, ctx, window_days, top):
     return await conn.fetch(sql, agency_id, *cur_params, *prv_params, *extra_params, top)
 
 
-async def _movers_from_updates(conn, agency_id, ctx, window_days, top):
-    """Fallback: live updates scan. Used when service/time_band filters are set."""
-    cur_ctx = dc_replace(ctx, from_date=ctx.from_date, to_date=ctx.to_date)
-    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
-                         to_date=ctx.to_date - timedelta(days=window_days))
-    cur_filter_sql, cur_params, next_n = build_updates_filter(cur_ctx, next_param=2)
-    prv_filter_sql, prv_params, prv_next = build_updates_filter(prv_ctx, next_param=next_n)
-    p_top = prv_next
-    sql = f"""
-        WITH cur AS (
-            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n
-            FROM updates WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {cur_filter_sql}
-            GROUP BY route_code
-        ),
-        prv AS (
-            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min
-            FROM updates WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {prv_filter_sql}
-            GROUP BY route_code
-        )
-        SELECT cur.route_code,
-               cur.avg_min AS current_avg,
-               prv.avg_min AS previous_avg,
-               cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
-               cur.n AS samples
-        FROM cur LEFT JOIN prv USING (route_code)
-        ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
-        LIMIT ${p_top}
-    """
-    return await conn.fetch(sql, agency_id, *cur_params, *prv_params, top)
-
-
 @perf.timed("dashboard.movers")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def movers(
@@ -395,15 +287,11 @@ async def movers(
 ) -> Movers:
     """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window.
 
-    Fast path (service='all' AND time_band='all') reads agg_daily_trend (deduped).
-    Falls back to a live updates scan when service/time_band filters are set, since
-    agg_daily_trend is untyped and has no time-band column. Honors date+dow+routes
-    on both paths.
+    All-time/all-service overview card served from agg_daily_trend (deduped).
+    Honors date-range + dow + routes; service and time_band are not applied
+    (agg_daily_trend is untyped / has no band column).
     """
-    if ctx.service == "all" and ctx.time_band == "all":
-        rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
-    else:
-        rows = await _movers_from_updates(conn, agency_id, ctx, window_days, top)
+    rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
     label_rows = await conn.fetch(
         "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1", agency_id,
     )
