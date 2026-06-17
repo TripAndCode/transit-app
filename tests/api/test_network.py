@@ -4,7 +4,9 @@ import os
 from datetime import date, datetime, time, timezone
 
 import asyncpg
+import httpx
 import pytest
+from httpx import ASGITransport
 
 from pipeline.reports.network import compute_network_summary
 
@@ -91,3 +93,26 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert by[cc]["feed_health_pct"] is None
     order = [r["agency_id"] for r in rows]
     assert order.index(a) < order.index(b) < order.index(cc)
+
+
+@pytest.fixture
+async def net_client(net_pool):
+    pool, a, b, cc = net_pool
+    from api.main import app
+
+    app.state.pool = pool
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client, pool, a, b, cc
+
+
+async def test_network_summary_endpoint(net_client):
+    client, pool, a, _b, _cc = net_client
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from"] == "2026-04-01" and body["to"] == "2026-04-07"
+    arow = next(x for x in body["agencies"] if x["agency_id"] == a)
+    assert arow["avg_delay_min"] == 10.0
+    assert set(arow) >= {"agency_id", "agency_name", "avg_delay_min", "on_time_pct",
+                         "samples", "raw_samples", "clamp_count", "feed_health_pct", "is_stale"}
