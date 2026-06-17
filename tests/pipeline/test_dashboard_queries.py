@@ -187,11 +187,11 @@ async def test_movers_service_filter_falls_back_to_live(movers_pool):
             await c.execute(
                 """INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type,
                        scheduled_time, route_code, stop_sequence, dep_delay)
-                   VALUES ($1,$2,$3,$4,'X',$5,'R1',$6,$7)""",
+                   VALUES ($1,$2,$3,$4,'平日',$5,'R1',$6,$7)""",
                 agency_id, f"svc_{idx}", cap_at, f"T_{d.isoformat()}_{seq}", time(8, 0), seq, delay,
             )
-    # service='X' forces the live fallback; no agg_daily_trend was seeded.
-    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14), service="X")
+    # service != 'all' forces the live fallback; no agg_daily_trend was seeded.
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14), service="平日")
     async with pool.acquire() as c:
         res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
     by = {r["route_code"]: r for r in res.rows}
