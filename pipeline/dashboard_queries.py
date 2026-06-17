@@ -218,57 +218,44 @@ async def movers(
 ) -> Movers:
     """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window.
 
-    BUG-4 fix: previously ignored ctx.from_date and all non-date filters.
-    Now uses ctx.from_date/to_date as the recent window boundaries and applies
-    dow/time_band/service/routes filters to both CTEs.
-
-    current window = [ctx.from_date, ctx.to_date]
-    prior   window = [ctx.from_date - window_days, ctx.to_date - window_days]
+    Reads agg_daily_trend (deduped, observation-grain) — not raw updates. Honors
+    date range + dow + service + routes via build_agg_daily_trend_filter; ignores
+    ctx.time_band (the aggregate has no band column).
     """
-    cur_from = ctx.from_date
-    cur_to = ctx.to_date
-    prv_from = ctx.from_date - timedelta(days=window_days)
-    prv_to = ctx.to_date - timedelta(days=window_days)
+    from api.range import build_agg_daily_trend_filter
 
-    # Build filter fragments for each window using the full ctx filter surface.
-    # Override only the date range per window; dow/time_band/service/routes are shared.
-    cur_ctx = dc_replace(ctx, from_date=cur_from, to_date=cur_to)
-    prv_ctx = dc_replace(ctx, from_date=prv_from, to_date=prv_to)
-
-    # $1 = agency_id (shared by both CTEs); cur filter occupies $2..$N;
-    # prv filter continues from $N+1; LIMIT is the final param.
-    cur_filter_sql, cur_params, next_n = build_updates_filter(cur_ctx, next_param=2)
-    prv_filter_sql, prv_params, prv_next = build_updates_filter(prv_ctx, next_param=next_n)
-    p_top = prv_next
-
+    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
+                         to_date=ctx.to_date - timedelta(days=window_days))
+    cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
+    prv_frag, prv_params, p_top = build_agg_daily_trend_filter(prv_ctx, next_param=next_n)
     sql = f"""
         WITH cur AS (
-            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n
-            FROM updates
-            WHERE agency_id = $1 AND dep_delay IS NOT NULL
-              AND {cur_filter_sql}
+            SELECT route_code,
+                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min,
+                   SUM(samples) AS n
+            FROM agg_daily_trend
+            WHERE agency_id = $1 AND {cur_frag}
             GROUP BY route_code
         ),
         prv AS (
-            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min
-            FROM updates
-            WHERE agency_id = $1 AND dep_delay IS NOT NULL
-              AND {prv_filter_sql}
+            SELECT route_code,
+                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min
+            FROM agg_daily_trend
+            WHERE agency_id = $1 AND {prv_frag}
             GROUP BY route_code
         )
         SELECT cur.route_code,
-               cur.avg_min  AS current_avg,
-               prv.avg_min  AS previous_avg,
+               cur.avg_min AS current_avg,
+               prv.avg_min AS previous_avg,
                cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
-               cur.n        AS samples
+               cur.n AS samples
         FROM cur LEFT JOIN prv USING (route_code)
         ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
         LIMIT ${p_top}
     """
     rows = await conn.fetch(sql, agency_id, *cur_params, *prv_params, top)
     label_rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1",
-        agency_id,
+        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1", agency_id,
     )
     labels = {r["route_id"]: (r["route_short_name"] or r["route_id"]) for r in label_rows}
     out_rows = []
@@ -278,15 +265,9 @@ async def movers(
         prv_v = float(r["previous_avg"]) if r["previous_avg"] is not None else None
         delta = float(r["delta"]) if r["delta"] is not None else 0.0
         pct = (delta / prv_v * 100.0) if prv_v else None
-        out_rows.append(
-            {
-                "route_code": rc,
-                "label": labels.get(rc, rc),
-                "current_avg": cur_v,
-                "previous_avg": prv_v,
-                "delta": delta,
-                "delta_pct": pct,
-                "samples": int(r["samples"]),
-            }
-        )
+        out_rows.append({
+            "route_code": rc, "label": labels.get(rc, rc),
+            "current_avg": cur_v, "previous_avg": prv_v,
+            "delta": delta, "delta_pct": pct, "samples": int(r["samples"]),
+        })
     return Movers(rows=out_rows)

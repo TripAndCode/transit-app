@@ -84,6 +84,54 @@ async def conn_with_seed(apply_schema):
     await pool.close()
 
 
+@pytest.fixture
+async def movers_pool(apply_schema):
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM agencies WHERE feed_url = 'http://dash-agg'")
+        row = await c.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('DashAgg','http://dash-agg') RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies, agg_daily_trend, agg_route_hour, agg_route_stats, static_routes CASCADE")
+    await pool.close()
+
+
+async def _seed_trend(pool, agency_id, rows):
+    """rows: list of (date_iso, route_code, service_type, avg_min, samples)."""
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1,$2,$3,$4,$5,$6)",
+            [(agency_id, d, rc, st, av, n) for (d, rc, st, av, n) in rows],
+        )
+        await c.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,$2,$3) "
+            "ON CONFLICT DO NOTHING",
+            [(agency_id, rc, rc) for (_d, rc, _s, _a, _n) in rows],
+        )
+
+
+async def test_movers_reads_agg_daily_trend(movers_pool):
+    pool, agency_id = movers_pool
+    await _seed_trend(pool, agency_id, [
+        ("2026-04-10", "R1", "平日", 9.0, 100),
+        ("2026-04-03", "R1", "平日", 3.0, 100),
+        ("2026-04-10", "R2", "平日", 2.0, 100),
+        ("2026-04-03", "R2", "平日", 2.0, 100),
+    ])
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] == 9.0 and by["R1"]["previous_avg"] == 3.0
+    assert by["R1"]["delta"] == 6.0
+    assert res.rows[0]["route_code"] == "R1"
+    assert by["R1"]["samples"] == 100
+
+
 def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31))
 
