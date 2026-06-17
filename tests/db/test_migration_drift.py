@@ -37,3 +37,20 @@ def test_missing_tracking_table_means_all_pending(pg_conn):
     assert result == _versions_on_disk()
     pg_conn.rollback()
     assert pending_migrations(pg_conn) == []
+
+
+def test_cmd_check_migrations_clean_when_current():
+    import gtfs_pipeline
+
+    # DATABASE_URL points at the migrated :5544 → no pending → returns cleanly
+    gtfs_pipeline.cmd_check_migrations(object())  # args unused
+
+
+def test_cmd_check_migrations_exits_when_behind(monkeypatch):
+    import db.migrate
+    import gtfs_pipeline
+
+    monkeypatch.setattr(db.migrate, "pending_migrations", lambda conn: ["9999"])
+    with pytest.raises(SystemExit) as ei:
+        gtfs_pipeline.cmd_check_migrations(object())
+    assert ei.value.code == 1

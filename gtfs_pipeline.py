@@ -254,6 +254,19 @@ def cmd_check_aggs(args):
     logger.info(f"check-aggs: all {len(agency_ids)} agencies fresh.")
 
 
+def cmd_check_migrations(args):
+    """Report migrations on disk not applied to the DB; nonzero exit if any behind."""
+    from db.migrate import pending_migrations
+
+    conn = _get_conn()
+    pending = pending_migrations(conn)
+    conn.close()
+    if pending:
+        logger.error(f"schema behind: {len(pending)} migration(s) not applied: {pending}")
+        sys.exit(1)
+    logger.info("schema up to date.")
+
+
 def cmd_digest(args):
     """Print the daily digest for one completed day (default: yesterday JST)."""
     from datetime import date
@@ -400,6 +413,7 @@ def main():
 
     sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
     sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
+    sub.add_parser("check_migrations", help="Report unapplied migrations; nonzero exit if the DB schema is behind")
 
     p_digest = sub.add_parser("digest", help="Print the daily network-health digest (Markdown)")
     p_digest.add_argument("--day", default=None, help="Target day YYYY-MM-DD (default: yesterday JST)")
@@ -438,6 +452,8 @@ def main():
         cmd_analyze_all(args)
     elif args.command == "check_aggs":
         cmd_check_aggs(args)
+    elif args.command == "check_migrations":
+        cmd_check_migrations(args)
     elif args.command == "digest":
         cmd_digest(args)
     elif args.command == "ingest_live":
