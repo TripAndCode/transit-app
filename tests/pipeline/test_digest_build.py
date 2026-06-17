@@ -158,3 +158,18 @@ def test_low_confidence_anomaly_caps_at_watch(pg_conn, agency_id):
     mover = next(m for m in section.movers if m.route_code == "44372")
     assert mover.low_confidence is True
     assert mover.bucket == "watch"
+
+
+def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):
+    import gtfs_pipeline
+
+    _seed(pg_conn, agency_id)
+
+    class _Args:
+        day = "2026-04-02"
+        locale = "ja"
+
+    gtfs_pipeline.cmd_digest(_Args())
+    out = capsys.readouterr().out
+    assert "日次ダイジェスト 2026-04-02" in out
+    assert "44372" in out

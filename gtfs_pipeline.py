@@ -254,6 +254,25 @@ def cmd_check_aggs(args):
     logger.info(f"check-aggs: all {len(agency_ids)} agencies fresh.")
 
 
+def cmd_digest(args):
+    """Print the daily digest for one completed day (default: yesterday JST)."""
+    from datetime import date
+
+    from pipeline.digest.build import build_digest
+    from pipeline.digest.render import render_digest
+
+    conn = _get_conn()
+    if args.day:
+        target_day = date.fromisoformat(args.day)
+    else:
+        with conn.cursor() as cur:
+            cur.execute("SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date - 1")
+            target_day = cur.fetchone()[0]
+    data = build_digest(conn, target_day)
+    conn.close()
+    sys.stdout.write(render_digest(data, args.locale))
+
+
 def cmd_ingest_live(args):
     """Fetch and ingest the live GTFS-RT feed for one or all agencies."""
     from pipeline.ingest import ingest_live
@@ -380,6 +399,10 @@ def main():
     sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
     sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
 
+    p_digest = sub.add_parser("digest", help="Print the daily network-health digest (Markdown)")
+    p_digest.add_argument("--day", default=None, help="Target day YYYY-MM-DD (default: yesterday JST)")
+    p_digest.add_argument("--locale", default="ja", choices=["ja", "en"])
+
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
@@ -413,6 +436,8 @@ def main():
         cmd_analyze_all(args)
     elif args.command == "check_aggs":
         cmd_check_aggs(args)
+    elif args.command == "digest":
+        cmd_digest(args)
     elif args.command == "ingest_live":
         cmd_ingest_live(args)
     elif args.command == "refresh-static":
