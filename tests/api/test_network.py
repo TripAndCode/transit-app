@@ -21,7 +21,7 @@ async def net_pool(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
         await c.execute(
-            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_route_daily, updates CASCADE"
+            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE"
         )
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"
         a = await c.fetchrow(ins, "A", "http://na")
@@ -30,12 +30,12 @@ async def net_pool(apply_schema):
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
         await c.execute(
-            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_route_daily, updates CASCADE"
+            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE"
         )
     await pool.close()
 
 
-async def _seed(pool, aid, *, dist, feed=None, route_daily_date=None, updates_at=None):
+async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
     """dist: list of (date_iso, samples, sum_delay_sec, on_time_count). feed: (date_iso, raw, clamp)."""
     async with pool.acquire() as c:
         for (d, n, sd, ot) in dist:
@@ -51,14 +51,6 @@ async def _seed(pool, aid, *, dist, feed=None, route_daily_date=None, updates_at
                 "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES ($1,$2,$3,$4)",
                 aid, date.fromisoformat(d), raw, clamp,
             )
-        if route_daily_date:
-            await c.execute(
-                "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
-                "worst_delay_sec, trips_observed, samples, last_seen_at) "
-                "VALUES ($1,$2,'R1','平日',60,120,1,10,$3)",
-                aid, date.fromisoformat(route_daily_date),
-                datetime(2026, 4, 2, 11, 37, tzinfo=timezone.utc),
-            )
         if updates_at:
             await c.execute(
                 "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
@@ -73,7 +65,6 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     await _seed(pool, a,
                 dist=[("2026-04-01", 100, 60000, 50), ("2026-04-02", 100, 60000, 50)],
                 feed=("2026-04-01", 1000, 5),
-                route_daily_date="2026-04-02",
                 updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
     # B's dist lags its newest completed updates day (2026-04-01 < 2026-04-02) → stale.
     await _seed(pool, b,
