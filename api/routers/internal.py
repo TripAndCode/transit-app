@@ -42,6 +42,7 @@ def _run_ingest_and_analyze() -> None:
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
     from pipeline.analyze import analyze
+    from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
 
     db_url = os.environ.get("DATABASE_URL")
@@ -50,6 +51,15 @@ def _run_ingest_and_analyze() -> None:
         return
 
     conn = psycopg2.connect(db_url)
+    # Pin JST so analyze() buckets `captured_at::date` on the same civil day the
+    # read API serves under (api/main + gtfs_pipeline._get_conn both pin JST);
+    # the cluster default is UTC, which would mis-bucket ~20% of rows by date
+    # and also desync agg_route_daily from the JST-based freshness check below.
+    # Committed up front (autocommit) so it survives analyze's txn rollback.
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+    conn.autocommit = False
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
@@ -67,6 +77,18 @@ def _run_ingest_and_analyze() -> None:
                 analyze(aid, conn)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
+
+        # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
+        # completed day, surface it loudly. Read-only; never aborts the run.
+        stale = check_agg_freshness(conn, agency_ids)
+        if stale:
+            _log.error(
+                "cron: %d agency(ies) have stale aggregates after analyze: %s",
+                len(stale),
+                [s.agency_id for s in stale],
+            )
+        else:
+            _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
         conn.close()
 
