@@ -91,8 +91,35 @@ async def delay_heatmap(
     """
     if dimension not in ("dow", "hour_band"):
         raise ValueError(f"dimension must be 'dow' or 'hour_band', got {dimension!r}")
+    if ctx.service == "all" and ctx.time_band == "all":
+        return await _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes)
+    return await _heatmap_from_updates(conn, agency_id, ctx, dimension, top_routes)
 
-    # Step 1: top N routes by sample count.
+
+async def _build_heatmap(conn, agency_id, route_codes, grid_rows, n_buckets, labels_list, normalize):
+    """Shared assembly: route labels + dense routes×buckets cell grid."""
+    labels = {
+        r["route_code"]: (r["label"] or r["route_code"])
+        for r in await conn.fetch(
+            "SELECT route_id AS route_code, route_short_name AS label "
+            "FROM static_routes WHERE agency_id = $1 AND route_id = ANY($2::text[])",
+            agency_id, route_codes,
+        )
+    }
+    by_route: dict[str, dict[int, float | None]] = {rc: {} for rc in route_codes}
+    for r in grid_rows:
+        b = normalize(r["bucket"])
+        by_route[r["route_code"]][b] = float(r["avg_min"]) if r["avg_min"] is not None else None
+    cells = [[by_route[rc].get(b) for b in range(n_buckets)] for rc in route_codes]
+    routes = [{"route_code": rc, "label": labels.get(rc, rc)} for rc in route_codes]
+    return DelayHeatmap(routes=routes, dimensions=labels_list, cells=cells, baseline_min=1.0)
+
+
+async def _heatmap_from_updates(conn, agency_id, ctx, dimension, top_routes):
+    """Fallback: live deduped updates scan. Used when service/time_band filters are set.
+
+    Buckets captured_at (DOW or hour-band); preserves the original bucketing.
+    """
     cte_sql, cte_params = _deduped_cte(agency_id, ctx)
     # next positional param after the CTE's params
     p_top = len(cte_params) + 1
@@ -108,18 +135,6 @@ async def delay_heatmap(
     if not route_codes:
         return DelayHeatmap(routes=[], dimensions=[], cells=[], baseline_min=1.0)
 
-    # Step 2: route labels from static_routes
-    labels = {
-        r["route_code"]: (r["label"] or r["route_code"])
-        for r in await conn.fetch(
-            "SELECT route_id AS route_code, route_short_name AS label "
-            "FROM static_routes WHERE agency_id = $1 AND route_id = ANY($2::text[])",
-            agency_id,
-            route_codes,
-        )
-    }
-
-    # Step 3: aggregate by route × dimension
     if dimension == "dow":
         bucket_sql = "EXTRACT(DOW FROM captured_at)::int AS bucket"
         n_buckets = 7
@@ -152,21 +167,74 @@ async def delay_heatmap(
         *cte_params,
         route_codes,
     )
-
-    by_route: dict[str, dict[int, float | None]] = {rc: {} for rc in route_codes}
-    for r in grid_rows:
-        b = bucket_normalize(r["bucket"])
-        by_route[r["route_code"]][b] = float(r["avg_min"]) if r["avg_min"] is not None else None
-
-    cells: list[list[float | None]] = [[by_route[rc].get(b) for b in range(n_buckets)] for rc in route_codes]
-    routes = [{"route_code": rc, "label": labels.get(rc, rc)} for rc in route_codes]
-
-    return DelayHeatmap(
-        routes=routes,
-        dimensions=labels_list,
-        cells=cells,
-        baseline_min=1.0,
+    return await _build_heatmap(
+        conn, agency_id, route_codes, grid_rows, n_buckets, labels_list, bucket_normalize
     )
+
+
+async def _heatmap_from_agg(conn, agency_id, ctx, dimension, top_routes):
+    """Fast path (service='all' AND time_band='all'). DOW from agg_daily_trend
+    (range-aware), hour-band from agg_route_hour (all-time). Honors ctx.routes."""
+    from api.range import build_agg_daily_trend_filter
+
+    if dimension == "dow":
+        frag, params, n = build_agg_daily_trend_filter(ctx, next_param=2)
+        routes_clause = ""
+        if ctx.routes:
+            routes_clause = f"AND route_code = ANY(${n}::text[])"
+            params = [*params, list(ctx.routes)]
+            n += 1
+        p_top = n
+        top_rows = await conn.fetch(
+            "SELECT route_code, SUM(samples) AS s FROM agg_daily_trend "
+            f"WHERE agency_id = $1 AND {frag} {routes_clause} "
+            f"GROUP BY route_code ORDER BY s DESC, route_code LIMIT ${p_top}",
+            agency_id, *params, top_routes,
+        )
+        route_codes = [r["route_code"] for r in top_rows]
+        if not route_codes:
+            return DelayHeatmap(routes=[], dimensions=[], cells=[], baseline_min=1.0)
+        frag2, params2, n2 = build_agg_daily_trend_filter(ctx, next_param=2)
+        rc_param = n2
+        grid = await conn.fetch(
+            "SELECT route_code, EXTRACT(DOW FROM date::date)::int AS bucket, "
+            "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_daily_trend "
+            f"WHERE agency_id = $1 AND {frag2} AND route_code = ANY(${rc_param}::text[]) "
+            "GROUP BY route_code, bucket",
+            agency_id, *params2, route_codes,
+        )
+        return await _build_heatmap(conn, agency_id, route_codes, grid, 7, _DOW_LABELS, lambda b: (b + 6) % 7)
+
+    # hour_band: all-time, agg_route_hour; service is 'all' on the fast path; honor routes
+    routes_clause = ""
+    rparams: list = []
+    p_top = 2
+    if ctx.routes:
+        routes_clause = "AND route_code = ANY($2::text[])"
+        rparams = [list(ctx.routes)]
+        p_top = 3
+    top_rows = await conn.fetch(
+        "SELECT route_code, SUM(samples) AS s FROM agg_route_hour "
+        f"WHERE agency_id = $1 {routes_clause} "
+        f"GROUP BY route_code ORDER BY s DESC, route_code LIMIT ${p_top}",
+        agency_id, *rparams, top_routes,
+    )
+    route_codes = [r["route_code"] for r in top_rows]
+    if not route_codes:
+        return DelayHeatmap(routes=[], dimensions=[], cells=[], baseline_min=1.0)
+    rc_param = 2 + len(rparams)
+    grid = await conn.fetch(
+        "SELECT route_code, CASE "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 5 AND 9 THEN 0 "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 10 AND 15 THEN 1 "
+        "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 16 AND 20 THEN 2 "
+        "ELSE 3 END AS bucket, "
+        "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_route_hour "
+        f"WHERE agency_id = $1 {routes_clause} AND route_code = ANY(${rc_param}::text[]) "
+        "GROUP BY route_code, bucket",
+        agency_id, *rparams, route_codes,
+    )
+    return await _build_heatmap(conn, agency_id, route_codes, grid, 4, ["朝", "昼", "夕", "夜"], lambda b: b)
 
 
 async def _anomalies_series_from_agg(conn, agency_id, ctx):

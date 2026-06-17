@@ -114,6 +114,21 @@ async def _seed_trend(pool, agency_id, rows):
         )
 
 
+async def _seed_route_hour(pool, agency_id, rows):
+    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples)."""
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "
+            "avg_min, p50_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$5,$5,$6)",
+            [(agency_id, rc, st, sch, av, n) for (rc, st, sch, av, n) in rows],
+        )
+        await c.executemany(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,$2,$3) "
+            "ON CONFLICT DO NOTHING",
+            [(agency_id, rc, rc) for (rc, *_rest) in rows],
+        )
+
+
 async def test_movers_reads_agg_daily_trend(movers_pool):
     pool, agency_id = movers_pool
     await _seed_trend(pool, agency_id, [
@@ -200,6 +215,36 @@ async def test_anomalies_reads_agg_daily_trend(movers_pool):
     assert any(a["date"] == "2026-04-04" for a in res.anomalies)
 
 
+async def test_heatmap_dow_from_trend(movers_pool):
+    pool, agency_id = movers_pool
+    await _seed_trend(pool, agency_id, [
+        ("2026-04-06", "R1", "平日", 5.0, 100),  # Monday -> bucket 0
+        ("2026-04-07", "R1", "平日", 8.0, 100),  # Tuesday -> bucket 1
+    ])
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    async with pool.acquire() as c:
+        res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="dow", top_routes=20)
+    assert res.dimensions == ["月", "火", "水", "木", "金", "土", "日"]
+    assert res.routes[0]["route_code"] == "R1"
+    assert res.cells[0][0] == 5.0
+    assert res.cells[0][1] == 8.0
+
+
+async def test_heatmap_hour_band_from_route_hour(movers_pool):
+    pool, agency_id = movers_pool
+    await _seed_route_hour(pool, agency_id, [
+        ("R1", "平日", time(7, 0), 6.0, 100),    # 朝 -> 0
+        ("R1", "平日", time(18, 0), 12.0, 100),  # 夕 -> 2
+    ])
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    async with pool.acquire() as c:
+        res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="hour_band", top_routes=20)
+    assert res.dimensions == ["朝", "昼", "夕", "夜"]
+    assert res.cells[0][0] == 6.0
+    assert res.cells[0][2] == 12.0
+    assert res.cells[0][1] is None
+
+
 def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31))
 
@@ -207,8 +252,11 @@ def _ctx() -> RangeCtx:
 @pytest.mark.asyncio
 async def test_delay_heatmap_by_dow_shape(conn_with_seed):
     pool, agency = conn_with_seed
+    # service='平日' forces the live updates path (the agg path needs
+    # service='all' AND time_band='all'); conn_with_seed seeds only `updates`.
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31), service="平日")
     async with pool.acquire() as c:
-        result = await delay_heatmap(c, agency_id=agency, ctx=_ctx(), dimension="dow", top_routes=20)
+        result = await delay_heatmap(c, agency_id=agency, ctx=ctx, dimension="dow", top_routes=20)
     assert isinstance(result, DelayHeatmap)
     # Routes ordered by sample count; we seeded 3 routes so all should appear
     assert len(result.routes) == 3
@@ -223,8 +271,11 @@ async def test_delay_heatmap_by_dow_shape(conn_with_seed):
 async def test_delay_heatmap_by_hour_band(conn_with_seed):
     """hour_band dimension buckets captured_at by hour-of-day band."""
     pool, agency = conn_with_seed
+    # service='平日' forces the live updates path (the agg path needs
+    # service='all' AND time_band='all'); conn_with_seed seeds only `updates`.
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31), service="平日")
     async with pool.acquire() as c:
-        result = await delay_heatmap(c, agency_id=agency, ctx=_ctx(), dimension="hour_band", top_routes=20)
+        result = await delay_heatmap(c, agency_id=agency, ctx=ctx, dimension="hour_band", top_routes=20)
     # Hour bands: morning (5-9), midday (10-15), evening (16-20), night (21-4)
     assert len(result.dimensions) == 4
 
