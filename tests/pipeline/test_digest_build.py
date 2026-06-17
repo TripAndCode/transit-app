@@ -160,6 +160,27 @@ def test_low_confidence_anomaly_caps_at_watch(pg_conn, agency_id):
     assert mover.bucket == "watch"
 
 
+def test_null_service_route_gets_route_grain_baseline(pg_conn, agency_id):
+    """A NULL-service route (stored as '' in agg_route_daily) finds the route's
+    overall baseline (aggregated across service_types in agg_route_stats) and is
+    triaged as a mover — proving '' rows are no longer dropped by the baseline join."""
+    with pg_conn.cursor() as cur:
+        # Daily row with empty-string service_type (the COALESCE'd NULL case).
+        _insert_daily(cur, agency_id, "44372", "", 480, 50)
+        # Baseline only under a TYPED service_type ('平日'); no '' row exists.
+        # day avg 480s > baseline p90 (300s) → anomaly once the route baseline matches.
+        _insert_stats(cur, agency_id, "44372", "平日", 3.0, 5.0)
+    pg_conn.commit()
+
+    data = build_digest(pg_conn, DAY)
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+
+    matching = [m for m in section.movers if m.route_code == "44372"]
+    assert len(matching) == 1
+    assert matching[0].bucket == "anomaly"
+    assert matching[0].baseline_avg_min == 3.0
+
+
 def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):
     import gtfs_pipeline
 

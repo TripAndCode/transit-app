@@ -51,12 +51,15 @@ def render_digest(data: DigestData, locale: str = "ja") -> str:
     day = data.target_day.isoformat()
     lines = ["## " + _t("title", locale, day=day), ""]
 
-    if data.network_avg_delay_min is None and not data.sections:
-        lines.append(_t("network_no_data", locale))
-        return "\n".join(lines)
-
+    # Always emit a network summary line: the avg when we have one, else the
+    # no-data line. Per-agency sections still render below either way.
     if data.network_avg_delay_min is not None:
         lines.append(_t("network", locale, avg=data.network_avg_delay_min))
+    else:
+        lines.append(_t("network_no_data", locale))
+
+    if not data.sections:
+        return "\n".join(lines)
 
     for s in data.sections:
         lines += ["", "### " + s.agency_name]
@@ -85,6 +88,9 @@ def render_digest(data: DigestData, locale: str = "ja") -> str:
 
     lines += ["", "---"]
     for s in data.sections:
+        # Skip the feed-health line for an agency with no readings (avoid "0/0").
+        if s.raw_samples == 0:
+            continue
         lines.append(_t("feed_health", locale, name=s.agency_name, clamp=s.clamp_count, raw=s.raw_samples))
     stale = [s.agency_name for s in data.sections if s.is_stale]
     lines.append(_t("stale", locale, names=", ".join(stale)) if stale else _t("fresh", locale))

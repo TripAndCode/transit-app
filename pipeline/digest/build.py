@@ -1,8 +1,13 @@
 """Assemble DigestData for one completed day. Read-only.
 
-Per agency: join agg_route_daily(day) with agg_route_stats (baseline) per route,
-bucket each route with the pure triage.classify_route, keep the worsening ones
+Per agency: read agg_route_daily(day), look up each route's baseline from a
+route-grain aggregate of agg_route_stats (across service_types), bucket each
+route with the pure triage.classify_route, keep the worsening ones
 (anomaly/watch) as the top-N movers, and compute a sample-weighted headline.
+A route-level baseline matters because agg_route_daily stores NULL service_type
+as '' (COALESCE) while agg_route_stats has no '' row — a per-(route, service_type)
+join would never match those NULL-service routes (real in agencies 9/10), so
+they'd get no baseline and never become movers.
 Adds feed-health (agg_feed_health) and freshness (check_agg_freshness).
 """
 
@@ -17,14 +22,21 @@ TOP_MOVERS = 5
 _AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies ORDER BY agency_id"
 
 _DAY_ROUTES_SQL = """
-    SELECT d.route_code, d.avg_delay_sec, d.samples,
-           b.avg_min AS baseline_avg_min, b.p90_min AS baseline_p90_min
-    FROM agg_route_daily d
-    LEFT JOIN agg_route_stats b
-      ON b.agency_id = %(aid)s
-     AND b.route_code = d.route_code
-     AND b.service_type = d.service_type
-    WHERE d.agency_id = %(aid)s AND d.date = %(day)s
+    SELECT route_code, avg_delay_sec, samples
+    FROM agg_route_daily
+    WHERE agency_id = %(aid)s AND date = %(day)s
+"""
+
+# Route-grain baseline: aggregate agg_route_stats ACROSS service_types per route,
+# weighted by the baseline's OWN samples. Keyed by route_code so a NULL-service
+# ('') daily row still finds the route's overall baseline.
+_ROUTE_BASELINE_SQL = """
+    SELECT route_code,
+           SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
+           SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+    FROM agg_route_stats
+    WHERE agency_id = %(aid)s AND samples IS NOT NULL
+    GROUP BY route_code
 """
 
 _FEED_HEALTH_SQL = """
@@ -36,53 +48,35 @@ _FEED_HEALTH_SQL = """
 def _aggregate_by_route(rows):
     """Collapse per-(route, service_type) day rows to one weighted entry per route_code.
 
-    Returns list of dicts: {route_code, avg_delay_sec, samples, baseline_avg_sec, baseline_p90_sec}.
+    Returns list of dicts: {route_code, avg_delay_sec, samples}.
     A digest is per-route; multiple service_types on one day would otherwise yield
     duplicate-route_code movers (e.g. a typed + NULL-service row for the same route).
-    Baseline is weighted by the SAME day samples as the average so delta is apples-to-apples.
+    The baseline is NOT part of this helper — it is looked up per route_code from a
+    route-grain aggregate of agg_route_stats in build_digest.
 
-    ``rows`` are tuples ``(route_code, avg_delay_sec, samples, baseline_avg_min,
-    baseline_p90_min)`` from ``_DAY_ROUTES_SQL``; baselines are in MINUTES and are
-    converted to seconds (round(x*60)) here, matching classify_route's units.
+    ``rows`` are tuples ``(route_code, avg_delay_sec, samples)`` from
+    ``_DAY_ROUTES_SQL``; avg_delay_sec is sample-weighted across service_types.
     """
     acc: dict[str, dict] = {}
     order: list[str] = []
-    for route_code, avg_delay_sec, samples, base_avg_min, base_p90_min in rows:
-        base_avg_sec = round(base_avg_min * 60) if base_avg_min is not None else None
-        base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None
+    for route_code, avg_delay_sec, samples in rows:
         e = acc.get(route_code)
         if e is None:
-            e = {
-                "route_code": route_code,
-                "_delay_w": 0.0,
-                "samples": 0,
-                # Baseline weighted by today's samples on the rows that HAVE a
-                # baseline (apples-to-apples with the day average's weighting).
-                "_base_avg_w": 0.0,
-                "_base_p90_w": 0.0,
-                "_base_samples": 0,
-            }
+            e = {"route_code": route_code, "_delay_w": 0.0, "samples": 0}
             acc[route_code] = e
             order.append(route_code)
         e["_delay_w"] += avg_delay_sec * samples
         e["samples"] += samples
-        if base_avg_sec is not None and base_p90_sec is not None:
-            e["_base_avg_w"] += base_avg_sec * samples
-            e["_base_p90_w"] += base_p90_sec * samples
-            e["_base_samples"] += samples
 
     out: list[dict] = []
     for rc in order:
         e = acc[rc]
         samples = e["samples"]
-        bs = e["_base_samples"]
         out.append(
             {
                 "route_code": rc,
                 "avg_delay_sec": round(e["_delay_w"] / samples) if samples else 0,
                 "samples": samples,
-                "baseline_avg_sec": round(e["_base_avg_w"] / bs) if bs else None,
-                "baseline_p90_sec": round(e["_base_p90_w"] / bs) if bs else None,
             }
         )
     return out
@@ -103,9 +97,14 @@ def build_digest(conn, target_day: date) -> DigestData:
         with conn.cursor() as cur:
             cur.execute(_DAY_ROUTES_SQL, {"aid": aid, "day": target_day})
             rows = cur.fetchall()
+            cur.execute(_ROUTE_BASELINE_SQL, {"aid": aid})
+            baseline_rows = cur.fetchall()
             cur.execute(_FEED_HEALTH_SQL, {"aid": aid, "day": target_day})
             fh = cur.fetchone()
         raw_samples, clamp_count = (fh[0], fh[1]) if fh else (0, 0)
+
+        # route_code -> (base_avg_min, base_p90_min); minutes, converted later.
+        baselines = {r[0]: (r[1], r[2]) for r in baseline_rows}
 
         if not rows:
             sections.append(
@@ -125,11 +124,16 @@ def build_digest(conn, target_day: date) -> DigestData:
         for e in route_entries:
             avg_delay_sec = e["avg_delay_sec"]
             samples = e["samples"]
-            base_avg_sec = e["baseline_avg_sec"]
-            base_p90_sec = e["baseline_p90_sec"]
+            # Route-grain baseline (keyed by route_code, so '' NULL-service rows
+            # still match). Convert minutes -> seconds for classify_route.
+            base_avg_min, base_p90_min = baselines.get(e["route_code"], (None, None))
+            base_avg_sec = round(base_avg_min * 60) if base_avg_min is not None else None
+            base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None
             bucket, deviation_sec, low_conf = classify_route(avg_delay_sec, base_avg_sec, base_p90_sec, samples)
             delay_w += avg_delay_sec * samples
             samples_sum += samples
+            # Weight each route's route-grain baseline by that route's TODAY
+            # samples so the headline delta stays apples-to-apples with today's avg.
             if base_avg_sec is not None:
                 base_w += base_avg_sec * samples
                 base_samples += samples

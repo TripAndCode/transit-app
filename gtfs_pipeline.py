@@ -262,14 +262,16 @@ def cmd_digest(args):
     from pipeline.digest.render import render_digest
 
     conn = _get_conn()
-    if args.day:
-        target_day = date.fromisoformat(args.day)
-    else:
-        with conn.cursor() as cur:
-            cur.execute("SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date - 1")
-            target_day = cur.fetchone()[0]
-    data = build_digest(conn, target_day)
-    conn.close()
+    try:
+        if args.day:
+            target_day = date.fromisoformat(args.day)
+        else:
+            with conn.cursor() as cur:
+                cur.execute("SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date - 1")
+                target_day = cur.fetchone()[0]
+        data = build_digest(conn, target_day)
+    finally:
+        conn.close()
     sys.stdout.write(render_digest(data, args.locale))
 
 
