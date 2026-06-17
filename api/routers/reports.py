@@ -26,6 +26,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
+from pipeline.reports.forecast import summarize_expected_delay
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -70,6 +71,18 @@ class ReportResponse(BaseModel):
     ctx: ReportCtx
 
 
+class ForecastResponse(BaseModel):
+    """Payload for ``GET /forecast`` — the typical (expected) delay for a slot."""
+
+    route: str
+    service_type: str
+    hour: int
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+    disclaimer: str
+
+
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
@@ -93,6 +106,34 @@ async def list_reports(
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
+
+
+@router.get("/forecast", response_model=ForecastResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast(
+    request: Request,
+    route: str = Query(..., min_length=1),
+    service_type: str = Query(..., min_length=1),
+    hour: int = Query(..., ge=0, le=23),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Typical ("expected") delay for a route at a service type + hour.
+
+    Reads the precomputed ``agg_route_hour`` baseline — a seasonal-naive lookup,
+    NOT a prediction. The response always carries a plain-language disclaimer.
+    """
+    rows = await conn.fetch(
+        "SELECT avg_min, samples FROM agg_route_hour "
+        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
+        "AND EXTRACT(HOUR FROM scheduled_time)::int = $4",
+        agency_id,
+        route,
+        service_type,
+        hour,
+    )
+    return summarize_expected_delay(rows, route, service_type, hour, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing

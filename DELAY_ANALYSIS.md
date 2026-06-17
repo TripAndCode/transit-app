@@ -48,3 +48,19 @@ resemble the historical pattern for that route at that time. It is honest to cal
 drift, weather, or special events. The only fiddly parts are mapping a calendar date to
 its service type (weekday / Saturday / Sunday-holiday) and bucketing a clock time into an
 hour; the core is "look up one average."
+
+## The "expected delay" endpoint
+
+`GET /api/{agency_id}/forecast?route=…&service_type=…&hour=0–23` is the concrete version of
+"look up an average": it reads the matching `agg_route_hour` rows and returns the
+sample-weighted typical delay for that slot. `service_type` must match the agency's stored
+value exactly (these are agency-specific labels — often prefixed, e.g. `35_平日(共通)`, not a
+bare `平日`); an unrecognized value simply returns the no-data response.
+
+**A "sample" (delay measurement)** = one run of a scheduled departure, measured at one stop,
+on one day. A busy route accumulates thousands; it is not a count of trips.
+
+The response always includes a `disclaimer` written for non-experts (no statistics jargon),
+stating what the figure is drawn from and that it is **not a prediction** — it cannot see
+incidents, weather, or today's conditions. **Any visualization of this number must show that
+disclaimer.**
