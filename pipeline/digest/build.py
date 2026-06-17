@@ -33,6 +33,61 @@ _FEED_HEALTH_SQL = """
 """
 
 
+def _aggregate_by_route(rows):
+    """Collapse per-(route, service_type) day rows to one weighted entry per route_code.
+
+    Returns list of dicts: {route_code, avg_delay_sec, samples, baseline_avg_sec, baseline_p90_sec}.
+    A digest is per-route; multiple service_types on one day would otherwise yield
+    duplicate-route_code movers (e.g. a typed + NULL-service row for the same route).
+    Baseline is weighted by the SAME day samples as the average so delta is apples-to-apples.
+
+    ``rows`` are tuples ``(route_code, avg_delay_sec, samples, baseline_avg_min,
+    baseline_p90_min)`` from ``_DAY_ROUTES_SQL``; baselines are in MINUTES and are
+    converted to seconds (round(x*60)) here, matching classify_route's units.
+    """
+    acc: dict[str, dict] = {}
+    order: list[str] = []
+    for route_code, avg_delay_sec, samples, base_avg_min, base_p90_min in rows:
+        base_avg_sec = round(base_avg_min * 60) if base_avg_min is not None else None
+        base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None
+        e = acc.get(route_code)
+        if e is None:
+            e = {
+                "route_code": route_code,
+                "_delay_w": 0.0,
+                "samples": 0,
+                # Baseline weighted by today's samples on the rows that HAVE a
+                # baseline (apples-to-apples with the day average's weighting).
+                "_base_avg_w": 0.0,
+                "_base_p90_w": 0.0,
+                "_base_samples": 0,
+            }
+            acc[route_code] = e
+            order.append(route_code)
+        e["_delay_w"] += avg_delay_sec * samples
+        e["samples"] += samples
+        if base_avg_sec is not None and base_p90_sec is not None:
+            e["_base_avg_w"] += base_avg_sec * samples
+            e["_base_p90_w"] += base_p90_sec * samples
+            e["_base_samples"] += samples
+
+    out: list[dict] = []
+    for rc in order:
+        e = acc[rc]
+        samples = e["samples"]
+        bs = e["_base_samples"]
+        out.append(
+            {
+                "route_code": rc,
+                "avg_delay_sec": round(e["_delay_w"] / samples) if samples else 0,
+                "samples": samples,
+                "baseline_avg_sec": round(e["_base_avg_w"] / bs) if bs else None,
+                "baseline_p90_sec": round(e["_base_p90_w"] / bs) if bs else None,
+            }
+        )
+    return out
+
+
 def build_digest(conn, target_day: date) -> DigestData:
     with conn.cursor() as cur:
         cur.execute(_AGENCIES_SQL)
@@ -58,14 +113,20 @@ def build_digest(conn, target_day: date) -> DigestData:
             )
             continue
 
+        # One entry per route_code (collapse service_types) so a route never
+        # produces duplicate movers / wastes top-5 slots.
+        route_entries = _aggregate_by_route(rows)
+
         movers: list[Mover] = []
         delay_w = 0.0
         samples_sum = 0
         base_w = 0.0
         base_samples = 0
-        for route_code, avg_delay_sec, samples, base_avg_min, base_p90_min in rows:
-            base_avg_sec = round(base_avg_min * 60) if base_avg_min is not None else None
-            base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None
+        for e in route_entries:
+            avg_delay_sec = e["avg_delay_sec"]
+            samples = e["samples"]
+            base_avg_sec = e["baseline_avg_sec"]
+            base_p90_sec = e["baseline_p90_sec"]
             bucket, deviation_sec, low_conf = classify_route(avg_delay_sec, base_avg_sec, base_p90_sec, samples)
             delay_w += avg_delay_sec * samples
             samples_sum += samples
@@ -75,7 +136,7 @@ def build_digest(conn, target_day: date) -> DigestData:
             if bucket in ("anomaly", "watch"):
                 movers.append(
                     Mover(
-                        route_code=route_code,
+                        route_code=e["route_code"],
                         avg_delay_min=round(avg_delay_sec / 60, 1),
                         baseline_avg_min=round(base_avg_sec / 60, 1) if base_avg_sec is not None else None,
                         deviation_min=round((deviation_sec or 0) / 60, 1),
