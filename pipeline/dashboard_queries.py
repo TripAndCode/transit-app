@@ -169,6 +169,41 @@ async def delay_heatmap(
     )
 
 
+async def _anomalies_series_from_agg(conn, agency_id, ctx):
+    """Fast path: deduped, sample-weighted daily avg from agg_daily_trend."""
+    from api.range import build_agg_daily_trend_filter
+
+    frag, params, n = build_agg_daily_trend_filter(ctx, next_param=2)
+    routes_clause = ""
+    if ctx.routes:
+        routes_clause = f"AND route_code = ANY(${n}::text[])"
+        params = [*params, list(ctx.routes)]
+    rows = await conn.fetch(
+        "SELECT date AS d, SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min "
+        f"FROM agg_daily_trend WHERE agency_id = $1 AND {frag} {routes_clause} "
+        "GROUP BY date ORDER BY date",
+        agency_id, *params,
+    )
+    return [
+        {"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0}
+        for r in rows
+    ]
+
+
+async def _anomalies_series_from_updates(conn, agency_id, ctx):
+    """Fallback: live updates scan. Used when service/time_band filters are set."""
+    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
+    rows = await conn.fetch(
+        f"{cte_sql}SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min "
+        "FROM deduped GROUP BY d ORDER BY d",
+        *cte_params,
+    )
+    return [
+        {"date": r["d"].isoformat(), "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0}
+        for r in rows
+    ]
+
+
 @perf.timed("dashboard.anomalies")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def anomaly_timeline(
@@ -179,19 +214,16 @@ async def anomaly_timeline(
     days: int = 30,
     sigma: float = 2.0,
 ) -> AnomalyTimeline:
-    """30-day daily avg delay (min) + outlier days flagged at ±sigma."""
-    cte_sql, cte_params = _deduped_cte(agency_id, ctx)
-    rows = await conn.fetch(
-        f"{cte_sql}SELECT captured_at::date AS d, AVG(dep_delay)/60.0 AS avg_min FROM deduped GROUP BY d ORDER BY d",
-        *cte_params,
-    )
-    series = [
-        {
-            "date": r["d"].isoformat(),
-            "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0,
-        }
-        for r in rows
-    ]
+    """Per-day network avg delay (min) over the ctx range + ±sigma outliers.
+
+    Fast path (service='all' AND time_band='all') reads agg_daily_trend (deduped,
+    sample-weighted across routes). Falls back to a live updates scan when
+    service/time_band filters are set. Honors date+dow+routes on both paths.
+    """
+    if ctx.service == "all" and ctx.time_band == "all":
+        series = await _anomalies_series_from_agg(conn, agency_id, ctx)
+    else:
+        series = await _anomalies_series_from_updates(conn, agency_id, ctx)
     if len(series) < 2:
         return AnomalyTimeline(series=series, mean=0.0, std=0.0, anomalies=[])
     vals = [s["avg_delay"] for s in series]

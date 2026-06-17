@@ -184,6 +184,22 @@ async def test_movers_service_filter_falls_back_to_live(movers_pool):
     assert by["R1"]["current_avg"] == 9.0 and by["R1"]["previous_avg"] == 3.0
 
 
+async def test_anomalies_reads_agg_daily_trend(movers_pool):
+    pool, agency_id = movers_pool
+    await _seed_trend(pool, agency_id, [
+        ("2026-04-01", "R1", "平日", 3.0, 100),
+        ("2026-04-02", "R1", "平日", 3.0, 100),
+        ("2026-04-03", "R1", "平日", 3.0, 100),
+        ("2026-04-04", "R1", "平日", 30.0, 100),  # spike
+    ])
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 4))
+    async with pool.acquire() as c:
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+    assert [s["date"] for s in res.series] == ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04"]
+    assert res.series[0]["avg_delay"] == 3.0
+    assert any(a["date"] == "2026-04-04" for a in res.anomalies)
+
+
 def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31))
 
@@ -216,11 +232,15 @@ async def test_delay_heatmap_by_hour_band(conn_with_seed):
 @pytest.mark.asyncio
 async def test_anomaly_timeline_detects_spike(conn_with_seed):
     pool, agency = conn_with_seed
+    # service='平日' forces the live updates fallback (the agg path needs
+    # service='all' AND time_band='all'); conn_with_seed seeds only `updates`.
+    # All weekday rows (incl. the R3 600s spike day) are retained.
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31), service="平日")
     async with pool.acquire() as c:
-        result = await anomaly_timeline(c, agency_id=agency, ctx=_ctx(), days=30, sigma=2.0)
+        result = await anomaly_timeline(c, agency_id=agency, ctx=ctx, days=30, sigma=2.0)
     assert isinstance(result, AnomalyTimeline)
-    # 28 days seeded, expect a series entry per day with avg_delay
-    assert len(result.series) >= 28
+    # 20 weekday days seeded in this window, one entry per day with avg_delay
+    assert len(result.series) >= 20
     # One anomaly day (the R3 600s spike on i=5) — but the daily average across R1/R2/R3
     # will spike noticeably; mean+2σ should flag it.
     assert len(result.anomalies) >= 1
