@@ -206,6 +206,83 @@ async def anomaly_timeline(
     return AnomalyTimeline(series=series, mean=round(mean, 3), std=round(std, 3), anomalies=anomalies)
 
 
+async def _movers_from_agg(conn, agency_id, ctx, window_days, top):
+    """Fast path: read deduped agg_daily_trend. Honors date+dow (+routes)."""
+    from api.range import build_agg_daily_trend_filter
+
+    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
+                         to_date=ctx.to_date - timedelta(days=window_days))
+    cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
+    prv_frag, prv_params, n2 = build_agg_daily_trend_filter(prv_ctx, next_param=next_n)
+    # routes filter (agg_daily_trend has route_code; the helper doesn't add it).
+    # The same ${n2} placeholder is referenced in BOTH CTEs and bound once
+    # positionally — $n2 is the next free slot after cur_params + prv_params.
+    routes_clause = ""
+    extra_params: list = []
+    p_top = n2
+    if ctx.routes:
+        routes_clause = f"AND route_code = ANY(${n2}::text[])"
+        extra_params = [list(ctx.routes)]
+        p_top = n2 + 1
+    sql = f"""
+        WITH cur AS (
+            SELECT route_code,
+                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min,
+                   SUM(samples) AS n
+            FROM agg_daily_trend
+            WHERE agency_id = $1 AND {cur_frag} {routes_clause}
+            GROUP BY route_code
+        ),
+        prv AS (
+            SELECT route_code,
+                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min
+            FROM agg_daily_trend
+            WHERE agency_id = $1 AND {prv_frag} {routes_clause}
+            GROUP BY route_code
+        )
+        SELECT cur.route_code,
+               cur.avg_min AS current_avg,
+               prv.avg_min AS previous_avg,
+               cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
+               cur.n AS samples
+        FROM cur LEFT JOIN prv USING (route_code)
+        ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
+        LIMIT ${p_top}
+    """
+    return await conn.fetch(sql, agency_id, *cur_params, *prv_params, *extra_params, top)
+
+
+async def _movers_from_updates(conn, agency_id, ctx, window_days, top):
+    """Fallback: live updates scan. Used when service/time_band filters are set."""
+    cur_ctx = dc_replace(ctx, from_date=ctx.from_date, to_date=ctx.to_date)
+    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
+                         to_date=ctx.to_date - timedelta(days=window_days))
+    cur_filter_sql, cur_params, next_n = build_updates_filter(cur_ctx, next_param=2)
+    prv_filter_sql, prv_params, prv_next = build_updates_filter(prv_ctx, next_param=next_n)
+    p_top = prv_next
+    sql = f"""
+        WITH cur AS (
+            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n
+            FROM updates WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {cur_filter_sql}
+            GROUP BY route_code
+        ),
+        prv AS (
+            SELECT route_code, AVG(dep_delay)/60.0 AS avg_min
+            FROM updates WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {prv_filter_sql}
+            GROUP BY route_code
+        )
+        SELECT cur.route_code,
+               cur.avg_min AS current_avg,
+               prv.avg_min AS previous_avg,
+               cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
+               cur.n AS samples
+        FROM cur LEFT JOIN prv USING (route_code)
+        ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
+        LIMIT ${p_top}
+    """
+    return await conn.fetch(sql, agency_id, *cur_params, *prv_params, top)
+
+
 @perf.timed("dashboard.movers")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def movers(
@@ -218,42 +295,15 @@ async def movers(
 ) -> Movers:
     """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window.
 
-    Reads agg_daily_trend (deduped, observation-grain) — not raw updates. Honors
-    date range + dow + service + routes via build_agg_daily_trend_filter; ignores
-    ctx.time_band (the aggregate has no band column).
+    Fast path (service='all' AND time_band='all') reads agg_daily_trend (deduped).
+    Falls back to a live updates scan when service/time_band filters are set, since
+    agg_daily_trend is untyped and has no time-band column. Honors date+dow+routes
+    on both paths.
     """
-    from api.range import build_agg_daily_trend_filter
-
-    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
-                         to_date=ctx.to_date - timedelta(days=window_days))
-    cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
-    prv_frag, prv_params, p_top = build_agg_daily_trend_filter(prv_ctx, next_param=next_n)
-    sql = f"""
-        WITH cur AS (
-            SELECT route_code,
-                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min,
-                   SUM(samples) AS n
-            FROM agg_daily_trend
-            WHERE agency_id = $1 AND {cur_frag}
-            GROUP BY route_code
-        ),
-        prv AS (
-            SELECT route_code,
-                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min
-            FROM agg_daily_trend
-            WHERE agency_id = $1 AND {prv_frag}
-            GROUP BY route_code
-        )
-        SELECT cur.route_code,
-               cur.avg_min AS current_avg,
-               prv.avg_min AS previous_avg,
-               cur.avg_min - COALESCE(prv.avg_min, 0) AS delta,
-               cur.n AS samples
-        FROM cur LEFT JOIN prv USING (route_code)
-        ORDER BY ABS(cur.avg_min - COALESCE(prv.avg_min, 0)) DESC NULLS LAST
-        LIMIT ${p_top}
-    """
-    rows = await conn.fetch(sql, agency_id, *cur_params, *prv_params, top)
+    if ctx.service == "all" and ctx.time_band == "all":
+        rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
+    else:
+        rows = await _movers_from_updates(conn, agency_id, ctx, window_days, top)
     label_rows = await conn.fetch(
         "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1", agency_id,
     )

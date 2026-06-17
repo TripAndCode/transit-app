@@ -132,6 +132,58 @@ async def test_movers_reads_agg_daily_trend(movers_pool):
     assert by["R1"]["samples"] == 100
 
 
+async def test_movers_routes_filter_fast_path(movers_pool):
+    """routes filter on the fast (agg) path: only the requested route appears."""
+    pool, agency_id = movers_pool
+    await _seed_trend(pool, agency_id, [
+        ("2026-04-10", "R1", "平日", 9.0, 100),
+        ("2026-04-03", "R1", "平日", 3.0, 100),
+        ("2026-04-10", "R2", "平日", 8.0, 100),
+        ("2026-04-03", "R2", "平日", 2.0, 100),
+    ])
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14), routes=("R1",))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    codes = {r["route_code"] for r in res.rows}
+    assert codes == {"R1"}
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] == 9.0 and by["R1"]["previous_avg"] == 3.0
+
+
+async def test_movers_service_filter_falls_back_to_live(movers_pool):
+    """service!='all' takes the live updates path (no agg_daily_trend seeded)."""
+    pool, agency_id = movers_pool
+    cur_d = date(2026, 4, 10)
+    prv_d = date(2026, 4, 3)
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,'R1','R1') "
+            "ON CONFLICT DO NOTHING",
+            agency_id,
+        )
+        rows = [
+            (cur_d, 1, 540),  # current window: 9 min
+            (cur_d, 2, 540),
+            (prv_d, 1, 180),  # prior window: 3 min
+            (prv_d, 2, 180),
+        ]
+        for idx, (d, seq, delay) in enumerate(rows):
+            cap_at = datetime(d.year, d.month, d.day, 8, 0, 0, tzinfo=timezone.utc)
+            await c.execute(
+                """INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type,
+                       scheduled_time, route_code, stop_sequence, dep_delay)
+                   VALUES ($1,$2,$3,$4,'X',$5,'R1',$6,$7)""",
+                agency_id, f"svc_{idx}", cap_at, f"T_{d.isoformat()}_{seq}", time(8, 0), seq, delay,
+            )
+    # service='X' forces the live fallback; no agg_daily_trend was seeded.
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14), service="X")
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert "R1" in by, "live fallback should return the seeded route"
+    assert by["R1"]["current_avg"] == 9.0 and by["R1"]["previous_avg"] == 3.0
+
+
 def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31))
 
