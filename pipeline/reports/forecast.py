@@ -1,9 +1,14 @@
 """Expected-delay lookup: summarize agg_route_hour into a typical-delay figure.
 
-Pure (no DB) so the hour-bucketing, sample-weighting, and disclaimer-case logic
-are unit-testable. The endpoint (api/routers/reports.py) supplies the rows + locale.
+Pure (no DB) so the sample-weighting and disclaimer-case logic are unit-testable.
+The endpoint (api/routers/reports.py) does the SQL — including the hour filter via
+``EXTRACT(HOUR FROM scheduled_time)`` — and passes the already-filtered rows here.
+
 This is a seasonal-naive baseline ("expected delay"), NOT a prediction — see
-DELAY_ANALYSIS.md.
+DELAY_ANALYSIS.md. Only the sample-weighted mean is reported: a weighted mean of
+per-departure averages equals the pooled mean, so it is exact. (A p90 is deliberately
+NOT reported — a weighted mean of per-departure p90s is not the pooled-hour p90, and
+percentiles cannot be recovered from per-bucket percentiles.)
 """
 
 from collections.abc import Iterable, Mapping
@@ -14,6 +19,8 @@ from api.triage import LOW_CONFIDENCE_SAMPLES
 # Plain-language disclaimers — NO jargon (p90/percentile/baseline forbidden). Each
 # template states the actual basis (which slot, how many measurements) and what it
 # excludes, and defines a "measurement" inline so `samples` is never undefined.
+# NOTE: `samples` counts stop-level delay measurements, not distinct days, so the
+# LOW_CONFIDENCE_SAMPLES=30 bar is intentionally generous for a pooled hourly slot.
 _DISCLAIMER: dict[tuple[str, str], str] = {
     ("normal", "ja"): (
         "{service_type}の{hour}時台に走ったこの路線の遅れの計測{samples}回分から計算した平均です"
@@ -45,15 +52,12 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
 def _disclaimer(case: str, locale: str, **vars: Any) -> str:
     lang = locale if locale in ("ja", "en") else "ja"
     tpl = _DISCLAIMER.get((case, lang)) or _DISCLAIMER[(case, "ja")]
-    return tpl.format(**vars)
-
-
-def _hour_of(scheduled_time: Any) -> "int | None":
-    """Parse the hour from a scheduled_time text like '17:37:00'. None if unparseable."""
+    # Guard like pipeline/query/tools.py::_summary: a template/var mismatch returns
+    # the raw template rather than raising a 500 in user-facing output.
     try:
-        return int(str(scheduled_time).split(":")[0])
-    except (ValueError, IndexError, AttributeError):
-        return None
+        return tpl.format(**vars)
+    except (KeyError, IndexError):
+        return tpl
 
 
 def summarize_expected_delay(
@@ -62,39 +66,31 @@ def summarize_expected_delay(
     service_type: str,
     hour: int,
     locale: str = "ja",
-) -> dict:
-    """Summarize agg_route_hour rows into the expected-delay payload. Pure.
+) -> dict[str, Any]:
+    """Summarize already-hour-filtered agg_route_hour rows into the payload. Pure.
 
-    `rows`: mappings with keys scheduled_time, avg_min, p90_min, samples
-    (asyncpg Records or plain dicts). Keeps only rows in `hour` with non-null
-    metrics, sample-weights avg/p90, and attaches a 3-case disclaimer.
+    `rows`: mappings with keys avg_min, samples (asyncpg Records or plain dicts),
+    pre-filtered by the endpoint to the requested hour. Skips rows with a null
+    avg_min or zero/None samples, sample-weights the mean, and attaches a 3-case
+    disclaimer (normal / low-confidence / no-data).
     """
-    matched = [
-        r for r in rows
-        if _hour_of(r["scheduled_time"]) == hour
-        and r["avg_min"] is not None
-        and r["p90_min"] is not None
-        and r["samples"]
-    ]
-    total = sum(r["samples"] for r in matched)
+    valid = [r for r in rows if r["avg_min"] is not None and r["samples"]]
+    total = sum(r["samples"] for r in valid)
     base = {"route": route, "service_type": service_type, "hour": hour, "samples": total}
 
     if total == 0:
         return {
             **base,
             "expected_avg_min": None,
-            "expected_p90_min": None,
             "low_confidence": True,
             "disclaimer": _disclaimer("none", locale, service_type=service_type, hour=hour),
         }
 
-    avg = round(sum(r["avg_min"] * r["samples"] for r in matched) / total, 1)
-    p90 = round(sum(r["p90_min"] * r["samples"] for r in matched) / total, 1)
+    avg = round(sum(r["avg_min"] * r["samples"] for r in valid) / total, 1)
     low = total < LOW_CONFIDENCE_SAMPLES
     return {
         **base,
         "expected_avg_min": avg,
-        "expected_p90_min": p90,
         "low_confidence": low,
         "disclaimer": _disclaimer(
             "low" if low else "normal", locale, service_type=service_type, hour=hour, samples=total

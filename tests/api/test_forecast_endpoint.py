@@ -44,9 +44,9 @@ async def test_forecast_weighted_for_hour(forecast_client):
     r = await client.get(f"/api/{aid}/forecast", params={"route": "44372", "service_type": "平日", "hour": 17})
     assert r.status_code == 200
     body = r.json()
-    assert body["samples"] == 400
+    assert body["samples"] == 400  # 08:10 row excluded by the SQL hour filter
     assert body["expected_avg_min"] == round((6.0 * 100 + 9.0 * 300) / 400, 1)
-    assert body["expected_p90_min"] == round((10.0 * 100 + 20.0 * 300) / 400, 1)
+    assert "expected_p90_min" not in body  # p90 deliberately dropped
     assert body["low_confidence"] is False
     assert body["disclaimer"]
 

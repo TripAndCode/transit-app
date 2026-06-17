@@ -78,7 +78,6 @@ class ForecastResponse(BaseModel):
     service_type: str
     hour: int
     expected_avg_min: float | None
-    expected_p90_min: float | None
     samples: int
     low_confidence: bool
     disclaimer: str
@@ -126,11 +125,13 @@ async def forecast(
     NOT a prediction. The response always carries a plain-language disclaimer.
     """
     rows = await conn.fetch(
-        "SELECT scheduled_time, avg_min, p90_min, samples FROM agg_route_hour "
-        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3",
+        "SELECT avg_min, samples FROM agg_route_hour "
+        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
+        "AND EXTRACT(HOUR FROM scheduled_time)::int = $4",
         agency_id,
         route,
         service_type,
+        hour,
     )
     return summarize_expected_delay(rows, route, service_type, hour, locale)
 

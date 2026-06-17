@@ -51,9 +51,11 @@ hour; the core is "look up one average."
 
 ## The "expected delay" endpoint
 
-`GET /api/{agency_id}/forecast?route=…&service_type=平日|土曜|日祝&hour=0–23` is the concrete
-version of "look up an average": it reads the matching `agg_route_hour` rows and returns the
-sample-weighted typical delay for that slot.
+`GET /api/{agency_id}/forecast?route=…&service_type=…&hour=0–23` is the concrete version of
+"look up an average": it reads the matching `agg_route_hour` rows and returns the
+sample-weighted typical delay for that slot. `service_type` must match the agency's stored
+value exactly (these are agency-specific labels — often prefixed, e.g. `35_平日(共通)`, not a
+bare `平日`); an unrecognized value simply returns the no-data response.
 
 **A "sample" (delay measurement)** = one run of a scheduled departure, measured at one stop,
 on one day. A busy route accumulates thousands; it is not a count of trips.
