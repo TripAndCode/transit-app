@@ -15,9 +15,14 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 @pytest.fixture
 async def net_pool(apply_schema):
+    # In-process compute cache is keyed on (from_date, to_date) only, so two
+    # tests sharing a date range would leak results — clear it per test.
+    compute_network_summary.cache_clear()
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
-        await c.execute("TRUNCATE agencies CASCADE")
+        await c.execute(
+            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_route_daily, updates CASCADE"
+        )
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
@@ -70,8 +75,9 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
                 feed=("2026-04-01", 1000, 5),
                 route_daily_date="2026-04-02",
                 updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
+    # B's dist lags its newest completed updates day (2026-04-01 < 2026-04-02) → stale.
     await _seed(pool, b,
-                dist=[("2026-04-02", 100, 12000, 100)],
+                dist=[("2026-04-01", 100, 12000, 100)],
                 feed=("2026-04-02", 500, 50),
                 updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
     # Agency C: no data in range at all.
@@ -83,14 +89,15 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert by[a]["avg_delay_min"] == 10.0
     assert by[a]["on_time_pct"] == 50.0
     assert by[a]["samples"] == 200
-    assert by[a]["feed_health_pct"] == round((1 - 5 / 1000) * 100, 2)
+    assert isinstance(by[a]["avg_delay_min"], float)
+    assert by[a]["clamp_pct"] == round(5 / 1000 * 100, 2)
     assert by[a]["is_stale"] is False
     assert by[b]["avg_delay_min"] == 2.0
     assert by[b]["on_time_pct"] == 100.0
     assert by[b]["is_stale"] is True
     assert by[cc]["avg_delay_min"] is None
     assert by[cc]["samples"] == 0
-    assert by[cc]["feed_health_pct"] is None
+    assert by[cc]["clamp_pct"] is None
     order = [r["agency_id"] for r in rows]
     assert order.index(a) < order.index(b) < order.index(cc)
 
@@ -106,8 +113,11 @@ async def net_client(net_pool):
 
 
 async def test_network_summary_endpoint(net_client):
-    client, pool, a, _b, _cc = net_client
+    client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+    # Agency B: dist lags its completed updates day, NO feed → clamp_pct None, stale.
+    await _seed(pool, b, dist=[("2026-04-01", 100, 12000, 100)],
+                updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert r.status_code == 200
     body = r.json()
@@ -115,4 +125,7 @@ async def test_network_summary_endpoint(net_client):
     arow = next(x for x in body["agencies"] if x["agency_id"] == a)
     assert arow["avg_delay_min"] == 10.0
     assert set(arow) >= {"agency_id", "agency_name", "avg_delay_min", "on_time_pct",
-                         "samples", "raw_samples", "clamp_count", "feed_health_pct", "is_stale"}
+                         "samples", "raw_samples", "clamp_count", "clamp_pct", "is_stale"}
+    brow = next(x for x in body["agencies"] if x["agency_id"] == b)
+    assert brow["clamp_pct"] is None
+    assert brow["is_stale"] is True

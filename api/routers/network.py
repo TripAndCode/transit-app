@@ -1,9 +1,10 @@
 """Cross-agency network summary endpoint (not scoped to a single agency)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_conn
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.reports.network import compute_network_summary
 
@@ -18,7 +19,7 @@ class NetworkAgencyRow(BaseModel):
     samples: int
     raw_samples: int
     clamp_count: int
-    feed_health_pct: float | None
+    clamp_pct: float | None
     is_stale: bool
 
 
@@ -29,7 +30,8 @@ class NetworkSummary(BaseModel):
 
 
 @router.get("/summary", response_model=NetworkSummary)
-async def network_summary(conn=Depends(get_conn), ctx: RangeCtx = Depends(get_range_ctx)):
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def network_summary(request: Request, conn=Depends(get_conn), ctx: RangeCtx = Depends(get_range_ctx)):
     """Per-agency network health board over [from, to], ranked worst-avg-delay first.
 
     Honors the date range only; service/time_band/dow/routes are not applied
