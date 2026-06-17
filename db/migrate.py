@@ -31,6 +31,21 @@ def _applied_versions(conn) -> set[str]:
         return {r[0] for r in cur.fetchall()}
 
 
+def pending_migrations(conn) -> list[str]:
+    """On-disk migration versions not yet applied, in order. Read-only.
+
+    If the schema_migrations table is absent (never-migrated DB), every on-disk
+    version is pending. Does not apply or write anything (unlike migrate_up).
+    """
+    on_disk = _versions_on_disk()
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('schema_migrations')")
+        if cur.fetchone()[0] is None:
+            return list(on_disk)
+    applied = _applied_versions(conn)
+    return [v for v in on_disk if v not in applied]
+
+
 def _run_up(version: str, conn) -> None:
     """Apply one up-migration and record its version, atomically."""
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.up.sql"))
