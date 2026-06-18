@@ -1,5 +1,6 @@
 import i18n from "../i18n";
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -17,6 +18,7 @@ import type {
   ConvMessage,
   FilterCtx,
   HeatmapCollection,
+  NetworkSummary,
   OverviewSummary,
   ReportMeta,
   ReportResponse,
@@ -86,6 +88,18 @@ export function useOverviewSummary(
     queryFn: ({ signal }) =>
       apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
+  });
+}
+
+export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
+  return useQuery({
+    queryKey: ["network-summary", ctx.from, ctx.to],
+    queryFn: ({ signal }) =>
+      apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
+    staleTime: 60 * 1000,
+    // Keep the prior range's table mounted while the new range loads, so stepping
+    // the date pickers doesn't flicker the whole board through a Skeleton each change.
+    placeholderData: keepPreviousData,
   });
 }
 

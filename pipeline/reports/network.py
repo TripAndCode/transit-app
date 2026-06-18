@@ -17,7 +17,8 @@ from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
 
 _PERF_SQL = """
-    SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd, SUM(on_time_count) AS ot
+    SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd, SUM(on_time_count) AS ot,
+           MIN(date) AS data_from, MAX(date) AS data_to
     FROM agg_route_daily_dist
     WHERE date BETWEEN $1 AND $2
     GROUP BY agency_id
@@ -65,6 +66,8 @@ async def compute_network_summary(conn, from_date: date, to_date: date) -> list[
         raw = int(f["raw"]) if f and f["raw"] else 0
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
         clamp_pct = round(clamp / raw * 100, 2) if raw else None
+        data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
+        data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         rows.append({
             "agency_id": aid,
             "agency_name": a["agency_name"],
@@ -75,6 +78,8 @@ async def compute_network_summary(conn, from_date: date, to_date: date) -> list[
             "clamp_count": clamp,
             "clamp_pct": clamp_pct,
             "is_stale": is_stale(agg_max.get(aid), live_max.get(aid)),
+            "data_from": data_from,
+            "data_to": data_to,
         })
     rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
     return rows

@@ -18,6 +18,7 @@ const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapT
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
 const LiveTab = lazy(() => import("./tabs/LiveTab").then((m) => ({ default: m.LiveTab })));
 const ReportsTab = lazy(() => import("./tabs/ReportsTab").then((m) => ({ default: m.ReportsTab })));
+const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
@@ -58,6 +59,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: el(<LiveTab />) },
       { path: "agencies/:agencyId/reports", element: el(<ReportsTab />) },
       { path: "agencies/:agencyId/reports/:reportType", element: el(<ReportsTab />) },
+      { path: "network", element: el(<NetworkTab />) },
       { path: "me", element: el(<AccountPage />) },
       { path: "admin/users", element: el(<RequireAdmin><AdminUsersPage /></RequireAdmin>) },
       { path: "admin/users/:uid", element: el(<RequireAdmin><AdminUserDetailPage /></RequireAdmin>) },

@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgencyPicker } from "./AgencyPicker";
@@ -63,6 +63,18 @@ export function Header() {
         <AgencyPicker />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
+        <NavLink
+          to="/network"
+          style={({ isActive }) => ({
+            alignSelf: "center",
+            fontSize: 13,
+            textDecoration: "none",
+            color: isActive ? "var(--accent)" : "var(--text-secondary)",
+            fontWeight: isActive ? 600 : 400,
+          })}
+        >
+          {t("nav.network")}
+        </NavLink>
         <HeaderUserMenu />
         <LocaleToggle />
         {isAdmin && (

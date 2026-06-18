@@ -306,3 +306,23 @@ export type OverviewSummary = {
   sparkline_points: number[];
 };
 
+export type NetworkAgencyRow = {
+  agency_id: number;
+  agency_name: string;
+  avg_delay_min: number | null;
+  on_time_pct: number | null;
+  samples: number;
+  raw_samples: number;
+  clamp_count: number;
+  clamp_pct: number | null;
+  is_stale: boolean;
+  data_from: string | null;
+  data_to: string | null;
+};
+
+export type NetworkSummary = {
+  from: string;
+  to: string;
+  agencies: NetworkAgencyRow[];
+};
+

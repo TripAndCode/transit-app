@@ -21,6 +21,8 @@ class NetworkAgencyRow(BaseModel):
     clamp_count: int
     clamp_pct: float | None
     is_stale: bool
+    data_from: str | None
+    data_to: str | None
 
 
 class NetworkSummary(BaseModel):

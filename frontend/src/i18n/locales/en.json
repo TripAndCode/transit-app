@@ -4,7 +4,33 @@
     "map": "Map",
     "ask": "Ask",
     "live": "Latest observations",
-    "reports": "Reports"
+    "reports": "Reports",
+    "network": "Network"
+  },
+  "network": {
+    "title": "Network",
+    "eyebrow": "Across all agencies · {{from}} – {{to}}",
+    "from": "From",
+    "to": "To",
+    "col_agency": "Agency",
+    "col_avg_delay": "Avg delay (min)",
+    "col_on_time": "On-time %",
+    "col_samples": "Samples",
+    "col_feed": "Feed (clamped %)",
+    "col_freshness": "Freshness",
+    "stale_badge": "Behind",
+    "empty": "No agencies.",
+    "help": "Compare every agency over the same window. Rows are ranked by worst average delay first — scan Feed for frozen-feed problems and Freshness for pipelines that are behind.",
+    "howto_title": "How to read this",
+    "help_agency": "Transit agency.",
+    "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
+    "help_on_time": "Share of readings within the on-time threshold.",
+    "help_samples": "Number of delay observations behind the figures.",
+    "help_feed": "Percent of readings dropped as implausible — high means a stuck or frozen feed.",
+    "help_freshness": "Whether the figures include the latest ingested data. \"Behind\" means the precomputed totals haven't caught up yet, so the most recent days may be missing.",
+    "help_coverage": "The date span this agency actually has data for within the window.",
+    "col_coverage": "Coverage",
+    "no_data_in_range": "no data in range"
   },
   "app": {
     "data_stale": {
