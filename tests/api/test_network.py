@@ -83,12 +83,16 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert isinstance(by[a]["avg_delay_min"], float)
     assert by[a]["clamp_pct"] == round(5 / 1000 * 100, 2)
     assert by[a]["is_stale"] is False
+    assert by[a]["data_from"] == "2026-04-01"
+    assert by[a]["data_to"] == "2026-04-02"
     assert by[b]["avg_delay_min"] == 2.0
     assert by[b]["on_time_pct"] == 100.0
     assert by[b]["is_stale"] is True
     assert by[cc]["avg_delay_min"] is None
     assert by[cc]["samples"] == 0
     assert by[cc]["clamp_pct"] is None
+    assert by[cc]["data_from"] is None
+    assert by[cc]["data_to"] is None
     order = [r["agency_id"] for r in rows]
     assert order.index(a) < order.index(b) < order.index(cc)
 
