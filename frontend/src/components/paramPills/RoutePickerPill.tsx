@@ -1,11 +1,12 @@
 /**
  * RoutePickerPill — searchable route selector pill popover.
  *
- * Renders a pill button showing the currently selected route's long name (or a
- * placeholder when unset). Clicking opens a listbox popover with a live-search
- * text input filtering routes by code, short name, or long name. Results are
- * capped at 50 to keep rendering fast. Closes on outside click, Escape, or
- * option selection.
+ * Renders a pill button showing the selected route's line name — short_name,
+ * falling back to long_name then the route code (or a placeholder when unset).
+ * Clicking opens a listbox popover with a live-search text input filtering
+ * routes by code, short name, or long name; each option shows the line name
+ * with the code as a muted sub-label. Results are capped at 50 to keep
+ * rendering fast. Closes on outside click, Escape, or option selection.
  */
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
@@ -71,8 +72,11 @@ export function RoutePickerPill({
     return list.slice(0, 50);
   }, [routes, q]);
 
+  // Prefer a human name (short_name is the line name, e.g. "L21 中央大橋線") over
+  // the internal route_code; fall through to the code only as a last resort.
+  const selected = value ? routes.find((r) => r.route_code === value) : undefined;
   const display = value
-    ? (routes.find((r) => r.route_code === value)?.route_long_name ?? value)
+    ? selected?.route_short_name || selected?.route_long_name || value
     : placeholder;
 
   return (
@@ -184,8 +188,17 @@ export function RoutePickerPill({
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ color: "var(--text-secondary, #666)" }}>{code}</span>
-                  {r.route_long_name && <> · {r.route_long_name}</>}
+                  {(() => {
+                    const label = r.route_short_name || r.route_long_name || code;
+                    return (
+                      <>
+                        <span>{label}</span>
+                        {code && label !== code && (
+                          <span style={{ color: "var(--text-tertiary, #999)" }}> · {code}</span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </button>
               );
             })}

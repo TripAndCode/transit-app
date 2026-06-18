@@ -221,18 +221,24 @@ async def forecast_profile(
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def forecast_services(
     request: Request,
+    route: str = Query(..., min_length=1),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
-    """Distinct service-type values present for this agency in ``agg_route_hour``.
+    """Service-type values present for ONE route in ``agg_route_hour``.
 
-    Drives the Forecast tab's service selector so it offers the agency's real
-    labels (e.g. ``35_平日(共通)``) instead of hardcoded bare values.
+    Scoped to the selected route, not the whole agency: ``service_type`` is a
+    route-specific GTFS calendar id (e.g. ``51_平日(共通)``), so an agency can have
+    dozens; a route has only the few that apply to it. Ordered by sample volume
+    DESC so the tab defaults to the richest service (a full curve) rather than an
+    often-sparse one (a near-empty chart).
     """
     rows = await conn.fetch(
-        "SELECT DISTINCT service_type FROM agg_route_hour "
-        "WHERE agency_id = $1 AND service_type <> '' ORDER BY service_type",
+        "SELECT service_type FROM agg_route_hour "
+        "WHERE agency_id = $1 AND route_code = $2 AND service_type <> '' "
+        "GROUP BY service_type ORDER BY SUM(samples) DESC, service_type",
         agency_id,
+        route,
     )
     return {"service_types": [r["service_type"] for r in rows]}
 

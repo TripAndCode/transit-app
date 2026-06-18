@@ -66,12 +66,16 @@ export function useForecastDow(
 
 export function useForecastServices(
   agencyId: number | null,
+  route: string,
 ): UseQueryResult<ForecastServices> {
   return useQuery({
-    queryKey: ["forecast-services", agencyId],
+    queryKey: ["forecast-services", agencyId, route],
     queryFn: ({ signal }) =>
-      apiGet<ForecastServices>(`/api/${agencyId}/forecast/services`, { signal }),
-    enabled: agencyId != null,
+      apiGet<ForecastServices>(
+        `/api/${agencyId}/forecast/services?route=${encodeURIComponent(route)}`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!route,
     staleTime: 5 * 60 * 1000,
   });
 }
