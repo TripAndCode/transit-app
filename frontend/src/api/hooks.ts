@@ -95,6 +95,7 @@ export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary>
     queryKey: ["network-summary", ctx.from, ctx.to],
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
+    staleTime: 60 * 1000,
   });
 }
 

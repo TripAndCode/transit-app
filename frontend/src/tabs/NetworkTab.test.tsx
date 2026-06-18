@@ -41,6 +41,19 @@ describe("NetworkTab", () => {
     expect(screen.getByText("10.00%")).toBeInTheDocument();
     expect(screen.getByText("Behind")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    // clamp dot boundary: present only for HiroBus (10%), absent for
+    // Hiroden (0.14 < 1) and Aomori (null).
+    expect(screen.getAllByTestId("clamp-dot")).toHaveLength(1);
+  });
+
+  it("renders the empty message and no table when there are no agencies", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByText("No agencies.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("shows a skeleton (no table) while pending", () => {

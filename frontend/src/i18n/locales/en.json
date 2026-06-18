@@ -16,7 +16,7 @@
     "col_avg_delay": "Avg delay (min)",
     "col_on_time": "On-time %",
     "col_samples": "Samples",
-    "col_feed": "Feed",
+    "col_feed": "Feed (clamped %)",
     "col_freshness": "Freshness",
     "stale_badge": "Behind",
     "empty": "No agencies."

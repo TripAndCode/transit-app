@@ -3,7 +3,9 @@ import { useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { delayColor, DELAY_RAMP } from "../styles/tokens";
+import { delayColor } from "../styles/tokens";
+
+const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
 const th: React.CSSProperties = { padding: "6px 10px", fontWeight: 500 };
 const thNum: React.CSSProperties = { ...th, textAlign: "right" };
@@ -44,12 +46,12 @@ export function NetworkTab() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
           <thead>
             <tr style={{ color: "var(--text-tertiary)", fontSize: 12, textAlign: "left" }}>
-              <th style={th}>{t("network.col_agency")}</th>
-              <th style={thNum}>{t("network.col_avg_delay")}</th>
-              <th style={thNum}>{t("network.col_on_time")}</th>
-              <th style={thNum}>{t("network.col_samples")}</th>
-              <th style={thNum}>{t("network.col_feed")}</th>
-              <th style={th}>{t("network.col_freshness")}</th>
+              <th scope="col" style={th}>{t("network.col_agency")}</th>
+              <th scope="col" style={thNum}>{t("network.col_avg_delay")}</th>
+              <th scope="col" style={thNum}>{t("network.col_on_time")}</th>
+              <th scope="col" style={thNum}>{t("network.col_samples")}</th>
+              <th scope="col" style={thNum}>{t("network.col_feed")}</th>
+              <th scope="col" style={th}>{t("network.col_freshness")}</th>
             </tr>
           </thead>
           <tbody>
@@ -60,7 +62,8 @@ export function NetworkTab() {
                   {a.avg_delay_min == null ? (
                     "—"
                   ) : (
-                    <span style={{ background: delayColor(a.avg_delay_min), color: "#fff", padding: "2px 8px", borderRadius: 4 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: delayColor(a.avg_delay_min), flex: "0 0 auto" }} />
                       {a.avg_delay_min.toFixed(1)}
                     </span>
                   )}
@@ -72,8 +75,8 @@ export function NetworkTab() {
                     "—"
                   ) : (
                     <>
-                      {a.clamp_pct > 1 && (
-                        <span aria-hidden style={{ color: DELAY_RAMP.moderate, marginRight: 4 }}>●</span>
+                      {a.clamp_pct > CLAMP_NOTABLE_PCT && (
+                        <span data-testid="clamp-dot" aria-hidden style={{ color: "var(--error-fg)", marginRight: 4 }}>●</span>
                       )}
                       {a.clamp_pct.toFixed(2)}%
                     </>

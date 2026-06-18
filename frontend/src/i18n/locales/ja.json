@@ -16,9 +16,9 @@
     "col_avg_delay": "平均遅延（分）",
     "col_on_time": "定時率",
     "col_samples": "観測数",
-    "col_feed": "フィード",
+    "col_feed": "フィード（異常値%）",
     "col_freshness": "鮮度",
-    "stale_badge": "遅延",
+    "stale_badge": "未更新",
     "empty": "事業者がありません。"
   },
   "app": {
