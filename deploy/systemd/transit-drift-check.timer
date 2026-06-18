@@ -1,0 +1,10 @@
+# Daily DB drift/staleness check. See transit-drift-check.service for install steps.
+[Unit]
+Description=Run transit DB drift/staleness check daily
+
+[Timer]
+OnCalendar=*-*-* 06:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

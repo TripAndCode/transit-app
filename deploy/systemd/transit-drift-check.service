@@ -1,0 +1,23 @@
+# transit-drift-check.service — scheduled DB drift/staleness check.
+#
+# Install (on the DB/app host):
+#   1. Set the real repo path in WorkingDirectory + ExecStart and the User below.
+#   2. Create the env file (NOT committed) with the deployed DB connstring:
+#        sudo install -m 600 -o root -g transit /dev/null /etc/transit/drift-check.env
+#        echo 'DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/transit' | sudo tee /etc/transit/drift-check.env
+#      Point it at the DEPLOYED DB — do not reuse the local dev :5433 string.
+#      (see deploy/systemd/drift-check.env.example)
+#   3. sudo cp deploy/systemd/transit-drift-check.{service,timer} /etc/systemd/system/
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now transit-drift-check.timer
+# Inspect: systemctl status transit-drift-check.timer ; journalctl -u transit-drift-check.service
+# A failed run is visible via `systemctl --failed` and journald. For host mail on
+# failure, add an `OnFailure=` unit (optional; not required).
+[Unit]
+Description=Transit DB drift/staleness check
+
+[Service]
+Type=oneshot
+User=transit
+WorkingDirectory=/opt/transit-app
+EnvironmentFile=/etc/transit/drift-check.env
+ExecStart=/usr/bin/env bash /opt/transit-app/scripts/drift_check.sh
