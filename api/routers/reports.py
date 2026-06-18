@@ -26,7 +26,10 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import summarize_expected_delay
+from pipeline.reports.forecast import (
+    summarize_expected_delay,
+    summarize_expected_delay_profile,
+)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -83,6 +86,24 @@ class ForecastResponse(BaseModel):
     disclaimer: str
 
 
+class ForecastProfileHour(BaseModel):
+    """One hour (0–23) of the expected-delay profile."""
+
+    hour: int
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+
+
+class ForecastProfileResponse(BaseModel):
+    """Payload for ``GET /forecast/profile`` — expected delay across all 24 hours."""
+
+    route: str
+    service_type: str
+    hours: list[ForecastProfileHour]
+    disclaimer: str
+
+
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
@@ -134,6 +155,37 @@ async def forecast(
         hour,
     )
     return summarize_expected_delay(rows, route, service_type, hour, locale)
+
+
+@router.get("/forecast/profile", response_model=ForecastProfileResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_profile(
+    request: Request,
+    route: str = Query(..., min_length=1),
+    service_type: str = Query(..., min_length=1),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Expected delay by hour (0–23) for a route at a service type.
+
+    Pools the precomputed ``agg_route_hour`` baseline to the hour (the
+    sample-weighted mean equals the exact pooled mean). Seasonal-naive, NOT a
+    prediction — the response always carries a plain-language disclaimer.
+    """
+    rows = await conn.fetch(
+        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour "
+        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
+        "AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY 1 ORDER BY 1",
+        agency_id,
+        route,
+        service_type,
+    )
+    return summarize_expected_delay_profile(rows, route, service_type, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing
