@@ -26,7 +26,17 @@ function profile(over = {}) {
   return { route: "R1", service_type: "平日", hours, disclaimer: "test disclaimer", ...over };
 }
 
-function renderTab(routes: RouteType[], services: string[] = ["平日"]) {
+function dowProfile() {
+  const days = Array.from({ length: 7 }, (_, i) => ({
+    dow: i + 1,
+    expected_avg_min: i === 0 ? 8 : i === 5 ? 3 : 4,
+    samples: i === 5 ? 10 : 300,
+    low_confidence: i === 5,
+  }));
+  return { route: "R1", days, disclaimer: "dow disclaimer" };
+}
+
+function renderTab(routes: RouteType[], services: string[] = ["平日"], dow: unknown = undefined) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
     data: routes,
     isPending: false,
@@ -35,6 +45,12 @@ function renderTab(routes: RouteType[], services: string[] = ["平日"]) {
   } as never);
   vi.spyOn(hooks, "useForecastServices").mockReturnValue({
     data: { service_types: services },
+    isPending: false,
+    error: null,
+    refetch: vi.fn(),
+  } as never);
+  vi.spyOn(hooks, "useForecastDow").mockReturnValue({
+    data: dow,
     isPending: false,
     error: null,
     refetch: vi.fn(),
@@ -71,6 +87,19 @@ describe("ForecastTab", () => {
     expect(screen.getAllByTestId("forecast-bar").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("forecast-bar-lowconf")).toBeInTheDocument();
     expect(screen.getByText("test disclaimer")).toBeInTheDocument();
+  });
+
+  it("renders the day-of-week strip with a low-confidence marker", () => {
+    vi.spyOn(hooks, "useForecastProfile").mockReturnValue({
+      data: profile(),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab([route("R1")], ["平日"], dowProfile());
+    expect(screen.getByText("By day of week")).toBeInTheDocument();
+    expect(screen.getAllByTestId("dow-bar").length).toBeGreaterThanOrEqual(7);
+    expect(screen.getByTestId("dow-bar-lowconf")).toBeInTheDocument();
   });
 
   it("shows a no-data note when every hour is null", () => {

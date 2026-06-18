@@ -252,6 +252,19 @@ export interface ForecastServices {
   service_types: string[];
 }
 
+export interface ForecastDowDay {
+  dow: number; // 1=Mon .. 7=Sun (ISODOW)
+  expected_avg_min: number | null;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastDow {
+  route: string;
+  days: ForecastDowDay[];
+  disclaimer: string;
+}
+
 export type OverviewHeadline = {
   avg_min: number | null;
   baseline_avg_min: number | null;

@@ -55,6 +55,15 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
         "(each measurement = one stop, on one run, on one day). It does not account for "
         "incidents, weather, or today's conditions."
     ),
+    ("dow_profile", "ja"): (
+        "曜日ごとに、この路線の過去の遅れの計測記録から平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+    ),
+    ("dow_profile", "en"): (
+        "Per-day-of-week averages from this route's past delay measurements "
+        "(each measurement = one stop, on one run, on one day). It does not account "
+        "for incidents, weather, or today's conditions."
+    ),
 }
 
 
@@ -141,3 +150,32 @@ def summarize_expected_delay_profile(
         "hours": hours,
         "disclaimer": _disclaimer("profile", locale, service_type=service_type),
     }
+
+
+def summarize_expected_delay_dow(
+    rows: Iterable[Mapping[str, Any]],
+    route: str,
+    locale: str = "ja",
+) -> dict[str, Any]:
+    """Lay already-per-dow-pooled rows onto a full ISODOW 1..7 grid. Pure.
+
+    `rows`: mappings with keys ``dow`` (1=Mon..7=Sun), ``avg_min`` (pooled mean,
+    may be None), ``samples`` (int). The endpoint SQL groups + sample-weights
+    ``avg_min`` across service types, so the value is already the exact pooled
+    mean; this fills the grid (missing days -> null/0) and flags low confidence.
+    No percentile (cannot pool per-bucket percentiles).
+    """
+    by_dow = {int(r["dow"]): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    days: list[dict[str, Any]] = []
+    for d in range(1, 8):
+        r = by_dow.get(d)
+        samples = int(r["samples"]) if r else 0
+        days.append(
+            {
+                "dow": d,
+                "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                "samples": samples,
+                "low_confidence": 0 < samples < LOW_CONFIDENCE_SAMPLES,
+            }
+        )
+    return {"route": route, "days": days, "disclaimer": _disclaimer("dow_profile", locale)}

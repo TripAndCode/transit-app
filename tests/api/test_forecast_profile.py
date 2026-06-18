@@ -82,9 +82,15 @@ async def test_profile_missing_param_422(profile_client):
     assert r.status_code == 422
 
 
-async def test_services_lists_distinct_sorted(profile_client):
+async def test_services_lists_route_distinct(profile_client):
+    client, aid = profile_client
+    r = await client.get(f"/api/{aid}/forecast/services", params={"route": "R1"})
+    assert r.status_code == 200
+    # fixture seeds both 平日 and 土日祝 for route R1
+    assert set(r.json()["service_types"]) == {"平日", "土日祝"}
+
+
+async def test_services_requires_route(profile_client):
     client, aid = profile_client
     r = await client.get(f"/api/{aid}/forecast/services")
-    assert r.status_code == 200
-    # fixture seeds both 平日 and 土日祝 for this agency (order is collation-dependent)
-    assert set(r.json()["service_types"]) == {"平日", "土日祝"}
+    assert r.status_code == 422
