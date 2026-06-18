@@ -30,7 +30,8 @@
     "help_freshness": "Whether the figures include the latest ingested data. \"Behind\" means the precomputed totals haven't caught up yet, so the most recent days may be missing.",
     "help_coverage": "The date span this agency actually has data for within the window.",
     "col_coverage": "Coverage",
-    "no_data_in_range": "no data in range"
+    "no_data_in_range": "no data in range",
+    "view_agency": "View {{name}} overview"
   },
   "app": {
     "data_stale": {

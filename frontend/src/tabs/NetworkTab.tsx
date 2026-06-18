@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { useRangeContext } from "../api/rangeContext";
+import { Link } from "react-router-dom";
+import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -17,6 +18,11 @@ export function NetworkTab() {
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
 
+  // Carry the full current range into each agency's Overview, matching how
+  // Sidebar/ReportsTab build agency links (proper encoding; "all" dims omitted).
+  const filterQS = ctxToQueryString(ctx);
+  const suffix = filterQS ? `?${filterQS}` : "";
+
   const cols = [
     { key: "agency", label: t("network.col_agency"), help: t("network.help_agency"), num: false },
     { key: "avg", label: t("network.col_avg_delay"), help: t("network.help_avg_delay"), num: true },
@@ -29,6 +35,12 @@ export function NetworkTab() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1040, margin: "0 auto" }}>
+      <style>{`
+        .network-row { transition: background var(--transition); }
+        .network-row:hover { background: var(--bg-soft); }
+        .network-row a { color: var(--accent); text-decoration: none; }
+        .network-row a:hover { text-decoration: underline; }
+      `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
       </div>
@@ -79,8 +91,15 @@ export function NetworkTab() {
           </thead>
           <tbody>
             {data.agencies.map((a) => (
-              <tr key={a.agency_id} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                <td style={td}>{a.agency_name}</td>
+              <tr key={a.agency_id} className="network-row" style={{ borderTop: "1px solid var(--border-soft)" }}>
+                <td style={td}>
+                  <Link
+                    to={`/agencies/${a.agency_id}/overview${suffix}`}
+                    title={t("network.view_agency", { name: a.agency_name })}
+                  >
+                    {a.agency_name}
+                  </Link>
+                </td>
                 <td style={tdNum}>
                   {a.avg_delay_min == null ? (
                     "—"

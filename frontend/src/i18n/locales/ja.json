@@ -30,7 +30,8 @@
     "help_freshness": "表の数値が最新の取り込みデータまで反映されているか。「未更新」は集計が追いついておらず、直近の日付がまだ含まれていない可能性を示します。",
     "help_coverage": "この事業者が期間内に実際にデータを持つ日付範囲。",
     "col_coverage": "データ範囲",
-    "no_data_in_range": "期間内のデータなし"
+    "no_data_in_range": "期間内のデータなし",
+    "view_agency": "{{name}} の概況を見る"
   },
   "app": {
     "data_stale": {
