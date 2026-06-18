@@ -316,6 +316,8 @@ export type NetworkAgencyRow = {
   clamp_count: number;
   clamp_pct: number | null;
   is_stale: boolean;
+  data_from: string | null;
+  data_to: string | null;
 };
 
 export type NetworkSummary = {

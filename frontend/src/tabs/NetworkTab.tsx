@@ -17,14 +17,38 @@ export function NetworkTab() {
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
 
+  const cols = [
+    { key: "agency", label: t("network.col_agency"), help: t("network.help_agency"), num: false },
+    { key: "avg", label: t("network.col_avg_delay"), help: t("network.help_avg_delay"), num: true },
+    { key: "ontime", label: t("network.col_on_time"), help: t("network.help_on_time"), num: true },
+    { key: "samples", label: t("network.col_samples"), help: t("network.help_samples"), num: true },
+    { key: "feed", label: t("network.col_feed"), help: t("network.help_feed"), num: true },
+    { key: "fresh", label: t("network.col_freshness"), help: t("network.help_freshness"), num: false },
+    { key: "coverage", label: t("network.col_coverage"), help: t("network.help_coverage"), num: false },
+  ];
+
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+    <div style={{ padding: 24, maxWidth: 1040, margin: "0 auto" }}>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
       </div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 16px" }}>
+      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 8px" }}>
         {t("network.title")}
       </h1>
+      <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: "0 0 12px", maxWidth: 720, lineHeight: 1.5 }}>
+        {t("network.help")}
+      </p>
+      <details style={{ marginBottom: 16, fontSize: 13, color: "var(--text-secondary)" }}>
+        <summary style={{ cursor: "pointer", color: "var(--accent)" }}>{t("network.howto_title")}</summary>
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+          <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
+          <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
+          <li><strong>{t("network.col_samples")}</strong> — {t("network.help_samples")}</li>
+          <li><strong>{t("network.col_feed")}</strong> — {t("network.help_feed")}</li>
+          <li><strong>{t("network.col_freshness")}</strong> — {t("network.help_freshness")}</li>
+          <li><strong>{t("network.col_coverage")}</strong> — {t("network.help_coverage")}</li>
+        </ul>
+      </details>
 
       <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "var(--text-secondary)" }}>
         <label>
@@ -46,12 +70,11 @@ export function NetworkTab() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
           <thead>
             <tr style={{ color: "var(--text-tertiary)", fontSize: 12, textAlign: "left" }}>
-              <th scope="col" style={th}>{t("network.col_agency")}</th>
-              <th scope="col" style={thNum}>{t("network.col_avg_delay")}</th>
-              <th scope="col" style={thNum}>{t("network.col_on_time")}</th>
-              <th scope="col" style={thNum}>{t("network.col_samples")}</th>
-              <th scope="col" style={thNum}>{t("network.col_feed")}</th>
-              <th scope="col" style={th}>{t("network.col_freshness")}</th>
+              {cols.map((c) => (
+                <th key={c.key} scope="col" title={c.help} style={c.num ? thNum : th}>
+                  {c.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -87,6 +110,13 @@ export function NetworkTab() {
                     <span style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>
                       {t("network.stale_badge")}
                     </span>
+                  )}
+                </td>
+                <td style={td}>
+                  {a.data_to == null ? (
+                    <span style={{ color: "var(--text-tertiary)" }}>{t("network.no_data_in_range")}</span>
+                  ) : (
+                    `${a.data_from} – ${a.data_to}`
                   )}
                 </td>
               </tr>

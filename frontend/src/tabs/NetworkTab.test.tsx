@@ -9,7 +9,8 @@ import type { NetworkAgencyRow } from "../api/types";
 function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
   return {
     agency_id: 1, agency_name: "A", avg_delay_min: 5, on_time_pct: 90,
-    samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false, ...over,
+    samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
+    data_from: "2026-04-01", data_to: "2026-04-02", ...over,
   };
 }
 
@@ -28,8 +29,8 @@ describe("NetworkTab", () => {
         from: "2026-04-01", to: "2026-04-07",
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 10, on_time_pct: 50, clamp_pct: 0.14 }),
-          row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true }),
-          row({ agency_id: 3, agency_name: "Aomori", avg_delay_min: null, on_time_pct: null, samples: 0, clamp_pct: null }),
+          row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true, data_from: "2026-04-03", data_to: "2026-04-05" }),
+          row({ agency_id: 3, agency_name: "Aomori", avg_delay_min: null, on_time_pct: null, samples: 0, clamp_pct: null, data_from: null, data_to: null }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -44,6 +45,9 @@ describe("NetworkTab", () => {
     // clamp dot boundary: present only for HiroBus (10%), absent for
     // Hiroden (0.14 < 1) and Aomori (null).
     expect(screen.getAllByTestId("clamp-dot")).toHaveLength(1);
+    expect(screen.getByText("2026-04-01 – 2026-04-02")).toBeInTheDocument();
+    expect(screen.getByText("no data in range")).toBeInTheDocument();
+    expect(screen.getByText("How to read this")).toBeInTheDocument();
   });
 
   it("renders the empty message and no table when there are no agencies", () => {
