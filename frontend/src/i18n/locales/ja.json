@@ -4,7 +4,22 @@
     "map": "地図",
     "ask": "質問",
     "live": "最新観測",
-    "reports": "レポート"
+    "reports": "レポート",
+    "network": "ネットワーク"
+  },
+  "network": {
+    "title": "ネットワーク",
+    "eyebrow": "全事業者 · {{from}} 〜 {{to}}",
+    "from": "開始",
+    "to": "終了",
+    "col_agency": "事業者",
+    "col_avg_delay": "平均遅延（分）",
+    "col_on_time": "定時率",
+    "col_samples": "観測数",
+    "col_feed": "フィード",
+    "col_freshness": "鮮度",
+    "stale_badge": "遅延",
+    "empty": "事業者がありません。"
   },
   "app": {
     "data_stale": {

@@ -4,7 +4,22 @@
     "map": "Map",
     "ask": "Ask",
     "live": "Latest observations",
-    "reports": "Reports"
+    "reports": "Reports",
+    "network": "Network"
+  },
+  "network": {
+    "title": "Network",
+    "eyebrow": "Across all agencies · {{from}} – {{to}}",
+    "from": "From",
+    "to": "To",
+    "col_agency": "Agency",
+    "col_avg_delay": "Avg delay (min)",
+    "col_on_time": "On-time %",
+    "col_samples": "Samples",
+    "col_feed": "Feed",
+    "col_freshness": "Freshness",
+    "stale_badge": "Behind",
+    "empty": "No agencies."
   },
   "app": {
     "data_stale": {
