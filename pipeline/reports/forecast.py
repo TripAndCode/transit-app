@@ -46,6 +46,15 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
         "There are no past delay measurements for this route's {service_type} departures in the "
         "{hour}:00 hour, so no estimate is available."
     ),
+    ("profile", "ja"): (
+        "{service_type}に走ったこの路線の遅れの計測記録から、時間帯ごとの平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+    ),
+    ("profile", "en"): (
+        "Hourly averages computed from this route's past {service_type} delay measurements "
+        "(each measurement = one stop, on one run, on one day). It does not account for "
+        "incidents, weather, or today's conditions."
+    ),
 }
 
 
@@ -95,4 +104,40 @@ def summarize_expected_delay(
         "disclaimer": _disclaimer(
             "low" if low else "normal", locale, service_type=service_type, hour=hour, samples=total
         ),
+    }
+
+
+def summarize_expected_delay_profile(
+    rows: Iterable[Mapping[str, Any]],
+    route: str,
+    service_type: str,
+    locale: str = "ja",
+) -> dict[str, Any]:
+    """Lay already-per-hour-pooled rows onto a full 0–23 grid. Pure.
+
+    `rows`: mappings with keys ``hour`` (0–23), ``avg_min`` (the pooled mean for
+    that hour, may be None), ``samples`` (int). The endpoint SQL groups by hour
+    and sample-weights ``avg_min``, so the value here is already the exact pooled
+    mean — this just fills the grid (missing hours → null/0) and flags low
+    confidence. No p90 is reported: percentiles cannot be pooled from per-bucket
+    percentiles (same reason ``summarize_expected_delay`` omits it).
+    """
+    by_hour = {int(r["hour"]): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    hours: list[dict[str, Any]] = []
+    for h in range(24):
+        r = by_hour.get(h)
+        samples = int(r["samples"]) if r else 0
+        hours.append(
+            {
+                "hour": h,
+                "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                "samples": samples,
+                "low_confidence": 0 < samples < LOW_CONFIDENCE_SAMPLES,
+            }
+        )
+    return {
+        "route": route,
+        "service_type": service_type,
+        "hours": hours,
+        "disclaimer": _disclaimer("profile", locale, service_type=service_type),
     }
