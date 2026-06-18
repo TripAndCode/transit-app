@@ -17,6 +17,7 @@ import type {
   ConvMessage,
   FilterCtx,
   HeatmapCollection,
+  NetworkSummary,
   OverviewSummary,
   ReportMeta,
   ReportResponse,
@@ -86,6 +87,14 @@ export function useOverviewSummary(
     queryFn: ({ signal }) =>
       apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
+  });
+}
+
+export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
+  return useQuery({
+    queryKey: ["network-summary", ctx.from, ctx.to],
+    queryFn: ({ signal }) =>
+      apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
   });
 }
 
