@@ -28,6 +28,7 @@ from pipeline.reports import (
 )
 from pipeline.reports.forecast import (
     summarize_expected_delay,
+    summarize_expected_delay_dow,
     summarize_expected_delay_profile,
 )
 
@@ -113,6 +114,23 @@ class ForecastServicesResponse(BaseModel):
     """
 
     service_types: list[str]
+
+
+class ForecastDowDay(BaseModel):
+    """One day of week (ISODOW 1=Mon..7=Sun) of the expected-delay-by-dow strip."""
+
+    dow: int
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+
+
+class ForecastDowResponse(BaseModel):
+    """Payload for ``GET /forecast/dow`` — expected delay across the week."""
+
+    route: str
+    days: list[ForecastDowDay]
+    disclaimer: str
 
 
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
@@ -217,6 +235,35 @@ async def forecast_services(
         agency_id,
     )
     return {"service_types": [r["service_type"] for r in rows]}
+
+
+@router.get("/forecast/dow", response_model=ForecastDowResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_dow(
+    request: Request,
+    route: str = Query(..., min_length=1),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Expected delay by day of week (ISODOW 1=Mon..7=Sun) for a route.
+
+    Pools agg_route_dow per dow across service types (sample-weighted = exact
+    pooled mean), so each day is "delay on Mondays" regardless of the service
+    label. Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
+    """
+    rows = await conn.fetch(
+        "SELECT dow, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_dow "
+        "WHERE agency_id = $1 AND route_code = $2 "
+        "AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY dow ORDER BY dow",
+        agency_id,
+        route,
+    )
+    return summarize_expected_delay_dow(rows, route, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing
