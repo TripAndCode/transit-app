@@ -107,7 +107,7 @@ export function NetworkTab() {
                 </td>
                 <td style={td}>
                   {a.is_stale && (
-                    <span style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>
+                    <span title={t("network.help_freshness")} style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>
                       {t("network.stale_badge")}
                     </span>
                   )}

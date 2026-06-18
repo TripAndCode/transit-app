@@ -1,5 +1,6 @@
 import i18n from "../i18n";
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -96,6 +97,9 @@ export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary>
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
     staleTime: 60 * 1000,
+    // Keep the prior range's table mounted while the new range loads, so stepping
+    // the date pickers doesn't flicker the whole board through a Skeleton each change.
+    placeholderData: keepPreviousData,
   });
 }
 
