@@ -63,6 +63,12 @@ export function Header() {
         <AgencyPicker />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
+        <Link
+          to="/network"
+          style={{ alignSelf: "center", fontSize: 13, color: "var(--text-secondary)", textDecoration: "none" }}
+        >
+          {t("nav.network")}
+        </Link>
         <HeaderUserMenu />
         <LocaleToggle />
         {isAdmin && (
