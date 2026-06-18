@@ -17,6 +17,7 @@ import type {
   Conversation,
   ConvMessage,
   FilterCtx,
+  ForecastDow,
   ForecastProfile,
   ForecastServices,
   HeatmapCollection,
@@ -46,6 +47,20 @@ export function useForecastProfile(
       ),
     // Only fetch once a route + service are chosen.
     enabled: agencyId != null && !!route && !!service,
+  });
+}
+
+export function useForecastDow(
+  agencyId: number | null,
+  route: string,
+): UseQueryResult<ForecastDow> {
+  return useQuery({
+    queryKey: ["forecast-dow", agencyId, route],
+    queryFn: ({ signal }) =>
+      apiGet<ForecastDow>(`/api/${agencyId}/forecast/dow?route=${encodeURIComponent(route)}`, {
+        signal,
+      }),
+    enabled: agencyId != null && !!route,
   });
 }
 
