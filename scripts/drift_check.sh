@@ -11,8 +11,10 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 2
 fi
 
-cd "$(dirname "$0")/.." || exit 2
-echo "=== drift_check $(date -u +%Y-%m-%dT%H:%M:%SZ) DB=${DATABASE_URL%%\?*} ==="
+cd "$(dirname "$0")/.." || exit 3
+# Redact credentials (user:pass@) before logging — journald is broadly readable.
+db_safe="$(printf '%s' "$DATABASE_URL" | sed -E 's#://[^@/]*@#://***@#; s#\?.*$##')"
+echo "=== drift_check $(date -u +%Y-%m-%dT%H:%M:%SZ) DB=${db_safe} ==="
 
 echo "--- check_migrations ---"
 poetry run python gtfs_pipeline.py check_migrations
