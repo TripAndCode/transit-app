@@ -5,7 +5,7 @@
     "ask": "質問",
     "live": "最新観測",
     "reports": "レポート",
-    "network": "ネットワーク",
+    "network": "事業者比較",
     "forecast": "予測"
   },
   "forecast": {
@@ -21,7 +21,7 @@
     "svg_aria": "時間帯ごとの予想遅延グラフ"
   },
   "network": {
-    "title": "ネットワーク",
+    "title": "事業者比較",
     "eyebrow": "全事業者 · {{from}} 〜 {{to}}",
     "from": "開始",
     "to": "終了",

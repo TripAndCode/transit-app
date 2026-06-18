@@ -5,7 +5,7 @@
     "ask": "Ask",
     "live": "Latest observations",
     "reports": "Reports",
-    "network": "Network",
+    "network": "Agencies",
     "forecast": "Forecast"
   },
   "forecast": {
@@ -21,7 +21,7 @@
     "svg_aria": "Expected delay by hour chart"
   },
   "network": {
-    "title": "Network",
+    "title": "Compare agencies",
     "eyebrow": "Across all agencies · {{from}} – {{to}}",
     "from": "From",
     "to": "To",
