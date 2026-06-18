@@ -5,7 +5,18 @@
     "ask": "質問",
     "live": "最新観測",
     "reports": "レポート",
-    "network": "ネットワーク"
+    "network": "ネットワーク",
+    "forecast": "予測"
+  },
+  "forecast": {
+    "title": "予測",
+    "eyebrow": "時間帯ごとの予想遅延",
+    "route_label": "路線",
+    "service_label": "種別",
+    "pick_prompt": "路線を選ぶと時間帯ごとの予想遅延を表示します。",
+    "low_confidence": "参考値（計測が少ない）",
+    "no_data": "この路線・種別の計測記録がありません。",
+    "axis_min": "分"
   },
   "network": {
     "title": "ネットワーク",

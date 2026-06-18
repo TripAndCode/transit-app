@@ -5,7 +5,18 @@
     "ask": "Ask",
     "live": "Latest observations",
     "reports": "Reports",
-    "network": "Network"
+    "network": "Network",
+    "forecast": "Forecast"
+  },
+  "forecast": {
+    "title": "Forecast",
+    "eyebrow": "Expected delay by hour",
+    "route_label": "Route",
+    "service_label": "Service",
+    "pick_prompt": "Pick a route to see its expected delay by hour.",
+    "low_confidence": "Low confidence (few measurements)",
+    "no_data": "No delay measurements for this route and service.",
+    "axis_min": "min"
   },
   "network": {
     "title": "Network",
