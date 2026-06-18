@@ -50,6 +50,29 @@ describe("NetworkTab", () => {
     expect(screen.getByText("How to read this")).toBeInTheDocument();
   });
 
+  it("links each agency name to its overview, carrying the current range", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07",
+        agencies: [row({ agency_id: 7, agency_name: "Hiroden" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/network?from=2026-04-01&to=2026-04-07"]}>
+        <NetworkTab />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: "Hiroden" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/agencies/7/overview?from=2026-04-01&to=2026-04-07",
+    );
+    // title carries the advisory "view overview" hint without overriding the
+    // self-describing accessible name (WCAG label-in-name).
+    expect(link).toHaveAttribute("title", "View Hiroden overview");
+  });
+
   it("renders the empty message and no table when there are no agencies", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
