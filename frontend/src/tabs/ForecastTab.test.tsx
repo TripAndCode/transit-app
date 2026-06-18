@@ -26,10 +26,17 @@ function profile(over = {}) {
   return { route: "R1", service_type: "平日", hours, disclaimer: "test disclaimer", ...over };
 }
 
-function renderTab(routes: RouteType[]) {
+function renderTab(routes: RouteType[], services: string[] = ["平日"]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
     data: routes,
     isPending: false,
+    isLoading: false,
+    refetch: vi.fn(),
+  } as never);
+  vi.spyOn(hooks, "useForecastServices").mockReturnValue({
+    data: { service_types: services },
+    isPending: false,
+    error: null,
     refetch: vi.fn(),
   } as never);
   renderWithProviders(

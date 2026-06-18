@@ -248,6 +248,10 @@ export interface ForecastProfile {
   disclaimer: string;
 }
 
+export interface ForecastServices {
+  service_types: string[];
+}
+
 export type OverviewHeadline = {
   avg_min: number | null;
   baseline_avg_min: number | null;

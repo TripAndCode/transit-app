@@ -1,25 +1,27 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useRoutes, useForecastProfile } from "../api/hooks";
+import { useRoutes, useForecastProfile, useForecastServices } from "../api/hooks";
+import { RoutePickerPill } from "../components/paramPills/RoutePickerPill";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { delayColor } from "../styles/tokens";
 import type { ForecastProfileHour } from "../api/types";
-
-// Service-type values are a query contract (raw GTFS service keys stored in
-// agg_route_hour), labelled in the active locale — same as TabFilterBar.
-const SERVICES = [
-  { value: "平日", labelKey: "filters.service.weekday" }, // i18n-ignore: query contract
-  { value: "土日祝", labelKey: "filters.service.weekend" }, // i18n-ignore: query contract
-];
 
 const CHART_H = 160;
 const COL_W = 30;
 const PAD_L = 36;
 const PAD_B = 22;
 
-function HourlyChart({ hours, axisMin }: { hours: ForecastProfileHour[]; axisMin: string }) {
+function HourlyChart({
+  hours,
+  axisMin,
+  ariaLabel,
+}: {
+  hours: ForecastProfileHour[];
+  axisMin: string;
+  ariaLabel: string;
+}) {
   const populated = hours.filter((h) => h.expected_avg_min != null);
   const max = Math.max(...populated.map((h) => h.expected_avg_min as number), 1);
   const width = PAD_L + 24 * COL_W;
@@ -30,11 +32,10 @@ function HourlyChart({ hours, axisMin }: { hours: ForecastProfileHour[]; axisMin
       width="100%"
       viewBox={`0 0 ${width} ${height}`}
       role="img"
+      aria-label={ariaLabel}
       style={{ maxWidth: width, display: "block" }}
     >
-      {/* baseline */}
       <line x1={PAD_L} y1={CHART_H} x2={width} y2={CHART_H} stroke="var(--border-subtle)" />
-      {/* y reference: the max */}
       <text x={4} y={12} fontSize={10} fill="var(--text-tertiary)">
         {max.toFixed(0)}
         {axisMin}
@@ -44,6 +45,7 @@ function HourlyChart({ hours, axisMin }: { hours: ForecastProfileHour[]; axisMin
         const labelled = h.hour % 6 === 0;
         const val = h.expected_avg_min;
         const barW = COL_W - 8;
+        const barH = val != null ? (val / max) * CHART_H : 0;
         return (
           <g key={h.hour}>
             {labelled && (
@@ -56,9 +58,9 @@ function HourlyChart({ hours, axisMin }: { hours: ForecastProfileHour[]; axisMin
                 <rect
                   data-testid="forecast-bar"
                   x={x}
-                  y={CHART_H - (val / max) * CHART_H}
+                  y={CHART_H - barH}
                   width={barW}
-                  height={(val / max) * CHART_H}
+                  height={barH}
                   rx={2}
                   fill={delayColor(val)}
                   opacity={h.low_confidence ? 0.4 : 1}
@@ -69,7 +71,7 @@ function HourlyChart({ hours, axisMin }: { hours: ForecastProfileHour[]; axisMin
                   <circle
                     data-testid="forecast-bar-lowconf"
                     cx={x + barW / 2}
-                    cy={CHART_H - (val / max) * CHART_H - 6}
+                    cy={Math.max(CHART_H - barH - 6, 3)}
                     r={2.5}
                     fill="var(--text-tertiary)"
                   />
@@ -87,23 +89,20 @@ export function ForecastTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const aid = agencyId ? Number(agencyId) : null;
+
   const { data: routes } = useRoutes(aid);
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
-  const [service, setService] = useState(SERVICES[0].value);
+  // Default to the first available route (render-derived, no effect); the
+  // picker stays in control once the user chooses.
+  const firstRoute = (routes ?? []).find((r) => r.route_code)?.route_code ?? null;
+  const route = selectedRoute ?? firstRoute ?? "";
 
-  // Deduplicate route options by code (an agency can list variants per code).
-  const seen = new Set<string>();
-  const routeOptions: { code: string; label: string }[] = [];
-  for (const r of routes ?? []) {
-    if (!r.route_code || seen.has(r.route_code)) continue;
-    seen.add(r.route_code);
-    routeOptions.push({
-      code: r.route_code,
-      label: r.route_short_name || r.route_long_name || r.route_code,
-    });
-  }
-  // Default to the first route once the list loads (render-derived, no effect).
-  const route = selectedRoute ?? routeOptions[0]?.code ?? "";
+  // Service options come from the agency's real agg_route_hour labels, not
+  // hardcoded bare values (which match almost no agency).
+  const { data: servicesData } = useForecastServices(aid);
+  const services = servicesData?.service_types ?? [];
+  const [selectedService, setSelectedService] = useState<string | null>(null);
+  const service = selectedService ?? services[0] ?? "";
 
   const { data, isPending, error, refetch } = useForecastProfile(aid, route, service);
 
@@ -118,28 +117,31 @@ export function ForecastTab() {
         {t("forecast.title")}
       </h1>
 
-      <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "var(--text-secondary)", flexWrap: "wrap" }}>
-        <label>
-          {t("forecast.route_label")}{" "}
-          <select value={route} onChange={(e) => setSelectedRoute(e.target.value)} disabled={routeOptions.length === 0}>
-            {routeOptions.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t("forecast.service_label")}{" "}
-          <select value={service} onChange={(e) => setService(e.target.value)}>
-            {SERVICES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {t(s.labelKey)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {aid != null && (
+        <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "var(--text-secondary)", alignItems: "center", flexWrap: "wrap" }}>
+          <RoutePickerPill
+            label={t("forecast.route_label")}
+            value={route || null}
+            agencyId={aid}
+            placeholder={t("forecast.route_placeholder")}
+            onChange={setSelectedRoute}
+          />
+          <label>
+            {t("forecast.service_label")}{" "}
+            <select
+              value={service}
+              onChange={(e) => setSelectedService(e.target.value)}
+              disabled={services.length === 0}
+            >
+              {services.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       {!route && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.pick_prompt")}</p>}
       {route && isPending && <Skeleton height={CHART_H + PAD_B} />}
@@ -147,7 +149,7 @@ export function ForecastTab() {
       {route && data && allNull && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.no_data")}</p>}
       {route && data && !allNull && (
         <>
-          <HourlyChart hours={data.hours} axisMin={t("forecast.axis_min")} />
+          <HourlyChart hours={data.hours} axisMin={t("forecast.axis_min")} ariaLabel={t("forecast.svg_aria")} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "8px 0", fontSize: 12, color: "var(--text-tertiary)" }}>
             <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-tertiary)" }} />
             {t("forecast.low_confidence")}

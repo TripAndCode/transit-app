@@ -104,6 +104,17 @@ class ForecastProfileResponse(BaseModel):
     disclaimer: str
 
 
+class ForecastServicesResponse(BaseModel):
+    """The service-type values this agency actually has in ``agg_route_hour``.
+
+    Service types are agency-specific GTFS labels (often prefixed, e.g.
+    ``35_平日(共通)``), so the UI must read them from the data rather than
+    hardcoding bare ``平日`` / ``土日祝`` — those match almost no real agency.
+    """
+
+    service_types: list[str]
+
+
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
@@ -186,6 +197,26 @@ async def forecast_profile(
         service_type,
     )
     return summarize_expected_delay_profile(rows, route, service_type, locale)
+
+
+@router.get("/forecast/services", response_model=ForecastServicesResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_services(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Distinct service-type values present for this agency in ``agg_route_hour``.
+
+    Drives the Forecast tab's service selector so it offers the agency's real
+    labels (e.g. ``35_平日(共通)``) instead of hardcoded bare values.
+    """
+    rows = await conn.fetch(
+        "SELECT DISTINCT service_type FROM agg_route_hour "
+        "WHERE agency_id = $1 AND service_type <> '' ORDER BY service_type",
+        agency_id,
+    )
+    return {"service_types": [r["service_type"] for r in rows]}
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing

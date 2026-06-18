@@ -18,6 +18,7 @@ import type {
   ConvMessage,
   FilterCtx,
   ForecastProfile,
+  ForecastServices,
   HeatmapCollection,
   NetworkSummary,
   OverviewSummary,
@@ -45,6 +46,18 @@ export function useForecastProfile(
       ),
     // Only fetch once a route + service are chosen.
     enabled: agencyId != null && !!route && !!service,
+  });
+}
+
+export function useForecastServices(
+  agencyId: number | null,
+): UseQueryResult<ForecastServices> {
+  return useQuery({
+    queryKey: ["forecast-services", agencyId],
+    queryFn: ({ signal }) =>
+      apiGet<ForecastServices>(`/api/${agencyId}/forecast/services`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
