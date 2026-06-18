@@ -17,6 +17,7 @@ import type {
   Conversation,
   ConvMessage,
   FilterCtx,
+  ForecastProfile,
   HeatmapCollection,
   NetworkSummary,
   OverviewSummary,
@@ -29,6 +30,23 @@ import type {
   RouteTripsResponse,
 } from "./types";
 import { useSession } from "./auth";
+
+export function useForecastProfile(
+  agencyId: number | null,
+  route: string,
+  service: string,
+): UseQueryResult<ForecastProfile> {
+  return useQuery({
+    queryKey: ["forecast-profile", agencyId, route, service],
+    queryFn: ({ signal }) =>
+      apiGet<ForecastProfile>(
+        `/api/${agencyId}/forecast/profile?route=${encodeURIComponent(route)}&service_type=${encodeURIComponent(service)}`,
+        { signal },
+      ),
+    // Only fetch once a route + service are chosen.
+    enabled: agencyId != null && !!route && !!service,
+  });
+}
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({

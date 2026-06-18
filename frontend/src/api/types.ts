@@ -234,6 +234,20 @@ export type Route = {
   trip_headsigns: string[];
 };
 
+export interface ForecastProfileHour {
+  hour: number;
+  expected_avg_min: number | null;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastProfile {
+  route: string;
+  service_type: string;
+  hours: ForecastProfileHour[];
+  disclaimer: string;
+}
+
 export type OverviewHeadline = {
   avg_min: number | null;
   baseline_avg_min: number | null;
