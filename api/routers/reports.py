@@ -26,7 +26,10 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import summarize_expected_delay
+from pipeline.reports.forecast import (
+    summarize_expected_delay,
+    summarize_expected_delay_profile,
+)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -83,6 +86,35 @@ class ForecastResponse(BaseModel):
     disclaimer: str
 
 
+class ForecastProfileHour(BaseModel):
+    """One hour (0–23) of the expected-delay profile."""
+
+    hour: int
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+
+
+class ForecastProfileResponse(BaseModel):
+    """Payload for ``GET /forecast/profile`` — expected delay across all 24 hours."""
+
+    route: str
+    service_type: str
+    hours: list[ForecastProfileHour]
+    disclaimer: str
+
+
+class ForecastServicesResponse(BaseModel):
+    """The service-type values this agency actually has in ``agg_route_hour``.
+
+    Service types are agency-specific GTFS labels (often prefixed, e.g.
+    ``35_平日(共通)``), so the UI must read them from the data rather than
+    hardcoding bare ``平日`` / ``土日祝`` — those match almost no real agency.
+    """
+
+    service_types: list[str]
+
+
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
@@ -134,6 +166,57 @@ async def forecast(
         hour,
     )
     return summarize_expected_delay(rows, route, service_type, hour, locale)
+
+
+@router.get("/forecast/profile", response_model=ForecastProfileResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_profile(
+    request: Request,
+    route: str = Query(..., min_length=1),
+    service_type: str = Query(..., min_length=1),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Expected delay by hour (0–23) for a route at a service type.
+
+    Pools the precomputed ``agg_route_hour`` baseline to the hour (the
+    sample-weighted mean equals the exact pooled mean). Seasonal-naive, NOT a
+    prediction — the response always carries a plain-language disclaimer.
+    """
+    rows = await conn.fetch(
+        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour "
+        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
+        "AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY 1 ORDER BY 1",
+        agency_id,
+        route,
+        service_type,
+    )
+    return summarize_expected_delay_profile(rows, route, service_type, locale)
+
+
+@router.get("/forecast/services", response_model=ForecastServicesResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_services(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+):
+    """Distinct service-type values present for this agency in ``agg_route_hour``.
+
+    Drives the Forecast tab's service selector so it offers the agency's real
+    labels (e.g. ``35_平日(共通)``) instead of hardcoded bare values.
+    """
+    rows = await conn.fetch(
+        "SELECT DISTINCT service_type FROM agg_route_hour "
+        "WHERE agency_id = $1 AND service_type <> '' ORDER BY service_type",
+        agency_id,
+    )
+    return {"service_types": [r["service_type"] for r in rows]}
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing

@@ -1,5 +1,5 @@
 import { NavLink, useParams } from "react-router-dom";
-import { Map as MapIcon, MessageSquare, Activity, BarChart3, LayoutDashboard, type LucideIcon } from "lucide-react";
+import { Map as MapIcon, MessageSquare, Activity, BarChart3, LayoutDashboard, TrendingUp, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
@@ -11,6 +11,7 @@ const ITEMS: Item[] = [
   { to: "ask", labelKey: "nav.ask", Icon: MessageSquare },
   { to: "live", labelKey: "nav.live", Icon: Activity },
   { to: "reports", labelKey: "nav.reports", Icon: BarChart3 },
+  { to: "forecast", labelKey: "nav.forecast", Icon: TrendingUp },
 ];
 
 export function Sidebar() {
