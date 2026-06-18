@@ -91,11 +91,13 @@ function DowStrip({
   axisMin,
   ariaLabel,
   labelFor,
+  lowConfLabel,
 }: {
   days: ForecastDowDay[];
   axisMin: string;
   ariaLabel: string;
   labelFor: (dow: number) => string;
+  lowConfLabel: string;
 }) {
   const populated = days.filter((d) => d.expected_avg_min != null);
   const max = Math.max(...populated.map((d) => d.expected_avg_min as number), 1);
@@ -120,7 +122,9 @@ function DowStrip({
         const x = PAD_L + i * colW;
         const val = d.expected_avg_min;
         const barW = colW - 16;
-        const barH = val != null ? (val / max) * CHART_H : 0;
+        // Clamp ≥0: a negative pooled mean (early arrivals) would be an invalid
+        // SVG rect height; a 0-height bar reads as "no positive delay".
+        const barH = val != null ? Math.max((val / max) * CHART_H, 0) : 0;
         return (
           <g key={d.dow}>
             <text x={x + barW / 2} y={height - 6} fontSize={10} fill="var(--text-tertiary)" textAnchor="middle">
@@ -138,7 +142,7 @@ function DowStrip({
                   fill={delayColor(val)}
                   opacity={d.low_confidence ? 0.4 : 1}
                 >
-                  <title>{`${labelFor(d.dow)} — ${val.toFixed(1)}${axisMin}`}</title>
+                  <title>{`${labelFor(d.dow)} — ${val.toFixed(1)}${axisMin}${d.low_confidence ? ` (${lowConfLabel})` : ""}`}</title>
                 </rect>
                 {d.low_confidence && (
                   <circle
@@ -233,7 +237,12 @@ export function ForecastTab() {
             axisMin={t("forecast.axis_min")}
             ariaLabel={t("forecast.dow_svg_aria")}
             labelFor={(d) => t(`forecast.dow_${WEEK[d - 1]}`)}
+            lowConfLabel={t("forecast.low_confidence")}
           />
+          <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "8px 0", fontSize: 12, color: "var(--text-tertiary)" }}>
+            <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-tertiary)" }} />
+            {t("forecast.low_confidence")}
+          </div>
           <p style={{ color: "var(--text-secondary)", fontSize: 13, maxWidth: 640, lineHeight: 1.5 }}>
             {dow.disclaimer}
           </p>
