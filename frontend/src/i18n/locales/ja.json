@@ -18,7 +18,17 @@
     "low_confidence": "参考値（計測が少ない）",
     "no_data": "この路線・種別の計測記録がありません。",
     "axis_min": "分",
-    "svg_aria": "時間帯ごとの予想遅延グラフ"
+    "svg_aria": "時間帯ごとの予想遅延グラフ",
+    "dow_title": "曜日別",
+    "dow_caption": "週全体の傾向です。下の時間帯グラフは選択した種別のみ。",
+    "dow_svg_aria": "曜日別の予想遅延グラフ",
+    "dow_mon": "月",
+    "dow_tue": "火",
+    "dow_wed": "水",
+    "dow_thu": "木",
+    "dow_fri": "金",
+    "dow_sat": "土",
+    "dow_sun": "日"
   },
   "network": {
     "title": "事業者比較",

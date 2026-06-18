@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useRoutes, useForecastProfile, useForecastServices } from "../api/hooks";
+import { useRoutes, useForecastProfile, useForecastServices, useForecastDow } from "../api/hooks";
 import { RoutePickerPill } from "../components/paramPills/RoutePickerPill";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { delayColor } from "../styles/tokens";
-import type { ForecastProfileHour } from "../api/types";
+import type { ForecastProfileHour, ForecastDowDay } from "../api/types";
 
 const CHART_H = 160;
 const COL_W = 30;
 const PAD_L = 36;
 const PAD_B = 22;
+const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
 function HourlyChart({
   hours,
@@ -85,6 +86,78 @@ function HourlyChart({
   );
 }
 
+function DowStrip({
+  days,
+  axisMin,
+  ariaLabel,
+  labelFor,
+}: {
+  days: ForecastDowDay[];
+  axisMin: string;
+  ariaLabel: string;
+  labelFor: (dow: number) => string;
+}) {
+  const populated = days.filter((d) => d.expected_avg_min != null);
+  const max = Math.max(...populated.map((d) => d.expected_avg_min as number), 1);
+  const colW = 64;
+  const width = PAD_L + 7 * colW;
+  const height = CHART_H + PAD_B;
+
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={ariaLabel}
+      style={{ maxWidth: width, display: "block" }}
+    >
+      <line x1={PAD_L} y1={CHART_H} x2={width} y2={CHART_H} stroke="var(--border-subtle)" />
+      <text x={4} y={12} fontSize={10} fill="var(--text-tertiary)">
+        {max.toFixed(0)}
+        {axisMin}
+      </text>
+      {days.map((d, i) => {
+        const x = PAD_L + i * colW;
+        const val = d.expected_avg_min;
+        const barW = colW - 16;
+        const barH = val != null ? (val / max) * CHART_H : 0;
+        return (
+          <g key={d.dow}>
+            <text x={x + barW / 2} y={height - 6} fontSize={10} fill="var(--text-tertiary)" textAnchor="middle">
+              {labelFor(d.dow)}
+            </text>
+            {val != null && (
+              <>
+                <rect
+                  data-testid="dow-bar"
+                  x={x}
+                  y={CHART_H - barH}
+                  width={barW}
+                  height={barH}
+                  rx={2}
+                  fill={delayColor(val)}
+                  opacity={d.low_confidence ? 0.4 : 1}
+                >
+                  <title>{`${labelFor(d.dow)} — ${val.toFixed(1)}${axisMin}`}</title>
+                </rect>
+                {d.low_confidence && (
+                  <circle
+                    data-testid="dow-bar-lowconf"
+                    cx={x + barW / 2}
+                    cy={Math.max(CHART_H - barH - 6, 3)}
+                    r={2.5}
+                    fill="var(--text-tertiary)"
+                  />
+                )}
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export function ForecastTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
@@ -105,6 +178,10 @@ export function ForecastTab() {
   const service = selectedService ?? services[0] ?? "";
 
   const { data, isPending, error, refetch } = useForecastProfile(aid, route, service);
+
+  // Day-of-week strip is route-scoped (across the whole week, not per service).
+  const { data: dow } = useForecastDow(aid, route);
+  const dowHasData = dow != null && dow.days.some((d) => d.expected_avg_min != null);
 
   const allNull = data != null && data.hours.every((h) => h.expected_avg_min == null);
 
@@ -144,6 +221,25 @@ export function ForecastTab() {
       )}
 
       {!route && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.pick_prompt")}</p>}
+
+      {route && dowHasData && dow && (
+        <section style={{ marginBottom: 28 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 2px" }}>{t("forecast.dow_title")}</h2>
+          <p style={{ color: "var(--text-tertiary)", fontSize: 12, margin: "0 0 8px" }}>
+            {t("forecast.dow_caption")}
+          </p>
+          <DowStrip
+            days={dow.days}
+            axisMin={t("forecast.axis_min")}
+            ariaLabel={t("forecast.dow_svg_aria")}
+            labelFor={(d) => t(`forecast.dow_${WEEK[d - 1]}`)}
+          />
+          <p style={{ color: "var(--text-secondary)", fontSize: 13, maxWidth: 640, lineHeight: 1.5 }}>
+            {dow.disclaimer}
+          </p>
+        </section>
+      )}
+
       {route && isPending && <Skeleton height={CHART_H + PAD_B} />}
       {route && error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {route && data && allNull && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.no_data")}</p>}
