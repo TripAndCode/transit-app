@@ -26,12 +26,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import (
-    summarize_expected_delay,
-    summarize_expected_delay_dow,
-    summarize_expected_delay_heatmap,
-    summarize_expected_delay_profile,
-)
+from pipeline.reports.forecast import summarize_expected_delay_heatmap
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -76,64 +71,6 @@ class ReportResponse(BaseModel):
     ctx: ReportCtx
 
 
-class ForecastResponse(BaseModel):
-    """Payload for ``GET /forecast`` — the typical (expected) delay for a slot."""
-
-    route: str
-    service_type: str
-    hour: int
-    expected_avg_min: float | None
-    samples: int
-    low_confidence: bool
-    disclaimer: str
-
-
-class ForecastProfileHour(BaseModel):
-    """One hour (0–23) of the expected-delay profile."""
-
-    hour: int
-    expected_avg_min: float | None
-    samples: int
-    low_confidence: bool
-
-
-class ForecastProfileResponse(BaseModel):
-    """Payload for ``GET /forecast/profile`` — expected delay across all 24 hours."""
-
-    route: str
-    service_type: str
-    hours: list[ForecastProfileHour]
-    disclaimer: str
-
-
-class ForecastServicesResponse(BaseModel):
-    """The service-type values this agency actually has in ``agg_route_hour``.
-
-    Service types are agency-specific GTFS labels (often prefixed, e.g.
-    ``35_平日(共通)``), so the UI must read them from the data rather than
-    hardcoding bare ``平日`` / ``土日祝`` — those match almost no real agency.
-    """
-
-    service_types: list[str]
-
-
-class ForecastDowDay(BaseModel):
-    """One day of week (ISODOW 1=Mon..7=Sun) of the expected-delay-by-dow strip."""
-
-    dow: int
-    expected_avg_min: float | None
-    samples: int
-    low_confidence: bool
-
-
-class ForecastDowResponse(BaseModel):
-    """Payload for ``GET /forecast/dow`` — expected delay across the week."""
-
-    route: str
-    days: list[ForecastDowDay]
-    disclaimer: str
-
-
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
     """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
     return ReportCtx(
@@ -157,120 +94,6 @@ async def list_reports(
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
-
-
-@router.get("/forecast", response_model=ForecastResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def forecast(
-    request: Request,
-    route: str = Query(..., min_length=1),
-    service_type: str = Query(..., min_length=1),
-    hour: int = Query(..., ge=0, le=23),
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    locale: str = Depends(get_locale),
-):
-    """Typical ("expected") delay for a route at a service type + hour.
-
-    Reads the precomputed ``agg_route_hour`` baseline — a seasonal-naive lookup,
-    NOT a prediction. The response always carries a plain-language disclaimer.
-    """
-    rows = await conn.fetch(
-        "SELECT avg_min, samples FROM agg_route_hour "
-        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
-        "AND EXTRACT(HOUR FROM scheduled_time)::int = $4",
-        agency_id,
-        route,
-        service_type,
-        hour,
-    )
-    return summarize_expected_delay(rows, route, service_type, hour, locale)
-
-
-@router.get("/forecast/profile", response_model=ForecastProfileResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def forecast_profile(
-    request: Request,
-    route: str = Query(..., min_length=1),
-    service_type: str = Query(..., min_length=1),
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    locale: str = Depends(get_locale),
-):
-    """Expected delay by hour (0–23) for a route at a service type.
-
-    Pools the precomputed ``agg_route_hour`` baseline to the hour (the
-    sample-weighted mean equals the exact pooled mean). Seasonal-naive, NOT a
-    prediction — the response always carries a plain-language disclaimer.
-    """
-    rows = await conn.fetch(
-        "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
-        "SUM(samples)::int AS samples "
-        "FROM agg_route_hour "
-        "WHERE agency_id = $1 AND route_code = $2 AND service_type = $3 "
-        "AND avg_min IS NOT NULL AND samples > 0 "
-        "GROUP BY 1 ORDER BY 1",
-        agency_id,
-        route,
-        service_type,
-    )
-    return summarize_expected_delay_profile(rows, route, service_type, locale)
-
-
-@router.get("/forecast/services", response_model=ForecastServicesResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def forecast_services(
-    request: Request,
-    route: str = Query(..., min_length=1),
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
-    """Service-type values present for ONE route in ``agg_route_hour``.
-
-    Scoped to the selected route, not the whole agency: ``service_type`` is a
-    route-specific GTFS calendar id (e.g. ``51_平日(共通)``), so an agency can have
-    dozens; a route has only the few that apply to it. Ordered by sample volume
-    DESC so the tab defaults to the richest service (a full curve) rather than an
-    often-sparse one (a near-empty chart).
-    """
-    rows = await conn.fetch(
-        "SELECT service_type FROM agg_route_hour "
-        "WHERE agency_id = $1 AND route_code = $2 AND service_type <> '' "
-        "GROUP BY service_type ORDER BY SUM(samples) DESC, service_type",
-        agency_id,
-        route,
-    )
-    return {"service_types": [r["service_type"] for r in rows]}
-
-
-@router.get("/forecast/dow", response_model=ForecastDowResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def forecast_dow(
-    request: Request,
-    route: str = Query(..., min_length=1),
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    locale: str = Depends(get_locale),
-):
-    """Expected delay by day of week (ISODOW 1=Mon..7=Sun) for a route.
-
-    Pools agg_route_dow per dow across service types (sample-weighted = exact
-    pooled mean), so each day is "delay on Mondays" regardless of the service
-    label. Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
-    """
-    rows = await conn.fetch(
-        "SELECT dow, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
-        "SUM(samples)::int AS samples "
-        "FROM agg_route_dow "
-        "WHERE agency_id = $1 AND route_code = $2 "
-        "AND avg_min IS NOT NULL AND samples > 0 "
-        "GROUP BY dow ORDER BY dow",
-        agency_id,
-        route,
-    )
-    return summarize_expected_delay_dow(rows, route, locale)
 
 
 class ForecastHeatmapCell(BaseModel):
