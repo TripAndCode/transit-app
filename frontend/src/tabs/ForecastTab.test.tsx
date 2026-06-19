@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ForecastTab } from "./ForecastTab";
@@ -18,7 +18,7 @@ function heatmap() {
       let n = 0;
       let low = false;
       if (h === 8) {
-        v = 5 + d; // dow1=6 .. dow7=12 (peak)
+        v = 5 + d;
         n = 300;
         if (d === 1) {
           n = 10;
@@ -49,21 +49,21 @@ describe("ForecastTab", () => {
     expect(screen.getByText(/pick a route/i)).toBeInTheDocument();
   });
 
-  it("renders the heatmap + margins + low-confidence marker", () => {
+  it("renders the three cards with heatmap + margins, no modal until clicked", () => {
     renderTab([route("R1")]);
-    expect(screen.getAllByTestId("hm-cell").length).toBe(7); // only hour-8 populated
+    expect(screen.getByText("By day & hour")).toBeInTheDocument();
+    expect(screen.getAllByTestId("hm-cell").length).toBe(7); // compact card, hour-8 only
     expect(screen.getByTestId("hm-cell-lowconf")).toBeInTheDocument();
     expect(screen.getAllByTestId("dow-bar").length).toBe(7);
     expect(screen.getAllByTestId("hr-bar").length).toBe(1);
-    expect(screen.getByText("test disclaimer")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("opens the detail modal with context when a cell is clicked", () => {
+  it("opens the heatmap detail modal (stats + disclaimer) when the card is clicked", () => {
     renderTab([route("R1")]);
-    fireEvent.click(screen.getAllByTestId("hm-cell")[6]); // dow7 h8 = peak (12)
+    fireEvent.click(screen.getByTestId("fc-card-hm"));
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveTextContent(/Expected delay/i);
-    expect(dialog).toHaveTextContent(/worst time/i); // peak context
+    expect(within(dialog).getByText("Worst")).toBeInTheDocument(); // stat label
+    expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
   });
 });
