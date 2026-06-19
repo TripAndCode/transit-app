@@ -30,7 +30,7 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-export function rampColor(t: number): string {
+function rampColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t));
   const seg = clamped * (RELATIVE_STOPS.length - 1);
   const i = Math.min(Math.floor(seg), RELATIVE_STOPS.length - 2);
