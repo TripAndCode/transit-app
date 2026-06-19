@@ -30,8 +30,7 @@ async def overview_client(apply_schema):
     aid_empty = empty_row["agency_id"]
     # route_code 100 has a static_routes label; route_code 200 does not (falls back to code).
     await pool.execute(
-        "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
-        "VALUES ($1, $2, $3, $4)",
+        "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) VALUES ($1, $2, $3, $4)",
         aid,
         "R(100)",
         "100",

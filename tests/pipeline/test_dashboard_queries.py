@@ -74,12 +74,16 @@ async def _seed_route_hour(pool, agency_id, rows):
 
 async def test_movers_reads_agg_daily_trend(movers_pool):
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-10", "R1", "平日", 9.0, 100),
-        ("2026-04-03", "R1", "平日", 3.0, 100),
-        ("2026-04-10", "R2", "平日", 2.0, 100),
-        ("2026-04-03", "R2", "平日", 2.0, 100),
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100),
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-10", "R2", "平日", 2.0, 100),
+            ("2026-04-03", "R2", "平日", 2.0, 100),
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
     async with pool.acquire() as c:
         res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
@@ -93,12 +97,16 @@ async def test_movers_reads_agg_daily_trend(movers_pool):
 async def test_movers_routes_filter_fast_path(movers_pool):
     """routes filter on the agg path: only the requested route appears."""
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-10", "R1", "平日", 9.0, 100),
-        ("2026-04-03", "R1", "平日", 3.0, 100),
-        ("2026-04-10", "R2", "平日", 8.0, 100),
-        ("2026-04-03", "R2", "平日", 2.0, 100),
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100),
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-10", "R2", "平日", 8.0, 100),
+            ("2026-04-03", "R2", "平日", 2.0, 100),
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14), routes=("R1",))
     async with pool.acquire() as c:
         res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
@@ -111,14 +119,18 @@ async def test_movers_routes_filter_fast_path(movers_pool):
 async def test_movers_returns_delta(movers_pool):
     """Row shape + ordering by abs(delta) DESC, served from agg_daily_trend."""
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-10", "R1", "平日", 9.0, 100),  # delta +6
-        ("2026-04-03", "R1", "平日", 3.0, 100),
-        ("2026-04-10", "R2", "平日", 5.0, 100),  # delta +2
-        ("2026-04-03", "R2", "平日", 3.0, 100),
-        ("2026-04-10", "R3", "平日", 4.0, 100),  # delta -4
-        ("2026-04-03", "R3", "平日", 8.0, 100),
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100),  # delta +6
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-10", "R2", "平日", 5.0, 100),  # delta +2
+            ("2026-04-03", "R2", "平日", 3.0, 100),
+            ("2026-04-10", "R3", "平日", 4.0, 100),  # delta -4
+            ("2026-04-03", "R3", "平日", 8.0, 100),
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
     async with pool.acquire() as c:
         result = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
@@ -137,12 +149,16 @@ async def test_movers_returns_delta(movers_pool):
 
 async def test_anomalies_reads_agg_daily_trend(movers_pool):
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-01", "R1", "平日", 3.0, 100),
-        ("2026-04-02", "R1", "平日", 3.0, 100),
-        ("2026-04-03", "R1", "平日", 3.0, 100),
-        ("2026-04-04", "R1", "平日", 30.0, 100),  # spike
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-01", "R1", "平日", 3.0, 100),
+            ("2026-04-02", "R1", "平日", 3.0, 100),
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-04", "R1", "平日", 30.0, 100),  # spike
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 4))
     async with pool.acquire() as c:
         res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
@@ -154,10 +170,14 @@ async def test_anomalies_reads_agg_daily_trend(movers_pool):
 
 async def test_heatmap_dow_from_trend(movers_pool):
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-06", "R1", "平日", 5.0, 100),  # Monday -> bucket 0
-        ("2026-04-07", "R1", "平日", 8.0, 100),  # Tuesday -> bucket 1
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-06", "R1", "平日", 5.0, 100),  # Monday -> bucket 0
+            ("2026-04-07", "R1", "平日", 8.0, 100),  # Tuesday -> bucket 1
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
     async with pool.acquire() as c:
         res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="dow", top_routes=20)
@@ -170,10 +190,14 @@ async def test_heatmap_dow_from_trend(movers_pool):
 
 async def test_heatmap_hour_band_from_route_hour(movers_pool):
     pool, agency_id = movers_pool
-    await _seed_route_hour(pool, agency_id, [
-        ("R1", "平日", time(7, 0), 6.0, 100),    # 朝 -> 0
-        ("R1", "平日", time(18, 0), 12.0, 100),  # 夕 -> 2
-    ])
+    await _seed_route_hour(
+        pool,
+        agency_id,
+        [
+            ("R1", "平日", time(7, 0), 6.0, 100),  # 朝 -> 0
+            ("R1", "平日", time(18, 0), 12.0, 100),  # 夕 -> 2
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
     async with pool.acquire() as c:
         res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="hour_band", top_routes=20)
@@ -186,10 +210,14 @@ async def test_heatmap_hour_band_from_route_hour(movers_pool):
 async def test_delay_heatmap_cache_hit(movers_pool):
     """Second call with identical args returns cached result: 1 miss + 1 hit + non-empty."""
     pool, agency_id = movers_pool
-    await _seed_trend(pool, agency_id, [
-        ("2026-04-06", "R1", "平日", 5.0, 100),
-        ("2026-04-07", "R1", "平日", 8.0, 100),
-    ])
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-06", "R1", "平日", 5.0, 100),
+            ("2026-04-07", "R1", "平日", 8.0, 100),
+        ],
+    )
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
 
     perf.reset()

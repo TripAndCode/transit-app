@@ -89,7 +89,8 @@ async def _build_heatmap(
         for r in await conn.fetch(
             "SELECT route_id AS route_code, route_short_name AS label "
             "FROM static_routes WHERE agency_id = $1 AND route_id = ANY($2::text[])",
-            agency_id, route_codes,
+            agency_id,
+            route_codes,
         )
     }
     by_route: dict[str, dict[int, float | None]] = {rc: {} for rc in route_codes}
@@ -122,7 +123,9 @@ async def _heatmap_from_agg(
             "SELECT route_code, SUM(samples) AS s FROM agg_daily_trend "
             f"WHERE agency_id = $1 AND {frag} {routes_clause} "
             f"GROUP BY route_code ORDER BY s DESC, route_code LIMIT ${p_top}",
-            agency_id, *params, top_routes,
+            agency_id,
+            *params,
+            top_routes,
         )
         route_codes = [r["route_code"] for r in top_rows]
         if not route_codes:
@@ -134,7 +137,9 @@ async def _heatmap_from_agg(
             "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_daily_trend "
             f"WHERE agency_id = $1 AND {frag2} AND route_code = ANY(${rc_param}::text[]) "
             "GROUP BY route_code, bucket",
-            agency_id, *params2, route_codes,
+            agency_id,
+            *params2,
+            route_codes,
         )
         return await _build_heatmap(conn, agency_id, route_codes, grid, 7, _DOW_LABELS, lambda b: (b + 6) % 7)
 
@@ -150,7 +155,9 @@ async def _heatmap_from_agg(
         "SELECT route_code, SUM(samples) AS s FROM agg_route_hour "
         f"WHERE agency_id = $1 {routes_clause} "
         f"GROUP BY route_code ORDER BY s DESC, route_code LIMIT ${p_top}",
-        agency_id, *rparams, top_routes,
+        agency_id,
+        *rparams,
+        top_routes,
     )
     route_codes = [r["route_code"] for r in top_rows]
     if not route_codes:
@@ -165,7 +172,9 @@ async def _heatmap_from_agg(
         "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_route_hour "
         f"WHERE agency_id = $1 {routes_clause} AND route_code = ANY(${rc_param}::text[]) "
         "GROUP BY route_code, bucket",
-        agency_id, *rparams, route_codes,
+        agency_id,
+        *rparams,
+        route_codes,
     )
     return await _build_heatmap(conn, agency_id, route_codes, grid, 4, ["朝", "昼", "夕", "夜"], lambda b: b)
 
@@ -185,12 +194,10 @@ async def _anomalies_series_from_agg(
         "SELECT date AS d, SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min "
         f"FROM agg_daily_trend WHERE agency_id = $1 AND {frag} {routes_clause} "
         "GROUP BY date ORDER BY date",
-        agency_id, *params,
+        agency_id,
+        *params,
     )
-    return [
-        {"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0}
-        for r in rows
-    ]
+    return [{"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0} for r in rows]
 
 
 @perf.timed("dashboard.anomalies")
@@ -233,8 +240,9 @@ async def _movers_from_agg(
     top: int,
 ) -> list[asyncpg.Record]:
     """Read deduped agg_daily_trend. Honors date+dow (+routes)."""
-    prv_ctx = dc_replace(ctx, from_date=ctx.from_date - timedelta(days=window_days),
-                         to_date=ctx.to_date - timedelta(days=window_days))
+    prv_ctx = dc_replace(
+        ctx, from_date=ctx.from_date - timedelta(days=window_days), to_date=ctx.to_date - timedelta(days=window_days)
+    )
     cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
     prv_frag, prv_params, n2 = build_agg_daily_trend_filter(prv_ctx, next_param=next_n)
     # routes filter (agg_daily_trend has route_code; the helper doesn't add it).
@@ -293,7 +301,8 @@ async def movers(
     """
     rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
     label_rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1", agency_id,
+        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1",
+        agency_id,
     )
     labels = {r["route_id"]: (r["route_short_name"] or r["route_id"]) for r in label_rows}
     out_rows = []
@@ -303,9 +312,15 @@ async def movers(
         prv_v = float(r["previous_avg"]) if r["previous_avg"] is not None else None
         delta = float(r["delta"]) if r["delta"] is not None else 0.0
         pct = (delta / prv_v * 100.0) if prv_v else None
-        out_rows.append({
-            "route_code": rc, "label": labels.get(rc, rc),
-            "current_avg": cur_v, "previous_avg": prv_v,
-            "delta": delta, "delta_pct": pct, "samples": int(r["samples"]),
-        })
+        out_rows.append(
+            {
+                "route_code": rc,
+                "label": labels.get(rc, rc),
+                "current_avg": cur_v,
+                "previous_avg": prv_v,
+                "delta": delta,
+                "delta_pct": pct,
+                "samples": int(r["samples"]),
+            }
+        )
     return Movers(rows=out_rows)

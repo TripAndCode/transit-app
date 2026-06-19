@@ -20,57 +20,69 @@ async def net_pool(apply_schema):
     compute_network_summary.cache_clear()
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
-        await c.execute(
-            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE"
-        )
+        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
         cc = await c.fetchrow(ins, "C", "http://nc")
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
-        await c.execute(
-            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE"
-        )
+        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
     await pool.close()
 
 
 async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
     """dist: list of (date_iso, samples, sum_delay_sec, on_time_count). feed: (date_iso, raw, clamp)."""
     async with pool.acquire() as c:
-        for (d, n, sd, ot) in dist:
+        for d, n, sd, ot in dist:
             await c.execute(
                 "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
                 "samples, sum_delay_sec, on_time_count, late5_count, hist) "
                 "VALUES ($1,$2,'R1','平日',$3,$4,$5,0,$6)",
-                aid, date.fromisoformat(d), n, sd, ot, [0] * 37,
+                aid,
+                date.fromisoformat(d),
+                n,
+                sd,
+                ot,
+                [0] * 37,
             )
         if feed:
             d, raw, clamp = feed
             await c.execute(
                 "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES ($1,$2,$3,$4)",
-                aid, date.fromisoformat(d), raw, clamp,
+                aid,
+                date.fromisoformat(d),
+                raw,
+                clamp,
             )
         if updates_at:
             await c.execute(
                 "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
                 "scheduled_time, route_code, stop_sequence, dep_delay) "
                 "VALUES ($1,'f.pb',$2,'T1','平日',$3,'R1',1,60)",
-                aid, updates_at, time(11, 37),
+                aid,
+                updates_at,
+                time(11, 37),
             )
 
 
 async def test_compute_rollups_ranking_and_freshness(net_pool):
     pool, a, b, cc = net_pool
-    await _seed(pool, a,
-                dist=[("2026-04-01", 100, 60000, 50), ("2026-04-02", 100, 60000, 50)],
-                feed=("2026-04-01", 1000, 5),
-                updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
+    await _seed(
+        pool,
+        a,
+        dist=[("2026-04-01", 100, 60000, 50), ("2026-04-02", 100, 60000, 50)],
+        feed=("2026-04-01", 1000, 5),
+        updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc),
+    )
     # B's dist lags its newest completed updates day (2026-04-01 < 2026-04-02) → stale.
-    await _seed(pool, b,
-                dist=[("2026-04-01", 100, 12000, 100)],
-                feed=("2026-04-02", 500, 50),
-                updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
+    await _seed(
+        pool,
+        b,
+        dist=[("2026-04-01", 100, 12000, 100)],
+        feed=("2026-04-02", 500, 50),
+        updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc),
+    )
     # Agency C: no data in range at all.
 
     async with pool.acquire() as conn:
@@ -111,16 +123,26 @@ async def test_network_summary_endpoint(net_client):
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
     # Agency B: dist lags its completed updates day, NO feed → clamp_pct None, stale.
-    await _seed(pool, b, dist=[("2026-04-01", 100, 12000, 100)],
-                updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc))
+    await _seed(
+        pool, b, dist=[("2026-04-01", 100, 12000, 100)], updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc)
+    )
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert r.status_code == 200
     body = r.json()
     assert body["from"] == "2026-04-01" and body["to"] == "2026-04-07"
     arow = next(x for x in body["agencies"] if x["agency_id"] == a)
     assert arow["avg_delay_min"] == 10.0
-    assert set(arow) >= {"agency_id", "agency_name", "avg_delay_min", "on_time_pct",
-                         "samples", "raw_samples", "clamp_count", "clamp_pct", "is_stale"}
+    assert set(arow) >= {
+        "agency_id",
+        "agency_name",
+        "avg_delay_min",
+        "on_time_pct",
+        "samples",
+        "raw_samples",
+        "clamp_count",
+        "clamp_pct",
+        "is_stale",
+    }
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
     assert brow["is_stale"] is True
