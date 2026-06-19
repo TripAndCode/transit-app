@@ -1,15 +1,24 @@
 /**
- * RoutePickerPill — searchable route selector pill popover.
+ * RoutePickerPill — searchable route selector.
  *
- * Renders a pill button showing the selected route's line name — short_name,
- * falling back to long_name then the route code (or a placeholder when unset).
- * Clicking opens a listbox popover with a live-search text input filtering
- * routes by code, short name, or long name; each option shows the line name
- * with the code as a muted sub-label. Results are capped at 50 to keep
- * rendering fast. Closes on outside click, Escape, or option selection.
+ * A field-like trigger (search glyph + selected route name, or a search-prompt
+ * placeholder when unset) opens a downward popover: a live-search input filtering
+ * routes by code / short name / long name, then a list where each option shows the
+ * line name with the code as a muted monospace sub-label. When `delays` is supplied
+ * (ForecastTab passes per-route avg delay), each row also shows a warm-ramp delay
+ * chip. Results are capped at 50. Closes on outside click, Escape, or selection.
  */
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
+import { delayColor } from "../../styles/tokens";
+import "./RoutePickerPill.css";
+
+const SearchIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <circle cx="11" cy="11" r="7" />
+    <line x1="21" y1="21" x2="16.5" y2="16.5" />
+  </svg>
+);
 
 /** Props for {@link RoutePickerPill}. */
 type RoutePickerPillProps = {
@@ -19,9 +28,11 @@ type RoutePickerPillProps = {
   placeholder: string;
   onChange: (next: string) => void;
   disabled?: boolean;
+  /** Optional per-route avg delay (minutes), keyed by route_code; shows a warm-ramp chip. */
+  delays?: Record<string, number | null | undefined>;
 };
 
-/** Searchable route picker pill that filters routes by code/name and emits the selected route code. */
+/** Searchable route picker that filters routes by code/name and emits the selected route code. */
 export function RoutePickerPill({
   label,
   value,
@@ -29,6 +40,7 @@ export function RoutePickerPill({
   placeholder,
   onChange,
   disabled,
+  delays,
 }: RoutePickerPillProps) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -75,130 +87,73 @@ export function RoutePickerPill({
   // Prefer a human name (short_name is the line name, e.g. "L21 中央大橋線") over
   // the internal route_code; fall through to the code only as a last resort.
   const selected = value ? routes.find((r) => r.route_code === value) : undefined;
-  const display = value
-    ? selected?.route_short_name || selected?.route_long_name || value
-    : placeholder;
+  const display = value ? selected?.route_short_name || selected?.route_long_name || value : placeholder;
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+    <div ref={ref} className="rp">
       <button
         ref={triggerRef}
         type="button"
+        className={`rp-trigger${value ? "" : " is-empty"}${open ? " is-open" : ""}`}
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
-        onMouseEnter={(e) => {
-          if (disabled) return;
-          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
-        }}
-        style={{
-          background: "var(--bg-soft, rgba(0,0,0,0.04))",
-          border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-          borderRadius: 6,
-          padding: "3px 8px",
-          fontSize: 12,
-          color: value ? "var(--text-primary, #1a1a1a)" : "var(--text-tertiary, #999)",
-          cursor: disabled ? "not-allowed" : "pointer",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          maxWidth: 200,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          transition: "background 120ms ease",
-        }}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={label}
       >
-        <span style={{ color: "var(--text-secondary, #666)" }}>{label}:</span>
-        <b style={{ overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 }}>{display}</b>
-        <span style={{ color: "var(--text-tertiary, #999)", fontSize: 10 }}>▾</span>
+        <span className="rp-glyph" aria-hidden>
+          <SearchIcon />
+        </span>
+        <span className="rp-value">{display}</span>
+        <span className="rp-caret" aria-hidden>
+          ▾
+        </span>
       </button>
       {open && (
-        <div
-          role="listbox"
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 4px)",
-            left: 0,
-            background: "var(--bg-surface, white)",
-            border: "1px solid var(--border-soft, rgba(0,0,0,0.12))",
-            borderRadius: 8,
-            padding: 6,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 10,
-            width: 280,
-          }}
-        >
-          <input
-            type="text"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={placeholder}
-            style={{
-              width: "100%",
-              padding: "4px 8px",
-              fontSize: 12,
-              border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-              borderRadius: 4,
-              background: "var(--bg-surface, white)",
-              marginBottom: 6,
-            }}
-            // eslint-disable-next-line jsx-a11y/no-autofocus -- search field of a just-opened route picker dropdown; focusing it is the expected UX
-            autoFocus
-          />
-          <div style={{ maxHeight: 220, overflowY: "auto" }}>
-            {isLoading && (
-              <div style={{ padding: 6, fontSize: 12, color: "var(--text-tertiary, #999)" }}>
-                …
-              </div>
-            )}
-            {!isLoading && filtered.length === 0 && (
-              <div style={{ padding: 6, fontSize: 12, color: "var(--text-tertiary, #999)" }}>
-                —
-              </div>
-            )}
+        <div role="listbox" className="rp-pop">
+          <div className="rp-search-wrap">
+            <span className="rp-search-icon" aria-hidden>
+              <SearchIcon />
+            </span>
+            <input
+              type="text"
+              className="rp-search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={placeholder}
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- search field of a just-opened route picker dropdown; focusing it is the expected UX
+              autoFocus
+            />
+          </div>
+          <div className="rp-list">
+            {isLoading && <div className="rp-msg">…</div>}
+            {!isLoading && filtered.length === 0 && <div className="rp-msg">—</div>}
             {filtered.map((r) => {
               const code = r.route_code;
+              const name = r.route_short_name || r.route_long_name || code;
+              const delay = code != null ? delays?.[code] : null;
               return (
                 <button
                   key={code ?? `_null_${r.route_id}`}
                   type="button"
                   role="option"
+                  className="rp-opt"
                   aria-selected={code === value}
                   onClick={() => {
-                    if (code != null) {
-                      onChange(code);
-                    }
+                    if (code != null) onChange(code);
                     close();
                   }}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    background: code === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                    color: code === value ? "var(--accent, #5b6cad)" : "var(--text-primary, #1a1a1a)",
-                    border: "none",
-                    borderRadius: 4,
-                    padding: "5px 8px",
-                    fontSize: 12,
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
                 >
-                  {(() => {
-                    const label = r.route_short_name || r.route_long_name || code;
-                    return (
-                      <>
-                        <span>{label}</span>
-                        {code && label !== code && (
-                          <span style={{ color: "var(--text-tertiary, #999)" }}> · {code}</span>
-                        )}
-                      </>
-                    );
-                  })()}
+                  <span className="rp-opt-name">{name}</span>
+                  {code && name !== code ? <span className="rp-opt-code">{code}</span> : <span />}
+                  {delay != null ? (
+                    <span className="rp-opt-delay">
+                      <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />
+                      <span className="rp-delay-val">{delay.toFixed(1)}</span>
+                    </span>
+                  ) : (
+                    <span />
+                  )}
                 </button>
               );
             })}

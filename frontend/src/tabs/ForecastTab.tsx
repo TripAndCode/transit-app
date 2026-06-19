@@ -392,6 +392,11 @@ export function ForecastTab() {
   const [view, setView] = useState<View>(null);
   const [showGrid, setShowGrid] = useState(false);
 
+  // Per-route avg delay for the picker's warm-ramp chips (same query the landing
+  // uses — react-query dedupes, so this does not double-fetch).
+  const { data: overview } = useForecastOverview(aid);
+  const delays = Object.fromEntries((overview?.routes ?? []).map((r) => [r.route_code, r.expected_avg_min]));
+
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
   const min1 = t("forecast.axis_min");
@@ -414,7 +419,7 @@ export function ForecastTab() {
               {t("forecast.back_to_overview")}
             </button>
           )}
-          <RoutePickerPill label={t("forecast.route_label")} value={selectedRoute} agencyId={aid} placeholder={t("forecast.route_placeholder")} onChange={setSelectedRoute} />
+          <RoutePickerPill label={t("forecast.route_label")} value={selectedRoute} agencyId={aid} placeholder={t("forecast.route_placeholder")} onChange={setSelectedRoute} delays={delays} />
         </div>
       )}
 
@@ -524,7 +529,7 @@ function AgencyLanding({
       {data.routes.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <Card title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+            <RankedRoutes routes={data.routes.slice(0, 8)} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
           </Card>
         </div>
       )}

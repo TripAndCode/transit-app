@@ -103,7 +103,7 @@ def summarize_agency_overview(
     grid_rows: Iterable[Mapping[str, Any]],
     route_rows: Iterable[Mapping[str, Any]],
     locale: str = "ja",
-    top_n: int = 8,
+    top_n: int | None = None,
 ) -> dict[str, Any]:
     """Agency-wide 7×band grid + worst-window + delay-ranked routes. Pure.
 
@@ -141,7 +141,7 @@ def summarize_agency_overview(
     if worst is not None:
         worst.pop("_m")
 
-    # ── routes: rank by delay desc, low-confidence last, cap at top_n ────
+    # ── routes: rank by delay desc, low-confidence last (top_n optional cap) ──
     routes: list[dict[str, Any]] = []
     for r in route_rows:
         if r["avg_min"] is None or not r["samples"]:
@@ -157,6 +157,7 @@ def summarize_agency_overview(
             }
         )
     routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
-    routes = routes[:top_n]
+    if top_n is not None:
+        routes = routes[:top_n]
 
     return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer("heatmap", locale)}
