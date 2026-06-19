@@ -1,6 +1,10 @@
 // frontend/src/components/OverviewModal.tsx
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+// Self-sufficient styling: this shared modal is used outside OverviewTab
+// (e.g. ForecastTab), so it must carry its own `.ov-modal-*` rules rather than
+// rely on a tab chunk having loaded overview.css first.
+import "../styles/overview.css";
 
 type Props = {
   isOpen: boolean;

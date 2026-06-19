@@ -1,14 +1,15 @@
-"""Expected-delay lookup: summarize agg_route_hour into a typical-delay figure.
+"""Expected-delay heatmap: summarize agg_route_hour_dow into a day×hour grid.
 
-Pure (no DB) so the sample-weighting and disclaimer-case logic are unit-testable.
-The endpoint (api/routers/reports.py) does the SQL — including the hour filter via
-``EXTRACT(HOUR FROM scheduled_time)`` — and passes the already-filtered rows here.
+Pure (no DB) so the grid-fill, low-confidence, and disclaimer logic are
+unit-testable. The endpoint (api/routers/reports.py) does the SQL — pooling
+agg_route_hour_dow across service types per (dow, hour) — and passes the
+per-cell rows here.
 
 This is a seasonal-naive baseline ("expected delay"), NOT a prediction — see
 DELAY_ANALYSIS.md. Only the sample-weighted mean is reported: a weighted mean of
-per-departure averages equals the pooled mean, so it is exact. (A p90 is deliberately
-NOT reported — a weighted mean of per-departure p90s is not the pooled-hour p90, and
-percentiles cannot be recovered from per-bucket percentiles.)
+per-departure averages equals the pooled mean, so it is exact. Percentiles are
+not reported (a weighted mean of per-bucket percentiles is not the pooled
+percentile, and percentiles cannot be recovered from per-bucket percentiles).
 """
 
 from collections.abc import Iterable, Mapping
@@ -16,53 +17,17 @@ from typing import Any
 
 from api.triage import LOW_CONFIDENCE_SAMPLES
 
-# Plain-language disclaimers — NO jargon (p90/percentile/baseline forbidden). Each
-# template states the actual basis (which slot, how many measurements) and what it
-# excludes, and defines a "measurement" inline so `samples` is never undefined.
-# NOTE: `samples` counts stop-level delay measurements, not distinct days, so the
-# LOW_CONFIDENCE_SAMPLES=30 bar is intentionally generous for a pooled hourly slot.
+# Plain-language disclaimer — NO jargon (p90/percentile/baseline forbidden).
+# Defines a "measurement" inline so `samples` is never ambiguous.
 _DISCLAIMER: dict[tuple[str, str], str] = {
-    ("normal", "ja"): (
-        "{service_type}の{hour}時台に走ったこの路線の遅れの計測{samples}回分から計算した平均です"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していないため、"
-        "実際の遅れは変わることがあります。"
-    ),
-    ("normal", "en"): (
-        "The average of {samples} past delay measurements for this route's {service_type} "
-        "departures in the {hour}:00 hour (each measurement = one stop, on one run, on one day). "
-        "It does not account for incidents, weather, or today's conditions, so the actual delay can differ."
-    ),
-    ("low", "ja"): (
-        "計測が{samples}回と少ないため、あくまで参考値です。{service_type}の{hour}時台のこの路線の"
-        "過去の遅れの計測から計算しましたが、事故・天候・当日の状況は反映していません。"
-    ),
-    ("low", "en"): (
-        "Based on only {samples} past delay measurements, so treat this as a rough indication. "
-        "Computed from this route's {service_type} departures in the {hour}:00 hour; it does not "
-        "reflect incidents, weather, or today's conditions."
-    ),
-    ("none", "ja"): "{service_type}の{hour}時台のこの路線の計測記録がないため、目安を出せません。",
-    ("none", "en"): (
-        "There are no past delay measurements for this route's {service_type} departures in the "
-        "{hour}:00 hour, so no estimate is available."
-    ),
-    ("profile", "ja"): (
-        "{service_type}に走ったこの路線の遅れの計測記録から、時間帯ごとの平均を出したものです"
+    ("heatmap", "ja"): (
+        "曜日・時間帯ごとに、この路線の過去の遅れの計測記録から平均を出したものです"
         "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
     ),
-    ("profile", "en"): (
-        "Hourly averages computed from this route's past {service_type} delay measurements "
-        "(each measurement = one stop, on one run, on one day). It does not account for "
-        "incidents, weather, or today's conditions."
-    ),
-    ("dow_profile", "ja"): (
-        "曜日ごとに、この路線の過去の遅れの計測記録から平均を出したものです"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
-    ),
-    ("dow_profile", "en"): (
-        "Per-day-of-week averages from this route's past delay measurements "
-        "(each measurement = one stop, on one run, on one day). It does not account "
-        "for incidents, weather, or today's conditions."
+    ("heatmap", "en"): (
+        "Average delay by day of week and hour, from this route's past measurements "
+        "(each = one stop, on one run, on one day). It does not account for incidents, "
+        "weather, or today's conditions."
     ),
 }
 
@@ -78,104 +43,32 @@ def _disclaimer(case: str, locale: str, **vars: Any) -> str:
         return tpl
 
 
-def summarize_expected_delay(
-    rows: Iterable[Mapping[str, Any]],
-    route: str,
-    service_type: str,
-    hour: int,
-    locale: str = "ja",
-) -> dict[str, Any]:
-    """Summarize already-hour-filtered agg_route_hour rows into the payload. Pure.
-
-    `rows`: mappings with keys avg_min, samples (asyncpg Records or plain dicts),
-    pre-filtered by the endpoint to the requested hour. Skips rows with a null
-    avg_min or zero/None samples, sample-weights the mean, and attaches a 3-case
-    disclaimer (normal / low-confidence / no-data).
-    """
-    valid = [r for r in rows if r["avg_min"] is not None and r["samples"]]
-    total = sum(r["samples"] for r in valid)
-    base = {"route": route, "service_type": service_type, "hour": hour, "samples": total}
-
-    if total == 0:
-        return {
-            **base,
-            "expected_avg_min": None,
-            "low_confidence": True,
-            "disclaimer": _disclaimer("none", locale, service_type=service_type, hour=hour),
-        }
-
-    avg = round(sum(r["avg_min"] * r["samples"] for r in valid) / total, 1)
-    low = total < LOW_CONFIDENCE_SAMPLES
-    return {
-        **base,
-        "expected_avg_min": avg,
-        "low_confidence": low,
-        "disclaimer": _disclaimer(
-            "low" if low else "normal", locale, service_type=service_type, hour=hour, samples=total
-        ),
-    }
-
-
-def summarize_expected_delay_profile(
-    rows: Iterable[Mapping[str, Any]],
-    route: str,
-    service_type: str,
-    locale: str = "ja",
-) -> dict[str, Any]:
-    """Lay already-per-hour-pooled rows onto a full 0–23 grid. Pure.
-
-    `rows`: mappings with keys ``hour`` (0–23), ``avg_min`` (the pooled mean for
-    that hour, may be None), ``samples`` (int). The endpoint SQL groups by hour
-    and sample-weights ``avg_min``, so the value here is already the exact pooled
-    mean — this just fills the grid (missing hours → null/0) and flags low
-    confidence. No p90 is reported: percentiles cannot be pooled from per-bucket
-    percentiles (same reason ``summarize_expected_delay`` omits it).
-    """
-    by_hour = {int(r["hour"]): r for r in rows if r["avg_min"] is not None and r["samples"]}
-    hours: list[dict[str, Any]] = []
-    for h in range(24):
-        r = by_hour.get(h)
-        samples = int(r["samples"]) if r else 0
-        hours.append(
-            {
-                "hour": h,
-                "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
-                "samples": samples,
-                "low_confidence": 0 < samples < LOW_CONFIDENCE_SAMPLES,
-            }
-        )
-    return {
-        "route": route,
-        "service_type": service_type,
-        "hours": hours,
-        "disclaimer": _disclaimer("profile", locale, service_type=service_type),
-    }
-
-
-def summarize_expected_delay_dow(
+def summarize_expected_delay_heatmap(
     rows: Iterable[Mapping[str, Any]],
     route: str,
     locale: str = "ja",
 ) -> dict[str, Any]:
-    """Lay already-per-dow-pooled rows onto a full ISODOW 1..7 grid. Pure.
+    """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
 
-    `rows`: mappings with keys ``dow`` (1=Mon..7=Sun), ``avg_min`` (pooled mean,
-    may be None), ``samples`` (int). The endpoint SQL groups + sample-weights
-    ``avg_min`` across service types, so the value is already the exact pooled
-    mean; this fills the grid (missing days -> null/0) and flags low confidence.
+    `rows`: per-(dow,hour) pooled mappings with keys ``dow``, ``hour``,
+    ``avg_min`` (may be None), ``samples``. The endpoint SQL sample-weights
+    ``avg_min`` across service types, so it is already the exact pooled mean;
+    this lays it on the grid (missing cells → null/0) and flags low confidence.
     No percentile (cannot pool per-bucket percentiles).
     """
-    by_dow = {int(r["dow"]): r for r in rows if r["avg_min"] is not None and r["samples"]}
-    days: list[dict[str, Any]] = []
+    by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
+    cells: list[dict[str, Any]] = []
     for d in range(1, 8):
-        r = by_dow.get(d)
-        samples = int(r["samples"]) if r else 0
-        days.append(
-            {
-                "dow": d,
-                "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
-                "samples": samples,
-                "low_confidence": 0 < samples < LOW_CONFIDENCE_SAMPLES,
-            }
-        )
-    return {"route": route, "days": days, "disclaimer": _disclaimer("dow_profile", locale)}
+        for h in range(24):
+            r = by.get((d, h))
+            n = int(r["samples"]) if r else 0
+            cells.append(
+                {
+                    "dow": d,
+                    "hour": h,
+                    "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                    "samples": n,
+                    "low_confidence": 0 < n < LOW_CONFIDENCE_SAMPLES,
+                }
+            )
+    return {"route": route, "cells": cells, "disclaimer": _disclaimer("heatmap", locale)}

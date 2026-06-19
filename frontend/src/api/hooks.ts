@@ -17,9 +17,7 @@ import type {
   Conversation,
   ConvMessage,
   FilterCtx,
-  ForecastDow,
-  ForecastProfile,
-  ForecastServices,
+  ForecastHeatmap,
   HeatmapCollection,
   NetworkSummary,
   OverviewSummary,
@@ -33,50 +31,17 @@ import type {
 } from "./types";
 import { useSession } from "./auth";
 
-export function useForecastProfile(
+export function useForecastHeatmap(
   agencyId: number | null,
   route: string,
-  service: string,
-): UseQueryResult<ForecastProfile> {
+): UseQueryResult<ForecastHeatmap> {
   return useQuery({
-    queryKey: ["forecast-profile", agencyId, route, service],
+    queryKey: ["forecast-heatmap", agencyId, route],
     queryFn: ({ signal }) =>
-      apiGet<ForecastProfile>(
-        `/api/${agencyId}/forecast/profile?route=${encodeURIComponent(route)}&service_type=${encodeURIComponent(service)}`,
-        { signal },
-      ),
-    // Only fetch once a route + service are chosen.
-    enabled: agencyId != null && !!route && !!service,
-  });
-}
-
-export function useForecastDow(
-  agencyId: number | null,
-  route: string,
-): UseQueryResult<ForecastDow> {
-  return useQuery({
-    queryKey: ["forecast-dow", agencyId, route],
-    queryFn: ({ signal }) =>
-      apiGet<ForecastDow>(`/api/${agencyId}/forecast/dow?route=${encodeURIComponent(route)}`, {
+      apiGet<ForecastHeatmap>(`/api/${agencyId}/forecast/heatmap?route=${encodeURIComponent(route)}`, {
         signal,
       }),
     enabled: agencyId != null && !!route,
-  });
-}
-
-export function useForecastServices(
-  agencyId: number | null,
-  route: string,
-): UseQueryResult<ForecastServices> {
-  return useQuery({
-    queryKey: ["forecast-services", agencyId, route],
-    queryFn: ({ signal }) =>
-      apiGet<ForecastServices>(
-        `/api/${agencyId}/forecast/services?route=${encodeURIComponent(route)}`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!route,
-    staleTime: 5 * 60 * 1000,
   });
 }
 
