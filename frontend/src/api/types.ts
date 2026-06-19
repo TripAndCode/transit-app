@@ -248,6 +248,40 @@ export interface ForecastHeatmap {
   disclaimer: string;
 }
 
+// Band keys/order mirror pipeline/reports/forecast.py::BANDS (display order).
+export const BAND_ORDER = ["early", "morning", "midday", "evening", "night"] as const;
+export type Band = (typeof BAND_ORDER)[number];
+
+export interface ForecastOverviewGridCell {
+  dow: number; // 1=Mon .. 7=Sun (ISODOW)
+  band: Band;
+  expected_avg_min: number | null;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastOverviewWorst {
+  dow: number;
+  band: Band;
+  expected_avg_min: number;
+  samples: number;
+}
+
+export interface ForecastOverviewRoute {
+  route_code: string;
+  route_name: string;
+  expected_avg_min: number;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastOverview {
+  grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
+  worst: ForecastOverviewWorst | null;
+  routes: ForecastOverviewRoute[];
+  disclaimer: string;
+}
+
 export type OverviewHeadline = {
   avg_min: number | null;
   baseline_avg_min: number | null;

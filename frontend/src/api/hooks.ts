@@ -18,6 +18,7 @@ import type {
   ConvMessage,
   FilterCtx,
   ForecastHeatmap,
+  ForecastOverview,
   HeatmapCollection,
   NetworkSummary,
   OverviewSummary,
@@ -42,6 +43,18 @@ export function useForecastHeatmap(
         signal,
       }),
     enabled: agencyId != null && !!route,
+  });
+}
+
+export function useForecastOverview(
+  agencyId: number | null,
+): UseQueryResult<ForecastOverview> {
+  return useQuery({
+    queryKey: ["forecast-overview", agencyId],
+    queryFn: ({ signal }) =>
+      apiGet<ForecastOverview>(`/api/${agencyId}/forecast/overview`, { signal }),
+    enabled: agencyId != null,
+    placeholderData: keepPreviousData,
   });
 }
 
