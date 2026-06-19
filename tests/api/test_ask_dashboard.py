@@ -13,19 +13,49 @@ from httpx import ASGITransport
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
+def _run_analyze(agency_id):
+    """Build the agg_* tables from seeded updates. The dashboard endpoints read
+    precomputed aggregates (agg_daily_trend, agg_route_hour) — not live `updates`
+    — so the fixture must analyze after seeding or every query returns empty."""
+    import psycopg2
+
+    from pipeline.analyze import analyze
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        analyze(agency_id, conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def _purge(c, agency_ids):
+    """FK-safe teardown: clear agg_* rows (which reference agencies, now that the
+    fixture analyzes) before the base rows. Queried dynamically so a future agg
+    table can't reintroduce the FK-violation this guards against."""
+    if not agency_ids:
+        return
+    aggs = [
+        r["tablename"]
+        for r in await c.fetch(r"SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'agg\_%'")
+    ]
+    for t in aggs:
+        await c.execute(f"DELETE FROM {t} WHERE agency_id = ANY($1::int[])", agency_ids)
+    await c.execute("DELETE FROM updates WHERE agency_id = ANY($1::int[])", agency_ids)
+    await c.execute("DELETE FROM static_routes WHERE agency_id = ANY($1::int[])", agency_ids)
+    await c.execute("DELETE FROM agencies WHERE agency_id = ANY($1::int[])", agency_ids)
+
+
 @pytest.fixture
 async def dash_app(apply_schema):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
-        await c.execute(
-            "DELETE FROM updates WHERE agency_id IN (SELECT agency_id FROM agencies WHERE feed_url = 'http://dash-t')"
-        )
-        await c.execute(
-            "DELETE FROM static_routes WHERE agency_id IN (SELECT agency_id FROM agencies WHERE feed_url = 'http://dash-t')"
-        )
-        await c.execute("DELETE FROM agencies WHERE feed_url = 'http://dash-t'")
+        leftover = [
+            r["agency_id"] for r in await c.fetch("SELECT agency_id FROM agencies WHERE feed_url = 'http://dash-t'")
+        ]
+        await _purge(c, leftover)
         row = await c.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://dash-t') RETURNING agency_id"
         )
@@ -56,12 +86,12 @@ async def dash_app(apply_schema):
                         (60 if route == "R1" else 30),
                         ts,
                     )
+    # Build the aggregates the dashboard endpoints read from the seeded updates.
+    _run_analyze(agency_id)
     app.state.pool = pool
     yield app, agency_id, pool
     async with pool.acquire() as c:
-        await c.execute("DELETE FROM updates WHERE agency_id = $1", agency_id)
-        await c.execute("DELETE FROM static_routes WHERE agency_id = $1", agency_id)
-        await c.execute("DELETE FROM agencies WHERE agency_id = $1", agency_id)
+        await _purge(c, [agency_id])
     await pool.close()
 
 
