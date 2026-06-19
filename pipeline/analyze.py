@@ -227,8 +227,14 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_route_hour_dow ───────────────────────────────────────────
         # Per route × service × day-of-week × hour, for the Forecast heatmap.
+        # `scheduled_time IS NOT NULL` guards the NOT NULL `hour` column: a typed
+        # row lacking a scheduled time would otherwise yield a NULL hour and abort
+        # the whole-agency analyze transaction.
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
+            WITH deduped AS (
+                SELECT * FROM _analyze_deduped
+                WHERE service_type IS NOT NULL AND scheduled_time IS NOT NULL
+            )
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,

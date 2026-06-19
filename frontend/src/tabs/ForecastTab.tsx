@@ -62,6 +62,7 @@ function HeatmapGrid({
   big,
   axisMin,
   dayLabel,
+  ariaLabel,
   onTip,
   onLeave,
 }: {
@@ -69,6 +70,7 @@ function HeatmapGrid({
   big: boolean;
   axisMin: string;
   dayLabel: (dow: number) => string;
+  ariaLabel?: string;
   onTip: (e: React.MouseEvent, text: string) => void;
   onLeave: () => void;
 }) {
@@ -80,7 +82,7 @@ function HeatmapGrid({
   const cols = `${labelW}px repeat(24, 1fr)`;
 
   return (
-    <div onMouseLeave={() => { setHover(null); onLeave(); }}>
+    <div role={ariaLabel ? "img" : undefined} aria-label={ariaLabel} onMouseLeave={() => { setHover(null); onLeave(); }}>
       <div style={{ display: "grid", gridTemplateColumns: cols, gap, alignItems: "center" }}>
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
@@ -323,7 +325,7 @@ export function ForecastTab() {
                   { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
                 ]}
               />
-              <HeatmapGrid cells={cells} big axisMin={min1} dayLabel={dayLabel} onTip={onTip} onLeave={onLeave} />
+              <HeatmapGrid cells={cells} big axisMin={min1} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 13, fontSize: 11, color: "var(--text-secondary)" }}>
                 <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
                 <span style={{ display: "inline-flex", gap: 2 }}>
@@ -341,15 +343,18 @@ export function ForecastTab() {
             const labels = view === "dow" ? dowLabels : hourLabels;
             const wi = argExtreme(vals, true);
             const ci = argExtreme(vals, false);
-            const present = vals.filter((v): v is number => v != null);
-            const m = present.length ? present.reduce((a, b) => a + b, 0) / present.length : 0;
+            // Route avg + sample count are properties of the route, not the
+            // collapsed axis: reuse the sample-weighted `mean`/`totalN` so all
+            // three modals show the same figures (a per-axis unweighted mean
+            // would disagree with the heatmap modal).
             return (
               <>
                 <StatStrip
                   stats={[
                     { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${min1}` : "—" },
                     { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${min1}` : "—" },
-                    { label: t("forecast.stat_mean"), value: `${m.toFixed(1)}${min1}` },
+                    { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${min1}` },
+                    { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
                   ]}
                 />
                 <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={min1} onTip={onTip} onLeave={onLeave} />
