@@ -64,6 +64,15 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
         "(each measurement = one stop, on one run, on one day). It does not account "
         "for incidents, weather, or today's conditions."
     ),
+    ("heatmap", "ja"): (
+        "曜日・時間帯ごとに、この路線の過去の遅れの計測記録から平均を出したものです"
+        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+    ),
+    ("heatmap", "en"): (
+        "Average delay by day of week and hour, from this route's past measurements "
+        "(each = one stop, on one run, on one day). It does not account for incidents, "
+        "weather, or today's conditions."
+    ),
 }
 
 
@@ -179,3 +188,38 @@ def summarize_expected_delay_dow(
             }
         )
     return {"route": route, "days": days, "disclaimer": _disclaimer("dow_profile", locale)}
+
+
+def summarize_expected_delay_heatmap(
+    rows: Iterable[Mapping[str, Any]],
+    route: str,
+    locale: str = "ja",
+) -> dict[str, Any]:
+    """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
+
+    `rows`: per-(dow,hour) pooled mappings with keys ``dow``, ``hour``,
+    ``avg_min`` (may be None), ``samples``. The endpoint SQL sample-weights
+    ``avg_min`` across service types, so it is already the exact pooled mean;
+    this lays it on the grid (missing cells → null/0) and flags low confidence.
+    No percentile (cannot pool per-bucket percentiles).
+    """
+    by = {
+        (int(r["dow"]), int(r["hour"])): r
+        for r in rows
+        if r["avg_min"] is not None and r["samples"]
+    }
+    cells: list[dict[str, Any]] = []
+    for d in range(1, 8):
+        for h in range(24):
+            r = by.get((d, h))
+            n = int(r["samples"]) if r else 0
+            cells.append(
+                {
+                    "dow": d,
+                    "hour": h,
+                    "expected_avg_min": round(float(r["avg_min"]), 1) if r else None,
+                    "samples": n,
+                    "low_confidence": 0 < n < LOW_CONFIDENCE_SAMPLES,
+                }
+            )
+    return {"route": route, "cells": cells, "disclaimer": _disclaimer("heatmap", locale)}
