@@ -252,6 +252,22 @@ export interface ForecastHeatmap {
 export const BAND_ORDER = ["early", "morning", "midday", "evening", "night"] as const;
 export type Band = (typeof BAND_ORDER)[number];
 
+// Hour→band boundaries, identical to the server BANDS ranges. Used to collapse
+// the per-route 7×24 heatmap into bands client-side (the agency grid arrives
+// pre-banded from the server).
+const BAND_RANGES: readonly [Band, number, number][] = [
+  ["early", 0, 6],
+  ["morning", 6, 9],
+  ["midday", 9, 16],
+  ["evening", 16, 19],
+  ["night", 19, 24],
+];
+
+export function bandOf(hour: number): Band {
+  const hit = BAND_RANGES.find(([, lo, hi]) => hour >= lo && hour < hi);
+  return hit ? hit[0] : "night";
+}
+
 export interface ForecastOverviewGridCell {
   dow: number; // 1=Mon .. 7=Sun (ISODOW)
   band: Band;

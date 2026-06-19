@@ -1,6 +1,6 @@
-from pipeline.reports.forecast import BANDS, band_of, summarize_agency_overview
-
 import pytest
+
+from pipeline.reports.forecast import BANDS, band_of, summarize_agency_overview
 
 
 def test_band_of_boundaries():

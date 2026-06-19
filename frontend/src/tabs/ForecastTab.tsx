@@ -1,13 +1,21 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useRoutes, useForecastHeatmap } from "../api/hooks";
+import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { RoutePickerPill } from "../components/paramPills/RoutePickerPill";
 import { OverviewModal } from "../components/OverviewModal";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { delayColor } from "../styles/tokens";
-import type { ForecastHeatmapCell } from "../api/types";
+import {
+  BAND_ORDER,
+  bandOf,
+  type Band,
+  type ForecastHeatmapCell,
+  type ForecastOverviewGridCell,
+  type ForecastOverviewRoute,
+  type ForecastOverviewWorst,
+} from "../api/types";
 
 const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const RAMP_STOPS = 6;
@@ -53,6 +61,127 @@ function Tooltip({ tip }: { tip: Tip }) {
       }}
     >
       {tip.text}
+    </div>
+  );
+}
+
+/** Anchored min→max colour ramp legend (shown inline, not only in the modal). */
+function Legend({ min, max, unit }: { min: number; max: number; unit: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: 11, color: "var(--text-secondary)" }}>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
+      <span style={{ display: "inline-flex", gap: 2 }}>
+        {Array.from({ length: RAMP_STOPS }, (_, i) => (
+          <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: delayColor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
+        ))}
+      </span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{max.toFixed(1)}</span>
+      <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>{unit}</span>
+    </div>
+  );
+}
+
+/** 7-day × 5-band grid. Dense by construction — used for the agency overview and
+ * the per-route detail (route cells collapsed to bands client-side). */
+function BandGrid({
+  grid,
+  bandLabel,
+  dayLabel,
+  axisMin,
+  onTip,
+  onLeave,
+}: {
+  grid: ForecastOverviewGridCell[];
+  bandLabel: (b: Band) => string;
+  dayLabel: (dow: number) => string;
+  axisMin: string;
+  onTip: (e: React.MouseEvent, text: string) => void;
+  onLeave: () => void;
+}) {
+  const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
+  const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
+  return (
+    <div onMouseLeave={onLeave}>
+      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
+        <span />
+        {BAND_ORDER.map((b) => (
+          <span key={b} style={{ fontSize: 11, color: "var(--text-tertiary)", textAlign: "center" }}>
+            {bandLabel(b)}
+          </span>
+        ))}
+        {Array.from({ length: 7 }, (_, di) => {
+          const dow = di + 1;
+          return [
+            <div key={`l${dow}`} style={{ fontSize: 11, color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+              {dayLabel(dow)}
+            </div>,
+            ...BAND_ORDER.map((b) => {
+              const c = byKey.get(`${dow}-${b}`);
+              const v = c?.expected_avg_min ?? null;
+              const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : `${v.toFixed(1)}${axisMin}`}`;
+              if (v == null) {
+                return (
+                  <div
+                    key={b}
+                    data-testid="ov-band-cell"
+                    onMouseEnter={(e) => onTip(e, tipText)}
+                    onMouseMove={(e) => onTip(e, tipText)}
+                    style={{ height: 30, borderRadius: 3, background: "repeating-linear-gradient(45deg,#f0eee9,#f0eee9 3px,#f6f4ef 3px,#f6f4ef 6px)" }}
+                  />
+                );
+              }
+              return (
+                <div
+                  key={b}
+                  data-testid="ov-band-cell"
+                  onMouseEnter={(e) => onTip(e, tipText)}
+                  onMouseMove={(e) => onTip(e, tipText)}
+                  style={{ height: 30, borderRadius: 3, background: delayColor(v), opacity: c?.low_confidence ? 0.5 : 1 }}
+                />
+              );
+            }),
+          ];
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Delay-ranked route list. Bar length encodes delay (not sample volume). */
+function RankedRoutes({
+  routes,
+  axisMin,
+  lowConfNote,
+  onPick,
+}: {
+  routes: ForecastOverviewRoute[];
+  axisMin: string;
+  lowConfNote: string;
+  onPick: (code: string) => void;
+}) {
+  const max = Math.max(...routes.map((r) => r.expected_avg_min), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {routes.map((r) => (
+        <div
+          key={r.route_code}
+          data-testid="ranked-route"
+          {...clickable(() => onPick(r.route_code))}
+          style={{ display: "grid", gridTemplateColumns: "minmax(120px, 38%) 1fr auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
+        >
+          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {r.route_name}
+            {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
+          </span>
+          <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
+            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: delayColor(r.expected_avg_min), borderRadius: 3 }} />
+          </span>
+          <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
+            {r.expected_avg_min.toFixed(1)}
+            {axisMin}
+          </b>
+        </div>
+      ))}
     </div>
   );
 }
@@ -204,19 +333,20 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
   );
 }
 
-function Card({ title, sublabel, expand, testid, onOpen, children }: {
+function Card({ title, sublabel, action, testid, onOpen, children }: {
   title: string;
   sublabel: string;
-  expand: string;
+  action?: React.ReactNode;
   testid: string;
-  onOpen: () => void;
+  onOpen?: () => void;
   children: React.ReactNode;
 }) {
+  const clickProps = onOpen ? clickable(onOpen) : {};
   return (
-    <div className="ov-card ov-clickable" data-testid={testid} aria-label={title} {...clickable(onOpen)}>
+    <div className={onOpen ? "ov-card ov-clickable" : "ov-card"} data-testid={testid} aria-label={title} {...clickProps}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
-        <span aria-hidden style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{expand} ⤢</span>
+        {action}
       </div>
       <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
@@ -224,21 +354,212 @@ function Card({ title, sublabel, expand, testid, onOpen, children }: {
   );
 }
 
+/** Collapse a per-route 7×24 heatmap into a 7×5 band grid (sample-weighted). */
+function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell[] {
+  const acc = new Map<string, { sum: number; n: number }>();
+  for (const c of cells) {
+    if (c.expected_avg_min == null || !c.samples) continue;
+    const key = `${c.dow}-${bandOf(c.hour)}`;
+    const a = acc.get(key) ?? { sum: 0, n: 0 };
+    a.sum += c.expected_avg_min * c.samples;
+    a.n += c.samples;
+    acc.set(key, a);
+  }
+  const grid: ForecastOverviewGridCell[] = [];
+  for (let dow = 1; dow <= 7; dow++) {
+    for (const band of BAND_ORDER) {
+      const a = acc.get(`${dow}-${band}`);
+      const n = a?.n ?? 0;
+      grid.push({
+        dow,
+        band,
+        expected_avg_min: a && n ? Math.round((a.sum / n) * 10) / 10 : null,
+        samples: n,
+        low_confidence: n > 0 && n < 30,
+      });
+    }
+  }
+  return grid;
+}
+
 export function ForecastTab() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const aid = agencyId ? Number(agencyId) : null;
 
-  const { data: routes } = useRoutes(aid);
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
-  const firstRoute = (routes ?? []).find((r) => r.route_code)?.route_code ?? null;
-  const route = selectedRoute ?? firstRoute ?? "";
-
-  const { data, isPending, error, refetch } = useForecastHeatmap(aid, route);
-  const cells = data?.cells ?? [];
-
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
+  const [showGrid, setShowGrid] = useState(false);
+
+  const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
+  const bandLabel = (b: Band) => t(`forecast.band_${b}`);
+  const min1 = t("forecast.axis_min");
+  const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
+  const onLeave = () => setTip(null);
+
+  return (
+    <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
+      <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>{t("forecast.eyebrow")}</div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 16px" }}>{t("forecast.title")}</h1>
+
+      {aid != null && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 22, alignItems: "center", flexWrap: "wrap" }}>
+          {selectedRoute && (
+            <button
+              type="button"
+              onClick={() => { setSelectedRoute(null); setShowGrid(false); }}
+              style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 13, padding: 0 }}
+            >
+              {t("forecast.back_to_overview")}
+            </button>
+          )}
+          <RoutePickerPill label={t("forecast.route_label")} value={selectedRoute} agencyId={aid} placeholder={t("forecast.route_placeholder")} onChange={setSelectedRoute} />
+        </div>
+      )}
+
+      {aid != null && !selectedRoute && (
+        <AgencyLanding
+          aid={aid}
+          dayLabel={dayLabel}
+          bandLabel={bandLabel}
+          axisMin={min1}
+          worstLabel={t("forecast.overview_worst_label")}
+          gridTitle={t("forecast.overview_grid_title")}
+          gridCaption={t("forecast.overview_grid_caption")}
+          routesTitle={t("forecast.overview_routes_title")}
+          routesCaption={t("forecast.overview_routes_caption")}
+          noData={t("forecast.overview_no_data")}
+          lowConfNote={t("forecast.low_confidence_note")}
+          legendUnit={t("forecast.legend_unit")}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min })}
+          onPick={setSelectedRoute}
+          onTip={onTip}
+          onLeave={onLeave}
+        />
+      )}
+
+      {aid != null && selectedRoute && (
+        <RouteDetail
+          aid={aid}
+          route={selectedRoute}
+          dayLabel={dayLabel}
+          bandLabel={bandLabel}
+          axisMin={min1}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((v) => !v)}
+          view={view}
+          setView={setView}
+          onTip={onTip}
+          onLeave={onLeave}
+        />
+      )}
+
+      <Tooltip tip={tip} />
+    </div>
+  );
+}
+
+function AgencyLanding({
+  aid,
+  dayLabel,
+  bandLabel,
+  axisMin,
+  worstLabel,
+  gridTitle,
+  gridCaption,
+  routesTitle,
+  routesCaption,
+  noData,
+  lowConfNote,
+  legendUnit,
+  worstPhrase,
+  onPick,
+  onTip,
+  onLeave,
+}: {
+  aid: number;
+  dayLabel: (dow: number) => string;
+  bandLabel: (b: Band) => string;
+  axisMin: string;
+  worstLabel: string;
+  gridTitle: string;
+  gridCaption: string;
+  routesTitle: string;
+  routesCaption: string;
+  noData: string;
+  lowConfNote: string;
+  legendUnit: string;
+  worstPhrase: (w: ForecastOverviewWorst) => string;
+  onPick: (code: string) => void;
+  onTip: (e: React.MouseEvent, text: string) => void;
+  onLeave: () => void;
+}) {
+  const { data, isPending, error, refetch } = useForecastOverview(aid);
+  if (isPending) return <Skeleton height={240} />;
+  if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
+  if (!data) return null;
+
+  const populated = data.grid.filter((c) => c.expected_avg_min != null);
+  if (populated.length === 0 && data.routes.length === 0) {
+    return <p style={{ color: "var(--text-secondary)" }}>{noData}</p>;
+  }
+  const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
+  const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
+
+  return (
+    <>
+      {data.worst && (
+        <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{worstPhrase(data.worst)}</div>
+        </div>
+      )}
+
+      <Card title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
+        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} />}
+      </Card>
+
+      {data.routes.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Card title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
+            <RankedRoutes routes={data.routes} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+          </Card>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RouteDetail({
+  aid,
+  route,
+  dayLabel,
+  bandLabel,
+  axisMin,
+  showGrid,
+  onToggleGrid,
+  view,
+  setView,
+  onTip,
+  onLeave,
+}: {
+  aid: number;
+  route: string;
+  dayLabel: (dow: number) => string;
+  bandLabel: (b: Band) => string;
+  axisMin: string;
+  showGrid: boolean;
+  onToggleGrid: () => void;
+  view: View;
+  setView: (v: View) => void;
+  onTip: (e: React.MouseEvent, text: string) => void;
+  onLeave: () => void;
+}) {
+  const { t } = useTranslation();
+  const { data, isPending, error, refetch } = useForecastHeatmap(aid, route);
+  const cells = data?.cells ?? [];
 
   const populated = cells.filter((c) => c.expected_avg_min != null);
   const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
@@ -248,6 +569,10 @@ export function ForecastTab() {
   const allNull = data != null && populated.length === 0;
   const peak = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
   const calm = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) < (b.expected_avg_min as number) ? c : b), null);
+  // Worst window excluding low-confidence cells, for the headline sentence.
+  const worstCell = populated
+    .filter((c) => !c.low_confidence)
+    .reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
 
   const margin = (pick: (c: ForecastHeatmapCell) => number, n: number): (number | null)[] =>
     Array.from({ length: n }, (_, i) => {
@@ -257,13 +582,9 @@ export function ForecastTab() {
     });
   const dowAvg = margin((c) => c.dow - 1, 7);
   const hourAvg = margin((c) => c.hour, 24);
+  const dowLabels = Array.from({ length: 7 }, (_, i) => dayLabel(i + 1));
+  const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}:00`);
 
-  const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
-  const min1 = t("forecast.axis_min");
-  const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
-  const onLeave = () => setTip(null);
-
-  // worst/calmest index of a margin
   const argExtreme = (vals: (number | null)[], worst: boolean) => {
     let idx = -1;
     let best = worst ? -Infinity : Infinity;
@@ -276,66 +597,63 @@ export function ForecastTab() {
     return idx;
   };
 
-  const dowLabels = Array.from({ length: 7 }, (_, i) => dayLabel(i + 1));
-  const hourLabels = Array.from({ length: 24 }, (_, h) => `${h}:00`);
-
   const modalTitle = view === "hm" ? t("forecast.heatmap_title") : view === "dow" ? t("forecast.dow_summary") : t("forecast.hour_summary");
 
-  return (
-    <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
-      <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>{t("forecast.eyebrow")}</div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 16px" }}>{t("forecast.title")}</h1>
+  if (isPending) return <Skeleton height={200} />;
+  if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
+  if (allNull) return <p style={{ color: "var(--text-secondary)" }}>{t("forecast.no_data")}</p>;
+  if (!data) return null;
 
-      {aid != null && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 22, alignItems: "center", flexWrap: "wrap" }}>
-          <RoutePickerPill label={t("forecast.route_label")} value={route || null} agencyId={aid} placeholder={t("forecast.route_placeholder")} onChange={setSelectedRoute} />
+  return (
+    <>
+      {worstCell && (
+        <div data-testid="detail-worst" style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstCell.dow), band: bandLabel(bandOf(worstCell.hour)), min: (worstCell.expected_avg_min as number).toFixed(1) })}
         </div>
       )}
 
-      {!route && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.pick_prompt")}</p>}
-      {route && isPending && <Skeleton height={200} />}
-      {route && error && <ErrorBanner error={error} onRetry={() => refetch()} />}
-      {route && data && allNull && <p style={{ color: "var(--text-secondary)" }}>{t("forecast.no_data")}</p>}
+      <Card title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
+        <BandGrid grid={collapseToBands(cells)} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
+      </Card>
 
-      {route && data && !allNull && (
-        <>
-          <Card title={t("forecast.heatmap_title")} sublabel={t("forecast.heatmap_caption")} expand={t("forecast.expand")} testid="fc-card-hm" onOpen={() => setView("hm")}>
-            <HeatmapGrid cells={cells} big={false} axisMin={min1} dayLabel={dayLabel} onTip={onTip} onLeave={onLeave} />
-          </Card>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-            <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} expand={t("forecast.expand")} testid="fc-card-dow" onOpen={() => setView("dow")}>
-              <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={min1} onTip={onTip} onLeave={onLeave} />
-            </Card>
-            <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} expand={t("forecast.expand")} testid="fc-card-hr" onOpen={() => setView("hr")}>
-              <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={min1} onTip={onTip} onLeave={onLeave} />
-            </Card>
-          </div>
-        </>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+        <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+        </Card>
+        <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+        </Card>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggleGrid}
+        style={{ marginTop: 16, background: "none", border: "1px solid var(--border-soft)", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}
+      >
+        {t("forecast.detail_show_grid")}
+      </button>
+      {showGrid && (
+        <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
+          <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
+          {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
+        </div>
       )}
 
-      {view && data && (
+      {view && (
         <OverviewModal isOpen onClose={() => setView(null)} title={modalTitle}>
           {view === "hm" && peak && calm && (
             <>
               <StatStrip
                 stats={[
-                  { label: t("forecast.stat_worst"), value: `${dayLabel(peak.dow)} ${peak.hour}:00 · ${(peak.expected_avg_min as number).toFixed(1)}${min1}` },
-                  { label: t("forecast.stat_calmest"), value: `${dayLabel(calm.dow)} ${calm.hour}:00 · ${(calm.expected_avg_min as number).toFixed(1)}${min1}` },
-                  { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${min1}` },
+                  { label: t("forecast.stat_worst"), value: `${dayLabel(peak.dow)} ${peak.hour}:00 · ${(peak.expected_avg_min as number).toFixed(1)}${axisMin}` },
+                  { label: t("forecast.stat_calmest"), value: `${dayLabel(calm.dow)} ${calm.hour}:00 · ${(calm.expected_avg_min as number).toFixed(1)}${axisMin}` },
+                  { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
                   { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
                 ]}
               />
-              <HeatmapGrid cells={cells} big axisMin={min1} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 13, fontSize: 11, color: "var(--text-secondary)" }}>
-                <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
-                <span style={{ display: "inline-flex", gap: 2 }}>
-                  {Array.from({ length: RAMP_STOPS }, (_, i) => (
-                    <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: delayColor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
-                  ))}
-                </span>
-                <span style={{ fontVariantNumeric: "tabular-nums" }}>{max.toFixed(1)}</span>
-                <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>{t("forecast.legend_unit")}</span>
-              </div>
+              <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
+              <Legend min={min} max={max} unit={t("forecast.legend_unit")} />
             </>
           )}
           {(view === "dow" || view === "hr") && (() => {
@@ -343,21 +661,17 @@ export function ForecastTab() {
             const labels = view === "dow" ? dowLabels : hourLabels;
             const wi = argExtreme(vals, true);
             const ci = argExtreme(vals, false);
-            // Route avg + sample count are properties of the route, not the
-            // collapsed axis: reuse the sample-weighted `mean`/`totalN` so all
-            // three modals show the same figures (a per-axis unweighted mean
-            // would disagree with the heatmap modal).
             return (
               <>
                 <StatStrip
                   stats={[
-                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${min1}` : "—" },
-                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${min1}` : "—" },
-                    { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${min1}` },
+                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${axisMin}` : "—" },
+                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${axisMin}` : "—" },
+                    { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
                     { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={min1} onTip={onTip} onLeave={onLeave} />
+                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
               </>
             );
           })()}
@@ -368,8 +682,6 @@ export function ForecastTab() {
           )}
         </OverviewModal>
       )}
-
-      <Tooltip tip={tip} />
-    </div>
+    </>
   );
 }
