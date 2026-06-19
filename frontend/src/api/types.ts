@@ -248,6 +248,61 @@ export interface ForecastHeatmap {
   disclaimer: string;
 }
 
+// Mirrors api/triage.py::LOW_CONFIDENCE_SAMPLES — a bucket with fewer measurements
+// is flagged low-confidence. Kept here so client-side banding (collapseToBands)
+// uses the same threshold as the server, not a bare literal.
+export const LOW_CONFIDENCE_SAMPLES = 30;
+
+// Band keys/order mirror pipeline/reports/forecast.py::BANDS (display order).
+export const BAND_ORDER = ["early", "morning", "midday", "evening", "night"] as const;
+export type Band = (typeof BAND_ORDER)[number];
+
+// Hour→band boundaries, identical to the server BANDS ranges. Used to collapse
+// the per-route 7×24 heatmap into bands client-side (the agency grid arrives
+// pre-banded from the server).
+const BAND_RANGES: readonly [Band, number, number][] = [
+  ["early", 0, 6],
+  ["morning", 6, 9],
+  ["midday", 9, 16],
+  ["evening", 16, 19],
+  ["night", 19, 24],
+];
+
+export function bandOf(hour: number): Band {
+  const hit = BAND_RANGES.find(([, lo, hi]) => hour >= lo && hour < hi);
+  return hit ? hit[0] : "night";
+}
+
+export interface ForecastOverviewGridCell {
+  dow: number; // 1=Mon .. 7=Sun (ISODOW)
+  band: Band;
+  expected_avg_min: number | null;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastOverviewWorst {
+  dow: number;
+  band: Band;
+  expected_avg_min: number;
+  samples: number;
+}
+
+export interface ForecastOverviewRoute {
+  route_code: string;
+  route_name: string;
+  expected_avg_min: number;
+  samples: number;
+  low_confidence: boolean;
+}
+
+export interface ForecastOverview {
+  grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
+  worst: ForecastOverviewWorst | null;
+  routes: ForecastOverviewRoute[];
+  disclaimer: string;
+}
+
 export type OverviewHeadline = {
   avg_min: number | null;
   baseline_avg_min: number | null;

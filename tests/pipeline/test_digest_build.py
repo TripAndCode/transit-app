@@ -25,8 +25,7 @@ def _seed(pg_conn, agency_id):
                 (agency_id, route, avg_min, avg_min, p90_min),
             )
         cur.execute(
-            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) "
-            "VALUES (%s, %s, 3400, 12)",
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, 3400, 12)",
             (agency_id, DAY),
         )
     pg_conn.commit()
