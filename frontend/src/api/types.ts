@@ -234,34 +234,17 @@ export type Route = {
   trip_headsigns: string[];
 };
 
-export interface ForecastProfileHour {
-  hour: number;
-  expected_avg_min: number | null;
-  samples: number;
-  low_confidence: boolean;
-}
-
-export interface ForecastProfile {
-  route: string;
-  service_type: string;
-  hours: ForecastProfileHour[];
-  disclaimer: string;
-}
-
-export interface ForecastServices {
-  service_types: string[];
-}
-
-export interface ForecastDowDay {
+export interface ForecastHeatmapCell {
   dow: number; // 1=Mon .. 7=Sun (ISODOW)
+  hour: number; // 0..23
   expected_avg_min: number | null;
   samples: number;
   low_confidence: boolean;
 }
 
-export interface ForecastDow {
+export interface ForecastHeatmap {
   route: string;
-  days: ForecastDowDay[];
+  cells: ForecastHeatmapCell[]; // always 168 (7×24)
   disclaimer: string;
 }
 
