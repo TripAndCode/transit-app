@@ -21,6 +21,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
+from api.aggregate_errors import aggregate_not_ready_handler
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
@@ -137,6 +138,9 @@ app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+# A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
+# on migrations) degrades to a localized 503 instead of an opaque 500.
+app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
 #   StarletteSessionMiddleware  (Authlib needs request.session)
