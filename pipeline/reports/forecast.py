@@ -72,3 +72,91 @@ def summarize_expected_delay_heatmap(
                 }
             )
     return {"route": route, "cells": cells, "disclaimer": _disclaimer("heatmap", locale)}
+
+
+# Ordered hour→band mapping. SINGLE SOURCE OF TRUTH for the time bands (the
+# frontend BAND_ORDER mirrors only the keys/order, for labels — keep identical).
+BANDS: list[tuple[str, range]] = [
+    ("early", range(0, 6)),
+    ("morning", range(6, 9)),
+    ("midday", range(9, 16)),
+    ("evening", range(16, 19)),
+    ("night", range(19, 24)),
+]
+_HOUR_BAND = {h: key for key, hrs in BANDS for h in hrs}
+
+
+def band_of(hour: int) -> str:
+    """Band key for an hour 0..23."""
+    return _HOUR_BAND[int(hour)]
+
+
+def _pooled(pairs: list[tuple[float, int]]) -> tuple[float | None, int]:
+    """(avg_min, samples) pairs -> exact pooled (mean, total_samples)."""
+    n = sum(s for _, s in pairs)
+    if not n:
+        return None, 0
+    return sum(v * s for v, s in pairs) / n, n
+
+
+def summarize_agency_overview(
+    grid_rows: Iterable[Mapping[str, Any]],
+    route_rows: Iterable[Mapping[str, Any]],
+    locale: str = "ja",
+    top_n: int = 8,
+) -> dict[str, Any]:
+    """Agency-wide 7×band grid + worst-window + delay-ranked routes. Pure.
+
+    `grid_rows`: per-(dow,hour) pooled mappings ``{dow,hour,avg_min,samples}``.
+    `route_rows`: per-route mappings ``{route_code, route_name, avg_min, samples}``.
+    Pooling is exact (a sample-weighted mean of per-bucket means is the pooled
+    mean). The worst window excludes low-confidence buckets so a small-sample
+    fluke can never headline. No percentile (cannot pool per-bucket percentiles).
+    """
+    # ── grid: pool hours into bands per (dow, band) ──────────────────────
+    buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
+    for r in grid_rows:
+        if r["avg_min"] is None or not r["samples"]:
+            continue
+        key = (int(r["dow"]), band_of(int(r["hour"])))
+        buckets.setdefault(key, []).append((float(r["avg_min"]), int(r["samples"])))
+
+    grid: list[dict[str, Any]] = []
+    worst: dict[str, Any] | None = None
+    for d in range(1, 8):
+        for band, _ in BANDS:
+            mean, n = _pooled(buckets.get((d, band), []))
+            low_conf = 0 < n < LOW_CONFIDENCE_SAMPLES
+            grid.append(
+                {
+                    "dow": d,
+                    "band": band,
+                    "expected_avg_min": round(mean, 1) if mean is not None else None,
+                    "samples": n,
+                    "low_confidence": low_conf,
+                }
+            )
+            if mean is not None and not low_conf and (worst is None or mean > worst["_m"]):
+                worst = {"dow": d, "band": band, "expected_avg_min": round(mean, 1), "samples": n, "_m": mean}
+    if worst is not None:
+        worst.pop("_m")
+
+    # ── routes: rank by delay desc, low-confidence last, cap at top_n ────
+    routes: list[dict[str, Any]] = []
+    for r in route_rows:
+        if r["avg_min"] is None or not r["samples"]:
+            continue
+        n = int(r["samples"])
+        routes.append(
+            {
+                "route_code": r["route_code"],
+                "route_name": r["route_name"],
+                "expected_avg_min": round(float(r["avg_min"]), 1),
+                "samples": n,
+                "low_confidence": n < LOW_CONFIDENCE_SAMPLES,
+            }
+        )
+    routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
+    routes = routes[:top_n]
+
+    return {"grid": grid, "worst": worst, "routes": routes, "disclaimer": _disclaimer("heatmap", locale)}
