@@ -29,7 +29,6 @@
     "low_confidence_note": "Few measurements — indicative",
     "route_label": "Route",
     "route_placeholder": "Search routes…",
-    "pick_prompt": "Pick a route to see when it runs late.",
     "no_data": "No delay measurements for this route yet.",
     "axis_min": "min",
     "legend_unit": "min delay",

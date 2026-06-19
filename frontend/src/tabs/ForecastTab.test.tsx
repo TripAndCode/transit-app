@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ForecastTab } from "./ForecastTab";
@@ -70,6 +70,8 @@ describe("ForecastTab", () => {
     expect(screen.getByText("Main Line")).toBeInTheDocument();
     expect(screen.getByText("Side Line")).toBeInTheDocument();
     expect(screen.getAllByTestId("ranked-route").length).toBe(2);
+    // the "not a prediction" disclaimer is surfaced on the landing, not only in a modal
+    expect(screen.getByText("test disclaimer")).toBeInTheDocument();
   });
 
   it("shows the empty-state message when the agency has no data", () => {
@@ -103,7 +105,9 @@ describe("ForecastTab", () => {
     renderTab();
     fireEvent.click(screen.getByText("Main Line"));
     fireEvent.click(screen.getByTestId("fc-card-dow"));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("test disclaimer")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    // disclaimer renders on the detail base view (footnote) AND inside the modal
+    expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
   });
 });

@@ -248,6 +248,11 @@ export interface ForecastHeatmap {
   disclaimer: string;
 }
 
+// Mirrors api/triage.py::LOW_CONFIDENCE_SAMPLES — a bucket with fewer measurements
+// is flagged low-confidence. Kept here so client-side banding (collapseToBands)
+// uses the same threshold as the server, not a bare literal.
+export const LOW_CONFIDENCE_SAMPLES = 30;
+
 // Band keys/order mirror pipeline/reports/forecast.py::BANDS (display order).
 export const BAND_ORDER = ["early", "morning", "midday", "evening", "night"] as const;
 export type Band = (typeof BAND_ORDER)[number];

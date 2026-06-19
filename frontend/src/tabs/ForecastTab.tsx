@@ -1,3 +1,14 @@
+/**
+ * ForecastTab — "いつもの遅れ方 / Typical delays".
+ *
+ * A landing↔detail router on `selectedRoute`. With no route picked it shows the
+ * agency-wide view (`AgencyLanding`): a worst-window headline, a 7-day × time-band
+ * grid pooled across all routes, and a delay-ranked route list. Picking a route
+ * (via the list or the search picker) shows `RouteDetail`: the per-route heatmap
+ * collapsed to bands, a worst-window sentence, day/hour summaries, and the full
+ * 7×24 grid behind a toggle. Data comes from `/forecast/overview` and the existing
+ * per-route `/forecast/heatmap`; both are seasonal-naive historical averages.
+ */
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -6,10 +17,11 @@ import { RoutePickerPill } from "../components/paramPills/RoutePickerPill";
 import { OverviewModal } from "../components/OverviewModal";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { delayColor } from "../styles/tokens";
+import { delayColor, relativeDelayColor } from "../styles/tokens";
 import {
   BAND_ORDER,
   bandOf,
+  LOW_CONFIDENCE_SAMPLES,
   type Band,
   type ForecastHeatmapCell,
   type ForecastOverviewGridCell,
@@ -65,14 +77,16 @@ function Tooltip({ tip }: { tip: Tip }) {
   );
 }
 
-/** Anchored min→max colour ramp legend (shown inline, not only in the modal). */
-function Legend({ min, max, unit }: { min: number; max: number; unit: string }) {
+/** Anchored min→max colour ramp legend (shown inline, not only in the modal).
+ * `colorFor` defaults to the absolute ramp; pass a relative ramp to match a grid
+ * that uses one, so the legend reflects the encoding actually shown. */
+function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: 11, color: "var(--text-secondary)" }}>
       <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
       <span style={{ display: "inline-flex", gap: 2 }}>
         {Array.from({ length: RAMP_STOPS }, (_, i) => (
-          <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: delayColor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
+          <span key={i} style={{ width: 14, height: 14, borderRadius: 2, background: colorFor(min + ((max - min) * i) / (RAMP_STOPS - 1)) }} />
         ))}
       </span>
       <span style={{ fontVariantNumeric: "tabular-nums" }}>{max.toFixed(1)}</span>
@@ -88,6 +102,7 @@ function BandGrid({
   bandLabel,
   dayLabel,
   axisMin,
+  colorFor,
   onTip,
   onLeave,
 }: {
@@ -95,6 +110,7 @@ function BandGrid({
   bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
   axisMin: string;
+  colorFor: (v: number) => string;
   onTip: (e: React.MouseEvent, text: string) => void;
   onLeave: () => void;
 }) {
@@ -136,7 +152,7 @@ function BandGrid({
                   data-testid="ov-band-cell"
                   onMouseEnter={(e) => onTip(e, tipText)}
                   onMouseMove={(e) => onTip(e, tipText)}
-                  style={{ height: 30, borderRadius: 3, background: delayColor(v), opacity: c?.low_confidence ? 0.5 : 1 }}
+                  style={{ height: 30, borderRadius: 3, background: colorFor(v), opacity: c?.low_confidence ? 0.5 : 1 }}
                 />
               );
             }),
@@ -159,7 +175,9 @@ function RankedRoutes({
   lowConfNote: string;
   onPick: (code: string) => void;
 }) {
-  const max = Math.max(...routes.map((r) => r.expected_avg_min), 1);
+  const vals = routes.map((r) => r.expected_avg_min);
+  const max = Math.max(...vals, 1);
+  const min = vals.length ? Math.min(...vals) : 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {routes.map((r) => (
@@ -174,7 +192,7 @@ function RankedRoutes({
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
-            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: delayColor(r.expected_avg_min), borderRadius: 3 }} />
+            <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: relativeDelayColor(r.expected_avg_min, min, max), borderRadius: 3 }} />
           </span>
           <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
             {r.expected_avg_min.toFixed(1)}
@@ -375,7 +393,7 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
         band,
         expected_avg_min: a && n ? Math.round((a.sum / n) * 10) / 10 : null,
         samples: n,
-        low_confidence: n > 0 && n < 30,
+        low_confidence: n > 0 && n < LOW_CONFIDENCE_SAMPLES,
       });
     }
   }
@@ -391,6 +409,18 @@ export function ForecastTab() {
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
   const [showGrid, setShowGrid] = useState(false);
+
+  // Reset the drill-down when the agency changes (the picker only swaps the
+  // :agencyId param, so this component instance is reused — without this, a
+  // selected route from the old agency would leak into the new one). This is
+  // the React "adjust state during render on prop change" pattern, not an effect.
+  const [prevAid, setPrevAid] = useState(aid);
+  if (aid !== prevAid) {
+    setPrevAid(aid);
+    setSelectedRoute(null);
+    setView(null);
+    setShowGrid(false);
+  }
 
   // Per-route avg delay for the picker's warm-ramp chips (same query the landing
   // uses — react-query dedupes, so this does not double-fetch).
@@ -437,7 +467,7 @@ export function ForecastTab() {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min })}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min.toFixed(1) })}
           onPick={setSelectedRoute}
           onTip={onTip}
           onLeave={onLeave}
@@ -465,6 +495,7 @@ export function ForecastTab() {
   );
 }
 
+/** Agency-wide landing: worst-window headline + day×band grid + delay-ranked routes. */
 function AgencyLanding({
   aid,
   dayLabel,
@@ -511,6 +542,7 @@ function AgencyLanding({
   }
   const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
   const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
+  const colorFor = (v: number) => relativeDelayColor(v, min, max);
 
   return (
     <>
@@ -522,8 +554,8 @@ function AgencyLanding({
       )}
 
       <Card title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} />}
+        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
+        {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
       </Card>
 
       {data.routes.length > 0 && (
@@ -533,10 +565,15 @@ function AgencyLanding({
           </Card>
         </div>
       )}
+
+      {data.disclaimer && (
+        <p style={{ color: "var(--text-tertiary)", fontSize: 11, lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
+      )}
     </>
   );
 }
 
+/** Per-route detail: band-collapsed grid + worst sentence + day/hour cards, full 7×24 behind a toggle. */
 function RouteDetail({
   aid,
   route,
@@ -574,10 +611,19 @@ function RouteDetail({
   const allNull = data != null && populated.length === 0;
   const peak = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
   const calm = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) < (b.expected_avg_min as number) ? c : b), null);
-  // Worst window excluding low-confidence cells, for the headline sentence.
-  const worstCell = populated
+
+  // Band-collapsed grid (same banding as the agency landing). The headline worst
+  // is the worst *band* (excluding low-confidence) so its number matches the band
+  // cell the user sees below it — not a single spiky hour. Its colour ramp is
+  // anchored to the band grid's own range.
+  const bandGrid = collapseToBands(cells);
+  const bandPop = bandGrid.filter((c) => c.expected_avg_min != null);
+  const bandMax = Math.max(...bandPop.map((c) => c.expected_avg_min as number), 1);
+  const bandMin = bandPop.length ? Math.min(...bandPop.map((c) => c.expected_avg_min as number)) : 0;
+  const bandColorFor = (v: number) => relativeDelayColor(v, bandMin, bandMax);
+  const worstBand = bandPop
     .filter((c) => !c.low_confidence)
-    .reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
+    .reduce<ForecastOverviewGridCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
 
   const margin = (pick: (c: ForecastHeatmapCell) => number, n: number): (number | null)[] =>
     Array.from({ length: n }, (_, i) => {
@@ -611,15 +657,15 @@ function RouteDetail({
 
   return (
     <>
-      {worstCell && (
+      {worstBand && (
         <div data-testid="detail-worst" style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstCell.dow), band: bandLabel(bandOf(worstCell.hour)), min: (worstCell.expected_avg_min as number).toFixed(1) })}
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), min: (worstBand.expected_avg_min as number).toFixed(1) })}
         </div>
       )}
 
       <Card title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid grid={collapseToBands(cells)} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
+        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
+        {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
@@ -643,6 +689,10 @@ function RouteDetail({
           <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
+      )}
+
+      {data.disclaimer && (
+        <p style={{ color: "var(--text-tertiary)", fontSize: 11, lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
       )}
 
       {view && (

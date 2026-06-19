@@ -29,7 +29,6 @@
     "low_confidence_note": "計測が少なく参考値",
     "route_label": "路線",
     "route_placeholder": "路線を検索…",
-    "pick_prompt": "路線を選ぶと、いつ遅れやすいかを表示します。",
     "no_data": "この路線の計測記録がまだありません。",
     "axis_min": "分",
     "legend_unit": "遅延（分）",
