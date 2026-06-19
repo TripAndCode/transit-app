@@ -15,7 +15,6 @@
     "route_placeholder": "路線を検索…",
     "pick_prompt": "路線を選ぶと、いつ遅れやすいかを表示します。",
     "no_data": "この路線の計測記録がまだありません。",
-    "low_confidence": "参考値（計測が少ない）",
     "axis_min": "分",
     "peak": "最大",
     "heatmap_title": "曜日 × 時間帯",
@@ -39,8 +38,7 @@
     "m_dir_slower": "遅い",
     "m_dir_calmer": "軽い",
     "m_samples": "計測 {{n}}回",
-    "m_low_conf": "（少なめ — 参考値）",
-    "m_close": "閉じる"
+    "m_low_conf": "（少なめ — 参考値）"
   },
   "network": {
     "title": "事業者比較",

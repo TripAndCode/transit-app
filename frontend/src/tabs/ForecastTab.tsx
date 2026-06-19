@@ -88,7 +88,7 @@ function Heatmap({
         )}
       </div>
       <div
-        role="img"
+        role="group"
         aria-label={ariaLabel}
         onMouseLeave={() => {
           setHover(null);

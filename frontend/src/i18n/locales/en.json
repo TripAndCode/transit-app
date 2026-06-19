@@ -15,7 +15,6 @@
     "route_placeholder": "Search routes…",
     "pick_prompt": "Pick a route to see when it runs late.",
     "no_data": "No delay measurements for this route yet.",
-    "low_confidence": "Low confidence (few measurements)",
     "axis_min": "min",
     "peak": "Peak",
     "heatmap_title": "By day & hour",
@@ -39,8 +38,7 @@
     "m_dir_slower": "slower",
     "m_dir_calmer": "lighter",
     "m_samples": "{{n}} measurements",
-    "m_low_conf": " (few — rough estimate)",
-    "m_close": "Close"
+    "m_low_conf": " (few — rough estimate)"
   },
   "network": {
     "title": "Compare agencies",
