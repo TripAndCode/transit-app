@@ -26,7 +26,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import summarize_expected_delay_heatmap
+from pipeline.reports.forecast import summarize_agency_overview, summarize_expected_delay_heatmap
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -138,6 +138,89 @@ async def forecast_heatmap(
         route,
     )
     return summarize_expected_delay_heatmap(rows, route, locale)
+
+
+class ForecastOverviewGridCell(BaseModel):
+    """One day-of-week × time-band cell of the agency overview grid."""
+
+    dow: int
+    band: str
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+
+
+class ForecastOverviewWorst(BaseModel):
+    """The single worst (highest pooled delay) window agency-wide."""
+
+    dow: int
+    band: str
+    expected_avg_min: float
+    samples: int
+
+
+class ForecastOverviewRoute(BaseModel):
+    """One route in the delay-ranked list."""
+
+    route_code: str
+    route_name: str
+    expected_avg_min: float
+    samples: int
+    low_confidence: bool
+
+
+class ForecastOverviewResponse(BaseModel):
+    """Payload for ``GET /forecast/overview`` — agency-wide landing view."""
+
+    grid: list[ForecastOverviewGridCell]
+    worst: ForecastOverviewWorst | None
+    routes: list[ForecastOverviewRoute]
+    disclaimer: str
+
+
+@router.get("/forecast/overview", response_model=ForecastOverviewResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_overview(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Agency-wide expected delay: a 7-day × time-band grid (pooled across all
+    routes), the worst window, and a delay-ranked route list. Seasonal-naive
+    baseline, NOT a prediction; carries a disclaimer. Re-pools agg_route_hour_dow
+    (no dedicated aggregate — the table is small enough to pool on read).
+    """
+    grid_rows = await conn.fetch(
+        "SELECT dow, hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour_dow "
+        "WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY dow, hour",
+        agency_id,
+    )
+    route_rows = await conn.fetch(
+        "WITH ra AS ("
+        "  SELECT route_code, "
+        "    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "    SUM(samples)::int AS samples "
+        "  FROM agg_route_hour_dow "
+        "  WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
+        "  GROUP BY route_code"
+        "), labels AS ("
+        "  SELECT DISTINCT ON (route_code) route_code, route_short_name, route_long_name FROM ("
+        "    SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, "
+        "           route_short_name, route_long_name "
+        "    FROM static_routes WHERE agency_id = $1"
+        "  ) s ORDER BY route_code, route_short_name"
+        ") "
+        "SELECT ra.route_code, ra.avg_min, ra.samples, "
+        "  COALESCE(NULLIF(l.route_short_name, ''), NULLIF(l.route_long_name, ''), ra.route_code) AS route_name "
+        "FROM ra LEFT JOIN labels l USING (route_code)",
+        agency_id,
+    )
+    return summarize_agency_overview(grid_rows, route_rows, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing
