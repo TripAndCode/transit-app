@@ -29,6 +29,7 @@ from pipeline.reports import (
 from pipeline.reports.forecast import (
     summarize_expected_delay,
     summarize_expected_delay_dow,
+    summarize_expected_delay_heatmap,
     summarize_expected_delay_profile,
 )
 
@@ -270,6 +271,50 @@ async def forecast_dow(
         route,
     )
     return summarize_expected_delay_dow(rows, route, locale)
+
+
+class ForecastHeatmapCell(BaseModel):
+    """One day-of-week × hour cell of the forecast heatmap."""
+
+    dow: int
+    hour: int
+    expected_avg_min: float | None
+    samples: int
+    low_confidence: bool
+
+
+class ForecastHeatmapResponse(BaseModel):
+    """Payload for ``GET /forecast/heatmap`` — the full 7×24 day×hour grid."""
+
+    route: str
+    cells: list[ForecastHeatmapCell]
+    disclaimer: str
+
+
+@router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def forecast_heatmap(
+    request: Request,
+    route: str = Query(..., min_length=1),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    locale: str = Depends(get_locale),
+):
+    """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
+    route, pooled across service types (sample-weighted = exact pooled mean).
+    Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
+    """
+    rows = await conn.fetch(
+        "SELECT dow, hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour_dow "
+        "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY dow, hour ORDER BY dow, hour",
+        agency_id,
+        route,
+    )
+    return summarize_expected_delay_heatmap(rows, route, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing

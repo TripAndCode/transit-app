@@ -61,6 +61,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_stats",
     "agg_route_hour",
     "agg_route_dow",
+    "agg_route_hour_dow",
     "agg_daily_trend",
     "agg_route_daily",
     "agg_route_daily_dist",
@@ -223,6 +224,31 @@ def analyze(agency_id: int, conn) -> None:
             conn,
         )
         logger.info(f"  agg_route_dow: {len(rows)} rows")
+
+        # ── agg_route_hour_dow ───────────────────────────────────────────
+        # Per route × service × day-of-week × hour, for the Forecast heatmap.
+        sql = """
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
+            SELECT
+                %(agency_id)s AS agency_id,
+                route_code, service_type,
+                EXTRACT(ISODOW FROM date::date)::smallint AS dow,
+                EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
+                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
+                COUNT(*) AS samples
+            FROM deduped
+            GROUP BY route_code, service_type,
+                     EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
+            ORDER BY route_code
+        """
+        rows = _run_query(sql, p, conn)
+        _insert_agg(
+            "agg_route_hour_dow",
+            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples"],
+            rows,
+            conn,
+        )
+        logger.info(f"  agg_route_hour_dow: {len(rows)} rows")
 
         # ── agg_daily_trend ──────────────────────────────────────────────
         # UNTYPED dedup so NULL-service routes (e.g. 広島's unmatched rows) are
