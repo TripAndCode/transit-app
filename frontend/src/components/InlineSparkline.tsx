@@ -9,7 +9,6 @@ type Props = {
   /** When true, always render in `accent`; skip the auto green-on-improvement. */
   forceAccent?: boolean;
   showEndDot?: boolean;
-  baseline?: number;
   showLabels?: boolean;
   style?: CSSProperties;
 };
@@ -21,7 +20,6 @@ export function InlineSparkline({
   accent = "#b45309",
   forceAccent = false,
   showEndDot = true,
-  baseline,
   showLabels = true,
   style,
 }: Props) {
@@ -33,11 +31,8 @@ export function InlineSparkline({
   const last_v = points[points.length - 1];
   const stroke = forceAccent ? accent : last_v <= first ? "#166534" : accent;
 
-  // Y scale: include baseline so the dashed line is in-range.
-  const data_min = Math.min(...points);
-  const data_max = Math.max(...points);
-  const y_min = baseline != null ? Math.min(data_min, baseline) : data_min;
-  const y_max = baseline != null ? Math.max(data_max, baseline) : data_max;
+  const y_min = Math.min(...points);
+  const y_max = Math.max(...points);
   const span = y_max - y_min || 1;
 
   const stepX = width / (points.length - 1);
@@ -70,8 +65,6 @@ export function InlineSparkline({
       .join(" ") +
     ` L ${lastX.toFixed(1)},${height} L 0,${height} Z`;
 
-  const baseline_y = baseline != null ? toY(baseline) : null;
-
   return (
     <svg
       className="ov-sparkline"
@@ -83,18 +76,6 @@ export function InlineSparkline({
       aria-hidden
     >
       <path d={area_path} fill={stroke} fillOpacity={0.12} stroke="none" />
-      {baseline_y != null && (
-        <line
-          x1={0}
-          y1={baseline_y}
-          x2={width}
-          y2={baseline_y}
-          stroke="#8e8e93"
-          strokeWidth="1"
-          strokeDasharray="3 3"
-          opacity={0.5}
-        />
-      )}
       <polyline
         fill="none"
         stroke={stroke}

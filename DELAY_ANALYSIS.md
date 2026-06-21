@@ -49,13 +49,19 @@ drift, weather, or special events. The only fiddly parts are mapping a calendar 
 its service type (weekday / Saturday / Sunday-holiday) and bucketing a clock time into an
 hour; the core is "look up one average."
 
-## The "expected delay" endpoint
+## The "expected delay" endpoints
 
-`GET /api/{agency_id}/forecast?route=…&service_type=…&hour=0–23` is the concrete version of
-"look up an average": it reads the matching `agg_route_hour` rows and returns the
-sample-weighted typical delay for that slot. `service_type` must match the agency's stored
-value exactly (these are agency-specific labels — often prefixed, e.g. `35_平日(共通)`, not a
-bare `平日`); an unrecognized value simply returns the no-data response.
+Two read endpoints are the concrete version of "look up an average", both served from the
+precomputed `agg_route_hour_dow` table (per route × service_type × day-of-week × scheduled
+hour):
+
+- `GET /api/{agency_id}/forecast/heatmap?route=…` — the full day-of-week × hour grid for one
+  route (the 予測 detail view).
+- `GET /api/{agency_id}/forecast/overview` — pooled across all routes into a day × time-band
+  grid, plus the worst window and a delay-ranked route list (the 予測 agency landing).
+
+Both report the sample-weighted mean (the exact pooled mean), never a percentile (a weighted
+mean of per-bucket percentiles is not the pooled percentile).
 
 **A "sample" (delay measurement)** = one run of a scheduled departure, measured at one stop,
 on one day. A busy route accumulates thousands; it is not a count of trips.

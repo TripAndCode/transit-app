@@ -256,9 +256,8 @@ async def ask(
 _BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", "describe_data")
 
 # Per-tool labels (ja / en) and field override metadata for the builder UI.
-# Enum options and defaults are derived from _TOOL_DEFAULTS where possible;
-# this dict supplies the human-readable labels and the enum option lists that
-# aren't captured in _TOOL_DEFAULTS.
+# This dict supplies the human-readable labels and the enum option lists for
+# each builder tool.
 # NOTE: ``service_type`` and ``time_window`` are intentionally absent from every
 # tool's builder fields. Those overlap with the per-thread FilterContextBar
 # (期間 ・ 曜日 ・ 時間帯), which is the single source of truth for time + DOW
@@ -342,9 +341,8 @@ async def ask_build_schema(
 ):
     """Return tool-form metadata for the frontend's guided build mode.
 
-    Driven by ``_BUILD_TOOL_META`` + ``_TOOL_DEFAULTS``. The
-    ``capabilities`` and ``route_meta`` tools are excluded as they are
-    not useful in a builder.
+    Driven by ``_BUILD_TOOL_META``. The ``capabilities`` and ``route_meta``
+    tools are excluded as they are not useful in a builder.
     """
     tools_out = []
     for name in _BUILD_TOOL_NAMES:

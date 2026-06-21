@@ -9,11 +9,12 @@ Aggregation tables produced:
 - agg_route_stats      — overall delay stats per route/service_type
 - agg_route_hour       — delay by scheduled departure time
 - agg_route_dow        — delay by day-of-week (ISODOW 1=Mon..7=Sun)
+- agg_route_hour_dow   — delay by day-of-week × scheduled hour (Forecast heatmap)
 - agg_daily_trend      — per-day delay averages for trend queries
 - agg_route_daily      — per-route, per-day summary (powers today/route-summary)
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
-- agg_stop_seq         — per-stop delay (requires static data)
+- agg_stop_seq         — per-stop delay by sequence (synthesizes stop names without static)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)

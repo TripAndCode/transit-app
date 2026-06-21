@@ -33,7 +33,7 @@ const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const RAMP_STOPS = 6;
 
 type Tip = { x: number; y: number; text: string } | null;
-type View = "hm" | "dow" | "hr" | null;
+type View = "dow" | "hr" | null;
 
 /** Clickable-card props matching the Overview card pattern (role=button + keyboard). */
 function clickable(onClick: () => void) {
@@ -609,8 +609,6 @@ function RouteDetail({
   const totalN = populated.reduce((a, c) => a + c.samples, 0);
   const mean = totalN ? populated.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / totalN : 0;
   const allNull = data != null && populated.length === 0;
-  const peak = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) > (b.expected_avg_min as number) ? c : b), null);
-  const calm = populated.reduce<ForecastHeatmapCell | null>((b, c) => (!b || (c.expected_avg_min as number) < (b.expected_avg_min as number) ? c : b), null);
 
   // Band-collapsed grid (same banding as the agency landing). The headline worst
   // is the worst *band* (excluding low-confidence) so its number matches the band
@@ -648,7 +646,7 @@ function RouteDetail({
     return idx;
   };
 
-  const modalTitle = view === "hm" ? t("forecast.heatmap_title") : view === "dow" ? t("forecast.dow_summary") : t("forecast.hour_summary");
+  const modalTitle = view === "dow" ? t("forecast.dow_summary") : t("forecast.hour_summary");
 
   if (isPending) return <Skeleton height={200} />;
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
@@ -697,20 +695,6 @@ function RouteDetail({
 
       {view && (
         <OverviewModal isOpen onClose={() => setView(null)} title={modalTitle}>
-          {view === "hm" && peak && calm && (
-            <>
-              <StatStrip
-                stats={[
-                  { label: t("forecast.stat_worst"), value: `${dayLabel(peak.dow)} ${peak.hour}:00 · ${(peak.expected_avg_min as number).toFixed(1)}${axisMin}` },
-                  { label: t("forecast.stat_calmest"), value: `${dayLabel(calm.dow)} ${calm.hour}:00 · ${(calm.expected_avg_min as number).toFixed(1)}${axisMin}` },
-                  { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
-                  { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
-                ]}
-              />
-              <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
-              <Legend min={min} max={max} unit={t("forecast.legend_unit")} />
-            </>
-          )}
           {(view === "dow" || view === "hr") && (() => {
             const vals = view === "dow" ? dowAvg : hourAvg;
             const labels = view === "dow" ? dowLabels : hourLabels;
