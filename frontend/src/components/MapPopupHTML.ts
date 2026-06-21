@@ -102,20 +102,30 @@ function stopIdLineHTML(stop_id: string | null | undefined): string {
   );
 }
 
-export function renderStopPopupHTML(d: StopPopupData, period: Period, t: TFunction): string {
-  const samplesLabel = d.samples.toLocaleString("en-US");
+/** Metric block: avg + samples for observed stops; a "no measurements" line for
+ * unobserved stops (samples 0), so they don't masquerade as a real 0.0-min reading. */
+function metricBlockHTML(d: StopPopupData, t: TFunction): string {
+  if (d.samples === 0) {
+    return `<div style="margin-top:6px;color:#888">${escapeHtml(t("map.popup.no_data"))}</div>`;
+  }
   const unitMin = escapeHtml(t("common.unit_min"));
   const unitCount = escapeHtml(t("common.unit_count"));
+  return (
+    `<div style="margin-top:6px">` +
+    `${escapeHtml(t("map.popup.avg_delay_label"))} ${d.avg_min.toFixed(1)}${unitMin}<br/>` +
+    `${escapeHtml(t("map.popup.samples_label"))} ${d.samples.toLocaleString("en-US")}${unitCount}` +
+    routesLineHTML(d, t) +
+    `</div>`
+  );
+}
+
+export function renderStopPopupHTML(d: StopPopupData, period: Period, t: TFunction): string {
   return (
     `<div style="font:13px sans-serif;min-width:220px">` +
     `<div><strong>${escapeHtml(d.stop_name)}</strong>${poleBadgeHTML(d.platform_code, t)}</div>` +
     stopCodeSubtitleHTML(d.stop_code, d.stop_name) +
     metaLineHTML(d.stop_sequence, d.active_route, t) +
-    `<div style="margin-top:6px">` +
-    `${escapeHtml(t("map.popup.avg_delay_label"))} ${d.avg_min.toFixed(1)}${unitMin}<br/>` +
-    `${escapeHtml(t("map.popup.samples_label"))} ${samplesLabel}${unitCount}` +
-    routesLineHTML(d, t) +
-    `</div>` +
+    metricBlockHTML(d, t) +
     stopIdLineHTML(d.stop_id) +
     `<div style="font-size:11px;color:#888;margin-top:4px">` +
     `${escapeHtml(t("map.popup.period_label"))} ${escapeHtml(period.from)} ${escapeHtml(t("common.range_separator"))} ${escapeHtml(period.to)}` +

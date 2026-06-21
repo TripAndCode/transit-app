@@ -198,6 +198,21 @@ export function MapLegend({
             selected={focusedSeverity === "severe"}
             onClick={() => onFocusedSeverityChange(focusedSeverity === "severe" ? null : "severe")}
           />
+          {/* Unobserved route-stops render as hollow rings in single-route mode;
+              explain them here. Not a focusable severity band — purely a key. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, padding: "2px 4px" }}>
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                background: "transparent",
+                border: "1px solid rgba(0,0,0,0.35)",
+                flexShrink: 0,
+              }}
+            />
+            <span>{t("map.legend.no_data")}</span>
+          </div>
           {focusedSeverity && (
             <button
               type="button"

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
-import type { RouteShapeResponse } from "../../api/types";
+import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
 import { DELAY_RAMP } from "../../styles/tokens";
 import { whenStyleReady } from "./styleReady";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
@@ -9,8 +9,6 @@ const ROUTE_SOURCE = "route-line";
 const ROUTE_STOPS_SOURCE = "route-line-stops";
 const ROUTE_LAYER = "route-line-stroke";
 export const ROUTE_STOPS_LAYER = "route-stops";
-const ROUTE_UNOBS_SOURCE = "route-unobserved";
-const ROUTE_UNOBS_LAYER = "route-unobserved-stops";
 
 // Every layer of the agency-wide delay overlay (dots + cluster bubbles + their
 // count labels). Single-route mode hides ALL of them, not just the dots —
@@ -24,8 +22,9 @@ function setDelayOverlayVisibility(m: MLMap, visibility: "visible" | "none") {
 }
 
 /**
- * Draw the single-route overlay when `shape` is present (polyline + numbered
- * stops + hollow unobserved-stop rings); strip it and re-show the agency-wide
+ * Draw the single-route overlay when `shape` is present (polyline + one stop
+ * layer that renders observed stops as delay-colored dots and unobserved stops
+ * as hollow rings — both interactive); strip it and re-show the agency-wide
  * delay overlay (dots + clusters + count labels) when it isn't. Fits bounds to
  * the route on focus.
  */
@@ -40,12 +39,10 @@ export function useRouteOverlay(
 
     function clearOverlay() {
       if (!m) return;
-      if (m.getLayer(ROUTE_UNOBS_LAYER)) m.removeLayer(ROUTE_UNOBS_LAYER);
       if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
       if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
       if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
       if (m.getSource(ROUTE_STOPS_SOURCE)) m.removeSource(ROUTE_STOPS_SOURCE);
-      if (m.getSource(ROUTE_UNOBS_SOURCE)) m.removeSource(ROUTE_UNOBS_SOURCE);
     }
 
     function drawOverlay() {
@@ -83,81 +80,59 @@ export function useRouteOverlay(
         },
       });
 
+      // One feature per stop, observed and unobserved together, distinguished by
+      // a `has_data` flag. A single layer means the existing route-stop click /
+      // hover handlers (registered on ROUTE_STOPS_LAYER in MapTab) cover every
+      // stop — unobserved ones are no longer dead, unexplained markers.
+      // RouteShapeStop carries avg_min/samples; UnobservedStop doesn't — accept
+      // either and only read the metrics for observed stops.
+      const toFeature = (s: RouteShapeStop | UnobservedStop, hasData: boolean) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [s.lon, s.lat] },
+        properties: {
+          stop_sequence: s.stop_sequence,
+          stop_name: s.stop_name,
+          stop_id: s.stop_id ?? null,
+          stop_code: s.stop_code ?? null,
+          platform_code: s.platform_code ?? null,
+          avg_min: hasData && "avg_min" in s ? (s.avg_min ?? 0) : 0,
+          samples: hasData && "samples" in s ? s.samples : 0,
+          has_data: hasData,
+        },
+      });
+      const features = [
+        ...shape.stops.map((s) => toFeature(s, (s.samples ?? 0) > 0)),
+        ...(shape.unobserved_stops ?? []).map((s) => toFeature(s, false)),
+      ];
+
       m.addSource(ROUTE_STOPS_SOURCE, {
         type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: shape.stops.map((s) => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-            properties: {
-              stop_sequence: s.stop_sequence,
-              stop_name: s.stop_name,
-              stop_id: s.stop_id ?? null,
-              stop_code: s.stop_code ?? null,
-              platform_code: s.platform_code ?? null,
-              avg_min: s.avg_min ?? 0,
-              samples: s.samples,
-            },
-          })),
-        },
+        data: { type: "FeatureCollection", features },
       });
       m.addLayer({
         id: ROUTE_STOPS_LAYER,
         type: "circle",
         source: ROUTE_STOPS_SOURCE,
         paint: {
+          // Observed stops are larger, delay-colored, white-ringed; unobserved
+          // stops are smaller hollow gray rings (transparent fill).
           "circle-radius": [
-            "interpolate", ["linear"], ["zoom"],
-            10, 4,
-            14, 7,
-            17, 11,
+            "case",
+            ["get", "has_data"],
+            ["interpolate", ["linear"], ["zoom"], 10, 4, 14, 7, 17, 11],
+            ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
           ],
           "circle-color": [
-            "step",
-            ["get", "avg_min"],
-            DELAY_RAMP.ok,
-            2, DELAY_RAMP.mild,
-            5, DELAY_RAMP.moderate,
-            10, DELAY_RAMP.severe,
+            "case",
+            ["get", "has_data"],
+            ["step", ["get", "avg_min"], DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe],
+            "rgba(255,255,255,0)",
           ],
           "circle-opacity": 0.95,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": ["case", ["get", "has_data"], 2, 1],
+          "circle-stroke-color": ["case", ["get", "has_data"], "#ffffff", "rgba(0,0,0,0.35)"],
         },
       });
-
-      const unobserved = shape.unobserved_stops ?? [];
-      if (unobserved.length > 0) {
-        m.addSource(ROUTE_UNOBS_SOURCE, {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: unobserved.map((s) => ({
-              type: "Feature",
-              geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-              properties: {
-                stop_sequence: s.stop_sequence,
-                stop_name: s.stop_name,
-                stop_id: s.stop_id ?? null,
-                stop_code: s.stop_code ?? null,
-                platform_code: s.platform_code ?? null,
-              },
-            })),
-          },
-        });
-        m.addLayer({
-          id: ROUTE_UNOBS_LAYER,
-          type: "circle",
-          source: ROUTE_UNOBS_SOURCE,
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
-            "circle-color": "rgba(255,255,255,0.0)",
-            "circle-stroke-width": 1,
-            "circle-stroke-color": "rgba(0,0,0,0.35)",
-          },
-        });
-      }
 
       let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
       for (const [lon, lat] of coords) {

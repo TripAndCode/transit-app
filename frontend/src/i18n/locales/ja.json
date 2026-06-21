@@ -321,6 +321,7 @@
       "band_5_10": "5 – 10分",
       "band_gt_10": "> 10分",
       "band_empty": "この範囲の停留所はありません",
+      "no_data": "計測なし",
       "clear_selection": "選択を解除",
       "size_density": "ドットの大きさ",
       "few_to_many": "遅延 小 → 大",
@@ -336,6 +337,7 @@
       "routes_label": "路線:",
       "avg_delay_label": "平均遅延:",
       "samples_label": "サンプル:",
+      "no_data": "この期間の計測はありません",
       "period_label": "期間:"
     },
     "hint": {
