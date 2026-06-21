@@ -321,6 +321,7 @@
       "band_5_10": "5–10 min",
       "band_gt_10": "> 10 min",
       "band_empty": "No stops in this range",
+      "no_data": "No data",
       "clear_selection": "Clear selection",
       "size_density": "Dot size",
       "few_to_many": "delay: low → high",
@@ -336,6 +337,7 @@
       "routes_label": "Routes:",
       "avg_delay_label": "Avg delay:",
       "samples_label": "Samples:",
+      "no_data": "No measurements in this period",
       "period_label": "Period:"
     },
     "hint": {
