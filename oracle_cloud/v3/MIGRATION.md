@@ -1,4 +1,4 @@
-# Collector v3 migration runbook (supersedes CUTOVER.md — do not run both)
+# Collector v3 migration runbook
 
 Spec: docs/superpowers/specs/2026-06-06-collector-v3-design.md
 Aomori RT gap: < 1 minute (step 4). Old tree left intact 1 week as fallback.

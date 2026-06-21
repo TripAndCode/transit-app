@@ -20,10 +20,15 @@ findings that affect correctness or the objective.
 ## Phase 3 — Cleanup (only after review reported)
 - Remove unnecessary comments and dead code in the diff.
 - Add docstrings: file header + new/changed funcs and classes.
-- Run `make all`. DB SAFETY: tests must point at the throwaway DB —
+- Run `make check` (fmt + lint + test). DB SAFETY: tests must point at the throwaway DB —
   `DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`. NEVER let
   a run hit dev DB :5433. See CLAUDE.md / transit-app-gotchas.
 - Fix only errors related to the changed files.
+
+## Review gate
+Before a PR is considered ready, run this whole flow THREE times, each pass
+approaching the diff as if seeing the PR for the first time (reset mindset between
+passes). Each fresh read surfaces issues the prior context-anchored read glossed over.
 
 ## Boundaries
 - Do NOT commit. Do NOT push.

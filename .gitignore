@@ -26,7 +26,6 @@ specs/
 # Contents pattern (not bare dir) so the negations below can re-include;
 # ssh keys and poller logs under oracle_cloud/ stay ignored.
 oracle_cloud/*
-!oracle_cloud/CUTOVER.md
 !oracle_cloud/v3/
 # inside the re-included v3 tree: never track runtime data or key material
 oracle_cloud/v3/data/
