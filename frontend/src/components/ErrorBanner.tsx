@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ApiError } from "../api/client";
+import { ApiError, isAggregateNotReady } from "../api/client";
 
 type Props = {
   error: unknown;
@@ -20,6 +20,28 @@ function messageFor(err: unknown, t: TFunction): string {
 
 export function ErrorBanner({ error, onRetry }: Props) {
   const { t } = useTranslation();
+
+  // Aggregates-not-built (503) is persistent, not transient: explain it calmly
+  // in a neutral tone and offer no retry (retrying can't build the data).
+  if (isAggregateNotReady(error)) {
+    return (
+      <div
+        role="status"
+        style={{
+          background: "var(--bg-soft)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border-soft)",
+          padding: "10px 14px",
+          borderRadius: "var(--radius)",
+          margin: "0 0 16px",
+          lineHeight: 1.5,
+        }}
+      >
+        {t("errors.aggregate_not_ready")}
+      </div>
+    );
+  }
+
   return (
     <div
       role="alert"
