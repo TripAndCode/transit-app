@@ -785,6 +785,7 @@
     "rate_limited": "High traffic right now. Please wait a moment and retry.",
     "not_found": "No data available yet.",
     "server_5xx": "Couldn't load data just now. Please retry.",
+    "aggregate_not_ready": "Data for this view isn't ready in this environment yet. It will appear once the data has been prepared.",
     "generic_status": "Failed to load ({{status}})",
     "network": "Connection dropped for a moment. Please retry.",
     "generic": "Failed to load.",

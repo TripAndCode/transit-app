@@ -13,6 +13,24 @@ export class ApiError extends Error {
   }
 }
 
+/** Machine code the API returns (503) when a read endpoint's precomputed
+ * aggregate table doesn't exist yet on this deployment (migrations/analyze
+ * behind). Mirrors api/aggregate_errors.py::AGGREGATE_NOT_READY_CODE. */
+const AGGREGATE_NOT_READY_CODE = "aggregate_not_ready";
+
+/** True when an error is the "aggregates not built in this environment" 503 —
+ * a persistent, not-transient condition, so the UI should explain it calmly and
+ * NOT offer a futile retry. */
+export function isAggregateNotReady(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 503) return false;
+  try {
+    const parsed = JSON.parse(err.body);
+    return parsed?.code === AGGREGATE_NOT_READY_CODE;
+  } catch {
+    return false;
+  }
+}
+
 /** GET. Pass react-query's `signal` so in-flight requests are aborted when
  * the query key changes or the consuming component unmounts — without it,
  * rapid filter changes leave orphaned fetches racing each other. */
