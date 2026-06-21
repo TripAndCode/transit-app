@@ -33,7 +33,6 @@
     "axis_min": "分",
     "legend_unit": "遅延（分）",
     "click_hint": "カードをクリックすると拡大します。",
-    "heatmap_title": "曜日 × 時間帯",
     "heatmap_caption": "この路線がいつ遅れやすいか — 濃いほど遅延が大きい。",
     "heatmap_aria": "曜日・時間帯ごとの予想遅延",
     "dow_summary": "曜日別",

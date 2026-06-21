@@ -45,19 +45,10 @@ export function makeMockMap(
     getPaintProperty: (layerId: string, prop: string) => paint[`${layerId}|${prop}`],
     getStyle: () => ({ layers }),
     isStyleLoaded: () => styleLoadedFlag,
-    _onceHandlers: {} as Record<string, () => void>,
-    once: (event: string, cb: () => void) => {
-      map._onceHandlers[event] = cb;
-    },
-    fireOnce: (event: string) => {
-      // a real `style.load` means the style is now loaded
-      if (event === "style.load") styleLoadedFlag = true;
-      const cb = map._onceHandlers[event];
-      if (cb) {
-        delete map._onceHandlers[event];
-        cb();
-      }
-    },
+    // No-op recorder: the code under test calls map.once("style.load", …);
+    // readiness is driven via settleStyle/settleViaIdle (styledata + idle
+    // backstop), so the one-shot never needs to fire in tests.
+    once: () => {},
     _handlers: {} as Record<string, Array<() => void>>,
     on: (event: string, cb: () => void) => {
       (map._handlers[event] ||= []).push(cb);

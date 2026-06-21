@@ -33,7 +33,6 @@
     "axis_min": "min",
     "legend_unit": "min delay",
     "click_hint": "Click a card to expand it.",
-    "heatmap_title": "By day & hour",
     "heatmap_caption": "When this route is late — darker = more delay.",
     "heatmap_aria": "Expected delay by day of week and hour",
     "dow_summary": "By day",

@@ -1,10 +1,9 @@
 type Props = {
   title: string;
   hint?: string;
-  hintMono?: string;
 };
 
-export function EmptyState({ title, hint, hintMono }: Props) {
+export function EmptyState({ title, hint }: Props) {
   return (
     <div
       style={{
@@ -29,19 +28,6 @@ export function EmptyState({ title, hint, hintMono }: Props) {
       />
       <div style={{ fontSize: 16, color: "var(--text-primary)" }}>{title}</div>
       {hint && <div style={{ marginTop: 8 }}>{hint}</div>}
-      {hintMono && (
-        <code
-          style={{
-            marginTop: 8,
-            padding: "4px 8px",
-            background: "var(--bg-soft)",
-            borderRadius: 4,
-            fontSize: 13,
-          }}
-        >
-          {hintMono}
-        </code>
-      )}
     </div>
   );
 }

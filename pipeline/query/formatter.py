@@ -22,11 +22,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "en"): "No data available. Try widening the range or clearing route filters.",
     ("no_static", "ja"): (
         "この質問にはGTFS Staticデータが必要です。\n"
-        "`python gtfs_rag_pipeline.py load_static ./raw_archives_static` を先に実行してください。"
+        "`python gtfs_pipeline.py load_static ./raw_archives_static` を先に実行してください。"
     ),
     ("no_static", "en"): (
-        "This report needs GTFS static data.\n"
-        "Run `python gtfs_rag_pipeline.py load_static ./raw_archives_static` first."
+        "This report needs GTFS static data.\nRun `python gtfs_pipeline.py load_static ./raw_archives_static` first."
     ),
     ("ranking_header", "ja"): "【{label}遅延ランキング上位{limit}路線】",
     ("ranking_header", "en"): "[{label}Delay ranking — top {limit} routes]",

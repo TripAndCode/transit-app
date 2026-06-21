@@ -21,9 +21,8 @@ from pipeline.db import _DOW_ISO_TO_JP
 # in display tables ('Mon' / 'Tue' / …).
 _DOW_ISO_TO_EN = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
 
-# JP rollup labels (emitted by the weekday/weekend grouping SQL) ↔ EN.
+# JP rollup labels (emitted by the weekday/weekend grouping SQL) → EN.
 _ROLLUP_JP_TO_EN = {"平日": "Weekday", "週末": "Weekend", "土日祝": "Weekend/Holiday"}
-_ROLLUP_EN_TO_JP = {v: k for k, v in _ROLLUP_JP_TO_EN.items()}
 
 
 def dow_label(value, lang: str = "ja") -> str:
