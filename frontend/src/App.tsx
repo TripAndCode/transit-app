@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
@@ -22,6 +22,10 @@ function useDocumentTitle() {
 
 export default function App() {
   useDocumentTitle();
+  // Remount the routed tab when the agency changes so no tab carries another
+  // agency's in-component state across a switch (e.g. a selected Ask thread or
+  // forecast route). Non-agency routes (network, account) share the "root" key.
+  const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <GuestPrompt />
@@ -32,7 +36,7 @@ export default function App() {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar />
         <main style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          <Outlet />
+          <Outlet key={agencyId ?? "root"} />
         </main>
       </div>
     </div>

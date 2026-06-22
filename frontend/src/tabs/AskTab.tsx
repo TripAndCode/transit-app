@@ -24,6 +24,7 @@ import {
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
+import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
@@ -49,9 +50,11 @@ export function AskTab() {
   const migrateAnon = useMigrateAnon(id ?? 0);
   const migratedRef = useRef(false);
 
-  // Anon → authed migration: fire once when user first becomes authenticated
+  // Anon → authed migration: fire once when an authenticated user actually has
+  // local threads to import. Gating on the local count (not just a ref) means a
+  // remount on agency switch can't re-fire it once localStorage has been cleared.
   useEffect(() => {
-    if (authed && !migratedRef.current && id != null) {
+    if (authed && !migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
       migratedRef.current = true;
       migrateAnon.mutate();
     }

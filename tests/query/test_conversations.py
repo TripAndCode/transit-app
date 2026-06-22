@@ -182,6 +182,33 @@ async def test_migrate_anon_threads_idempotent(pool_with_users):
 
 
 @pytest.mark.asyncio
+async def test_migrate_homes_each_thread_to_its_own_agency(pool_with_users):
+    """Each anon thread carries its own agency_id; migration must home it there,
+    not dump every thread under the URL agency the user happened to be viewing."""
+    pool, agency1, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        a2 = await c.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T2', 'http://t2') RETURNING agency_id"
+        )
+        agency2 = a2["agency_id"]
+    payload = [
+        {"client_id": "t-a1", "agency_id": agency1, "title": "for a1", "filter_ctx": {},
+         "pinned": False, "created_at": "2026-05-29T10:00:00", "updated_at": "2026-05-29T10:00:00", "messages": []},
+        {"client_id": "t-a2", "agency_id": agency2, "title": "for a2", "filter_ctx": {},
+         "pinned": False, "created_at": "2026-05-29T11:00:00", "updated_at": "2026-05-29T11:00:00", "messages": []},
+    ]
+    # URL/scope agency is agency1, but thread t-a2 belongs to agency2.
+    async with pool.acquire() as c:
+        n = await migrate_anon_threads(c, user_id=u1, agency_id=agency1, threads=payload)
+    assert n == 2
+    async with pool.acquire() as c:
+        a1_rows = await list_conversations(c, user_id=u1, agency_id=agency1, limit=10)
+        a2_rows = await list_conversations(c, user_id=u1, agency_id=agency2, limit=10)
+    assert {r["title"] for r in a1_rows} == {"for a1"}
+    assert {r["title"] for r in a2_rows} == {"for a2"}
+
+
+@pytest.mark.asyncio
 async def test_title_truncated_to_200(pool_with_users):
     pool, agency, u1, _ = pool_with_users
     long = "x" * 5000

@@ -62,6 +62,9 @@ class AppendMessage(BaseModel):
 
 class AnonThread(BaseModel):
     client_id: str
+    # The agency the thread belongs to; threads span agencies in localStorage,
+    # so each is homed under its own agency (None → fall back to request scope).
+    agency_id: int | None = None
     title: str
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
     pinned: bool = False

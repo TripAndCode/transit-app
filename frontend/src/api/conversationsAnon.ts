@@ -31,8 +31,10 @@ export const conversationsAnon = {
       });
   },
 
-  get(client_id: string): AnonThread | undefined {
-    return read().find((t) => t.client_id === client_id);
+  // `agency_id`, when given, scopes the lookup so a stale client_id from a
+  // different agency can never resolve to another agency's thread.
+  get(client_id: string, agency_id?: number): AnonThread | undefined {
+    return read().find((t) => t.client_id === client_id && (agency_id === undefined || t.agency_id === agency_id));
   },
 
   create(agency_id: number, title: string, filter_ctx: FilterCtx = {}): AnonThread {
