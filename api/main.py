@@ -43,11 +43,17 @@ from api.routers.network import router as network_router
 from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
+from api.security import cookie_secure
 
 _log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# The placeholder signing key used when SESSION_SIGNING_KEY is unset. Safe for
+# local/anonymous boots; refused at startup once SSO is enabled (see
+# _validate_session_signing_key) so a forgeable-cookie config can't reach prod.
+_DEV_SIGNING_KEY = "dev-only-not-secret"
 
 # Path prefixes the SPA fallback must NOT swallow. An unknown URL under one
 # of these prefixes returns a structured JSON 404 instead of the SPA's
@@ -100,6 +106,17 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
         )
 
 
+def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
+    """Refuse to boot an auth-enabled deployment that still uses the dev signing
+    key — every session/OAuth cookie would be forgeable. No-op when auth is off
+    (anonymous-only mode never mints those cookies)."""
+    if enabled and signing_key == _DEV_SIGNING_KEY:
+        raise RuntimeError(
+            "SESSION_SIGNING_KEY is the dev default in an auth-enabled deployment. "
+            "Set a real secret (e.g. `openssl rand -hex 32`)."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -116,6 +133,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
         )
+    _validate_session_signing_key(enabled, os.environ.get("SESSION_SIGNING_KEY"))
     # max_size=20 (asyncpg default 10): the overview pool-gather path fans
     # out to ~10 concurrent per-task connections while the request's own
     # get_conn dependency still holds a slot — default sizing left the
@@ -166,10 +184,13 @@ app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
     StarletteSessionMiddleware,
-    secret_key=os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
+    secret_key=os.environ.get("SESSION_SIGNING_KEY", _DEV_SIGNING_KEY),
     session_cookie="auth_tmp",
     max_age=600,
-    https_only=False,  # TLS terminated at the edge (Railway); the app sees plain HTTP
+    # Secure when the deployment is HTTPS (PUBLIC_BASE_URL). TLS terminates at
+    # Railway's edge — the browser↔edge hop is HTTPS, so a Secure cookie is sent;
+    # the edge↔app hop being plain HTTP doesn't matter for the Secure flag.
+    https_only=cookie_secure(),
     same_site="lax",
 )
 # Cross-origin SSO from the Vite dev server (:5173 → :8000) needs both
