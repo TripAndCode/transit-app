@@ -272,16 +272,28 @@ async def today_route_summary(
 
     rows = await conn.fetch(
         """
+        WITH rb AS (
+            -- Route-grain baseline (across service_types), so a NULL-service daily
+            -- row (stored as '') still finds a baseline even though agg_route_stats
+            -- has no '' row. Mirrors the digest's route-grain baseline.
+            SELECT route_code,
+                   SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
+                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+            FROM agg_route_stats
+            WHERE agency_id = $1 AND samples IS NOT NULL
+            GROUP BY route_code
+        )
         SELECT
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
-            b.avg_min AS baseline_avg_min,
-            b.p90_min AS baseline_p90_min
+            COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
+            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
           ON b.agency_id = $1
          AND b.route_code = d.route_code
          AND b.service_type = d.service_type
+        LEFT JOIN rb ON rb.route_code = d.route_code
         WHERE d.agency_id = $1 AND d.date = $2
         ORDER BY d.worst_delay_sec DESC, d.route_code
         """,

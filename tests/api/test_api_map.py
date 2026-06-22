@@ -281,6 +281,30 @@ async def test_route_summary_buckets_and_deviation(map_app):
 
 
 @pytest.mark.asyncio
+async def test_route_summary_null_service_uses_route_grain_baseline(map_app):
+    """A NULL-service daily row (stored as '') has no per-(route,service_type)
+    baseline, but the route has typed history — it should fall back to the
+    route-grain baseline instead of being stuck as no_baseline (Hiroshima case)."""
+    app, agency_id = map_app
+    pool = app.state.pool
+    # Today's row is NULL-service ('') and clearly anomalous (420s vs 360s p90).
+    await _seed_route(pool, agency_id, "R_NULLSVC", "", [(f"x{i}", 1, 420, "10:00") for i in range(40)], baseline=None)
+    # The route DOES have a typed (平日) baseline in agg_route_stats.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
+            "VALUES ($1, 'R_NULLSVC', '平日', 2.0, 6.0, 500)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSVC"]
+    assert r["has_baseline"] is True
+    assert r["baseline_avg_sec"] == 120  # route-grain 2.0 min, not no_baseline
+    assert r["bucket"] == "anomaly"
+
+
+@pytest.mark.asyncio
 async def test_route_summary_low_confidence_caps_anomaly(map_app):
     app, agency_id = map_app
     pool = app.state.pool
