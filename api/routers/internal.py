@@ -1,10 +1,12 @@
 """Internal endpoints for scheduled cron jobs.
 
-Designed to be called by an external scheduler (the repo ships a GitHub
-Actions workflow that hits ``POST /internal/cron/ingest`` hourly), so we
-don't need an always-on cron worker on the deployment box. Every endpoint
-is gated by :envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header —
-anything without the matching header gets 401.
+This is the **fallback** ingest path. Production normally ingests the dense
+Oracle archives via a daily Railway scheduled job (see
+``docs/deploy-railway.md``); when object storage isn't wired, an external
+scheduler can instead poke ``POST /internal/cron/ingest`` to run the
+lower-fidelity ``ingest_live`` + ``analyze``. Every endpoint is gated by
+:envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header — anything
+without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
 the cron caller gets a fast 202 and doesn't block on the multi-minute

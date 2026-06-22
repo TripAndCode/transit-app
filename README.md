@@ -317,19 +317,20 @@ WHERE router_stage = 'llm' GROUP BY 1;
 you choose a load path:
 
 ```bash
-# Path A — live fetch from each agency's official feed_url
+# Path A — live fetch from each agency's official feed_url (fallback)
 poetry run python gtfs_pipeline.py ingest_live
 make analyze
 
-# Path B — replay archives from the Oracle Cloud collection VM (local dev only)
+# Path B — replay archives from the Oracle Cloud collection VM
 make fetch-ingest    # rsync + ingest + load_static + analyze in one shot
 ```
 
-Path A is what production uses (the hourly cron hits
-`POST /internal/cron/ingest`). Path B is local-only — see
+Path B (the dense Oracle archive) is the real data path — locally it pulls
+over SSH; in production a daily Railway job pulls the same archives from object
+storage. Path A (`ingest_live`) is the lower-fidelity no-Oracle fallback. See
 [Path A vs Path B](#data-ingest-path-a-vs-path-b) for the why.
 
-See [Deployment](#deployment-railway) for how the deployed cron is wired.
+See [Deployment](#deployment-railway) for how the production ingest job is wired.
 
 For one-off ad-hoc agency inserts:
 
@@ -394,16 +395,17 @@ poetry run python gtfs_pipeline.py ingest_live
 ```
 
 Needs: a public GTFS-RT URL, internet, a populated `feed_url` on the agency
-row. **This is what production uses** — a GitHub Actions workflow hits
-`POST /internal/cron/ingest` hourly, and the FastAPI app runs `ingest_live`
-+ `analyze` for every agency in a background task. See
-[Deployment](#deployment-railway) below.
+row. **This is the production fallback** — when object storage isn't wired,
+poke the `CRON_SECRET`-gated `POST /internal/cron/ingest` endpoint and the
+FastAPI app runs `ingest_live` + `analyze` for every agency in a background
+task. It samples the live feed, so it's lower-fidelity than the Oracle archive
+(Path B). See [Deployment](#deployment-railway) below.
 
 Path A does **not** load static GTFS (stops, routes, timetable) — for that
 you still need `make load_static` against a local zip, or set `static_url`
 on the agency and add a fetcher (not in this repo).
 
-### Path B — Oracle Cloud archive replay (local dev only)
+### Path B — Oracle Cloud archive replay (local dev + production source)
 
 A separate Oracle Cloud VM (`64.110.114.101`, user `opc`) runs an
 independent scraper that crawls the GTFS-JP website and stores both:
@@ -428,11 +430,14 @@ Oracle VM (crawls GTFS-JP)
    Postgres (transit-pg, port 5433)
 ```
 
-The wiring is in `scripts/fetch_archives.sh` (rsync) and
+The local wiring is in `scripts/fetch_archives.sh` (rsync) and
 `scripts/fetch_and_ingest.sh` (rsync → ingest → load_static → analyze).
-This is **only useful for local development** — production deploys do
-not have SSH access to the Oracle VM, and the cron path runs `ingest_live`
-against each agency's `feed_url` instead.
+**Production uses the same archives by a different transport:** Oracle uploads
+the daily per-agency zips to object storage (R2/S3), and a daily Railway
+scheduled job pulls them over HTTPS and runs ingest → analyze → prune into the
+private DB (no inbound SSH, no public DB — see
+[Deployment](#deployment-railway)). `ingest_live` (Path A) is the fallback when
+object storage isn't wired.
 
 For the full bring-up command sequence see [Quick Start ▸ TL;DR](#tldr--path-b-oracle-cloud-archives-current-setup) above. `feed_url` on the agency row is metadata only for Path B — the .pb files are pre-fetched.
 
@@ -487,8 +492,8 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 > **2026-05-22 note on type changes:** migration `0011` retypes
 > `scheduled_time` from `TEXT` to `TIME` and `agg_route_dow.dow` from
 > Japanese-char `TEXT` to `SMALLINT` (ISODOW: Mon=1..Sun=7). After
-> `make migrate`, run `make analyze` (or wait one hour for the cron
-> tick) to repopulate `agg_*` rows under the new types. Ingest
+> `make migrate`, run `make analyze` (or wait for the next daily ingest
+> job) to repopulate `agg_*` rows under the new types. Ingest
 > strategies skip rows with `scheduled_time` hour >= 24 or minute >= 60
 > with a structured warning log — defensive guards against any feed
 > producing values the strict TIME column can't hold.
@@ -523,7 +528,7 @@ poetry run python gtfs_pipeline.py ingest_live
 poetry run python gtfs_pipeline.py ingest_live --agency-id 1
 ```
 
-Fetches the current GTFS-RT protobuf from each agency's `feed_url`. In production it is invoked hourly by a GitHub Actions workflow that hits the guarded `POST /internal/cron/ingest` endpoint — see [Deployment](#deployment-railway).
+Fetches the current GTFS-RT protobuf from each agency's `feed_url`. This is the production *fallback* path — invoked via the guarded `POST /internal/cron/ingest` endpoint when object storage isn't wired; the primary path is the daily Oracle-archive ingest job (see [Deployment](#deployment-railway)).
 
 ### Load static GTFS
 
@@ -555,7 +560,7 @@ Computes five aggregation tables used by all API queries:
 > not the maximum across the polling window. This matches what passengers
 > actually experienced — GTFS-RT estimates refine as the trip nears each
 > stop. Average delays may shift slightly downward on noisy feeds. Each
-> `make analyze` (or hourly cron tick) wipes the agency's five `agg_*`
+> `make analyze` (or daily ingest-job tick) wipes the agency's five `agg_*`
 > tables and rewrites them from the freshly computed SELECTs in one
 > transaction — routes whose data no longer meets the sample-count
 > cutoffs disappear from the tables on the next run, rather than
@@ -876,11 +881,13 @@ Railway runs the two Docker images — the **app** (`Dockerfile`, with the SPA
 baked in, serving API + UI on one origin) and the **database** (custom
 `db/Dockerfile`: PostGIS + pgvector + pg_trgm, on a persistent volume) — with
 free TLS, a managed domain, and auto-deploy on `git push`. ~$10–18/mo,
-usage-based. No box to harden, no reverse proxy to run. Cron is a GitHub
-Actions workflow that hits a guarded `POST /internal/cron/ingest` hourly — no
-always-on cron worker.
+usage-based. No box to harden, no reverse proxy to run. The DB stays on the
+private network; a **daily Railway scheduled job** ingests the day's Oracle
+archives from object storage — no public DB, no always-on worker. `ingest_live`
+(via the `CRON_SECRET`-gated `POST /internal/cron/ingest` endpoint) remains a
+lower-fidelity fallback for when object storage isn't wired.
 
-Full step-by-step (DB service → app service → data load → cron → custom
+Full step-by-step (DB service → app service → data load → ingest job → custom
 domain → backups): [`docs/deploy-railway.md`](docs/deploy-railway.md).
 The app service config (Dockerfile builder, `/health` check, `migrate up`
 pre-deploy command) is pinned in [`railway.json`](railway.json).
@@ -900,20 +907,30 @@ Domain ideas (portfolio): `transit-delay.app`, `gtfs-jp.dev`, `chien-map.app` (�
 `PORT` is injected by Railway automatically (the Dockerfile honours
 `${PORT:-8000}`); don't set it yourself.
 
-### Required GitHub repo secrets
+### Daily ingest job env (set on the `ingest` scheduled service)
 
 | Name | Notes |
 |---|---|
-| `CRON_SECRET` | random 32 bytes; same value as `CRON_SECRET` in the app's Railway Variables |
-| `APP_BASE_URL` | the Railway domain, e.g. `https://<app>.up.railway.app` (the GH workflow `curl`s `${APP_BASE_URL}/internal/cron/ingest`) |
+| `DATABASE_URL` | same private-host URL as the app service |
+| `OBJECT_STORE_ENDPOINT` / `OBJECT_STORE_BUCKET` | S3-compatible store (Cloudflare R2 / AWS S3) Oracle uploads the daily zips to |
+| `OBJECT_STORE_ACCESS_KEY_ID` / `OBJECT_STORE_SECRET_ACCESS_KEY` | read creds for the job, write creds on Oracle's upload step |
+| `AGENCY_IDS` / `RETENTION_DAYS` | agencies to ingest; raw-row prune window (default 400d) |
+
+`CRON_SECRET` is only needed if you also use the `ingest_live` fallback
+endpoint — set it identically on the app service and on whatever external
+scheduler pokes `POST /internal/cron/ingest`.
 
 ### Operational notes
 
 - Migrations: auto-run. `railway.json`'s `preDeployCommand` runs
   `python gtfs_pipeline.py migrate up` before every release (idempotent —
   tracked in `schema_migrations`). No manual step on deploy.
-- The hourly cron is observable in the GitHub Actions tab. Manual replay: `gh workflow run "Hourly Ingest"`.
-- `make fetch-ingest` (Oracle SSH replay) is **local-dev only** and not part of any deployed cron path. The deployed cron uses `ingest_live` — direct HTTPS GET of each agency's `feed_url`.
+- The daily ingest job is observable in its Railway service Logs. Manual
+  replay: trigger the `ingest` service from the Railway dashboard.
+- Production ingests the **Oracle archives** (dense 30s observations) pulled
+  from object storage by the daily job — not a live feed sample. `ingest_live`
+  is the no-Oracle fallback. `make fetch-ingest` (Oracle SSH replay) is the
+  **local-dev** equivalent of the same archive path.
 - The db service's **volume** (`/var/lib/postgresql/data`) is the only stateful piece — without it, data is wiped on every redeploy.
 
 ### Observability
