@@ -167,6 +167,18 @@ railway run --service app python gtfs_pipeline.py build_rag_index --agency-id 1
 
 ## 4. Wire the daily ingest job (Railway scheduled service)
 
+> **Which object store? Use Cloudflare R2.** The pattern is write-once /
+> read-once-a-day, cross-provider (Railway pulls from the bucket) — so the cost
+> that matters is *egress*, and R2 charges **zero egress** (every daily pull and
+> backup restore is free; S3 would bill ~$0.09/GB each pull). It's S3-compatible,
+> so the `aws s3` commands below work unchanged against its endpoint; storage is
+> ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
+> **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
+> retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
+> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set a
+> bucket lifecycle rule** to expire old zips (mirror the DB's 400-day prune) so
+> storage doesn't grow forever.
+
 Production ingest runs **inside the project**, on the private network, so the
 DB stays private (step 1). Add a third service that runs once a day and exits:
 
