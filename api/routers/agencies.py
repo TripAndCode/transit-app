@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.deps import get_conn
-from api.security import csrf_guard
+from api.security import csrf_guard, require_admin
 
 router = APIRouter(prefix="/api/agencies", tags=["agencies"])
 
@@ -38,11 +38,12 @@ async def get_agency(agency_id: int, conn=Depends(get_conn)):
 
 
 @router.post("", response_model=AgencyOut, status_code=201)
-async def create_agency(body: AgencyCreate, request: Request, conn=Depends(get_conn)):
+async def create_agency(body: AgencyCreate, request: Request, conn=Depends(get_conn), _admin=Depends(require_admin)):
     """Create an agency row.
 
-    Origin-gated by ``csrf_guard``; no SSO requirement because operator
-    workflows (``make seed-agencies``) go through the CLI rather than HTTP.
+    Admin-only: the ``feed_url`` is fetched server-side at ingest, so an
+    unauthenticated writer here would be a stored-SSRF vector. Bulk/operator
+    setup still goes through the CLI (``make seed-agencies``).
     """
     csrf_guard(request)
     row = await conn.fetchrow(

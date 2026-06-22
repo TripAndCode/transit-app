@@ -87,8 +87,11 @@ async def _build_heatmap(
     labels = {
         r["route_code"]: (r["label"] or r["route_code"])
         for r in await conn.fetch(
-            "SELECT route_id AS route_code, route_short_name AS label "
-            "FROM static_routes WHERE agency_id = $1 AND route_id = ANY($2::text[])",
+            # route_code in the aggregates is the digit-only code; static_routes.route_id
+            # may carry a trailing "(NNNN)" (Aomori), so derive the code on both sides.
+            "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name AS label "
+            "FROM static_routes WHERE agency_id = $1 "
+            "AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])",
             agency_id,
             route_codes,
         )
@@ -301,10 +304,12 @@ async def movers(
     """
     rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
     label_rows = await conn.fetch(
-        "SELECT route_id, route_short_name FROM static_routes WHERE agency_id = $1",
+        # Derive the digit-only route_code so labels match the aggregates' keys.
+        "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name "
+        "FROM static_routes WHERE agency_id = $1",
         agency_id,
     )
-    labels = {r["route_id"]: (r["route_short_name"] or r["route_id"]) for r in label_rows}
+    labels = {r["route_code"]: (r["route_short_name"] or r["route_code"]) for r in label_rows}
     out_rows = []
     for r in rows:
         rc = r["route_code"]

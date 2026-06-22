@@ -11,6 +11,7 @@ the cron caller gets a fast 202 and doesn't block on the multi-minute
 DB writes.
 """
 
+import hmac
 import logging
 import os
 
@@ -28,7 +29,7 @@ def _check_secret(request: Request) -> None:
         # configured a secret. A misconfigured deploy shouldn't expose
         # the ingest button.
         raise HTTPException(status_code=503, detail="CRON_SECRET not configured")
-    if request.headers.get("X-Cron-Secret") != expected:
+    if not hmac.compare_digest(request.headers.get("X-Cron-Secret") or "", expected):
         raise HTTPException(status_code=401, detail="Invalid cron secret")
 
 

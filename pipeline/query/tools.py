@@ -605,6 +605,26 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
     return ToolResult(kind="empty", summary=_summary("unknown_dimension", lang=locale, dimension=dimension))
 
 
+def _weighted_avg_min(days: list[dict]) -> float | None:
+    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+
+    Each `days` entry is already a per-bucket sample-weighted mean with a
+    `samples` weight, so a plain mean-of-means would overweight thin days (one
+    sparse outlier day could dominate the headline). Null-`avg_min` days are
+    skipped (not counted as 0). Returns None when there are no measured samples.
+    """
+    num = 0.0
+    den = 0
+    for d in days:
+        v = d.get("avg_min")
+        if v is None:
+            continue
+        s = d.get("samples") or 0
+        num += v * s
+        den += s
+    return num / den if den else None
+
+
 async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
     # When the LLM scopes to a single route, push it into ctx so the
     # compute function narrows the trend to that route only. Without this
@@ -618,7 +638,9 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
-    avg = sum((d["avg_min"] or 0) for d in days) / len(days)
+    avg = _weighted_avg_min(days)
+    if avg is None:
+        return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
     return ToolResult(
         kind="series",
         summary=_summary(
