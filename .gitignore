@@ -19,7 +19,8 @@ raw_archives_static/
 .claude/settings.local.json
 .claude/**/*.local.md
 .claude/**/.DS_Store
-docs/
+docs/*
+!docs/deploy-railway.md
 specs/
 .worktrees/
 .superpowers/
