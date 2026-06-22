@@ -192,10 +192,26 @@ async def test_migrate_homes_each_thread_to_its_own_agency(pool_with_users):
         )
         agency2 = a2["agency_id"]
     payload = [
-        {"client_id": "t-a1", "agency_id": agency1, "title": "for a1", "filter_ctx": {},
-         "pinned": False, "created_at": "2026-05-29T10:00:00", "updated_at": "2026-05-29T10:00:00", "messages": []},
-        {"client_id": "t-a2", "agency_id": agency2, "title": "for a2", "filter_ctx": {},
-         "pinned": False, "created_at": "2026-05-29T11:00:00", "updated_at": "2026-05-29T11:00:00", "messages": []},
+        {
+            "client_id": "t-a1",
+            "agency_id": agency1,
+            "title": "for a1",
+            "filter_ctx": {},
+            "pinned": False,
+            "created_at": "2026-05-29T10:00:00",
+            "updated_at": "2026-05-29T10:00:00",
+            "messages": [],
+        },
+        {
+            "client_id": "t-a2",
+            "agency_id": agency2,
+            "title": "for a2",
+            "filter_ctx": {},
+            "pinned": False,
+            "created_at": "2026-05-29T11:00:00",
+            "updated_at": "2026-05-29T11:00:00",
+            "messages": [],
+        },
     ]
     # URL/scope agency is agency1, but thread t-a2 belongs to agency2.
     async with pool.acquire() as c:
