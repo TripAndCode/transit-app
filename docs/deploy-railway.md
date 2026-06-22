@@ -104,6 +104,16 @@ curl -fsS https://<your>.up.railway.app/health      # → 200
 Open the domain in a browser — SPA loads. Tabs are empty until data lands
 (next step), and Ask works once `GROQ_API_KEY`/`CEREBRAS_API_KEY` is valid.
 
+> **Image spec — embedder is baked in.** The `Dockerfile` downloads the
+> Ask-tab embedder (`intfloat/multilingual-e5-small`, ~470 MB) at **build**
+> time into `HF_HOME=/opt/hf-cache`, so the running container loads it from
+> local disk (~6 s) instead of pulling from HuggingFace on every cold start.
+> This keeps boot fast and removes a runtime dependency on HF being up. Cost:
+> the app image is ~4 GB, and the **build** needs network access to HuggingFace
+> (Railway's builder has it). If you ever bump `EMBEDDING_MODEL_ID` to a model
+> other than the baked default, the container falls back to downloading it at
+> boot — re-bake it in the Dockerfile to keep cold starts fast.
+
 ---
 
 ## 3. Load data
@@ -248,4 +258,5 @@ Skip entirely if it's only demo data.
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of `*.railway.internal`. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | Cron returns 401 | `CRON_SECRET` mismatch between Railway Variables and the GH repo secret. |
-| Out of memory at boot | The e5-small embedder (torch) is heavy. Bump the app service's memory, or set `ASK_ROUTER_ENABLED=false` to skip loading it (Ask falls through to the LLM — Stages 1 & 3 still work). |
+| Out of memory at boot | The e5-small embedder (torch) is heavy (~1–2 GB resident — the model is baked into the image, but it still loads into RAM). Bump the app service's memory, or set `ASK_ROUTER_ENABLED=false` to skip loading it (Ask falls through to the LLM — Stages 1 & 3 still work). |
+| Slow first boot / `/health` timeout after a redeploy | If boot pauses on `Load pretrained SentenceTransformer`, the baked model isn't being found (e.g. `HF_HOME` changed or `EMBEDDING_MODEL_ID` overridden) so it's downloading from HuggingFace. Confirm the Dockerfile's bake step and `HF_HOME` match the runtime. |

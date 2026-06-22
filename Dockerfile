@@ -16,6 +16,16 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction
 
+# Bake the Ask-tab embedder into the image. Without this the container downloads
+# the model (~hundreds of MB) from HuggingFace on every cold start — a ~50s boot
+# delay before /health passes AND a runtime dependency on HF being reachable.
+# HF_HOME pins the cache path so the build-time download and the runtime load
+# resolve to the same place. Placed before `COPY . .` so editing app code
+# doesn't invalidate this heavy layer. Keep the id in sync with
+# pipeline/query/embeddings.py:_DEFAULT_MODEL.
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
+
 COPY . .
 COPY --from=frontend /fe/dist /app/api/static
 
