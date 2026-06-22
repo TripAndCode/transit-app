@@ -212,11 +212,18 @@ async def migrate_anon_threads(
             continue
         fc = dict(t.get("filter_ctx") or {})
         fc["_client_id"] = cid
+        # Home each thread under its OWN agency (threads span agencies in
+        # localStorage); fall back to the request-scope agency for older
+        # payloads that predate the per-thread agency_id field.
+        try:
+            thread_agency = int(t.get("agency_id"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            thread_agency = agency_id
         await conn.execute(
             "INSERT INTO ask_conversations (user_id, agency_id, title, filter_ctx, pinned) "
             "VALUES ($1, $2, $3, $4::jsonb, $5)",
             user_id,
-            agency_id,
+            thread_agency,
             str(t.get("title", "(no title)"))[:_MAX_TITLE],
             json.dumps(fc),
             bool(t.get("pinned", False)),

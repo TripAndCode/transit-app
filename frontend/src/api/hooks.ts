@@ -272,7 +272,7 @@ export function useConversation(
         ]);
         return { conversation: conv, messages: msgs };
       }
-      const anon = conversationsAnon.get(conversationId);
+      const anon = conversationsAnon.get(conversationId, agencyId);
       if (!anon) return null;
       return { conversation: toServerLikeConversation(anon), messages: anon.messages };
     },
@@ -479,7 +479,7 @@ export function useFollowup(agencyId: number, authed: boolean) {
         );
       }
       // Anon path: look up context message from localStorage
-      const localThread = conversationsAnon.get(vars.conversationId);
+      const localThread = conversationsAnon.get(vars.conversationId, agencyId);
       const ctx = localThread?.messages.find((m) => m.message_id === vars.contextMessageId);
       if (!ctx) throw new Error("local context message not found");
       const resp = await apiPost<AppendMessageResult>(
