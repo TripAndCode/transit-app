@@ -163,7 +163,7 @@ app.add_middleware(
     secret_key=os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
     session_cookie="auth_tmp",
     max_age=600,
-    https_only=False,  # Caddy in front does TLS
+    https_only=False,  # TLS terminated at the edge (Railway); the app sees plain HTTP
     same_site="lax",
 )
 # Cross-origin SSO from the Vite dev server (:5173 → :8000) needs both
