@@ -16,6 +16,17 @@ from fastapi import HTTPException, Request
 
 _PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 _ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
+
+
+def cookie_secure() -> bool:
+    """True when cookies should set ``Secure`` — i.e. the deployment is served
+    over HTTPS. Read live from the env (not the import-frozen ``_PUBLIC_BASE_URL``)
+    so a per-process config flip is honored. Local-dev over ``http://localhost``
+    returns False so the browser still sends the cookie and SSO works.
+    """
+    return _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").startswith("https://")
+
+
 _CORS_ORIGINS = tuple(
     o.strip() for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
 )

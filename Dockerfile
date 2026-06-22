@@ -21,4 +21,9 @@ COPY --from=frontend /fe/dist /app/api/static
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
+# --proxy-headers + --forwarded-allow-ips='*': trust X-Forwarded-For so the
+# anon rate-limiter and audit/access logs see the real client IP, not Railway's
+# edge. '*' is safe here because Railway's edge is the only network path to the
+# container — clients can't connect directly to spoof the header. (Single-quoted
+# so the shell doesn't glob the '*'.)
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --proxy-headers --forwarded-allow-ips='*'"]

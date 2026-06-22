@@ -25,7 +25,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from api.deps import get_conn
 from api.oauth import oauth
-from api.security import User, csrf_guard, current_user
+from api.security import User, cookie_secure, csrf_guard, current_user
 from pipeline.audit import record_event
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -71,11 +71,6 @@ def sanitize_next(value: str | None) -> str:
     return value
 
 
-def _is_secure() -> bool:
-    """Return True when cookies should set ``Secure`` (deployment is on HTTPS)."""
-    return PUBLIC_BASE_URL.startswith("https://")
-
-
 @router.get("/{provider}/login")
 async def login(provider: str, request: Request, next: str = "/"):
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
@@ -101,7 +96,7 @@ async def login(provider: str, request: Request, next: str = "/"):
         tx_payload,
         max_age=TX_TTL_SEC,
         httponly=True,
-        secure=_is_secure(),
+        secure=cookie_secure(),
         samesite="lax",
         path="/",
     )
@@ -299,7 +294,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         sid,
         max_age=SESSION_TTL_DAYS * 86400,
         httponly=True,
-        secure=_is_secure(),
+        secure=cookie_secure(),
         samesite="lax",
         path="/",
     )
