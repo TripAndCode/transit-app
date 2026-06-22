@@ -60,8 +60,14 @@ _API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json", "internal/")
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """Per-connection setup. Pin the session to Asia/Tokyo so ``captured_at::date``
     casts honor the operator's local calendar instead of UTC (Aomori observations
-    span midnight JST and would otherwise straddle two UTC dates)."""
+    span midnight JST and would otherwise straddle two UTC dates).
+
+    Also caps any single query at 30s — all read endpoints serve from small
+    precomputed agg_* tables (sub-second), so this only ever fires on a
+    pathological live-fallback scan, as a safety net against a hung request.
+    (analyze/ingest run on their own psycopg2 connections, not this pool.)"""
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
+    await conn.execute("SET statement_timeout = '30s'")
 
 
 _AUTH_ENV = (

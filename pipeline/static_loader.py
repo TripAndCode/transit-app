@@ -153,7 +153,11 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 if skipped:
                     logger.warning(f"  WARNING: {skipped} duplicate rows skipped in {table}")
 
-            conn.commit()
             logger.info(f"  {table}: {len(raw_rows):,} rows")
+
+    # Commit once, after every table — a mid-load failure then rolls back the
+    # whole static set rather than leaving a partial one (which `_static_loaded`,
+    # gated only on static_stops, would treat as a complete load).
+    conn.commit()
 
     logger.info("Static data loaded.")
