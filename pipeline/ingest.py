@@ -22,6 +22,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
+from pipeline.url_guard import validate_feed_url
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,10 @@ def ingest_live(agency_id: int, conn) -> int:
     if row is None or not row[0]:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
+
+    # Defense-in-depth: feed_url is admin-set, but block non-http(s) schemes
+    # (urllib opens file://) and internal/metadata hosts before fetching it.
+    validate_feed_url(feed_url)
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)

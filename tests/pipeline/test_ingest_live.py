@@ -21,12 +21,27 @@ def test_ingest_live_raises_when_agency_not_found():
         ingest_live(999, mock_conn)
 
 
+def test_ingest_live_rejects_unsafe_feed_url():
+    """A non-http(s) / internal feed_url is rejected before any fetch (SSRF guard)."""
+    from pipeline.url_guard import FeedURLError
+
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
+        ("file:///etc/passwd",),
+    ]
+    with patch("pipeline.ingest.urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(FeedURLError):
+            ingest_live(1, mock_conn)
+    mock_urlopen.assert_not_called()
+
+
 def test_ingest_live_fetches_and_ingests(tmp_path):
     """Test that ingest_live fetches the URL and calls strategy.parse_feed with raw bytes."""
     mock_conn = MagicMock()
     # Two fetchone calls: (1) feed_url SELECT, (2) ingest_strategy SELECT
+    # Public IP literal so validate_feed_url passes without a DNS lookup (hermetic).
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
-        ("https://example.com/feed.pb",),
+        ("https://8.8.8.8/feed.pb",),
         (None,),  # ingest_strategy = NULL → falls back to aomori_regex
     ]
 
@@ -54,5 +69,5 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
             with patch("pipeline.ingest.psycopg2.extras.execute_batch"):
                 result = ingest_live(1, mock_conn)
 
-    mock_urlopen.assert_called_once_with("https://example.com/feed.pb", timeout=30)
+    mock_urlopen.assert_called_once_with("https://8.8.8.8/feed.pb", timeout=30)
     assert result == 1
