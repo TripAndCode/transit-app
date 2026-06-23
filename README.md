@@ -797,6 +797,60 @@ The Dockerfile uses a multistage build that compiles `frontend/` and copies `dis
 
 ## Architecture
 
+### Runtime & data flow
+
+How data gets from the road to the dashboard, and where each piece runs:
+
+```mermaid
+flowchart TD
+    feeds["GTFS-RT feeds<br/>4 agencies"]
+
+    subgraph ORACLE["Oracle Cloud VM — collector"]
+        collect["Poll every ~30s ·<br/>roll daily per-agency<br/>archive zips + static GTFS"]
+    end
+
+    subgraph R2["Cloudflare R2 — object storage"]
+        bucket["Daily archive zips<br/>durable raw · lifecycle-pruned"]
+    end
+
+    subgraph RAILWAY["Railway project · private network"]
+        job["Daily ingest job · cron 1×/day<br/>ingest → analyze_all → prune"]
+        subgraph DB["Postgres · PostGIS + pgvector"]
+            raw["raw: updates, static_*"]
+            agg["precomputed: agg_* tables"]
+        end
+        app["App container · one image<br/>FastAPI API + React SPA, same origin<br/>reads agg_* (sub-second)"]
+    end
+
+    LLM["LLM providers<br/>Cerebras / Groq"]
+    user["Browser<br/>map · charts · Ask"]
+
+    feeds -->|HTTP GET| collect
+    collect -->|daily upload| bucket
+    bucket -->|daily pull · HTTPS| job
+    feeds -.->|"fallback: ingest_live (live sample)"| job
+    job -->|write| raw
+    raw -->|analyze rebuilds| agg
+    agg --> app
+    app -->|HTTPS · TLS at Railway edge| user
+    app -.->|Ask stage 3 only| LLM
+```
+
+Four things this encodes:
+
+- **Read endpoints never scan raw data.** Every API response comes from the
+  precomputed `agg_*` tables (sub-second); `analyze` rebuilds them after each
+  ingest. Raw `updates` is write-only at request time.
+- **The database is private.** Ingest, analyze, and backups all run *inside* the
+  Railway project — nothing external connects to Postgres.
+- **Oracle is the primary source, `ingest_live` is the fallback.** The dense 30s
+  Oracle archive (via R2) feeds production; a direct live-feed sample is the
+  no-Oracle backup path.
+- **The LLM is off the hot path.** Ask answers from deterministic SQL tools
+  (stages 1–2); only the stage-3 RAG fallback calls a provider.
+
+### Module map
+
 ```
 GTFS-RT .pb files / live feed_url
     │
