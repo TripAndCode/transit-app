@@ -287,7 +287,8 @@ async def today_route_summary(
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
             COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
-            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min
+            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
+            b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
           ON b.agency_id = $1
@@ -343,6 +344,7 @@ async def today_route_summary(
                 "bucket": bucket,
                 "low_confidence": low_confidence,
                 "has_baseline": baseline_avg_sec is not None,
+                "late5_pct": r["late5_pct"],
             }
         )
     return {
