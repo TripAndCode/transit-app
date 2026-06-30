@@ -850,6 +850,32 @@
     },
     "ops": {
       "stub": "Coming soon"
+    },
+    "agencies": {
+      "title": "Agencies",
+      "add_button": "Add agency",
+      "col_name": "Name",
+      "col_feed_url": "Feed URL",
+      "col_strategy": "Strategy",
+      "col_status": "Status",
+      "status_active": "Active",
+      "status_deleted": "Deleted",
+      "action_edit": "Edit",
+      "action_delete": "Delete",
+      "action_restore": "Restore",
+      "confirm_delete": "Delete \"{{name}}\"? It will be excluded from ingest and analysis.",
+      "form_title_add": "Add agency",
+      "form_title_edit": "Edit agency",
+      "form_name": "Agency name",
+      "form_feed_url": "GTFS-RT feed URL",
+      "form_static_url": "GTFS static URL (optional)",
+      "form_strategy": "Ingest strategy",
+      "form_strategy_placeholder": "Select strategy",
+      "form_trip_pattern": "Trip ID pattern (optional)",
+      "form_submit_add": "Add",
+      "form_submit_edit": "Update",
+      "form_submitting": "Saving...",
+      "form_error_feed_url": "Invalid feed URL"
     }
   }
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPatch } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
 type AdminUser = {
   user_id: number;
@@ -49,5 +49,86 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (uid: number) => deleteUser(uid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+  });
+}
+
+// ── Agency admin types ────────────────────────────────────────────────────
+
+export type AdminAgency = {
+  agency_id: number;
+  agency_name: string;
+  feed_url: string;
+  static_url: string | null;
+  ingest_strategy: string | null;
+  trip_id_pattern: string | null;
+  deleted_at: string | null;
+};
+
+type AgencyCreate = {
+  agency_name: string;
+  feed_url: string;
+  static_url?: string | null;
+  ingest_strategy?: string | null;
+  trip_id_pattern?: string | null;
+};
+
+type AgencyPatch = Partial<Omit<AgencyCreate, "agency_name"> & { agency_name: string }>;
+
+// ── Agency admin hooks ───────────────────────────────────────────────────
+
+/** Admin list of ALL agencies including soft-deleted. */
+export function useAdminAgencies() {
+  return useQuery({
+    queryKey: ["adminAgencies"],
+    queryFn: ({ signal }) => apiGet<AdminAgency[]>("/api/admin/agencies", { signal }),
+  });
+}
+
+/** Mutation: create an agency via POST /api/agencies. */
+export function useCreateAgencyAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AgencyCreate) => apiPost<AdminAgency>("/api/agencies", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAgencies"] });
+      qc.invalidateQueries({ queryKey: ["agencies"] });
+    },
+  });
+}
+
+/** Mutation: PATCH an agency. */
+export function usePatchAgency() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: AgencyPatch }) =>
+      apiPatch<AdminAgency>(`/api/agencies/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAgencies"] });
+      qc.invalidateQueries({ queryKey: ["agencies"] });
+    },
+  });
+}
+
+/** Mutation: soft-delete an agency. */
+export function useDeleteAgency() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete(`/api/agencies/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAgencies"] });
+      qc.invalidateQueries({ queryKey: ["agencies"] });
+    },
+  });
+}
+
+/** Mutation: restore a soft-deleted agency. */
+export function useRestoreAgency() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPost<AdminAgency>(`/api/agencies/${id}/restore`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAgencies"] });
+      qc.invalidateQueries({ queryKey: ["agencies"] });
+    },
   });
 }

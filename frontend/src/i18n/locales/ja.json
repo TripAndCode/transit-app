@@ -850,6 +850,32 @@
     },
     "ops": {
       "stub": "準備中"
+    },
+    "agencies": {
+      "title": "事業者管理",
+      "add_button": "事業者を追加",
+      "col_name": "事業者名",
+      "col_feed_url": "フィードURL",
+      "col_strategy": "取得方式",
+      "col_status": "状態",
+      "status_active": "有効",
+      "status_deleted": "削除済",
+      "action_edit": "編集",
+      "action_delete": "削除",
+      "action_restore": "復元",
+      "confirm_delete": "「{{name}}」を削除しますか？取込・集計から除外されます。",
+      "form_title_add": "事業者を追加",
+      "form_title_edit": "事業者を編集",
+      "form_name": "事業者名",
+      "form_feed_url": "GTFS-RT フィードURL",
+      "form_static_url": "GTFS 静的データURL（任意）",
+      "form_strategy": "取得方式",
+      "form_strategy_placeholder": "方式を選択",
+      "form_trip_pattern": "便IDパターン（任意）",
+      "form_submit_add": "追加",
+      "form_submit_edit": "更新",
+      "form_submitting": "保存中...",
+      "form_error_feed_url": "フィードURLが無効です"
     }
   }
 }
