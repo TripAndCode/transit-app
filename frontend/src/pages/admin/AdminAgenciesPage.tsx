@@ -42,12 +42,14 @@ function agencyToForm(a: AdminAgency): FormState {
 
 function AgencyFormModal({
   initial,
+  isEdit,
   onClose,
   onSubmit,
   isPending,
   error,
 }: {
   initial: FormState;
+  isEdit: boolean;
   onClose: () => void;
   onSubmit: (f: FormState) => void;
   isPending: boolean;
@@ -55,7 +57,6 @@ function AgencyFormModal({
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(initial);
-  const isEdit = initial.agency_name !== "";
 
   function set(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -103,6 +104,11 @@ function AgencyFormModal({
             onChange={(e) => set("feed_url", e.target.value)}
             style={{ width: "100%" }}
           />
+          {form.feed_url && !form.feed_url.startsWith("http://") && !form.feed_url.startsWith("https://") && (
+            <div style={{ color: "var(--color-warning)", fontSize: 12, marginTop: 2 }}>
+              {t("admin.agencies.form_error_feed_url")}
+            </div>
+          )}
         </Field>
         <Field label={t("admin.agencies.form_static_url")} htmlFor="af-static">
           <input
@@ -204,7 +210,7 @@ export function AdminAgenciesPage() {
       if (editing === undefined) {
         await create.mutateAsync(body);
       } else if (editing) {
-        patch.mutate({ id: editing.agency_id, body });
+        await patch.mutateAsync({ id: editing.agency_id, body });
       }
       setEditing(null);
     } catch {
@@ -309,6 +315,7 @@ export function AdminAgenciesPage() {
       {editing !== null && (
         <AgencyFormModal
           initial={editing === undefined ? EMPTY_FORM : agencyToForm(editing)}
+          isEdit={editing !== undefined}
           onClose={() => setEditing(null)}
           onSubmit={handleSubmit}
           isPending={create.isPending || patch.isPending}
