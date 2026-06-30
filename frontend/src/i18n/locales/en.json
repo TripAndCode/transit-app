@@ -27,6 +27,7 @@
     "detail_show_grid": "Show day × hour detail",
     "back_to_overview": "← Back to overview",
     "low_confidence_note": "Few measurements — indicative",
+    "lowSamples": "Low data ({{count}} obs.)",
     "route_label": "Route",
     "route_placeholder": "Search routes…",
     "no_data": "No delay measurements for this route yet.",
@@ -167,6 +168,13 @@
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
+  },
+  "peakHourModal": {
+    "title": "{{dow}} {{hour}}:00 — delayed routes",
+    "allDow": "All days",
+    "noData": "Not enough data for this time slot",
+    "avgMin": "+{{value}}min",
+    "routeCount": "{{count}} routes"
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -365,6 +373,10 @@
       "std": "Standard",
       "photo": "Satellite",
       "layers": "Layers"
+    },
+    "heatmapMode": {
+      "avg": "Avg delay",
+      "p90": "90th percentile"
     }
   },
   "ask": {
@@ -685,7 +697,8 @@
       "baseline_today": "normal {{baseline}} → today {{today}}",
       "no_baseline_note": "baseline pending",
       "low_confidence": "low confidence (few obs.)",
-      "samples": "{{count}} obs."
+      "samples": "{{count}} obs.",
+      "late5_pct": ">5min {{value}}%"
     },
     "drill": {
       "title": "{{route}} detail",
@@ -695,6 +708,7 @@
       "trip_label_no_headsign": "{{time}}",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "Stop #{{seq}}",
+      "stop_outlier": "{{delta}}min more than {{count}} other routes' avg",
       "close": "Close",
       "empty": "No trip data for this route"
     },

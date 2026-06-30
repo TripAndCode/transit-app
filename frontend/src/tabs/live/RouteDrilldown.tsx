@@ -81,11 +81,29 @@ export function RouteDrilldown({
       <h4 style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 20 }}>{t("live.drill.stops_heading")}</h4>
       {stops.isLoading && <Spinner />}
       {stops.data?.stops.map((s) => (
-        <div key={s.stop_sequence} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
+        <div
+          key={s.stop_sequence}
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            padding: "4px 0",
+            paddingLeft: s.is_outlier ? 8 : 0,
+            borderLeft: s.is_outlier ? "3px solid var(--color-warning, #C99A2E)" : "none",
+          }}
+        >
           <span style={{ flex: 1, fontSize: 13 }}>
             {s.stop_name
               ? t("live.drill.stop_label", { seq: s.stop_sequence, name: s.stop_name })
               : t("live.drill.stop_label_no_name", { seq: s.stop_sequence })}
+            {s.is_outlier && s.cohort_route_count != null && s.cohort_avg_delay_sec != null && (
+              <small style={{ display: "block", fontSize: 10, color: "var(--color-warning, #C99A2E)", marginTop: 2 }}>
+                {t("live.drill.stop_outlier", {
+                  count: (s.cohort_route_count ?? 1) - 1,
+                  delta: Math.round((s.avg_delay_sec - s.cohort_avg_delay_sec) / 60),
+                })}
+              </small>
+            )}
           </span>
           <span
             aria-hidden="true"

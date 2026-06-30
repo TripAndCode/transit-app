@@ -96,3 +96,40 @@ describe("useHeatmapLayer (clustering)", () => {
     expect(paint["circle-opacity"]).toBe(0.92);
   });
 });
+
+describe("useHeatmapLayer colorField", () => {
+  it("defaults to avg_delay_min color expression", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, DATA, true, null, 1, 0);
+    });
+    const paint = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
+    expect(JSON.stringify(paint["circle-color"])).toContain("avg_delay_min");
+  });
+
+  it("uses p90_delay_min when colorField is p90_delay_min", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, DATA, true, null, 1, 0, "p90_delay_min");
+    });
+    const paint = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
+    expect(JSON.stringify(paint["circle-color"])).toContain("p90_delay_min");
+  });
+
+  it("calls setPaintProperty when colorField changes", () => {
+    const map = makeMockMap();
+    type Props = { field: 'avg_delay_min' | 'p90_delay_min' };
+    const { rerender } = renderHook(
+      ({ field }: Props) => {
+        const mapRef = useRef(map as never);
+        useHeatmapLayer(mapRef, DATA, true, null, 1, 0, field);
+      },
+      { initialProps: { field: 'avg_delay_min' } as Props },
+    );
+    rerender({ field: 'p90_delay_min' });
+    const updated = map.getPaintProperty(LAYER, "circle-color");
+    expect(JSON.stringify(updated)).toContain("p90_delay_min");
+  });
+});

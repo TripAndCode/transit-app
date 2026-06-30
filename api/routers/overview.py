@@ -5,7 +5,7 @@ Returns the full magazine payload in a single locale-aware round-trip.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn, get_locale
@@ -108,6 +108,76 @@ class OverviewSummary(BaseModel):
     service_split: dict[str, float]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
+
+
+class RouteHourEntry(BaseModel):
+    route_code: str
+    service_type: str
+    avg_min: float
+    samples: int
+
+
+class PeakHourBreakdown(BaseModel):
+    hour: int
+    dow: int | None
+    routes: list[RouteHourEntry]
+
+
+@router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def peak_hour_breakdown(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    hour: int = Query(ge=0, le=23),
+    dow: int | None = Query(default=None, ge=1, le=7),
+) -> PeakHourBreakdown:
+    """Top routes by average delay for a given hour (and optionally day-of-week).
+
+    Reads from ``agg_route_hour_dow``. When ``dow`` is omitted, pools all DOWs
+    for the requested hour. Routes with fewer than 3 samples are excluded to
+    suppress noise from infrequent service patterns. Returns at most 20 routes
+    ordered worst-first.
+    """
+    if dow is not None:
+        rows = await conn.fetch(
+            """
+            SELECT route_code, service_type, avg_min, samples
+            FROM agg_route_hour_dow
+            WHERE agency_id = $1 AND dow = $2 AND hour = $3 AND samples >= 3
+            ORDER BY avg_min DESC
+            LIMIT 20
+            """,
+            agency_id, dow, hour,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT route_code, service_type,
+                   SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min,
+                   SUM(samples) AS samples
+            FROM agg_route_hour_dow
+            WHERE agency_id = $1 AND hour = $2 AND samples >= 3
+            GROUP BY route_code, service_type
+            HAVING SUM(samples) >= 3
+            ORDER BY avg_min DESC
+            LIMIT 20
+            """,
+            agency_id, hour,
+        )
+    return PeakHourBreakdown(
+        hour=hour,
+        dow=dow,
+        routes=[
+            RouteHourEntry(
+                route_code=r["route_code"],
+                service_type=r["service_type"],
+                avg_min=round(float(r["avg_min"]), 2),
+                samples=int(r["samples"]),
+            )
+            for r in rows
+        ],
+    )
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)

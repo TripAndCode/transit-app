@@ -65,6 +65,7 @@ export function useHeatmapLayer(
   focusedSeverity: SeverityKey | null,
   agencyId: number | null,
   styleEpoch: number,
+  colorField: 'avg_delay_min' | 'p90_delay_min' = 'avg_delay_min',
 ): void {
   const fittedRef = useRef(false);
 
@@ -174,7 +175,7 @@ export function useHeatmapLayer(
 
       const colorExpr: maplibregl.ExpressionSpecification = [
         "step",
-        ["get", "avg_delay_min"],
+        ["get", colorField],
         DELAY_RAMP.ok,
         2, DELAY_RAMP.mild,
         5, DELAY_RAMP.moderate,
@@ -187,7 +188,7 @@ export function useHeatmapLayer(
       // requires `zoom` to be the TOP-LEVEL interpolate input, so each per-zoom
       // stop output is the delay-driven size scaled by a per-zoom factor.
       const delaySize = (k: number): maplibregl.ExpressionSpecification => [
-        "interpolate", ["linear"], ["get", "avg_delay_min"],
+        "interpolate", ["linear"], ["get", colorField],
         0, 4 * k,
         2, 6 * k,
         5, 9 * k,
@@ -276,5 +277,18 @@ export function useHeatmapLayer(
     // after style.load but before basemap tiles finish (isStyleLoaded() false)
     // still attaches instead of waiting on an event that won't fire again.
     return whenStyleReady(m, applyData);
-  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch]);
+  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch, colorField]);
+
+  // Update color/size when colorField changes without rebuilding the whole layer.
+  // Only runs after the layer setup effect has fired (layers exist on map).
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    if (!m.getLayer(LAYER)) return;
+    const expr: maplibregl.ExpressionSpecification = [
+      "step", ["get", colorField],
+      DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe,
+    ];
+    m.setPaintProperty(LAYER, "circle-color", expr);
+  }, [mapRef, colorField]);
 }

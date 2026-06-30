@@ -287,7 +287,8 @@ async def today_route_summary(
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
             COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
-            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min
+            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
+            b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
           ON b.agency_id = $1
@@ -343,6 +344,7 @@ async def today_route_summary(
                 "bucket": bucket,
                 "low_confidence": low_confidence,
                 "has_baseline": baseline_avg_sec is not None,
+                "late5_pct": r["late5_pct"],
             }
         )
     return {
@@ -417,6 +419,25 @@ async def route_trips(
     }
 
 
+def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dict:
+    """Merge cohort stats for one stop into the stop dict."""
+    if stop_id is None or stop_id not in cohort:
+        return {"cohort_avg_delay_sec": None, "cohort_route_count": 0, "is_outlier": False}
+    c = cohort[stop_id]
+    cohort_avg = c["cohort_avg_delay_sec"]
+    route_count = c["cohort_route_count"]
+    is_outlier = (
+        cohort_avg is not None
+        and route_count >= 2
+        and route_avg_sec > cohort_avg * 1.5
+    )
+    return {
+        "cohort_avg_delay_sec": cohort_avg,
+        "cohort_route_count": route_count,
+        "is_outlier": is_outlier,
+    }
+
+
 @router.get("/today/route/{route_code}/stop-profile")
 async def route_stop_profile(
     route_code: str,
@@ -451,6 +472,7 @@ async def route_stop_profile(
         )
         SELECT
             d.stop_sequence,
+            MAX(sst.stop_id) AS stop_id,
             MAX(ss.stop_name) AS stop_name,
             ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
             COUNT(*) AS samples
@@ -466,14 +488,44 @@ async def route_stop_profile(
         route_code,
         latest_ts,
     )
+
+    # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
+    from datetime import timedelta
+
+    stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
+    cohort_by_stop: dict[str, dict] = {}
+    if stop_ids:
+        date_from = latest_ts.date() - timedelta(days=30)
+        cohort_rows = await conn.fetch(
+            """
+            SELECT
+                stop_id,
+                COUNT(DISTINCT route_code) AS cohort_route_count,
+                ROUND(
+                    AVG(delay_sum::float / NULLIF(samples, 0))::numeric, 0
+                )::int AS cohort_avg_delay_sec
+            FROM agg_route_stop_daily
+            WHERE agency_id = $1
+              AND stop_id = ANY($2)
+              AND date >= $3
+            GROUP BY stop_id
+            """,
+            agency_id,
+            stop_ids,
+            date_from,
+        )
+        cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
+
     return {
         "date": latest_ts.date().isoformat(),
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
+                "stop_id": r["stop_id"],
                 "stop_name": r["stop_name"],
                 "avg_delay_sec": r["avg_delay_sec"],
                 "samples": r["samples"],
+                **_cohort_fields(r["stop_id"], r["avg_delay_sec"], cohort_by_stop),
             }
             for r in rows
         ],
@@ -484,9 +536,9 @@ def _heatmap_features(rows) -> dict:
     """Build a GeoJSON FeatureCollection from query rows.
 
     Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
-    stop_codes, route_codes, avg_delay_min, samples.  Those columns are mapped
-    to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
-    platform_code, avg_delay_min, samples, route_codes).
+    stop_codes, route_codes, avg_delay_min, p90_delay_min, samples.  Those columns
+    are mapped to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
+    platform_code, avg_delay_min, p90_delay_min, samples, route_codes).
     """
     features = [
         {
@@ -498,6 +550,7 @@ def _heatmap_features(rows) -> dict:
                 "stop_code": r["stop_codes"] or "",
                 "platform_code": r["platform_codes"] or "",
                 "avg_delay_min": float(r["avg_delay_min"]),
+                "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
             },
@@ -549,6 +602,11 @@ async def delay_heatmap(
                     AS stop_codes,
                 string_agg(DISTINCT a.route_code, ',' ORDER BY a.route_code) AS route_codes,
                 ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                ROUND(
+                    PERCENTILE_CONT(0.9) WITHIN GROUP (
+                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
+                    )::numeric / 60.0,
+                2) AS p90_delay_min,
                 SUM(a.samples) AS samples
             FROM agg_route_stop_daily a
             JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
@@ -586,6 +644,11 @@ async def delay_heatmap(
                     AS stop_codes,
                 string_agg(DISTINCT r.route_codes, ',') AS route_codes,
                 ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                ROUND(
+                    PERCENTILE_CONT(0.9) WITHIN GROUP (
+                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
+                    )::numeric / 60.0,
+                2) AS p90_delay_min,
                 SUM(a.samples) AS samples
             FROM agg_stop_daily a
             JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id

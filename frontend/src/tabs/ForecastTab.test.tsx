@@ -37,12 +37,21 @@ function overview(partial: Partial<ForecastOverview> = {}): ForecastOverview {
   };
 }
 
-function heatmap() {
+function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = []) {
+  const set = new Map(populate.map((p) => [`${p.d}-${p.h}`, p]));
   const cells = [];
   for (let d = 1; d <= 7; d++) {
     for (let h = 0; h < 24; h++) {
-      const populated = h === 12;
-      cells.push({ dow: d, hour: h, expected_avg_min: populated ? 5 + d : null, samples: populated ? 300 : 0, low_confidence: false });
+      const p = set.get(`${d}-${h}`);
+      const populated = p || h === 12;
+      const samples = p?.n ?? (populated ? 300 : 0);
+      cells.push({
+        dow: d,
+        hour: h,
+        expected_avg_min: populated ? (p?.v ?? 5 + d) : null,
+        samples,
+        low_confidence: samples > 0 && samples < 30,
+      });
     }
   }
   return { route: "100", cells, disclaimer: "test disclaimer" };
@@ -109,5 +118,33 @@ describe("ForecastTab", () => {
     expect(dialog).toBeInTheDocument();
     // disclaimer renders on the detail base view (footnote) AND inside the modal
     expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
+  });
+
+  it("shows visible amber badge on low-confidence heatmap cells", () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false, isLoading: false, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
+      data: overview(),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({
+      data: heatmap([{ d: 1, h: 9, v: 4, n: 5 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/forecast"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/forecast" element={<ForecastTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText("Main Line"));
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const lowConfBadges = screen.queryAllByTestId("hm-cell-lowconf");
+    const visible = lowConfBadges.filter((el) => !el.hasAttribute("hidden"));
+    expect(visible.length).toBeGreaterThan(0);
   });
 });

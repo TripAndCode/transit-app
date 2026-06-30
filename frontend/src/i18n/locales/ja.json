@@ -27,6 +27,7 @@
     "detail_show_grid": "曜日×時間帯を詳しく",
     "back_to_overview": "← 全体に戻る",
     "low_confidence_note": "計測が少なく参考値",
+    "lowSamples": "データ不足 ({{count}}件)",
     "route_label": "路線",
     "route_placeholder": "路線を検索…",
     "no_data": "この路線の計測記録がまだありません。",
@@ -167,6 +168,13 @@
     "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
     "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
+  },
+  "peakHourModal": {
+    "title": "{{dow}}曜 {{hour}}時台 — 遅延路線",
+    "allDow": "全",
+    "noData": "この時間帯に十分なデータがありません",
+    "avgMin": "+{{value}}分",
+    "routeCount": "{{count}}路線"
   },
   "header": {
     "app_title": "遅延ダッシュボード",
@@ -365,6 +373,10 @@
       "std": "標準",
       "photo": "航空写真",
       "layers": "レイヤー"
+    },
+    "heatmapMode": {
+      "avg": "平均遅延",
+      "p90": "90パーセンタイル"
     }
   },
   "ask": {
@@ -685,7 +697,8 @@
       "baseline_today": "平常 {{baseline}} → 今日 {{today}}",
       "no_baseline_note": "平常データ準備中",
       "low_confidence": "要確認（観測少）",
-      "samples": "{{count}}観測"
+      "samples": "{{count}}観測",
+      "late5_pct": "5分超 {{value}}%"
     },
     "drill": {
       "title": "{{route}} の詳細",
@@ -695,6 +708,7 @@
       "trip_label_no_headsign": "{{time}}発",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "停留所 #{{seq}}",
+      "stop_outlier": "他{{count}}路線の平均より{{delta}}分多い",
       "close": "閉じる",
       "empty": "この路線の便データがありません"
     },

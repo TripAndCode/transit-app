@@ -21,6 +21,7 @@ export type RouteSummary = {
   bucket: RouteBucket;
   low_confidence: boolean;
   has_baseline: boolean;
+  late5_pct?: number | null;
 };
 
 export type RouteTrip = {
@@ -38,9 +39,13 @@ export type RouteTripsResponse = {
 
 export type RouteStopProfileRow = {
   stop_sequence: number;
+  stop_id?: string | null;
   stop_name: string | null;
   avg_delay_sec: number;
   samples: number;
+  cohort_avg_delay_sec?: number | null;
+  cohort_route_count?: number;
+  is_outlier?: boolean;
 };
 
 export type RouteStopProfileResponse = {
@@ -108,6 +113,7 @@ export type HeatmapProps = {
   /** Optional GTFS platform_code (pole number, e.g. "2"). */
   platform_code?: string;
   avg_delay_min: number;
+  p90_delay_min?: number | null;
   samples: number;
   /** Comma-joined list of route_codes contributing to this stop's avg.
    *  Optional because clients with cached responses from before the
@@ -117,6 +123,19 @@ export type HeatmapProps = {
 
 export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps> & {
   ctx?: ResponseCtx;
+};
+
+export type PeakHourBreakdownRoute = {
+  route_code: string;
+  service_type: string;
+  avg_min: number;
+  samples: number;
+};
+
+export type PeakHourBreakdown = {
+  hour: number;
+  dow: number | null;
+  routes: PeakHourBreakdownRoute[];
 };
 
 export type ResponseCtx = {

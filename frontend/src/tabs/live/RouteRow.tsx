@@ -70,6 +70,11 @@ export function RouteRow({
       {route.low_confidence && (
         <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("live.row.low_confidence")}</span>
       )}
+      {route.late5_pct != null && (
+        <span style={{ fontSize: 11, color: "var(--text-tertiary)", minWidth: 72, textAlign: "right" }}>
+          {t("live.row.late5_pct", { value: route.late5_pct.toFixed(1) })}
+        </span>
+      )}
       <span style={{ fontSize: 11, color: "var(--text-tertiary)", minWidth: 64, textAlign: "right" }}>
         {t("live.row.samples", { count: route.samples })}
       </span>

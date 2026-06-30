@@ -34,6 +34,7 @@ export function MapTab() {
   const popupRef = useRef<Popup | null>(null);
   const [showSingleSampleStops, setShowSingleSampleStops] = useState(false);
   const [focusedSeverity, setFocusedSeverity] = useState<SeverityKey | null>(null);
+  const [heatmapField, setHeatmapField] = useState<'avg_delay_min' | 'p90_delay_min'>('avg_delay_min');
   const [styleId, setStyleId] = useMapStylePref();
   const [styleEpoch, setStyleEpoch] = useState(0);
   const isFirstStyleRun = useRef(true);
@@ -220,7 +221,7 @@ export function MapTab() {
   // (effect order follows hook-call order).
   useBasemapDim(mapRef, styleEpoch);
 
-  useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch);
+  useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch, heatmapField);
 
   useRouteOverlay(mapRef, shape, styleEpoch);
 
@@ -278,6 +279,26 @@ export function MapTab() {
         style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}
       >
         {!getMapStyleOverride() && <MapStyleControl value={styleId} onChange={setStyleId} t={t} />}
+        <button
+          type="button"
+          onClick={() => setHeatmapField(f => f === 'avg_delay_min' ? 'p90_delay_min' : 'avg_delay_min')}
+          title={t(`map.heatmapMode.${heatmapField === 'avg_delay_min' ? 'p90' : 'avg'}`)}
+          style={{
+            position: "absolute",
+            bottom: 68,
+            left: 12,
+            padding: "4px 10px",
+            fontSize: 12,
+            background: heatmapField === 'p90_delay_min' ? "var(--accent-soft)" : "var(--bg-surface)",
+            border: "1px solid var(--border-soft)",
+            borderRadius: 4,
+            cursor: "pointer",
+            color: heatmapField === 'p90_delay_min' ? "var(--accent)" : "var(--text-secondary)",
+            zIndex: 1,
+          }}
+        >
+          {t(`map.heatmapMode.${heatmapField === 'avg_delay_min' ? 'avg' : 'p90'}`)}
+        </button>
       </div>
       <MapLegend
         showSingleSampleStops={showSingleSampleStops}
