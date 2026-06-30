@@ -276,3 +276,26 @@ async def delete_user(
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted")
     return Response(status_code=204)
+
+
+class AdminAgencyOut(BaseModel):
+    agency_id: int
+    agency_name: str
+    feed_url: str
+    static_url: Any
+    ingest_strategy: Any
+    trip_id_pattern: Any
+    deleted_at: Any
+
+
+@router.get("/agencies", response_model=list[AdminAgencyOut])
+async def list_admin_agencies(
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Admin list of ALL agencies including soft-deleted."""
+    rows = await conn.fetch(
+        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
+        "FROM agencies ORDER BY agency_id"
+    )
+    return [dict(r) for r in rows]
