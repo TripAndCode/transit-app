@@ -30,7 +30,7 @@ export function HeaderUserMenu() {
         {session.name || session.email}
       </Link>
       {session.role === "admin" && (
-        <Link to="/admin/users" style={{ color: "inherit", textDecoration: "none",
+        <Link to="/admin" style={{ color: "inherit", textDecoration: "none",
                                           padding: "2px 8px", background: "var(--surface-2)",
                                           borderRadius: 4, fontSize: 12 }}>
           {t("account.admin_link")}

@@ -841,6 +841,14 @@
       "created_label": "作成",
       "email_at_link": "連携時メール: {{email}}",
       "recent_events": "最近のイベント"
+    },
+    "nav": {
+      "agencies": "事業者管理",
+      "users": "ユーザー管理",
+      "ops": "運用状況"
+    },
+    "ops": {
+      "stub": "準備中"
     }
   }
 }

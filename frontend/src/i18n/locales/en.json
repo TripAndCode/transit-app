@@ -841,6 +841,14 @@
       "created_label": "Created",
       "email_at_link": "Email at link time: {{email}}",
       "recent_events": "Recent events"
+    },
+    "nav": {
+      "agencies": "Agencies",
+      "users": "Users",
+      "ops": "Ops"
+    },
+    "ops": {
+      "stub": "Coming soon"
     }
   }
 }

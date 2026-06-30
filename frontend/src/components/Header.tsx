@@ -1,18 +1,14 @@
-import { Link, NavLink, useSearchParams } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgencyPicker } from "./AgencyPicker";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { HeaderUserMenu } from "./HeaderUserMenu";
 import { LocaleToggle } from "./LocaleToggle";
-import { AgencyForm } from "../admin/AgencyForm";
 
 export function Header() {
   const { t } = useTranslation();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [params] = useSearchParams();
-  const isAdmin = params.get("admin") === "1";
 
   return (
     <header
@@ -77,21 +73,6 @@ export function Header() {
         </NavLink>
         <HeaderUserMenu />
         <LocaleToggle />
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setAdminOpen(true)}
-            style={{
-              background: "var(--accent)",
-              color: "#fff",
-              border: "none",
-              padding: "6px 14px",
-              borderRadius: 4,
-            }}
-          >
-            {`+ ${t("header.new_agency")}`}
-          </button>
-        )}
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
@@ -107,7 +88,6 @@ export function Header() {
         </button>
       </div>
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      {adminOpen && <AgencyForm onClose={() => setAdminOpen(false)} />}
     </header>
   );
 }

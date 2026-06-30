@@ -26,6 +26,15 @@ const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((m) => (
 const AdminUserDetailPage = lazy(() =>
   import("./pages/AdminUserDetailPage").then((m) => ({ default: m.AdminUserDetailPage })),
 );
+const AdminLayout = lazy(() =>
+  import("./pages/admin/AdminLayout").then((m) => ({ default: m.AdminLayout }))
+);
+const AdminAgenciesPage = lazy(() =>
+  import("./pages/admin/AdminAgenciesPage").then((m) => ({ default: m.AdminAgenciesPage }))
+);
+const AdminOpsPage = lazy(() =>
+  import("./pages/admin/AdminOpsPage").then((m) => ({ default: m.AdminOpsPage }))
+);
 
 /** Wrap a lazy route element in the shared Suspense fallback. */
 function el(node: React.ReactNode) {
@@ -63,8 +72,17 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/forecast", element: el(<ForecastTab />) },
       { path: "network", element: el(<NetworkTab />) },
       { path: "me", element: el(<AccountPage />) },
-      { path: "admin/users", element: el(<RequireAdmin><AdminUsersPage /></RequireAdmin>) },
-      { path: "admin/users/:uid", element: el(<RequireAdmin><AdminUserDetailPage /></RequireAdmin>) },
+      {
+        path: "admin",
+        element: el(<RequireAdmin><AdminLayout /></RequireAdmin>),
+        children: [
+          { index: true, element: <Navigate to="agencies" replace /> },
+          { path: "agencies", element: el(<AdminAgenciesPage />) },
+          { path: "users", element: el(<AdminUsersPage />) },
+          { path: "users/:uid", element: el(<AdminUserDetailPage />) },
+          { path: "ops", element: el(<AdminOpsPage />) },
+        ],
+      },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
