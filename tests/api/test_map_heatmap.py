@@ -116,8 +116,9 @@ async def stop_profile_client(apply_schema):
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
         aid, "f1.pb", ts, "T1", "平日", time(9, 0), "K31", 2, 60,
     )
-    # agg_route_stop_daily: S1 has two routes — K31 (600s avg) and K99 (200s avg)
-    for route_code, ds, s in [("K31", 600, 1), ("K99", 200, 1)]:
+    # agg_route_stop_daily: S1 has three routes — K31 (600s avg), K99 (200s avg), K98 (100s avg)
+    # cohort_avg = (600+200+100)/3 = 300s; K31 avg 600 > 300*1.5=450 → is_outlier=True for K31
+    for route_code, ds, s in [("K31", 600, 1), ("K99", 200, 1), ("K98", 100, 1)]:
         await pool.execute(
             "INSERT INTO agg_route_stop_daily "
             "(agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples) "
@@ -148,10 +149,9 @@ async def test_stop_profile_includes_cohort_fields(stop_profile_client):
     assert "cohort_avg_delay_sec" in s1
     assert "cohort_route_count" in s1
     assert "is_outlier" in s1
-    # S1: K31 avg=600s, cohort avg=(600+200)/2=400s; 600 > 400*1.5=600 → False (tie, not strictly greater)
-    # Actually 600 > 400*1.5=600 is False. Let's check is_outlier logic: >, not >=
-    assert s1["cohort_route_count"] == 2
-    assert s1["cohort_avg_delay_sec"] == pytest.approx(400, abs=5)
+    # S1: K31 avg=600s, cohort avg=(600+200+100)/3=300s; 600 > 300*1.5=450 → True
+    assert s1["cohort_route_count"] == 3
+    assert s1["cohort_avg_delay_sec"] == pytest.approx(300, abs=5)
 
 
 @pytest.mark.asyncio
@@ -163,3 +163,15 @@ async def test_stop_profile_single_route_stop_never_outlier(stop_profile_client)
     # S2 only has K31 in cohort → cohort_route_count=1 → is_outlier must be False
     assert s2["cohort_route_count"] == 1
     assert s2["is_outlier"] is False
+
+
+@pytest.mark.asyncio
+async def test_stop_profile_outlier_true(stop_profile_client):
+    client, aid = stop_profile_client
+    r = await client.get(f"/api/{aid}/today/route/K31/stop-profile")
+    assert r.status_code == 200
+    stops = r.json()["stops"]
+    s1 = next(s for s in stops if s["stop_sequence"] == 1)
+    # K31 avg=600s; cohort includes K31+K99+K98, avg=(600+200+100)/3=300s; 600 > 300*1.5=450 → True
+    assert s1["is_outlier"] is True
+    assert s1["cohort_route_count"] == 3

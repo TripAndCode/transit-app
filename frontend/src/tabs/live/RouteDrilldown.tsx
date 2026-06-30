@@ -99,7 +99,7 @@ export function RouteDrilldown({
             {s.is_outlier && s.cohort_route_count != null && s.cohort_avg_delay_sec != null && (
               <small style={{ display: "block", fontSize: 10, color: "var(--color-warning, #C99A2E)", marginTop: 2 }}>
                 {t("live.drill.stop_outlier", {
-                  count: s.cohort_route_count,
+                  count: (s.cohort_route_count ?? 1) - 1,
                   delta: Math.round((s.avg_delay_sec - s.cohort_avg_delay_sec) / 60),
                 })}
               </small>

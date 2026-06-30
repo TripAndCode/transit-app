@@ -171,7 +171,7 @@
   },
   "peakHourModal": {
     "title": "{{dow}}曜 {{hour}}時台 — 遅延路線",
-    "allDow": "全曜日",
+    "allDow": "全",
     "noData": "この時間帯に十分なデータがありません",
     "avgMin": "+{{value}}分",
     "routeCount": "{{count}}路線"

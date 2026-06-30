@@ -124,7 +124,9 @@ class PeakHourBreakdown(BaseModel):
 
 
 @router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def peak_hour_breakdown(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     hour: int = Query(ge=0, le=23),
