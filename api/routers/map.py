@@ -486,9 +486,9 @@ def _heatmap_features(rows) -> dict:
     """Build a GeoJSON FeatureCollection from query rows.
 
     Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
-    stop_codes, route_codes, avg_delay_min, samples.  Those columns are mapped
-    to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
-    platform_code, avg_delay_min, samples, route_codes).
+    stop_codes, route_codes, avg_delay_min, p90_delay_min, samples.  Those columns
+    are mapped to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
+    platform_code, avg_delay_min, p90_delay_min, samples, route_codes).
     """
     features = [
         {
@@ -500,6 +500,7 @@ def _heatmap_features(rows) -> dict:
                 "stop_code": r["stop_codes"] or "",
                 "platform_code": r["platform_codes"] or "",
                 "avg_delay_min": float(r["avg_delay_min"]),
+                "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
             },
@@ -551,6 +552,11 @@ async def delay_heatmap(
                     AS stop_codes,
                 string_agg(DISTINCT a.route_code, ',' ORDER BY a.route_code) AS route_codes,
                 ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                ROUND(
+                    PERCENTILE_CONT(0.9) WITHIN GROUP (
+                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
+                    )::numeric / 60.0,
+                2) AS p90_delay_min,
                 SUM(a.samples) AS samples
             FROM agg_route_stop_daily a
             JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
@@ -588,6 +594,11 @@ async def delay_heatmap(
                     AS stop_codes,
                 string_agg(DISTINCT r.route_codes, ',') AS route_codes,
                 ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
+                ROUND(
+                    PERCENTILE_CONT(0.9) WITHIN GROUP (
+                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
+                    )::numeric / 60.0,
+                2) AS p90_delay_min,
                 SUM(a.samples) AS samples
             FROM agg_stop_daily a
             JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
