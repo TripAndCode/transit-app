@@ -288,6 +288,66 @@ class AdminAgencyOut(BaseModel):
     deleted_at: Any
 
 
+# ── Ops health endpoint ──────────────────────────────────────────────────
+
+class MigrationStatusOut(BaseModel):
+    applied: str | None
+    latest: str | None
+    behind: int
+
+
+class AgencyFreshnessOut(BaseModel):
+    agency_id: int
+    agency_name: str
+    last_analyzed_at: Any  # datetime | None
+    analyze_age_hours: Any  # float | None
+    agg_fresh: bool
+    agg_behind_days: int
+    is_stale: bool
+    data_to: Any  # str | None
+    clamp_pct: Any  # float | None
+
+
+class OpsHealth(BaseModel):
+    migrations: Any  # MigrationStatusOut | None
+    agencies: list[AgencyFreshnessOut]
+
+
+@router.get("/ops", response_model=OpsHealth)
+async def admin_ops(
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
+    from pipeline.health import aggregate_freshness, migration_status
+
+    mig: Any = None
+    try:
+        ms = await migration_status(conn)
+        mig = {"applied": ms.applied, "latest": ms.latest, "behind": ms.behind}
+    except Exception:
+        pass  # mig stays None
+
+    agencies_out: list[dict] = []
+    try:
+        for af in await aggregate_freshness(conn):
+            agencies_out.append({
+                "agency_id": af.agency_id,
+                "agency_name": af.agency_name,
+                "last_analyzed_at": af.last_analyzed_at.isoformat() if af.last_analyzed_at else None,
+                "analyze_age_hours": af.analyze_age_hours,
+                "agg_fresh": af.agg_fresh,
+                "agg_behind_days": af.agg_behind_days,
+                "is_stale": af.is_stale,
+                "data_to": af.data_to,
+                "clamp_pct": af.clamp_pct,
+            })
+    except Exception:
+        pass  # agencies_out stays []
+
+    return OpsHealth(migrations=mig, agencies=agencies_out)
+
+
 @router.get("/agencies", response_model=list[AdminAgencyOut])
 async def list_admin_agencies(
     _admin: User = Depends(require_admin),
