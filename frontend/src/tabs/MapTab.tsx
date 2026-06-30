@@ -285,8 +285,8 @@ export function MapTab() {
           title={t(`map.heatmapMode.${heatmapField === 'avg_delay_min' ? 'p90' : 'avg'}`)}
           style={{
             position: "absolute",
-            top: 8,
-            left: 8,
+            bottom: 68,
+            left: 12,
             padding: "4px 10px",
             fontSize: 12,
             background: heatmapField === 'p90_delay_min' ? "var(--accent-soft)" : "var(--bg-surface)",
@@ -297,7 +297,7 @@ export function MapTab() {
             zIndex: 1,
           }}
         >
-          {t(`map.heatmapMode.${heatmapField}`)}
+          {t(`map.heatmapMode.${heatmapField === 'avg_delay_min' ? 'avg' : 'p90'}`)}
         </button>
       </div>
       <MapLegend
