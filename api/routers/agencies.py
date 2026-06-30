@@ -85,27 +85,28 @@ async def create_agency(
     try:
         validate_feed_url(body.feed_url)
     except FeedURLError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    row = await conn.fetchrow(
-        """
-        INSERT INTO agencies (agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING agency_id, agency_name, feed_url, static_url
-        """,
-        body.agency_name,
-        body.feed_url,
-        body.static_url,
-        body.ingest_strategy,
-        body.trip_id_pattern,
-    )
-    aid = row["agency_id"]
-    await record_event(
-        conn,
-        user_id=None,
-        actor_id=admin.user_id,
-        kind="agency_created",
-        meta={"agency_id": aid},
-    )
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            """
+            INSERT INTO agencies (agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING agency_id, agency_name, feed_url, static_url
+            """,
+            body.agency_name,
+            body.feed_url,
+            body.static_url,
+            body.ingest_strategy,
+            body.trip_id_pattern,
+        )
+        aid = row["agency_id"]
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="agency_created",
+            meta={"agency_id": aid},
+        )
     return dict(row)
 
 
@@ -119,6 +120,10 @@ async def patch_agency(
 ):
     """Partial update. Only provided fields change. Validates feed_url if present."""
     csrf_guard(request)
+    if "agency_name" in body.model_fields_set and body.agency_name is None:
+        raise HTTPException(status_code=422, detail="agency_name cannot be null")
+    if "feed_url" in body.model_fields_set and body.feed_url is None:
+        raise HTTPException(status_code=422, detail="feed_url cannot be null")
     row = await conn.fetchrow(
         "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
         "FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL",
@@ -132,7 +137,7 @@ async def patch_agency(
         try:
             validate_feed_url(body.feed_url)
         except FeedURLError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from None
 
     updates: dict[str, Any] = {
         field: getattr(body, field)
@@ -142,14 +147,15 @@ async def patch_agency(
     if updates:
         set_clauses = [f"{col}=${i+2}" for i, col in enumerate(updates)]
         sql = f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1"
-        await conn.execute(sql, agency_id, *updates.values())
-        await record_event(
-            conn,
-            user_id=None,
-            actor_id=admin.user_id,
-            kind="agency_updated",
-            meta={"agency_id": agency_id, "fields": list(updates.keys())},
-        )
+        async with conn.transaction():
+            await conn.execute(sql, agency_id, *updates.values())
+            await record_event(
+                conn,
+                user_id=None,
+                actor_id=admin.user_id,
+                kind="agency_updated",
+                meta={"agency_id": agency_id, "fields": list(updates.keys())},
+            )
 
     out = await conn.fetchrow(
         "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
@@ -171,18 +177,19 @@ async def delete_agency(
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    tag = await conn.execute(
-        "UPDATE agencies SET deleted_at = now() WHERE agency_id=$1 AND deleted_at IS NULL",
-        agency_id,
-    )
-    if tag == "UPDATE 1":
-        await record_event(
-            conn,
-            user_id=None,
-            actor_id=admin.user_id,
-            kind="agency_deleted",
-            meta={"agency_id": agency_id},
+    async with conn.transaction():
+        tag = await conn.execute(
+            "UPDATE agencies SET deleted_at = now() WHERE agency_id=$1 AND deleted_at IS NULL",
+            agency_id,
         )
+        if tag == "UPDATE 1":
+            await record_event(
+                conn,
+                user_id=None,
+                actor_id=admin.user_id,
+                kind="agency_deleted",
+                meta={"agency_id": agency_id},
+            )
     return Response(status_code=204)
 
 
@@ -198,14 +205,15 @@ async def restore_agency(
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    await conn.execute("UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1", agency_id)
-    await record_event(
-        conn,
-        user_id=None,
-        actor_id=admin.user_id,
-        kind="agency_restored",
-        meta={"agency_id": agency_id},
-    )
+    async with conn.transaction():
+        await conn.execute("UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1", agency_id)
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="agency_restored",
+            meta={"agency_id": agency_id},
+        )
     out = await conn.fetchrow(
         "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
         "FROM agencies WHERE agency_id=$1",

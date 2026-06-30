@@ -5,14 +5,12 @@ pipeline/freshness.py and db/migrate.py. Same SQL logic, different adapter —
 the CLI keeps using the sync versions; the API calls these.
 """
 
-import pathlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import asyncpg
 
-_MIGRATIONS_DIR = pathlib.Path(__file__).parent.parent / "db" / "migrations"
-
+from db.migrate import _versions_on_disk
 
 # ── Migration status ─────────────────────────────────────────────────────
 
@@ -22,11 +20,6 @@ class MigrationStatus:
     applied: str | None  # latest applied version string, e.g. "0025"
     latest: str | None   # latest on-disk version string
     behind: int          # count of on-disk versions not in schema_migrations
-
-
-def _versions_on_disk() -> list[str]:
-    files = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
-    return [f.name.split("_")[0] for f in files]
 
 
 async def migration_status(conn: asyncpg.Connection) -> MigrationStatus:
@@ -65,11 +58,11 @@ class AgencyFreshness:
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id"
 
 _LIVE_MAX_SQL = """
-    SELECT (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date
+    SELECT agency_id, (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date AS d
     FROM updates
-    WHERE agency_id = $1
-      AND captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
+    WHERE captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
                         AT TIME ZONE 'Asia/Tokyo'
+    GROUP BY agency_id
 """
 
 _FEED_HEALTH_SQL = """
@@ -92,6 +85,8 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
     meta = {r["agency_id"]: r["analyzed_at"] for r in meta_rows}
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
+    live_max_rows = await conn.fetch(_LIVE_MAX_SQL)
+    live_max = {r["agency_id"]: r["d"] for r in live_max_rows}
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:
@@ -110,8 +105,7 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
             age_hours = None
 
         agg_day = agg_max.get(aid)
-        live_row = await conn.fetchrow(_LIVE_MAX_SQL, aid)
-        live_day = live_row[0] if live_row else None
+        live_day = live_max.get(aid)
 
         stale = is_stale(agg_day, live_day)
 
@@ -122,7 +116,7 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
         else:
             behind = max(0, (live_day - agg_day).days)
 
-        data_to = agg_day.isoformat() if agg_day else None
+        data_to = live_day.isoformat() if live_day else None
 
         f = feed.get(aid)
         raw = int(f["raw"]) if f and f["raw"] else 0

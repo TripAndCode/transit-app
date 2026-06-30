@@ -34,7 +34,7 @@ async def ops_client(apply_schema):
     app.state.pool = pool
     async with pool.acquire() as conn:
         await conn.execute(
-            "TRUNCATE agencies, sessions, users, agg_meta CASCADE"
+            "TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE"
         )
         admin_sid = await _seed_admin_session(conn)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

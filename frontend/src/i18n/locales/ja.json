@@ -179,7 +179,6 @@
   "header": {
     "app_title": "遅延ダッシュボード",
     "app_tagline": "リアルタイム × 時刻表",
-    "new_agency": "新規事業者",
     "settings_aria": "設定",
     "agency_picker_empty": "事業者が登録されていません",
     "agency_picker_placeholder": "事業者を選択",

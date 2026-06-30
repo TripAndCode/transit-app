@@ -179,7 +179,6 @@
   "header": {
     "app_title": "Delay Dashboard",
     "app_tagline": "Real-time × Timetable",
-    "new_agency": "New Agency",
     "settings_aria": "Settings",
     "agency_picker_empty": "No agencies registered",
     "agency_picker_placeholder": "Select agency",
