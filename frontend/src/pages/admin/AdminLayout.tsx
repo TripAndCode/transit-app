@@ -12,7 +12,7 @@ export function AdminLayout() {
   return (
     <div style={{ display: "flex", minHeight: "100%", flex: 1 }}>
       <nav
-        aria-label={t("admin.nav.agencies")}
+        aria-label={t("admin.nav.label")}
         style={{
           width: 180,
           borderRight: "1px solid var(--border-soft)",

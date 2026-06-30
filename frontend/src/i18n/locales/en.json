@@ -843,6 +843,7 @@
       "recent_events": "Recent events"
     },
     "nav": {
+      "label": "Admin navigation",
       "agencies": "Agencies",
       "users": "Users",
       "ops": "Ops"
