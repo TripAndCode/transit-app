@@ -35,7 +35,7 @@ def _require_agency(args, conn) -> int:
     if args.agency_id:
         return int(args.agency_id)
     with conn.cursor() as cur:
-        cur.execute("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
+        cur.execute("SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
         agencies = cur.fetchall()
     if not agencies:
         logger.info("No agencies found. Add one first:")
@@ -210,7 +210,7 @@ def cmd_analyze_all(args):
 
     conn = _get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+        cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
         agency_ids = [r[0] for r in cur.fetchall()]
     if not agency_ids:
         logger.info("No agencies found.")
@@ -240,7 +240,7 @@ def cmd_check_aggs(args):
 
     conn = _get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+        cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
         agency_ids = [r[0] for r in cur.fetchall()]
     stale = check_agg_freshness(conn, agency_ids)
     conn.close()
@@ -297,7 +297,7 @@ def cmd_ingest_live(args):
         ingest_live(int(args.agency_id), conn)
     else:
         with conn.cursor() as cur:
-            cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+            cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
             logger.info("No agencies found.")
@@ -341,7 +341,7 @@ def cmd_build_rag_index(args):
         pool = await asyncpg.create_pool(DATABASE_URL)
         if args.all_agencies:
             async with pool.acquire() as conn:
-                rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
+                rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
             ids = [(r["agency_id"], r["agency_name"]) for r in rows]
         else:
             if args.agency_id is None:
