@@ -419,6 +419,25 @@ async def route_trips(
     }
 
 
+def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dict:
+    """Merge cohort stats for one stop into the stop dict."""
+    if stop_id is None or stop_id not in cohort:
+        return {"cohort_avg_delay_sec": None, "cohort_route_count": 0, "is_outlier": False}
+    c = cohort[stop_id]
+    cohort_avg = c["cohort_avg_delay_sec"]
+    route_count = c["cohort_route_count"]
+    is_outlier = (
+        cohort_avg is not None
+        and route_count >= 2
+        and route_avg_sec > cohort_avg * 1.5
+    )
+    return {
+        "cohort_avg_delay_sec": cohort_avg,
+        "cohort_route_count": route_count,
+        "is_outlier": is_outlier,
+    }
+
+
 @router.get("/today/route/{route_code}/stop-profile")
 async def route_stop_profile(
     route_code: str,
@@ -453,6 +472,7 @@ async def route_stop_profile(
         )
         SELECT
             d.stop_sequence,
+            MAX(sst.stop_id) AS stop_id,
             MAX(ss.stop_name) AS stop_name,
             ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
             COUNT(*) AS samples
@@ -468,14 +488,44 @@ async def route_stop_profile(
         route_code,
         latest_ts,
     )
+
+    # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
+    from datetime import timedelta
+
+    stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
+    cohort_by_stop: dict[str, dict] = {}
+    if stop_ids:
+        date_from = latest_ts.date() - timedelta(days=30)
+        cohort_rows = await conn.fetch(
+            """
+            SELECT
+                stop_id,
+                COUNT(DISTINCT route_code) AS cohort_route_count,
+                ROUND(
+                    AVG(delay_sum::float / NULLIF(samples, 0))::numeric, 0
+                )::int AS cohort_avg_delay_sec
+            FROM agg_route_stop_daily
+            WHERE agency_id = $1
+              AND stop_id = ANY($2)
+              AND date >= $3
+            GROUP BY stop_id
+            """,
+            agency_id,
+            stop_ids,
+            date_from,
+        )
+        cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
+
     return {
         "date": latest_ts.date().isoformat(),
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
+                "stop_id": r["stop_id"],
                 "stop_name": r["stop_name"],
                 "avg_delay_sec": r["avg_delay_sec"],
                 "samples": r["samples"],
+                **_cohort_fields(r["stop_id"], r["avg_delay_sec"], cohort_by_stop),
             }
             for r in rows
         ],
