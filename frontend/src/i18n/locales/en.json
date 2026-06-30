@@ -685,7 +685,8 @@
       "baseline_today": "normal {{baseline}} → today {{today}}",
       "no_baseline_note": "baseline pending",
       "low_confidence": "low confidence (few obs.)",
-      "samples": "{{count}} obs."
+      "samples": "{{count}} obs.",
+      "late5_pct": ">5min {{value}}%"
     },
     "drill": {
       "title": "{{route}} detail",

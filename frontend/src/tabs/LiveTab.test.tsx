@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { LiveTab } from "./LiveTab";
+import { RouteRow } from "./live/RouteRow";
 import * as hooks from "../api/hooks";
 import type { RouteSummary } from "../api/types";
 
@@ -59,5 +60,21 @@ describe("LiveTab", () => {
     renderTab();
     await userEvent.click(screen.getByRole("button", { name: /BAD/ }));
     expect(screen.getByRole("complementary")).toBeInTheDocument();
+  });
+
+  it("shows late5_pct label when value is present", () => {
+    const testRoute = route({ late5_pct: 23.5 });
+    const mockT = ((key: string, opts?: Record<string, unknown>) =>
+      opts ? `${key}:${JSON.stringify(opts)}` : key
+    ) as never;
+    const { getByText } = render(
+      <RouteRow
+        route={testRoute}
+        formatRoute={(rc: string) => rc}
+        onOpen={() => {}}
+        t={mockT}
+      />
+    );
+    expect(getByText(/live\.row\.late5_pct/)).toBeInTheDocument();
   });
 });

@@ -21,6 +21,7 @@ export type RouteSummary = {
   bucket: RouteBucket;
   low_confidence: boolean;
   has_baseline: boolean;
+  late5_pct?: number | null;
 };
 
 export type RouteTrip = {

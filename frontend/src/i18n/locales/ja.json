@@ -685,7 +685,8 @@
       "baseline_today": "平常 {{baseline}} → 今日 {{today}}",
       "no_baseline_note": "平常データ準備中",
       "low_confidence": "要確認（観測少）",
-      "samples": "{{count}}観測"
+      "samples": "{{count}}観測",
+      "late5_pct": "5分超 {{value}}%"
     },
     "drill": {
       "title": "{{route}} の詳細",
