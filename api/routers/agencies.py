@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.deps import get_conn
@@ -135,17 +135,10 @@ async def patch_agency(
         except FeedURLError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    updates: dict[str, Any] = {}
-    if body.agency_name is not None:
-        updates["agency_name"] = body.agency_name
-    if body.feed_url is not None:
-        updates["feed_url"] = body.feed_url
-    if body.static_url is not None:
-        updates["static_url"] = body.static_url
-    if body.ingest_strategy is not None:
-        updates["ingest_strategy"] = body.ingest_strategy
-    if body.trip_id_pattern is not None:
-        updates["trip_id_pattern"] = body.trip_id_pattern
+    updates: dict[str, Any] = {
+        field: getattr(body, field)
+        for field in body.model_fields_set
+    }
 
     if updates:
         set_clauses = [f"{col}=${i+2}" for i, col in enumerate(updates)]
@@ -179,18 +172,18 @@ async def delete_agency(
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    await conn.execute(
+    tag = await conn.execute(
         "UPDATE agencies SET deleted_at = now() WHERE agency_id=$1 AND deleted_at IS NULL",
         agency_id,
     )
-    await record_event(
-        conn,
-        user_id=None,
-        actor_id=admin.user_id,
-        kind="agency_deleted",
-        meta={"agency_id": agency_id},
-    )
-    from fastapi import Response
+    if tag == "UPDATE 1":
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="agency_deleted",
+            meta={"agency_id": agency_id},
+        )
     return Response(status_code=204)
 
 

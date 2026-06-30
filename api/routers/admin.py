@@ -290,6 +290,7 @@ class AdminAgencyOut(BaseModel):
 
 @router.get("/agencies", response_model=list[AdminAgencyOut])
 async def list_admin_agencies(
+    request: Request,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ):
