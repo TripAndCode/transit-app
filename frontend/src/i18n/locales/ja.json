@@ -27,6 +27,7 @@
     "detail_show_grid": "曜日×時間帯を詳しく",
     "back_to_overview": "← 全体に戻る",
     "low_confidence_note": "計測が少なく参考値",
+    "lowSamples": "データ不足 ({{count}}件)",
     "route_label": "路線",
     "route_placeholder": "路線を検索…",
     "no_data": "この路線の計測記録がまだありません。",

@@ -221,6 +221,7 @@ function HeatmapGrid({
   onTip: (e: React.MouseEvent, text: string) => void;
   onLeave: () => void;
 }) {
+  const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
   const byKey = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
   const labelW = big ? 30 : 22;
@@ -260,6 +261,7 @@ function HeatmapGrid({
                   onMouseEnter={(e) => { setHover(key); onTip(e, text); }}
                   onMouseMove={(e) => onTip(e, text)}
                   style={{
+                    position: "relative",
                     height: cellH,
                     borderRadius: 2,
                     background: delayColor(v),
@@ -269,7 +271,24 @@ function HeatmapGrid({
                     boxShadow: active ? "0 0 0 3px var(--accent-soft)" : "none",
                   }}
                 >
-                  {c.low_confidence && <span data-testid="hm-cell-lowconf" hidden />}
+                  {c.low_confidence && (
+                    <span
+                      data-testid="hm-cell-lowconf"
+                      title={t("forecast.lowSamples", { count: c.samples })}
+                      style={{
+                        position: "absolute",
+                        top: 1,
+                        right: 2,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        lineHeight: 1,
+                        color: "#C99A2E",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      !
+                    </span>
+                  )}
                 </div>
               );
             }),
