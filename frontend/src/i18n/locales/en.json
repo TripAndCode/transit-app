@@ -168,6 +168,13 @@
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
   },
+  "peakHourModal": {
+    "title": "{{dow}} {{hour}}:00 — delayed routes",
+    "allDow": "All days",
+    "noData": "Not enough data for this time slot",
+    "avgMin": "+{{value}}min",
+    "routeCount": "{{count}} routes"
+  },
   "header": {
     "app_title": "Delay Dashboard",
     "app_tagline": "Real-time × Timetable",

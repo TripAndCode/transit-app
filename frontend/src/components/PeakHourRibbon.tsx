@@ -12,6 +12,8 @@ type Props = {
   peak_hour_weekend?: OverviewPeakHour | null;
   variant?: "card" | "modal";
   onClick?: () => void;
+  /** Called when the user clicks on a specific hour bar in the chart. */
+  onHourClick?: (hour: number) => void;
 };
 
 const W = 660;
@@ -33,7 +35,13 @@ type HoverState = {
 
 /** Standalone 24-bar peak-hour chart. Used by both card and modal,
  *  and rendered twice in the modal (once per DOW partition). */
-function PeakHourChart({ peak_hour }: { peak_hour: OverviewPeakHour }) {
+function PeakHourChart({
+  peak_hour,
+  onHourClick,
+}: {
+  peak_hour: OverviewPeakHour;
+  onHourClick?: (hour: number) => void;
+}) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<HoverState>({
     visible: false,
@@ -107,10 +115,21 @@ function PeakHourChart({ peak_hour }: { peak_hour: OverviewPeakHour }) {
     });
   }
 
+  function handleClick(e: React.MouseEvent<SVGSVGElement>) {
+    if (!onHourClick) return;
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const scaleX = rect.width / W;
+    const localX = (e.clientX - rect.left) / scaleX;
+    const idx = Math.max(0, Math.min(23, Math.floor((localX - PAD_LEFT) / CELL_W)));
+    if (hourValues[idx] != null) onHourClick(idx);
+  }
+
   return (
     <div
       className="ov-peak-svg-wrap"
       onMouseLeave={() => setHover((h) => ({ ...h, visible: false }))}
+      style={{ cursor: onHourClick ? "pointer" : "default" }}
     >
       <svg
         width="100%"
@@ -120,6 +139,7 @@ function PeakHourChart({ peak_hour }: { peak_hour: OverviewPeakHour }) {
         role="img"
         aria-label={t("overview.section_peak_hour")}
         onMouseMove={handleMove}
+        onClick={handleClick}
       >
         {spreadSegments.map((seg, i) => (
           <rect
@@ -260,6 +280,7 @@ export function PeakHourRibbon({
   peak_hour_weekend,
   variant = "card",
   onClick,
+  onHourClick,
 }: Props) {
   const { t } = useTranslation();
   if (peak_hour == null) return null;
@@ -320,7 +341,7 @@ export function PeakHourRibbon({
   return (
     <div className={wrapperClass} {...interactiveProps}>
       <p className="ov-card-eyebrow">{t("overview.section_peak_hour")}</p>
-      <PeakHourChart peak_hour={peak_hour} />
+      <PeakHourChart peak_hour={peak_hour} onHourClick={onHourClick} />
       <p className="ov-pareto-rest" style={{ marginTop: 10 }}>
         {t("overview.peak_hour_callout", {
           hour: peak_hour.peak_hour,

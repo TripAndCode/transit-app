@@ -121,6 +121,19 @@ export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, Heatmap
   ctx?: ResponseCtx;
 };
 
+export type PeakHourBreakdownRoute = {
+  route_code: string;
+  service_type: string;
+  avg_min: number;
+  samples: number;
+};
+
+export type PeakHourBreakdown = {
+  hour: number;
+  dow: number | null;
+  routes: PeakHourBreakdownRoute[];
+};
+
 export type ResponseCtx = {
   from: string;
   to: string;

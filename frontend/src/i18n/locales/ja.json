@@ -168,6 +168,13 @@
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
     "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
   },
+  "peakHourModal": {
+    "title": "{{dow}}曜 {{hour}}時台 — 遅延路線",
+    "allDow": "全曜日",
+    "noData": "この時間帯に十分なデータがありません",
+    "avgMin": "+{{value}}分",
+    "routeCount": "{{count}}路線"
+  },
   "header": {
     "app_title": "遅延ダッシュボード",
     "app_tagline": "リアルタイム × 時刻表",

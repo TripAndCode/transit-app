@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 
-import { useOverviewSummary } from "../api/hooks";
+import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
@@ -11,6 +11,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { HeroSentence } from "../components/HeroSentence";
 import { MoversList } from "../components/OverviewMoversList";
 import { OverviewModal } from "../components/OverviewModal";
+import { PeakHourModal } from "../components/PeakHourModal";
 import { PeakHourRibbon } from "../components/PeakHourRibbon";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { Skeleton } from "../components/Skeleton";
@@ -39,6 +40,15 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
+  const [peakHourSel, setPeakHourSel] = useState<{
+    hour: number;
+    dow: number | null;
+  } | null>(null);
+  const peakBreakdown = usePeakHourBreakdown(
+    agencyId,
+    peakHourSel?.hour ?? null,
+    peakHourSel?.dow ?? null,
+  );
 
   const hasAnyData =
     !!data && (
@@ -106,6 +116,7 @@ export function OverviewTab() {
               <PeakHourRibbon
                 peak_hour={data.peak_hour}
                 onClick={() => setOpen("peak_hour")}
+                onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
               />
             )}
             {Object.keys(data.service_split).length > 0 && (
@@ -174,6 +185,13 @@ export function OverviewTab() {
           />
         )}
       </OverviewModal>
+      {peakHourSel != null && (
+        <PeakHourModal
+          data={peakBreakdown.data ?? null}
+          loading={peakBreakdown.isLoading}
+          onClose={() => setPeakHourSel(null)}
+        />
+      )}
     </>
   );
 }
