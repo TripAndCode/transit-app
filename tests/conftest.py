@@ -130,7 +130,7 @@ def pg_conn(apply_schema):
                 static_trips, static_routes, static_calendar_dates, static_shapes,
                 agg_route_stats, agg_route_hour, agg_route_dow, agg_route_hour_dow,
                 agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes,
-                agg_meta, rag_chunks, api_keys,
+                agg_feed_health, agg_meta, rag_chunks, api_keys,
                 filter_presets, login_events, sessions, oauth_identities, users CASCADE
             """)
         conn.commit()
@@ -166,7 +166,7 @@ async def aconn(apply_schema):
             static_trips, static_routes, static_calendar_dates, static_shapes,
             agg_route_stats, agg_route_hour, agg_route_dow, agg_route_hour_dow,
             agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes,
-            agg_meta, rag_chunks, api_keys,
+            agg_feed_health, agg_meta, rag_chunks, api_keys,
             filter_presets, login_events, sessions, oauth_identities, users CASCADE
         """)
     except Exception:

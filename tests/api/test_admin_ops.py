@@ -8,8 +8,6 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN
-
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
