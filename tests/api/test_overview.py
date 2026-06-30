@@ -101,6 +101,18 @@ async def _seed_agg_route_stats(aconn, agency_id, route_code, service_type, avg_
     )
 
 
+async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples):
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7) "
+        "ON CONFLICT (agency_id, route_code, service_type, dow, hour) DO UPDATE "
+        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples",
+        agency_id, route_code, service_type, dow, hour,
+        float(avg_min), int(samples),
+    )
+
+
 async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_type, avg_delay_sec, samples):
     await aconn.execute(
         "INSERT INTO agg_route_daily "
@@ -805,3 +817,42 @@ async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency
     k99 = next((x for x in routes if x["route_code"] == "K99"), None)
     assert k99 is not None
     assert k99["late5_pct"] is None
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_returns_top_routes(client, aconn, aagency_id):
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "K31", "平日", 5, 8, 6.5, 50)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "K37", "平日", 5, 8, 5.2, 30)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "C12", "平日", 5, 8, 4.1, 10)
+    # Different hour — must not appear
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "W53", "平日", 5, 9, 9.0, 100)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8, "dow": 5})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["hour"] == 8
+    assert body["dow"] == 5
+    codes = [x["route_code"] for x in body["routes"]]
+    assert codes == ["K31", "K37", "C12"]
+    assert body["routes"][0]["avg_min"] == pytest.approx(6.5, rel=1e-4)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_excludes_low_samples(client, aconn, aagency_id):
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "X1", "平日", 1, 7, 8.0, 2)  # samples < 3
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "X2", "平日", 1, 7, 7.0, 3)  # samples == 3, included
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 7, "dow": 1})
+    assert r.status_code == 200
+    codes = [x["route_code"] for x in r.json()["routes"]]
+    assert "X1" not in codes
+    assert "X2" in codes
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_id):
+    # Without dow param: routes from any DOW at that hour should appear
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Z1", "平日", 1, 12, 5.0, 10)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Z1", "平日", 2, 12, 3.0, 10)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 12})
+    assert r.status_code == 200
+    codes = [x["route_code"] for x in r.json()["routes"]]
+    assert "Z1" in codes
