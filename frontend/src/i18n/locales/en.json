@@ -365,6 +365,10 @@
       "std": "Standard",
       "photo": "Satellite",
       "layers": "Layers"
+    },
+    "heatmapMode": {
+      "avg": "Avg delay",
+      "p90": "90th percentile"
     }
   },
   "ask": {
