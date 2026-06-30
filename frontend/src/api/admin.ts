@@ -132,3 +132,30 @@ export function useRestoreAgency() {
     },
   });
 }
+
+// ── Ops health ────────────────────────────────────────────────────────────
+
+export type AgencyFreshnessItem = {
+  agency_id: number;
+  agency_name: string;
+  last_analyzed_at: string | null;
+  analyze_age_hours: number | null;
+  agg_fresh: boolean;
+  agg_behind_days: number;
+  is_stale: boolean;
+  data_to: string | null;
+  clamp_pct: number | null;
+};
+
+export type OpsHealth = {
+  migrations: { applied: string | null; latest: string | null; behind: number } | null;
+  agencies: AgencyFreshnessItem[];
+};
+
+export function useAdminOps() {
+  return useQuery({
+    queryKey: ["adminOps"],
+    queryFn: ({ signal }) => apiGet<OpsHealth>("/api/admin/ops", { signal }),
+    staleTime: 30_000,
+  });
+}

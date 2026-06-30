@@ -849,7 +849,23 @@
       "ops": "運用状況"
     },
     "ops": {
-      "stub": "準備中"
+      "title": "運用状況",
+      "migrations_ok": "スキーマ最新",
+      "migrations_behind": "スキーマが {{count}} 件遅れています",
+      "agencies_all_fresh": "全事業者: 集計最新",
+      "agencies_stale": "{{count}} 事業者: 集計遅れあり",
+      "col_agency": "事業者",
+      "col_last_analyzed": "最終集計",
+      "col_freshness": "集計状態",
+      "col_data_to": "データ最終日",
+      "col_clamp_pct": "クランプ率",
+      "fresh": "最新",
+      "behind": "{{days}} 日遅れ",
+      "never": "未集計",
+      "age_hours": "{{h}} 時間前",
+      "age_minutes": "{{m}} 分前",
+      "unknown": "不明",
+      "network_link": "路線別遅延は事業者比較タブで確認できます。"
     },
     "agencies": {
       "title": "事業者管理",

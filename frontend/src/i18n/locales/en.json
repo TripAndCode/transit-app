@@ -849,7 +849,23 @@
       "ops": "Ops"
     },
     "ops": {
-      "stub": "Coming soon"
+      "title": "Ops",
+      "migrations_ok": "Schema up to date",
+      "migrations_behind": "Schema behind by {{count}}",
+      "agencies_all_fresh": "All agencies fresh",
+      "agencies_stale": "{{count}} agencies with stale aggregates",
+      "col_agency": "Agency",
+      "col_last_analyzed": "Last analyzed",
+      "col_freshness": "Freshness",
+      "col_data_to": "Data through",
+      "col_clamp_pct": "Clamp %",
+      "fresh": "Fresh",
+      "behind": "{{days}} d behind",
+      "never": "Never analyzed",
+      "age_hours": "{{h}} h ago",
+      "age_minutes": "{{m}} min ago",
+      "unknown": "Unknown",
+      "network_link": "For per-route delay comparison, see the Network tab."
     },
     "agencies": {
       "title": "Agencies",
