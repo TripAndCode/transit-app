@@ -39,9 +39,13 @@ export type RouteTripsResponse = {
 
 export type RouteStopProfileRow = {
   stop_sequence: number;
+  stop_id?: string | null;
   stop_name: string | null;
   avg_delay_sec: number;
   samples: number;
+  cohort_avg_delay_sec?: number | null;
+  cohort_route_count?: number;
+  is_outlier?: boolean;
 };
 
 export type RouteStopProfileResponse = {

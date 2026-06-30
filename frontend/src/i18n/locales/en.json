@@ -707,6 +707,7 @@
       "trip_label_no_headsign": "{{time}}",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "Stop #{{seq}}",
+      "stop_outlier": "{{delta}}min more than {{count}} other routes' avg",
       "close": "Close",
       "empty": "No trip data for this route"
     },

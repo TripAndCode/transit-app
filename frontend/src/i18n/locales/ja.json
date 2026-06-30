@@ -707,6 +707,7 @@
       "trip_label_no_headsign": "{{time}}発",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "停留所 #{{seq}}",
+      "stop_outlier": "他{{count}}路線の平均より{{delta}}分多い",
       "close": "閉じる",
       "empty": "この路線の便データがありません"
     },
