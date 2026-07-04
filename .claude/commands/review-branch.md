@@ -9,11 +9,21 @@ Review the current branch for project $ARGUMENTS as a principal engineer.
 1. Diff the current branch against `main` (NOT master).
 2. Deduce the branch objective and how the new code builds on `main`.
 3. Write a short context intro stating that objective before any findings.
+4. Test-delta gate: compare lines changed under `tests/` and
+   `frontend/src/**/*.{test,spec}.{ts,tsx}` (this repo's tests are colocated next to
+   source per `frontend/vitest.config.ts`, including under nested `__tests__` dirs —
+   the `**` glob matches both) against total lines changed. If the test share is
+   under 15% AND the diff adds new logic
+   (not a pure refactor/wiring/config change), report this as a Major finding
+   before dimension findings arrive — name which new/changed functions or
+   components have no apparent matching test.
 
 ## Phase 2 — Fresh-context review (dispatch subagents)
-Dispatch the `branch-reviewer` subagent once per dimension, in parallel, each with
-a clean context and the diff + stated objective only — none sees another's output:
-bugs, logic, perf, practices, alternatives.
+Dispatch the `branch-reviewer` subagent once per dimension listed under "Dimensions
+you may be asked for" in `.claude/agents/branch-reviewer.md` — that file is the
+single source of truth for the dimension list, so it doesn't drift out of sync with
+this one. Run all dimensions in parallel, each with a clean context and the diff +
+stated objective only — none sees another's output.
 Then YOU synthesize: dedupe, rank by severity, drop low-confidence noise. Keep only
 findings that affect correctness or the objective.
 

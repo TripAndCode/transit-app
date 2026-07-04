@@ -4,7 +4,13 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-dev-db.sh\"" }
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-dev-db.sh\"" },
+          {
+            "type": "command",
+            "timeout": 600,
+            "statusMessage": "Pre-push gate: ruff fmt/lint + tests + frontend typecheck/test/lint/i18n",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-push-quality.sh\""
+          }
         ]
       }
     ]
