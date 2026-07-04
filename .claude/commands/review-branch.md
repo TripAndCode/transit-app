@@ -11,8 +11,9 @@ Review the current branch for project $ARGUMENTS as a principal engineer.
 3. Write a short context intro stating that objective before any findings.
 4. Test-delta gate: compare lines changed under `tests/` and
    `frontend/src/**/*.{test,spec}.{ts,tsx}` (this repo's tests are colocated next to
-   source per `frontend/vitest.config.ts`, not under a `__tests__` dir) against
-   total lines changed. If the test share is under 15% AND the diff adds new logic
+   source per `frontend/vitest.config.ts`, including under nested `__tests__` dirs —
+   the `**` glob matches both) against total lines changed. If the test share is
+   under 15% AND the diff adds new logic
    (not a pure refactor/wiring/config change), report this as a Major finding
    before dimension findings arrive — name which new/changed functions or
    components have no apparent matching test.
