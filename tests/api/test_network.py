@@ -109,6 +109,20 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert order.index(a) < order.index(b) < order.index(cc)
 
 
+async def test_compute_network_summary_excludes_deleted_agency(net_pool):
+    pool, a, b, cc = net_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, date(2026, 4, 1), date(2026, 4, 7))
+
+    ids = [r["agency_id"] for r in rows]
+    assert cc not in ids
+    assert a in ids
+    assert b in ids
+
+
 @pytest.fixture
 async def net_client(net_pool):
     pool, a, b, cc = net_pool

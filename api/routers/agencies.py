@@ -200,20 +200,26 @@ async def restore_agency(
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
 ):
-    """Clear deleted_at, making the agency active again."""
+    """Clear deleted_at, making the agency active again. Idempotent — restoring
+    an already-active agency is a no-op, mirroring delete_agency's guard so a
+    double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     async with conn.transaction():
-        await conn.execute("UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1", agency_id)
-        await record_event(
-            conn,
-            user_id=None,
-            actor_id=admin.user_id,
-            kind="agency_restored",
-            meta={"agency_id": agency_id},
+        tag = await conn.execute(
+            "UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL",
+            agency_id,
         )
+        if tag == "UPDATE 1":
+            await record_event(
+                conn,
+                user_id=None,
+                actor_id=admin.user_id,
+                kind="agency_restored",
+                meta={"agency_id": agency_id},
+            )
     out = await conn.fetchrow(
         "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
         "FROM agencies WHERE agency_id=$1",

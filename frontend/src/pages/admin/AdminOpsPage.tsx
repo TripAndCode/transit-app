@@ -27,16 +27,72 @@ function FreshnessChip({ row, t }: { row: AgencyFreshnessItem; t: ReturnType<typ
   );
 }
 
+type StripStatus = "loading" | "ok" | "warn" | "unknown";
+
+function stripColor(status: StripStatus): string {
+  return status === "warn" || status === "unknown" ? "var(--color-warning, #C99A2E)" : "var(--accent)";
+}
+
 export function AdminOpsPage() {
   const { t } = useTranslation();
-  const { data, isLoading } = useAdminOps();
+  const { data, error } = useAdminOps();
 
   const staleCount = data?.agencies.filter((a) => !a.agg_fresh).length ?? 0;
   const migBehind = data?.migrations?.behind ?? 0;
 
+  // `migrations === null` / `agencies_ok === false` means that sub-check
+  // threw server-side (degrade-gracefully-but-still-200) — render it as
+  // "unknown", not as a false "0 behind" / "all fresh" green state. A failed
+  // request (`error`, no `data` at all) is also "unknown", not stuck loading.
+  const migStatus: StripStatus =
+    data === undefined
+      ? error
+        ? "unknown"
+        : "loading"
+      : data.migrations === null
+      ? "unknown"
+      : migBehind > 0
+      ? "warn"
+      : "ok";
+  const agenciesStatus: StripStatus =
+    data === undefined
+      ? error
+        ? "unknown"
+        : "loading"
+      : !data.agencies_ok
+      ? "unknown"
+      : staleCount > 0
+      ? "warn"
+      : "ok";
+
+  const migText: Record<StripStatus, string> = {
+    loading: t("common.loading"),
+    unknown: t("admin.ops.migrations_unknown"),
+    warn: t("admin.ops.migrations_behind", { count: migBehind }),
+    ok: t("admin.ops.migrations_ok"),
+  };
+  const agenciesText: Record<StripStatus, string> = {
+    loading: t("common.loading"),
+    unknown: t("admin.ops.agencies_unknown"),
+    warn: t("admin.ops.agencies_stale", { count: staleCount }),
+    ok: t("admin.ops.agencies_all_fresh"),
+  };
+
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
       <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ops.title")}</h1>
+
+      {error && (
+        <p
+          role="alert"
+          style={{
+            marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-md)",
+            background: "var(--surface-1)", color: "var(--color-warning, #C99A2E)", fontSize: 14,
+          }}
+        >
+          {t("admin.ops.load_error")}
+        </p>
+      )}
 
       {/* Global status strip */}
       <div
@@ -46,23 +102,9 @@ export function AdminOpsPage() {
           fontSize: 14,
         }}
       >
-        <span
-          style={{ color: migBehind > 0 ? "var(--color-warning, #C99A2E)" : "var(--accent)" }}
-        >
-          {data === undefined && isLoading
-            ? t("common.loading")
-            : migBehind > 0
-            ? t("admin.ops.migrations_behind", { count: migBehind })
-            : t("admin.ops.migrations_ok")}
-        </span>
+        <span style={{ color: stripColor(migStatus) }}>{migText[migStatus]}</span>
         <span style={{ color: "var(--border-soft)" }}>|</span>
-        <span
-          style={{ color: staleCount > 0 ? "var(--color-warning, #C99A2E)" : "var(--accent)" }}
-        >
-          {staleCount > 0
-            ? t("admin.ops.agencies_stale", { count: staleCount })
-            : t("admin.ops.agencies_all_fresh")}
-        </span>
+        <span style={{ color: stripColor(agenciesStatus) }}>{agenciesText[agenciesStatus]}</span>
       </div>
 
       {/* Per-agency table */}

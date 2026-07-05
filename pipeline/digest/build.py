@@ -19,7 +19,7 @@ from pipeline.freshness import check_agg_freshness
 
 TOP_MOVERS = 5
 
-_AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies ORDER BY agency_id"
+_AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
 
 _DAY_ROUTES_SQL = """
     SELECT route_code, avg_delay_sec, samples

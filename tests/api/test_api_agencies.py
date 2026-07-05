@@ -355,6 +355,18 @@ async def test_patch_unknown_ingest_strategy(agencies_client):
     assert resp.status_code == 422
 
 
+async def _audit_count(agency_id: int, kind: str) -> int:
+    from api.main import app
+
+    async with app.state.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT count(*) AS n FROM login_events WHERE kind=$1 AND meta->>'agency_id' = $2",
+            kind,
+            str(agency_id),
+        )
+    return row["n"]
+
+
 @pytest.mark.asyncio
 async def test_soft_delete_idempotent(agencies_client):
     client, sid = agencies_client
@@ -368,6 +380,30 @@ async def test_soft_delete_idempotent(agencies_client):
     await client.delete(f"/api/agencies/{aid}", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
     resp2 = await client.delete(f"/api/agencies/{aid}", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
     assert resp2.status_code == 204  # idempotent
+    # The guard (tag == "UPDATE 1") must stop the second delete from writing
+    # a duplicate audit row — this is the behavior the idempotency is for.
+    assert await _audit_count(aid, "agency_deleted") == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_idempotent(agencies_client):
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "RestoreIdem", "feed_url": "http://ri.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    await client.delete(f"/api/agencies/{aid}", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
+
+    resp1 = await client.post(f"/api/agencies/{aid}/restore", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
+    resp2 = await client.post(f"/api/agencies/{aid}/restore", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200  # restoring an already-active agency is a no-op, not an error
+    assert resp2.json()["deleted_at"] is None
+    # Re-restoring an already-active agency must not write a second audit row.
+    assert await _audit_count(aid, "agency_restored") == 1
 
 
 @pytest.mark.asyncio

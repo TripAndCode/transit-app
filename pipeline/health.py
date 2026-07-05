@@ -57,12 +57,21 @@ class AgencyFreshness:
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id"
 
+# LATERAL per agency (not a bare GROUP BY over all of `updates`) so each probe
+# is an agency_id-equality + MAX — an index-backed backward scan on
+# idx_updates_agency_at — instead of a full scan/aggregate of the whole
+# fact table. Only active agencies are probed (WHERE deleted_at IS NULL).
 _LIVE_MAX_SQL = """
-    SELECT agency_id, (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date AS d
-    FROM updates
-    WHERE captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
-                        AT TIME ZONE 'Asia/Tokyo'
-    GROUP BY agency_id
+    SELECT a.agency_id, (m.mx AT TIME ZONE 'Asia/Tokyo')::date AS d
+    FROM agencies a
+    CROSS JOIN LATERAL (
+        SELECT MAX(u.captured_at) AS mx
+        FROM updates u
+        WHERE u.agency_id = a.agency_id
+          AND u.captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
+                              AT TIME ZONE 'Asia/Tokyo'
+    ) m
+    WHERE a.deleted_at IS NULL
 """
 
 _FEED_HEALTH_SQL = """

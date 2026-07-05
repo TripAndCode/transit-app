@@ -54,6 +54,22 @@ def test_build_empty_day_marks_no_data(pg_conn, agency_id):
     assert data.network_avg_delay_min is None
 
 
+def test_build_digest_excludes_deleted_agency(pg_conn, agency_id):
+    _seed(pg_conn, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES (%s, %s, now()) RETURNING agency_id",
+            ("Deleted Digest Agency", "http://deleted-digest.example.com"),
+        )
+        deleted_id = cur.fetchone()[0]
+    pg_conn.commit()
+
+    data = build_digest(pg_conn, DAY)
+
+    assert deleted_id not in [s.agency_id for s in data.sections]
+    assert agency_id in [s.agency_id for s in data.sections]
+
+
 def _insert_daily(cur, agency_id, route, service_type, avg_sec, samples):
     cur.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "

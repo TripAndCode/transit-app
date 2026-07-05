@@ -224,7 +224,11 @@ export function AdminAgenciesPage() {
         <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.agencies.title")}</h1>
         <button
           type="button"
-          onClick={() => setEditing(undefined)}
+          onClick={() => {
+            create.reset();
+            patch.reset();
+            setEditing(undefined);
+          }}
           style={{
             background: "var(--accent)", color: "#fff", border: "none",
             padding: "6px 14px", borderRadius: 4, cursor: "pointer",
@@ -279,13 +283,18 @@ export function AdminAgenciesPage() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setEditing(a)}
+                      onClick={() => {
+                        create.reset();
+                        patch.reset();
+                        setEditing(a);
+                      }}
                       style={{ marginRight: 8, fontSize: 13 }}
                     >
                       {t("admin.agencies.action_edit")}
                     </button>
                     <button
                       type="button"
+                      disabled={del.isPending && del.variables === a.agency_id}
                       onClick={() => {
                         if (confirm(t("admin.agencies.confirm_delete", { name: a.agency_name }))) {
                           del.mutate(a.agency_id);
@@ -300,6 +309,7 @@ export function AdminAgenciesPage() {
                 {a.deleted_at && (
                   <button
                     type="button"
+                    disabled={restore.isPending && restore.variables === a.agency_id}
                     onClick={() => restore.mutate(a.agency_id)}
                     style={{ fontSize: 13 }}
                   >
@@ -316,7 +326,11 @@ export function AdminAgenciesPage() {
         <AgencyFormModal
           initial={editing === undefined ? EMPTY_FORM : agencyToForm(editing)}
           isEdit={editing !== undefined}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            create.reset();
+            patch.reset();
+            setEditing(null);
+          }}
           onSubmit={handleSubmit}
           isPending={create.isPending || patch.isPending}
           error={create.error || patch.error}

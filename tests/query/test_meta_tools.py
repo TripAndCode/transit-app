@@ -168,6 +168,29 @@ async def test_describe_data_agencies_cross(conn_with_observations):
 
 
 @pytest.mark.asyncio
+async def test_describe_data_agencies_cross_excludes_deleted(conn_with_observations):
+    """cross_agency=True must still hide soft-deleted agencies."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES ('GONE', 'http://gone', now())"
+        )
+        result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
+    names = {row[1] for row in result.rows}
+    assert "GONE" not in names
+
+
+@pytest.mark.asyncio
+async def test_describe_data_agencies_own_deleted_returns_empty(conn_with_observations):
+    """A caller whose own agency was soft-deleted gets no rows back."""
+    pool, agency_id = conn_with_observations
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", agency_id)
+        result = await describe_data({"kind": "agencies"}, _ctx(), conn, agency_id, locale="ja")
+    assert result.rows == []
+
+
+@pytest.mark.asyncio
 async def test_describe_data_sample_counts(conn_with_observations):
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:

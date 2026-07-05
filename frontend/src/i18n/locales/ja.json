@@ -804,14 +804,6 @@
     "no_agency_selected": "事業者が選択されていません"
   },
   "admin": {
-    "agency_form": {
-      "title": "新規事業者登録",
-      "name_label": "事業者名",
-      "gtfs_label": "GTFS 静的データ URL（任意）",
-      "error": "登録に失敗しました",
-      "submitting": "登録中...",
-      "submit": "登録"
-    },
     "users": {
       "title": "ユーザー管理",
       "search_placeholder": "メール / 名前で検索",
@@ -851,8 +843,11 @@
       "title": "運用状況",
       "migrations_ok": "スキーマ最新",
       "migrations_behind": "スキーマが {{count}} 件遅れています",
+      "migrations_unknown": "マイグレーション状態を取得できません",
       "agencies_all_fresh": "全事業者: 集計最新",
       "agencies_stale": "{{count}} 事業者: 集計遅れあり",
+      "agencies_unknown": "事業者の集計状態を取得できません",
+      "load_error": "運用状況の取得に失敗しました。取得できた分のみ表示しています。",
       "col_agency": "事業者",
       "col_last_analyzed": "最終集計",
       "col_freshness": "集計状態",

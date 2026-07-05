@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
+# Shared by every all-agencies loop below (analyze-all, check-aggs, ingest-live)
+# so a test can assert against the query as actually executed, not a hand-typed
+# copy that would stay green if the real filter were ever reverted.
+ACTIVE_AGENCY_IDS_SQL = "SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+
 
 def _get_conn():
     conn = psycopg2.connect(DATABASE_URL)
@@ -210,7 +215,7 @@ def cmd_analyze_all(args):
 
     conn = _get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+        cur.execute(ACTIVE_AGENCY_IDS_SQL)
         agency_ids = [r[0] for r in cur.fetchall()]
     if not agency_ids:
         logger.info("No agencies found.")
@@ -240,7 +245,7 @@ def cmd_check_aggs(args):
 
     conn = _get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+        cur.execute(ACTIVE_AGENCY_IDS_SQL)
         agency_ids = [r[0] for r in cur.fetchall()]
     stale = check_agg_freshness(conn, agency_ids)
     conn.close()
@@ -297,7 +302,7 @@ def cmd_ingest_live(args):
         ingest_live(int(args.agency_id), conn)
     else:
         with conn.cursor() as cur:
-            cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+            cur.execute(ACTIVE_AGENCY_IDS_SQL)
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
             logger.info("No agencies found.")

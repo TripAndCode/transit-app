@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.deps import get_conn
+from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
 
@@ -278,16 +279,6 @@ async def delete_user(
     return Response(status_code=204)
 
 
-class AdminAgencyOut(BaseModel):
-    agency_id: int
-    agency_name: str
-    feed_url: str
-    static_url: Any
-    ingest_strategy: Any
-    trip_id_pattern: Any
-    deleted_at: Any
-
-
 # ── Ops health endpoint ──────────────────────────────────────────────────
 
 class MigrationStatusOut(BaseModel):
@@ -311,6 +302,10 @@ class AgencyFreshnessOut(BaseModel):
 class OpsHealth(BaseModel):
     migrations: Any  # MigrationStatusOut | None
     agencies: list[AgencyFreshnessOut]
+    # False only when the agencies sub-check itself threw — lets the frontend
+    # tell "checked, zero agencies" apart from "check failed" (both would
+    # otherwise be an indistinguishable empty `agencies` list).
+    agencies_ok: bool
 
 
 @router.get("/ops", response_model=OpsHealth)
@@ -329,6 +324,7 @@ async def admin_ops(
         pass  # mig stays None
 
     agencies_out: list[dict] = []
+    agencies_ok = True
     try:
         for af in await aggregate_freshness(conn):
             agencies_out.append({
@@ -343,9 +339,10 @@ async def admin_ops(
                 "clamp_pct": af.clamp_pct,
             })
     except Exception:
-        pass  # agencies_out stays []
+        agencies_out = []
+        agencies_ok = False
 
-    return OpsHealth(migrations=mig, agencies=agencies_out)
+    return OpsHealth(migrations=mig, agencies=agencies_out, agencies_ok=agencies_ok)
 
 
 @router.get("/agencies", response_model=list[AdminAgencyOut])

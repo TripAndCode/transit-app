@@ -46,6 +46,7 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> int:
         cur.execute(
             "SELECT agency_id FROM agencies "
             "WHERE static_url IS NOT NULL AND static_strategy IS NOT NULL "
+            "AND deleted_at IS NULL "
             "ORDER BY agency_id"
         )
         ids = [r[0] for r in cur.fetchall()]

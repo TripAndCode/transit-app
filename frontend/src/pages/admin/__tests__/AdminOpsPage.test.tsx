@@ -23,6 +23,7 @@ let mockReturnValue: any = {
         clamp_pct: 1.3,
       },
     ],
+    agencies_ok: true,
   },
   isLoading: false,
   error: null,
@@ -62,6 +63,7 @@ describe("AdminOpsPage", () => {
             clamp_pct: 1.3,
           },
         ],
+        agencies_ok: true,
       },
       isLoading: false,
       error: null,
@@ -78,20 +80,49 @@ describe("AdminOpsPage", () => {
     expect(screen.getByText("Aomori Bus")).toBeTruthy();
   });
 
-  it("renders without crashing when migrations is null", () => {
-    // Override the return value for this test
+  it("shows migration status as unknown (not a false OK) when migrations is null", () => {
+    // Backend degrades a failed migration_status() check to null, still 200.
     mockReturnValue = {
-      data: {
-        migrations: null,
-        agencies: [],
-      },
+      data: { migrations: null, agencies: [], agencies_ok: true },
       isLoading: false,
       error: null,
     };
 
     wrap(<AdminOpsPage />);
-    // Component must not throw; status strip should show the OK label
-    // (migBehind defaults to 0 when migrations is null)
-    expect(screen.getByText(/schema up to date/i)).toBeTruthy();
+    expect(screen.getByText(/migration status unavailable/i)).toBeTruthy();
+    expect(screen.queryByText(/schema up to date/i)).toBeNull();
+  });
+
+  it("shows agency freshness as unknown (not a false all-fresh) when agencies_ok is false", () => {
+    // Backend degrades a failed aggregate_freshness() check to [] + agencies_ok=false.
+    mockReturnValue = {
+      data: { migrations: { applied: "0026", latest: "0026", behind: 0 }, agencies: [], agencies_ok: false },
+      isLoading: false,
+      error: null,
+    };
+
+    wrap(<AdminOpsPage />);
+    expect(screen.getByText(/agency freshness unavailable/i)).toBeTruthy();
+    expect(screen.queryByText(/all agencies fresh/i)).toBeNull();
+  });
+
+  it("shows a load-error banner and unknown status on a full request failure", () => {
+    mockReturnValue = {
+      data: undefined,
+      isLoading: false,
+      error: new Error("network down"),
+    };
+
+    wrap(<AdminOpsPage />);
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByText(/migration status unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/agency freshness unavailable/i)).toBeTruthy();
+  });
+
+  it("shows loading text while the query is in flight", () => {
+    mockReturnValue = { data: undefined, isLoading: true, error: null };
+
+    wrap(<AdminOpsPage />);
+    expect(screen.getAllByText(/loading/i).length).toBeGreaterThan(0);
   });
 });

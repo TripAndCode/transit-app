@@ -257,10 +257,13 @@ async def describe_data(
         # "どんなエージェンシーがある?" — that's a leak waiting to happen.
         cross_agency = bool(args.get("cross_agency", False))
         if cross_agency:
-            rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
+            rows = await conn.fetch(
+                "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+            )
         else:
             rows = await conn.fetch(
-                "SELECT agency_id, agency_name FROM agencies WHERE agency_id = $1 ORDER BY agency_id",
+                "SELECT agency_id, agency_name FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL "
+                "ORDER BY agency_id",
                 agency_id,
             )
         return ToolResult(

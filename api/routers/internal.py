@@ -65,7 +65,7 @@ def _run_ingest_and_analyze() -> None:
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT agency_id FROM agencies ORDER BY agency_id")
+            cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
             _log.warning("cron: no agencies seeded; nothing to ingest")

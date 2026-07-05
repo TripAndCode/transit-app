@@ -150,6 +150,9 @@ export type AgencyFreshnessItem = {
 export type OpsHealth = {
   migrations: { applied: string | null; latest: string | null; behind: number } | null;
   agencies: AgencyFreshnessItem[];
+  // False only when the agencies sub-check itself failed — distinguishes
+  // "checked, zero agencies" from "check failed" (both give an empty array).
+  agencies_ok: boolean;
 };
 
 export function useAdminOps() {

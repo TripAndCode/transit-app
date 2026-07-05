@@ -45,7 +45,9 @@ _LIVE_MAX_ONE_SQL = """
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, from_date: date, to_date: date) -> list[dict[str, Any]]:
     """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first."""
-    agencies = await conn.fetch("SELECT agency_id, agency_name FROM agencies ORDER BY agency_id")
+    agencies = await conn.fetch(
+        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+    )
     perf = {r["agency_id"]: r for r in await conn.fetch(_PERF_SQL, from_date, to_date)}
     feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
     agg_max = {r["agency_id"]: r["d"] for r in await conn.fetch(_AGG_MAX_SQL)}
