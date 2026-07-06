@@ -115,6 +115,11 @@ describe("useHeatmapLayer colorField", () => {
 
   it("recolors dots + cluster bubbles on themechange (severe band tracks the theme)", () => {
     const map = makeMockMap();
+    // Start in light mode: dark is the default, so a toggle TO dark is only
+    // observable from a non-dark starting DOM state. useThemeSignal reads
+    // data-theme from the DOM (the source of truth applyTheme writes), so the
+    // test sets it exactly as applyTheme would, alongside dispatching the event.
+    document.documentElement.dataset.theme = "light";
     run(map);
     // Built with the light-mode severe red by default (no theme, jsdom cascade
     // unresolved -> severeColorResolved() falls back to #d92121).
@@ -123,9 +128,11 @@ describe("useHeatmapLayer colorField", () => {
       JSON.stringify((map.getLayer(CLUSTER_LAYER) as MockLayer).paint!["circle-color"]),
     ).toContain("#d92121");
 
-    // Simulate the cascade resolving the dark value, then toggle the theme.
+    // Simulate the cascade resolving the dark value, then toggle the theme —
+    // data-theme write + event, exactly what applyTheme does.
     act(() => {
       document.documentElement.style.setProperty("--delay-severe", "#F04438");
+      document.documentElement.dataset.theme = "dark";
       window.dispatchEvent(new CustomEvent("themechange", { detail: "dark" }));
     });
 

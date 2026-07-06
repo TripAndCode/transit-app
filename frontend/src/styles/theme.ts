@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark";
 
@@ -47,24 +47,34 @@ export function applyTheme(theme: Theme): void {
   }
 }
 
+/** Subscribe to theme changes: re-run `onStoreChange` whenever applyTheme
+ *  dispatches its `themechange` event. Returns the unsubscribe cleanup. */
+function subscribeThemeSignal(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(THEME_CHANGE_EVENT, onStoreChange);
+  return () => window.removeEventListener(THEME_CHANGE_EVENT, onStoreChange);
+}
+
+/** Snapshot of the current theme, read from the DOM (`data-theme` on <html>) —
+ *  the single source of truth applyTheme writes. Returns DEFAULT_THEME (dark)
+ *  when the attribute is absent or unrecognized, matching the module's default
+ *  rather than a hardcoded "light". Returns a stable primitive so
+ *  useSyncExternalStore won't loop. Doubles as the server snapshot. */
+function themeSnapshot(): Theme {
+  if (typeof document === "undefined") return DEFAULT_THEME;
+  const v = document.documentElement.dataset.theme;
+  return v === "light" || v === "dark" ? v : DEFAULT_THEME;
+}
+
 /** Current theme as a re-render signal for imperative (non-CSS) consumers.
- *  Subscribes to the `themechange` event applyTheme dispatches, so a hook that
- *  puts this value in an effect's dependency array re-runs on a theme toggle —
- *  without every such component mounting its own useTheme(). CSS consumers
- *  don't need this: the cascade recolors var(--*) references automatically. */
+ *  A hook that puts this value in an effect's dependency array re-runs on a
+ *  theme toggle — without every such component mounting its own useTheme().
+ *  CSS consumers don't need this: the cascade recolors var(--*) references
+ *  automatically.
+ *
+ *  Backed by useSyncExternalStore, which reads the snapshot at subscribe time
+ *  (no missed-update window between the initial read and the listener
+ *  attaching, unlike a useState + useEffect pair) and stays concurrent-safe. */
 export function useThemeSignal(): Theme {
-  const [theme, setTheme] = useState<Theme>(() =>
-    typeof document !== "undefined" && document.documentElement.dataset.theme === "dark"
-      ? "dark"
-      : "light",
-  );
-  useEffect(() => {
-    function onChange(e: Event) {
-      const detail = (e as CustomEvent<Theme>).detail;
-      setTheme(detail === "dark" ? "dark" : "light");
-    }
-    window.addEventListener(THEME_CHANGE_EVENT, onChange);
-    return () => window.removeEventListener(THEME_CHANGE_EVENT, onChange);
-  }, []);
-  return theme;
+  return useSyncExternalStore(subscribeThemeSignal, themeSnapshot, themeSnapshot);
 }
