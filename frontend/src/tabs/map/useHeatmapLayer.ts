@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
 import { whenStyleReady } from "./styleReady";
-import { DELAY_RAMP, severeColorResolved } from "../../styles/tokens";
+import { severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import type { SeverityKey } from "../../components/MapLegend";
 
@@ -137,11 +137,7 @@ export function useHeatmapLayer(
         "/", ["get", "dsum"], ["get", "point_count"],
       ];
       const clusterColor: maplibregl.ExpressionSpecification = [
-        "step", clusterAvgDelay,
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, severeColorResolved(),
+        "step", clusterAvgDelay, ...severityStepColors(),
       ];
       const clusterRadius: maplibregl.ExpressionSpecification = [
         "step", ["get", "point_count"], 15, 10, 19, 50, 25, 200, 32,
@@ -181,12 +177,7 @@ export function useHeatmapLayer(
       });
 
       const colorExpr: maplibregl.ExpressionSpecification = [
-        "step",
-        ["get", colorField],
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, severeColorResolved(),
+        "step", ["get", colorField], ...severityStepColors(),
       ];
 
       // Dot SIZE encodes the DELAY itself — bigger = worse — so color and size
@@ -296,14 +287,12 @@ export function useHeatmapLayer(
     if (!m) return;
     if (!m.getLayer(LAYER)) return;
     const expr: maplibregl.ExpressionSpecification = [
-      "step", ["get", colorField],
-      DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved(),
+      "step", ["get", colorField], ...severityStepColors(),
     ];
     m.setPaintProperty(LAYER, "circle-color", expr);
     if (m.getLayer(CLUSTER_LAYER)) {
       const clusterColor: maplibregl.ExpressionSpecification = [
-        "step", ["/", ["get", "dsum"], ["get", "point_count"]],
-        DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved(),
+        "step", ["/", ["get", "dsum"], ["get", "point_count"]], ...severityStepColors(),
       ];
       m.setPaintProperty(CLUSTER_LAYER, "circle-color", clusterColor);
     }

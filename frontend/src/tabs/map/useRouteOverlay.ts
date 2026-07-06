@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
-import { DELAY_RAMP, severeColorResolved } from "../../styles/tokens";
+import { severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
@@ -132,7 +132,7 @@ export function useRouteOverlay(
           "circle-color": [
             "case",
             ["get", "has_data"],
-            ["step", ["get", "avg_min"], DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved()],
+            ["step", ["get", "avg_min"], ...severityStepColors()],
             "rgba(255,255,255,0)",
           ],
           "circle-opacity": 0.95,

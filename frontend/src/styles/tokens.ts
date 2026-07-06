@@ -23,6 +23,9 @@ const SEVERE_VAR = "var(--delay-severe)";
 // Light-mode severe red — the fallback when the CSS custom property can't be
 // resolved (e.g. under jsdom, which doesn't apply global.css's cascade; tests
 // see this unless they set `--delay-severe` inline).
+// NOTE: must stay in sync with global.css's base `:root { --delay-severe: … }`
+// light value — there's no build-time link between the two, so a change to one
+// must be mirrored in the other by hand.
 const SEVERE_FALLBACK = "#d92121";
 
 /** Resolve `--delay-severe` to a concrete hex for callers that need a real,
@@ -60,6 +63,28 @@ export function delayColor(minutes: number): string {
   if (minutes < 5) return DELAY_RAMP.mild;
   if (minutes < 10) return DELAY_RAMP.moderate;
   return DELAY_RAMP.severe;
+}
+
+/** The delay-ramp color/threshold pairs a MapLibre `step` expression needs after
+ *  its `["step", <input>]` prefix: `[ok, 2, mild, 5, moderate, 10, severe]`.
+ *  Single source of truth for the paint-expression stops shared by the heatmap
+ *  and route-overlay layers — spread it (`["step", input, ...severityStepColors()]`)
+ *  rather than hand-assembling the array, so a new call site can't accidentally
+ *  reach for `DELAY_RAMP.severe` (the literal `var()`, which MapLibre can't parse)
+ *  instead of the resolved hex. The severe stop is `severeColorResolved()`, a real
+ *  parseable color for exactly that reason. */
+export function severityStepColors(): readonly [
+  string, number, string, number, string, number, string,
+] {
+  return [
+    DELAY_RAMP.ok,
+    2,
+    DELAY_RAMP.mild,
+    5,
+    DELAY_RAMP.moderate,
+    10,
+    severeColorResolved(),
+  ];
 }
 
 // Continuous calm ramp for *relative* (within-view) severity: t=0 → sage, t=1 → orange.
