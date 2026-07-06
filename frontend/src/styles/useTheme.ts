@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { applyTheme, readThemePref, writeThemePref, type Theme } from "../styles/theme";
+import { applyTheme, readThemePref, writeThemePref, type Theme } from "./theme";
 
 /** Current theme + a setter that persists to localStorage and updates
  *  data-theme on <html>. Applies the initial theme on mount too — redundant

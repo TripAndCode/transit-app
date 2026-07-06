@@ -27,10 +27,14 @@ function severeColor(): string {
   return v || SEVERE_FALLBACK;
 }
 
-export const DELAY_RAMP = {
+const BASE_RAMP = {
   ok: "#8fb88f",       // < 2 min   sage
   mild: "#d4b878",     // 2 – 5 min sand
   moderate: "#e07a3a", // 5 – 10 min orange
+} as const;
+
+export const DELAY_RAMP = {
+  ...BASE_RAMP,
   get severe(): string {
     return severeColor(); // > 10 min red, per-theme via --delay-severe
   },

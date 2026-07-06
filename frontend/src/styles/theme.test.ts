@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readThemePref, writeThemePref, applyTheme } from "./theme";
 
 describe("theme preference (localStorage)", () => {
@@ -19,6 +19,22 @@ describe("theme preference (localStorage)", () => {
   it("ignores an invalid stored value and returns the default", () => {
     localStorage.setItem("transit.theme", "sepia");
     expect(readThemePref()).toBe("dark");
+  });
+
+  it("returns dark when localStorage.getItem throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("localStorage unavailable");
+    });
+    expect(readThemePref()).toBe("dark");
+    spy.mockRestore();
+  });
+
+  it("doesn't throw when localStorage.setItem throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("localStorage unavailable");
+    });
+    expect(() => writeThemePref("light")).not.toThrow();
+    spy.mockRestore();
   });
 
   it("applyTheme sets data-theme on the html element", () => {

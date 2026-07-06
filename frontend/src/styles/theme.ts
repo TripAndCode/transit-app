@@ -36,11 +36,14 @@ export function writeThemePref(theme: Theme): void {
  *  the global.css `:root[data-theme="dark"]` block selects on. Also dispatches
  *  a `themechange` event so imperative consumers that can't recolor via the CSS
  *  cascade (the MapLibre layer hooks, which embed DELAY_RAMP.severe in style
- *  expressions) can rebuild — see useThemeSignal. */
+ *  expressions) can rebuild — see useThemeSignal. Skips redundant writes if the
+ *  theme value is unchanged. */
 export function applyTheme(theme: Theme): void {
-  document.documentElement.dataset.theme = theme;
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent<Theme>(THEME_CHANGE_EVENT, { detail: theme }));
+  if (document.documentElement.dataset.theme !== theme) {
+    document.documentElement.dataset.theme = theme;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent<Theme>(THEME_CHANGE_EVENT, { detail: theme }));
+    }
   }
 }
 
