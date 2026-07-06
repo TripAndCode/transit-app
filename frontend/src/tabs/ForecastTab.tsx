@@ -62,8 +62,8 @@ function Tooltip({ tip }: { tip: Tip }) {
         top: y,
         zIndex: 90,
         pointerEvents: "none",
-        background: "var(--text-primary)",
-        color: "#fff",
+        background: "var(--tooltip-bg)",
+        color: "var(--tooltip-fg)",
         fontSize: 12,
         padding: "5px 9px",
         borderRadius: 6,
@@ -282,7 +282,7 @@ function HeatmapGrid({
                         fontSize: 9,
                         fontWeight: 800,
                         lineHeight: 1,
-                        color: "#C99A2E",
+                        color: "var(--color-warning)",
                         pointerEvents: "none",
                       }}
                     >
