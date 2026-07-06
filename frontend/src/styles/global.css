@@ -11,6 +11,25 @@
   --accent-soft: #e8ebf4;
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
+  /* --surface-1/--surface-2 alias the two existing surface tiers under names
+     already used by several admin pages (AdminOpsPage, AdminAgenciesPage,
+     HeaderUserMenu, PresetMenu, GuestPrompt, AccountPage, AdminUser*Page) —
+     those files reference --surface-1/--surface-2 but neither was ever
+     defined, so they've been silently rendering with no background. */
+  --surface-1: var(--bg-surface);
+  --surface-2: var(--bg-soft);
+  /* Referenced via var(--color-warning, #C99A2E) fallbacks in several files
+     (RouteDrilldown, AdminOpsPage) and unguarded in AdminAgenciesPage — same
+     gap as --surface-1/--surface-2 above. Same value in both themes; passes
+     contrast comfortably on dark, matches the pre-existing (marginal) look
+     on light — not changing the light-mode value here, out of scope. */
+  --color-warning: #C99A2E;
+  --color-danger: #c0392b;
+  /* Tooltip is intentionally theme-invariant (always a dark chip with white
+     text, in both light and dark mode) — NOT derived from --text-primary,
+     which flips light-to-dark and would otherwise break tooltip contrast. */
+  --tooltip-bg: #2a2a2a;
+  --tooltip-fg: #ffffff;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -23,6 +42,21 @@
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --bg-page: #0F1119;
+  --bg-surface: #141726;
+  --bg-soft: #1B1F35;
+  --border-soft: #232840;
+  --border-subtle: #2A3050;
+  --text-primary: #DDD9F3;
+  --text-secondary: #9894B8;
+  --text-tertiary: #5A607A;
+  --accent-soft: rgba(91, 108, 173, 0.16);
+  --error-bg: #2A1F14;
+  --error-fg: #E0B45C;
+  --color-danger: #E0685B;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
