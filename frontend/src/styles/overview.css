@@ -72,7 +72,7 @@
   padding: 32px;
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.04),
-    0 0 0 1px rgba(0, 0, 0, 0.04);
+    0 0 0 1px var(--border-soft);
   margin-bottom: 32px;
   position: relative;
 }
@@ -102,9 +102,9 @@
   padding: 4px 12px;
   font-size: 14px;
 }
-.ov-chip-down    { background: rgba(22, 101, 52, 0.10); color: #166534; }
-.ov-chip-up      { background: rgba(180, 83, 9, 0.10);  color: #b45309; }
-.ov-chip-neutral { background: rgba(71, 85, 105, 0.08); color: #475569; }
+.ov-chip-down    { background: var(--trend-good-bg);   color: var(--trend-good); }
+.ov-chip-up      { background: var(--trend-bad-bg);     color: var(--trend-bad); }
+.ov-chip-neutral { background: var(--trend-neutral-bg); color: var(--trend-neutral); }
 
 /* ---------- 2. Movers (ranked rows) ---------- */
 .ov-movers {
@@ -125,7 +125,7 @@
   align-items: center;
   gap: 16px;
   padding: 14px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--border-soft);
 }
 .ov-mover-row:first-child { padding-top: 4px; }
 .ov-mover-row:last-child  { border-bottom: 0; padding-bottom: 0; }
@@ -170,11 +170,11 @@
 }
 .ov-mover-streak::before {
   content: "●";
-  color: #b45309;
+  color: var(--trend-bad);
   font-size: 6px;
   line-height: 1;
 }
-.ov-mover-streak.good::before { color: #166534; }
+.ov-mover-streak.good::before { color: var(--trend-good); }
 
 .ov-mover-spark {
   display: flex;
@@ -222,7 +222,7 @@
 }
 .ov-pareto-track {
   height: 8px;
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--track-bg);
   border-radius: 4px;
   overflow: hidden;
   position: relative;
@@ -230,7 +230,7 @@
 .ov-pareto-fill {
   height: 100%;
   border-radius: 4px;
-  outline: 1px solid rgba(0, 0, 0, 0.05);
+  outline: 1px solid var(--border-soft);
   outline-offset: -1px;
   transition: height 200ms ease;
   transform-origin: left center;
@@ -286,7 +286,7 @@
 }
 .ov-svc-track {
   height: 8px;
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--track-bg);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -391,7 +391,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 24px 32px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--border-soft);
 }
 .ov-modal-title {
   margin: 0;
@@ -410,7 +410,7 @@
   line-height: 1;
 }
 .ov-modal-close:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--hover-tint);
   color: var(--text-primary);
 }
 .ov-modal-body { padding: 32px; overflow-y: auto; }
@@ -458,7 +458,7 @@
   transform: translateY(-1px);
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.06),
-    0 0 0 1px rgba(0, 0, 0, 0.06);
+    0 0 0 1px var(--border-soft);
 }
 .ov-hero.ov-clickable:hover { transform: translateY(-1px); }
 .ov-card.ov-clickable:focus-visible,

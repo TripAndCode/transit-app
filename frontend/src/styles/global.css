@@ -36,6 +36,24 @@
      getComputedStyle so both CSS (var(--delay-severe)) and JS consumers
      (MapLibre style expressions) resolve the same source of truth. */
   --delay-severe: #d92121;
+  /* Overview trend chips / mover-streak dots + generic track/hover accents.
+     trend-* pairs are the "good/bad/neutral" semantic colors used by
+     .ov-chip-down/-up/-neutral and the mover-streak dots; track-bg is a
+     background fill for bar/rail tracks (pareto, service-split); hover-tint
+     is a bare (non-brand) hover feedback tint; skeleton-* feed .skeleton's
+     shimmer gradient. All theme-aware — light values below match the
+     pre-existing hardcoded overview.css hex exactly; dark values are lifted
+     to pass contrast / stay visible on the dark surfaces. */
+  --trend-good: #166534;
+  --trend-good-bg: rgba(22, 101, 52, 0.10);
+  --trend-bad: #b45309;
+  --trend-bad-bg: rgba(180, 83, 9, 0.10);
+  --trend-neutral: #475569;
+  --trend-neutral-bg: rgba(71, 85, 105, 0.08);
+  --track-bg: rgba(0, 0, 0, 0.03);
+  --hover-tint: rgba(0, 0, 0, 0.04);
+  --skeleton-a: #ececec;
+  --skeleton-b: #f5f5f5;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -64,6 +82,16 @@
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
   --delay-severe: #F04438;
+  --trend-good: #4ade80;
+  --trend-good-bg: rgba(74, 222, 128, 0.16);
+  --trend-bad: #fbbf24;
+  --trend-bad-bg: rgba(251, 191, 36, 0.16);
+  --trend-neutral: #94a3b8;
+  --trend-neutral-bg: rgba(148, 163, 184, 0.16);
+  --track-bg: rgba(255, 255, 255, 0.08);
+  --hover-tint: rgba(255, 255, 255, 0.08);
+  --skeleton-a: #1B1F35;
+  --skeleton-b: #262b47;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -99,7 +127,7 @@ input:focus, select:focus, textarea:focus {
 summary::-webkit-details-marker { display: none; }
 
 .skeleton {
-  background: linear-gradient(90deg, #ececec 0%, #f5f5f5 50%, #ececec 100%);
+  background: linear-gradient(90deg, var(--skeleton-a) 0%, var(--skeleton-b) 50%, var(--skeleton-a) 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius);
