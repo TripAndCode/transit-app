@@ -35,7 +35,7 @@ export function writeThemePref(theme: Theme): void {
 /** Apply the theme to the document by setting data-theme on <html>, which
  *  the global.css `:root[data-theme="dark"]` block selects on. Also dispatches
  *  a `themechange` event so imperative consumers that can't recolor via the CSS
- *  cascade (the MapLibre layer hooks, which embed DELAY_RAMP.severe in style
+ *  cascade (the MapLibre layer hooks, which embed severeColorResolved() in style
  *  expressions) can rebuild — see useThemeSignal. Skips redundant writes if the
  *  theme value is unchanged. */
 export function applyTheme(theme: Theme): void {
