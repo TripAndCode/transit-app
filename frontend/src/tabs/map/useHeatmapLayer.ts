@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
 import { whenStyleReady } from "./styleReady";
-import { DELAY_RAMP } from "../../styles/tokens";
+import { DELAY_RAMP, severeColorResolved } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import type { SeverityKey } from "../../components/MapLegend";
 
@@ -69,7 +69,7 @@ export function useHeatmapLayer(
   colorField: 'avg_delay_min' | 'p90_delay_min' = 'avg_delay_min',
 ): void {
   const fittedRef = useRef(false);
-  // Re-render signal on theme toggle: DELAY_RAMP.severe reads the theme-aware
+  // Re-render signal on theme toggle: severeColorResolved() reads the theme-aware
   // --delay-severe CSS var, but a MapLibre paint expression is a plain JS value
   // captured at build time — the browser cascade can't reach into it. Depending
   // on this in the recolor effect below rebuilds the color expressions so the
@@ -141,7 +141,7 @@ export function useHeatmapLayer(
         DELAY_RAMP.ok,
         2, DELAY_RAMP.mild,
         5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
+        10, severeColorResolved(),
       ];
       const clusterRadius: maplibregl.ExpressionSpecification = [
         "step", ["get", "point_count"], 15, 10, 19, 50, 25, 200, 32,
@@ -186,7 +186,7 @@ export function useHeatmapLayer(
         DELAY_RAMP.ok,
         2, DELAY_RAMP.mild,
         5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
+        10, severeColorResolved(),
       ];
 
       // Dot SIZE encodes the DELAY itself — bigger = worse — so color and size
@@ -290,20 +290,20 @@ export function useHeatmapLayer(
   // whole layer (setPaintProperty, not addLayer — leaves the build/style-race
   // path in the effect above untouched). Only runs after the layer setup effect
   // has fired (layers exist on map). Both the dots and the cluster bubbles embed
-  // DELAY_RAMP.severe, so both are re-read here on a theme toggle.
+  // severeColorResolved(), so both are re-read here on a theme toggle.
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
     if (!m.getLayer(LAYER)) return;
     const expr: maplibregl.ExpressionSpecification = [
       "step", ["get", colorField],
-      DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe,
+      DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved(),
     ];
     m.setPaintProperty(LAYER, "circle-color", expr);
     if (m.getLayer(CLUSTER_LAYER)) {
       const clusterColor: maplibregl.ExpressionSpecification = [
         "step", ["/", ["get", "dsum"], ["get", "point_count"]],
-        DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe,
+        DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved(),
       ];
       m.setPaintProperty(CLUSTER_LAYER, "circle-color", clusterColor);
     }

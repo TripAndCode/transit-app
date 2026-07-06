@@ -117,7 +117,7 @@ describe("useHeatmapLayer colorField", () => {
     const map = makeMockMap();
     run(map);
     // Built with the light-mode severe red by default (no theme, jsdom cascade
-    // unresolved -> DELAY_RAMP.severe falls back to #d92121).
+    // unresolved -> severeColorResolved() falls back to #d92121).
     expect(JSON.stringify(map.getPaintProperty(LAYER, "circle-color"))).toContain("#d92121");
     expect(
       JSON.stringify((map.getLayer(CLUSTER_LAYER) as MockLayer).paint!["circle-color"]),

@@ -2,24 +2,36 @@
 // usual data isn't visually loud; severe (>10 min) is a true red so the
 // genuinely problematic stops pop without ambiguity.
 
-// Light-mode severe red, and the fallback when the CSS custom property can't be
-// resolved (e.g. under jsdom, which doesn't apply global.css's cascade — tests
+// The severe tier (>10 min) is theme-aware: at #d92121 (the light-mode red)
+// contrast against the new dark backgrounds is ~3.6:1 — fails WCAG AA's 4.5:1
+// for normal text; #F04438 fixes that on dark (~5:1) but itself fails on the
+// light background (~3.8:1), so the two themes need genuinely different values.
+// Both live in the `--delay-severe` CSS custom property (light #d92121 / dark
+// #F04438, defined in global.css) so the cascade is the single source of truth.
+//
+// TWO surfaces, deliberately split — pick by how the caller renders the color:
+//  - DOM/React (renders into an inline `style` prop): use `DELAY_RAMP.severe` /
+//    `delayColor()`, which return the LITERAL string "var(--delay-severe)". The
+//    browser cascade resolves it to the active theme's color automatically, so
+//    these consumers recolor on a theme toggle for free — no re-render, no JS.
+//  - MapLibre (builds plain-JS paint expressions that CANNOT consume var()):
+//    call `severeColorResolved()`, which returns a real parseable hex. These
+//    call sites already subscribe to `useThemeSignal` and rebuild their
+//    expressions on toggle (see useHeatmapLayer / useRouteOverlay).
+const SEVERE_VAR = "var(--delay-severe)";
+
+// Light-mode severe red — the fallback when the CSS custom property can't be
+// resolved (e.g. under jsdom, which doesn't apply global.css's cascade; tests
 // see this unless they set `--delay-severe` inline).
 const SEVERE_FALLBACK = "#d92121";
 
-// `severe` is a live getter reading the `--delay-severe` CSS custom property
-// (light #d92121 / dark #F04438, defined in global.css). At #d92121 (the
-// light-mode red) contrast against the new dark backgrounds is ~3.6:1 — fails
-// WCAG AA's 4.5:1 for normal text; #F04438 fixes that on dark (~5:1) but itself
-// fails on the light background (~3.8:1), so the two themes need genuinely
-// different values. Sourcing that value from CSS (rather than re-deriving it
-// from data-theme in JS) makes the CSS cascade the single source of truth: DOM
-// consumers recolor via `var(--delay-severe)` for free on a theme toggle, and
-// only the imperative MapLibre call sites — which can't consume `var()` — need
-// an explicit theme dependency to rebuild their style expressions. Reading the
-// custom property here keeps every existing consumer of DELAY_RAMP.severe
-// unchanged (no theme param threaded through delayColor/relativeDelayColor).
-function severeColor(): string {
+/** Resolve `--delay-severe` to a concrete hex for callers that need a real,
+ *  parseable color string — MapLibre paint expressions, which can't consume
+ *  `var()`. Reads the live CSS cascade so it tracks the active theme; falls
+ *  back to the light-mode red when unresolved (SSR / jsdom). DOM consumers
+ *  should NOT call this — use `DELAY_RAMP.severe` (the literal var) instead so
+ *  the cascade recolors them on toggle without a re-render. */
+export function severeColorResolved(): string {
   if (typeof document === "undefined") return SEVERE_FALLBACK;
   const v = getComputedStyle(document.documentElement)
     .getPropertyValue("--delay-severe")
@@ -35,10 +47,10 @@ const BASE_RAMP = {
 
 export const DELAY_RAMP = {
   ...BASE_RAMP,
-  get severe(): string {
-    return severeColor(); // > 10 min red, per-theme via --delay-severe
-  },
-};
+  // Literal CSS var string for DOM/React consumers — see the block comment
+  // above. MapLibre call sites use severeColorResolved() instead.
+  severe: SEVERE_VAR, // > 10 min red, per-theme via --delay-severe
+} as const;
 
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
-import { DELAY_RAMP } from "../../styles/tokens";
+import { DELAY_RAMP, severeColorResolved } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
@@ -35,7 +35,7 @@ export function useRouteOverlay(
   styleEpoch: number,
 ): void {
   // Rebuild the overlay on a theme toggle so the observed-stop dots' severe
-  // band re-reads the theme-aware DELAY_RAMP.severe. This effect already fully
+  // band re-reads the theme-aware severeColorResolved(). This effect already fully
   // rebuilds (clearOverlay + drawOverlay re-adds the source/layers), so adding
   // theme to its deps is enough — no setPaintProperty needed here.
   const theme = useThemeSignal();
@@ -132,7 +132,7 @@ export function useRouteOverlay(
           "circle-color": [
             "case",
             ["get", "has_data"],
-            ["step", ["get", "avg_min"], DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe],
+            ["step", ["get", "avg_min"], DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, severeColorResolved()],
             "rgba(255,255,255,0)",
           ],
           "circle-opacity": 0.95,
