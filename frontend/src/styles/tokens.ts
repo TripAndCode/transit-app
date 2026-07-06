@@ -1,12 +1,26 @@
 // Severity ramp for delays (minutes -> color). Calm at the low end so the
 // usual data isn't visually loud; severe (>10 min) is a true red so the
 // genuinely problematic stops pop without ambiguity.
+function isDarkTheme(): boolean {
+  return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+}
+
+// `severe` is a live getter, not a plain string: at #d92121 (the light-mode
+// red), contrast against the new dark backgrounds is ~3.6:1 — fails WCAG AA's
+// 4.5:1 for normal text. #F04438 fixes that on dark (~5:1) but itself fails on
+// the light background (~3.8:1) — the two themes need genuinely different
+// values, and reading data-theme here (rather than threading a theme param
+// through delayColor/relativeDelayColor and their ~10 call sites, several of
+// which build MapLibre style expressions, not React trees) keeps every
+// existing consumer of DELAY_RAMP.severe unchanged.
 export const DELAY_RAMP = {
   ok: "#8fb88f",       // < 2 min   sage
   mild: "#d4b878",     // 2 – 5 min sand
   moderate: "#e07a3a", // 5 – 10 min orange
-  severe: "#d92121",   // > 10 min  red
-} as const;
+  get severe(): string {
+    return isDarkTheme() ? "#F04438" : "#d92121"; // > 10 min red, per-theme
+  },
+};
 
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
