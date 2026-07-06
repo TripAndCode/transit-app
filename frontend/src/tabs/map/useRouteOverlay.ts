@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
 import { DELAY_RAMP } from "../../styles/tokens";
+import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
@@ -33,6 +34,12 @@ export function useRouteOverlay(
   shape: RouteShapeResponse | undefined,
   styleEpoch: number,
 ): void {
+  // Rebuild the overlay on a theme toggle so the observed-stop dots' severe
+  // band re-reads the theme-aware DELAY_RAMP.severe. This effect already fully
+  // rebuilds (clearOverlay + drawOverlay re-adds the source/layers), so adding
+  // theme to its deps is enough — no setPaintProperty needed here.
+  const theme = useThemeSignal();
+
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
@@ -154,5 +161,5 @@ export function useRouteOverlay(
       });
     }
     return whenStyleReady(m, drawOverlay);
-  }, [shape, mapRef, styleEpoch]);
+  }, [shape, mapRef, styleEpoch, theme]);
 }

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
 import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER } from "./useHeatmapLayer";
@@ -98,6 +98,11 @@ describe("useHeatmapLayer (clustering)", () => {
 });
 
 describe("useHeatmapLayer colorField", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--delay-severe");
+    delete document.documentElement.dataset.theme;
+  });
+
   it("defaults to avg_delay_min color expression", () => {
     const map = makeMockMap();
     renderHook(() => {
@@ -106,6 +111,26 @@ describe("useHeatmapLayer colorField", () => {
     });
     const paint = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
     expect(JSON.stringify(paint["circle-color"])).toContain("avg_delay_min");
+  });
+
+  it("recolors dots + cluster bubbles on themechange (severe band tracks the theme)", () => {
+    const map = makeMockMap();
+    run(map);
+    // Built with the light-mode severe red by default (no theme, jsdom cascade
+    // unresolved -> DELAY_RAMP.severe falls back to #d92121).
+    expect(JSON.stringify(map.getPaintProperty(LAYER, "circle-color"))).toContain("#d92121");
+    expect(
+      JSON.stringify((map.getLayer(CLUSTER_LAYER) as MockLayer).paint!["circle-color"]),
+    ).toContain("#d92121");
+
+    // Simulate the cascade resolving the dark value, then toggle the theme.
+    act(() => {
+      document.documentElement.style.setProperty("--delay-severe", "#F04438");
+      window.dispatchEvent(new CustomEvent("themechange", { detail: "dark" }));
+    });
+
+    expect(JSON.stringify(map.getPaintProperty(LAYER, "circle-color"))).toContain("#F04438");
+    expect(JSON.stringify(map.getPaintProperty(CLUSTER_LAYER, "circle-color"))).toContain("#F04438");
   });
 
   it("uses p90_delay_min when colorField is p90_delay_min", () => {
