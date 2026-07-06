@@ -222,6 +222,8 @@
     "rel_seconds_ago": "{{count}}秒前",
     "range_separator": "〜",
     "language_aria": "言語",
+    "theme_toggle_to_dark": "ダークモードに切り替え",
+    "theme_toggle_to_light": "ライトモードに切り替え",
     "service_value": {
       "平日": "平日",
       "土日祝": "土日祝"
