@@ -30,6 +30,12 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
+  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>10)). Theme-dependent for
+     WCAG AA contrast: #d92121 fails on the dark surfaces, #F04438 fails on the
+     light background — see the dark block below. tokens.ts reads this via
+     getComputedStyle so both CSS (var(--delay-severe)) and JS consumers
+     (MapLibre style expressions) resolve the same source of truth. */
+  --delay-severe: #d92121;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -57,6 +63,7 @@
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
+  --delay-severe: #F04438;
 }
 
 *, *::before, *::after { box-sizing: border-box; }

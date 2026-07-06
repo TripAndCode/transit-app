@@ -1,24 +1,38 @@
 // Severity ramp for delays (minutes -> color). Calm at the low end so the
 // usual data isn't visually loud; severe (>10 min) is a true red so the
 // genuinely problematic stops pop without ambiguity.
-function isDarkTheme(): boolean {
-  return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+
+// Light-mode severe red, and the fallback when the CSS custom property can't be
+// resolved (e.g. under jsdom, which doesn't apply global.css's cascade — tests
+// see this unless they set `--delay-severe` inline).
+const SEVERE_FALLBACK = "#d92121";
+
+// `severe` is a live getter reading the `--delay-severe` CSS custom property
+// (light #d92121 / dark #F04438, defined in global.css). At #d92121 (the
+// light-mode red) contrast against the new dark backgrounds is ~3.6:1 — fails
+// WCAG AA's 4.5:1 for normal text; #F04438 fixes that on dark (~5:1) but itself
+// fails on the light background (~3.8:1), so the two themes need genuinely
+// different values. Sourcing that value from CSS (rather than re-deriving it
+// from data-theme in JS) makes the CSS cascade the single source of truth: DOM
+// consumers recolor via `var(--delay-severe)` for free on a theme toggle, and
+// only the imperative MapLibre call sites — which can't consume `var()` — need
+// an explicit theme dependency to rebuild their style expressions. Reading the
+// custom property here keeps every existing consumer of DELAY_RAMP.severe
+// unchanged (no theme param threaded through delayColor/relativeDelayColor).
+function severeColor(): string {
+  if (typeof document === "undefined") return SEVERE_FALLBACK;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue("--delay-severe")
+    .trim();
+  return v || SEVERE_FALLBACK;
 }
 
-// `severe` is a live getter, not a plain string: at #d92121 (the light-mode
-// red), contrast against the new dark backgrounds is ~3.6:1 — fails WCAG AA's
-// 4.5:1 for normal text. #F04438 fixes that on dark (~5:1) but itself fails on
-// the light background (~3.8:1) — the two themes need genuinely different
-// values, and reading data-theme here (rather than threading a theme param
-// through delayColor/relativeDelayColor and their ~10 call sites, several of
-// which build MapLibre style expressions, not React trees) keeps every
-// existing consumer of DELAY_RAMP.severe unchanged.
 export const DELAY_RAMP = {
   ok: "#8fb88f",       // < 2 min   sage
   mild: "#d4b878",     // 2 – 5 min sand
   moderate: "#e07a3a", // 5 – 10 min orange
   get severe(): string {
-    return isDarkTheme() ? "#F04438" : "#d92121"; // > 10 min red, per-theme
+    return severeColor(); // > 10 min red, per-theme via --delay-severe
   },
 };
 
