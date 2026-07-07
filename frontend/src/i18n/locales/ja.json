@@ -1,12 +1,18 @@
 {
   "nav": {
     "overview": "概況",
+    "overview_subtitle": "今すぐ何が起きているか",
     "map": "地図",
+    "map_subtitle": "どこで起きているか",
     "ask": "質問",
+    "ask_subtitle": "自然言語で質問",
     "live": "最新観測",
+    "live_subtitle": "異常を素早く発見",
     "reports": "レポート",
+    "reports_subtitle": "傾向を分析",
     "network": "事業者比較",
-    "forecast": "予測"
+    "forecast": "予測",
+    "forecast_subtitle": "将来の遅延を予測"
   },
   "forecast": {
     "title": "いつもの遅れ方",
