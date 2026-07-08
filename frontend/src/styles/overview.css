@@ -219,7 +219,11 @@
   border-radius: 6px;
   transition: background-color 200ms ease;
 }
-.ov-pareto-row:hover { background: color-mix(in srgb, var(--trend-bad) 4%, transparent); }
+/* Plain fallback first: color-mix() has no built-in fallback, and an
+   engine without it would resolve `background` to its initial value
+   (transparent) — silently losing the hover feedback. Matches the
+   fallback-declaration convention established for --map-badge-bg. */
+.ov-pareto-row:hover { background: var(--trend-bad-bg); background: color-mix(in srgb, var(--trend-bad) 4%, transparent); }
 .ov-pareto-label {
   color: var(--text-primary);
   font-weight: 500;
@@ -261,7 +265,9 @@
   position: relative;
   width: 100%;
 }
-.ov-peak-spread { fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
+/* Plain fallback first: an engine without color-mix() would otherwise
+   resolve `fill` to its initial value (black), not transparent. */
+.ov-peak-spread { fill: var(--trend-bad-bg); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
 
 /* ---------- 5. Service split ---------- */
 .ov-svc-list {
@@ -299,6 +305,9 @@
 }
 .ov-svc-fill {
   height: 100%;
+  /* Plain fallback first: without color-mix() support, `background`
+     would otherwise resolve to transparent, hiding the progress fill. */
+  background: var(--trend-neutral-bg);
   background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
   border-radius: 4px;
   transform-origin: left center;
@@ -487,6 +496,8 @@
   gap: 2px;
   padding: 10px 14px;
   border-radius: 10px;
+  /* Plain fallback first, same reasoning as .ov-svc-fill above. */
+  background: var(--trend-neutral-bg);
   background: color-mix(in srgb, var(--trend-neutral) 5%, transparent);
   min-width: 90px;
 }
