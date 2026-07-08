@@ -1,12 +1,18 @@
 {
   "nav": {
     "overview": "Overview",
+    "overview_subtitle": "What's happening right now",
     "map": "Map",
+    "map_subtitle": "Where it's happening",
     "ask": "Ask",
+    "ask_subtitle": "Ask in plain language",
     "live": "Latest observations",
+    "live_subtitle": "Spot anomalies fast",
     "reports": "Reports",
+    "reports_subtitle": "Analyze trends",
     "network": "Agencies",
-    "forecast": "Forecast"
+    "forecast": "Forecast",
+    "forecast_subtitle": "Predict future delays"
   },
   "forecast": {
     "title": "Typical delays",

@@ -3,15 +3,15 @@ import { Map as MapIcon, MessageSquare, Activity, BarChart3, LayoutDashboard, Tr
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
-type Item = { to: string; labelKey: string; Icon: LucideIcon };
+type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIcon };
 
 const ITEMS: Item[] = [
-  { to: "overview", labelKey: "nav.overview", Icon: LayoutDashboard },
-  { to: "map", labelKey: "nav.map", Icon: MapIcon },
-  { to: "ask", labelKey: "nav.ask", Icon: MessageSquare },
-  { to: "live", labelKey: "nav.live", Icon: Activity },
-  { to: "reports", labelKey: "nav.reports", Icon: BarChart3 },
-  { to: "forecast", labelKey: "nav.forecast", Icon: TrendingUp },
+  { to: "overview", labelKey: "nav.overview", subtitleKey: "nav.overview_subtitle", Icon: LayoutDashboard },
+  { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
+  { to: "ask", labelKey: "nav.ask", subtitleKey: "nav.ask_subtitle", Icon: MessageSquare },
+  { to: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: Activity },
+  { to: "reports", labelKey: "nav.reports", subtitleKey: "nav.reports_subtitle", Icon: BarChart3 },
+  { to: "forecast", labelKey: "nav.forecast", subtitleKey: "nav.forecast_subtitle", Icon: TrendingUp },
 ];
 
 export function Sidebar() {
@@ -23,12 +23,12 @@ export function Sidebar() {
   const [ctx] = useRangeContext();
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
-  if (!agencyId) return <aside style={{ width: 180 }} />;
+  if (!agencyId) return <aside style={{ width: 210 }} />;
 
   return (
     <aside
       style={{
-        width: 180,
+        width: 210,
         background: "var(--bg-surface)",
         borderRight: "1px solid var(--border-soft)",
         padding: "16px 0",
@@ -42,9 +42,9 @@ export function Sidebar() {
             to={`/agencies/${agencyId}/${item.to}${suffix}`}
             style={({ isActive }) => ({
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: 12,
-              padding: "10px 20px",
+              padding: "12px 22px",
               color: isActive ? "var(--accent)" : "var(--text-primary)",
               background: isActive ? "var(--accent-soft)" : "transparent",
               borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
@@ -52,8 +52,13 @@ export function Sidebar() {
               transition: "background var(--transition)",
             })}
           >
-            <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" />
-            <span>{t(item.labelKey)}</span>
+            <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0 }} />
+            <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span>{t(item.labelKey)}</span>
+              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
+                {t(item.subtitleKey)}
+              </span>
+            </span>
           </NavLink>
         ))}
       </nav>
