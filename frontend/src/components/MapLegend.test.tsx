@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
@@ -6,8 +6,13 @@ import { MapLegend } from "./MapLegend";
 
 // Pin the language explicitly rather than relying on jsdom's default
 // navigator.language — the shared i18n singleton's fallbackLng is "ja".
+// Restored after this file so the mutation doesn't outlive it if isolation
+// is ever relaxed.
 beforeAll(async () => {
   await i18n.changeLanguage("en");
+});
+afterAll(async () => {
+  await i18n.changeLanguage("ja");
 });
 
 function renderLegend(overrides = {}) {
@@ -30,8 +35,8 @@ function renderLegend(overrides = {}) {
 describe("MapLegend", () => {
   it("renders all 4 severity band labels", () => {
     renderLegend();
-    // Real i18n copy (en.json) uses en-dashes, not hyphens — verified against
-    // frontend/src/i18n/locales/en.json:333-336 directly, not guessed.
+    // Real i18n copy (map.legend.band_lt_2/band_2_5/band_5_10/band_gt_10 in
+    // en.json) uses en-dashes, not hyphens — verified directly, not guessed.
     expect(screen.getByText("< 2 min")).toBeTruthy();
     expect(screen.getByText("2–5 min")).toBeTruthy();
     expect(screen.getByText("5–10 min")).toBeTruthy();
