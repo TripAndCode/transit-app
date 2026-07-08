@@ -15,7 +15,8 @@
     "forecast_subtitle": "将来の遅延を予測"
   },
   "onboarding": {
-    "subtitle": "あなたの事業者を選んでください"
+    "subtitle": "あなたの事業者を選んでください",
+    "no_agencies": "事業者がまだ登録されていません。"
   },
   "forecast": {
     "title": "いつもの遅れ方",

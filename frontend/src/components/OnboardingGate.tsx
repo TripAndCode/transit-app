@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import { IndexLoadingPlaceholder } from "./RoutePlaceholders";
+import { ErrorBanner } from "./ErrorBanner";
 import type { Agency } from "../api/types";
+
+// Selection→navigate delay: must stay >= --transition (global.css) so the
+// dim/highlight finishes before the route changes. Not derived from the CSS
+// var directly (no runtime cost of reading it) — bump both together if
+// --transition ever grows past this.
+const SELECT_TRANSITION_MS = 250;
 
 /** Owns the "/" landing decision: while agencies load, show the existing
  *  placeholder; once loaded, instantly redirect (via the declarative
@@ -16,7 +23,7 @@ import type { Agency } from "../api/types";
 export function OnboardingGate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data: agencies, isLoading } = useAgencies();
+  const { data: agencies, isLoading, isError, error, refetch } = useAgencies();
   // Hooks must run unconditionally on every render (Rules of Hooks) — declared
   // here, above the early returns below, rather than next to select() where
   // it's used. Otherwise the post-click re-render (once writeLastAgency()
@@ -25,8 +32,27 @@ export function OnboardingGate() {
   // "Rendered fewer hooks than expected."
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // Deferred navigate lives in an effect (not the click handler's own
+  // setTimeout) so an unmount inside the delay window cleans up the timer
+  // instead of leaving it to call navigate() on a gone component.
+  useEffect(() => {
+    if (selectedId == null) return;
+    const id = setTimeout(() => navigate(`/agencies/${selectedId}/map`, { replace: true }), SELECT_TRANSITION_MS);
+    return () => clearTimeout(id);
+  }, [selectedId, navigate]);
+
   if (isLoading) return <IndexLoadingPlaceholder />;
-  if (!agencies || agencies.length === 0) return <IndexLoadingPlaceholder />;
+  if (isError) {
+    return (
+      <div style={{ padding: 24 }}>
+        <ErrorBanner error={error} onRetry={() => refetch()} />
+      </div>
+    );
+  }
+  if (!agencies) return <IndexLoadingPlaceholder />;
+  if (agencies.length === 0) {
+    return <div style={{ padding: 24, color: "var(--text-tertiary)" }}>{t("onboarding.no_agencies")}</div>;
+  }
 
   if (agencies.length === 1) {
     return <Navigate to={`/agencies/${agencies[0].agency_id}/map`} replace />;
@@ -41,12 +67,9 @@ export function OnboardingGate() {
     return <Navigate to={`/agencies/${remembered}/map`} replace />;
   }
 
-  // Click is a real event handler, so calling useNavigate() imperatively
-  // here (unlike the render-time redirects above) is fine.
   function select(agency: Agency) {
     setSelectedId(agency.agency_id);
     writeLastAgency(agency.agency_id);
-    setTimeout(() => navigate(`/agencies/${agency.agency_id}/map`, { replace: true }), 250);
   }
 
   return (
@@ -101,7 +124,7 @@ export function OnboardingGate() {
                   borderRadius: "var(--radius)",
                   padding: "20px 18px",
                   textAlign: "left",
-                  cursor: "pointer",
+                  cursor: selectedId != null ? "default" : "pointer",
                   color: "var(--text-primary)",
                   font: "inherit",
                   opacity: isDimmed ? 0.25 : 1,

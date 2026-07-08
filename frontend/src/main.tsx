@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import "./i18n";
 import App from "./App";
+import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
 import { RouteError } from "./components/RouteError";
 import { ChunkLoading } from "./components/RoutePlaceholders";
@@ -13,9 +14,11 @@ import "maplibre-gl/dist/maplibre-gl.css";
 // Tabs and pages are code-split per route — MapTab alone pulls in
 // maplibre-gl (~800 KB), which nothing else needs. Each loader maps the
 // file's named export onto the default-export shape React.lazy expects.
-const OnboardingGate = lazy(() =>
-  import("./components/OnboardingGate").then((m) => ({ default: m.OnboardingGate }))
-);
+// OnboardingGate is a deliberate exception, imported eagerly above: it sits
+// on the "/" redirect-critical path (hit by every visitor) and has no heavy
+// deps of its own, so lazy-splitting it would only add a chunk-fetch delay
+// with no bundle-size benefit — review-branch perf/alternatives/practices
+// passes all independently flagged this.
 const OverviewTab = lazy(() => import("./tabs/OverviewTab").then((m) => ({ default: m.OverviewTab })));
 const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapTab })));
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
@@ -64,7 +67,7 @@ const router = createBrowserRouter([
       // Index has no static target — OnboardingGate owns the redirect once
       // agencies load. Sending Navigate to="overview" here loops with the
       // catch-all because /overview is not a registered route.
-      { index: true, element: el(<OnboardingGate />) },
+      { index: true, element: <OnboardingGate /> },
       { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },
       { path: "agencies/:agencyId/overview", element: el(<OverviewTab />) },
       { path: "agencies/:agencyId/map", element: el(<MapTab />) },

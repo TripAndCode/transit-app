@@ -26,8 +26,18 @@ function renderGate() {
   );
 }
 
-function mockAgencies(data: Agency[] | undefined, isLoading = false) {
-  vi.spyOn(hooks, "useAgencies").mockReturnValue({ data, isLoading } as never);
+function mockAgencies(
+  data: Agency[] | undefined,
+  isLoading = false,
+  over: { isError?: boolean; error?: unknown; refetch?: () => void } = {},
+) {
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({
+    data,
+    isLoading,
+    isError: over.isError ?? false,
+    error: over.error ?? null,
+    refetch: over.refetch ?? vi.fn(),
+  } as never);
 }
 
 describe("OnboardingGate", () => {
@@ -38,6 +48,22 @@ describe("OnboardingGate", () => {
     mockAgencies(undefined, true);
     renderGate();
     expect(screen.getByText("Loading agencies...")).toBeTruthy();
+    expect(screen.queryByText(/^landed:/)).toBeNull();
+  });
+
+  it("shows an error banner with retry when the agencies fetch fails", () => {
+    const refetch = vi.fn();
+    mockAgencies(undefined, false, { isError: true, error: new Error("network down"), refetch });
+    renderGate();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByText("Retry"));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it("shows a distinct empty-state message when zero agencies are configured", () => {
+    mockAgencies([]);
+    renderGate();
+    expect(screen.getByText("No agencies are configured yet.")).toBeTruthy();
     expect(screen.queryByText(/^landed:/)).toBeNull();
   });
 
