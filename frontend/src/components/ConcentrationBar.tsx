@@ -91,7 +91,7 @@ export function ConcentrationBar({
               points={sparkPoints}
               width={320}
               height={48}
-              accent="#475569"
+              accent="var(--trend-neutral)"
               forceAccent
               showLabels={false}
               showEndDot
@@ -135,7 +135,7 @@ export function ConcentrationBar({
                 className="ov-pareto-fill ov-anim-grow-x"
                 style={{
                   width: `${r.share_pct}%`,
-                  background: "#b45309",
+                  background: "var(--trend-bad)",
                   opacity,
                 }}
               />
@@ -265,7 +265,7 @@ function LorenzCurve({
           y1={LZ_PAD_TOP}
           x2={LZ_PAD_LEFT}
           y2={LZ_PAD_TOP + innerH}
-          stroke="#e5e7eb"
+          style={{ stroke: "var(--border-subtle)" }}
           strokeWidth="1"
         />
         <line
@@ -273,19 +273,19 @@ function LorenzCurve({
           y1={LZ_PAD_TOP + innerH}
           x2={LZ_PAD_LEFT + innerW}
           y2={LZ_PAD_TOP + innerH}
-          stroke="#e5e7eb"
+          style={{ stroke: "var(--border-subtle)" }}
           strokeWidth="1"
         />
         {/* Equality diagonal */}
         <path
           d={diagonal}
-          stroke="#cbd5e1"
+          style={{ stroke: "var(--border-subtle)" }}
           strokeWidth="1"
           strokeDasharray="3 4"
           fill="none"
         />
         {/* Lorenz curve */}
-        <path d={path} stroke="#b45309" strokeWidth="1.8" fill="none" />
+        <path d={path} style={{ stroke: "var(--trend-bad)" }} strokeWidth="1.8" fill="none" />
         {/* 80% marker */}
         {ticks20 && (
           <g>
@@ -294,11 +294,11 @@ function LorenzCurve({
               y1={LZ_PAD_TOP + innerH}
               x2={ticks20.x}
               y2={ticks20.y}
-              stroke="#94a3b8"
+              style={{ stroke: "var(--text-tertiary)" }}
               strokeWidth="0.8"
               strokeDasharray="2 3"
             />
-            <circle cx={ticks20.x} cy={ticks20.y} r="3" fill="#b45309" />
+            <circle cx={ticks20.x} cy={ticks20.y} r="3" style={{ fill: "var(--trend-bad)" }} />
           </g>
         )}
         {/* X tick labels */}
@@ -308,7 +308,7 @@ function LorenzCurve({
             x={LZ_PAD_LEFT + (p / 100) * innerW}
             y={LZ_PAD_TOP + innerH + 14}
             fontSize="10"
-            fill="#8e8e93"
+            style={{ fill: "var(--text-tertiary)" }}
             textAnchor="middle"
           >
             {p}%
@@ -321,7 +321,7 @@ function LorenzCurve({
             x={LZ_PAD_LEFT - 6}
             y={LZ_PAD_TOP + innerH - (p / 100) * innerH + 3}
             fontSize="10"
-            fill="#8e8e93"
+            style={{ fill: "var(--text-tertiary)" }}
             textAnchor="end"
           >
             {p}%
