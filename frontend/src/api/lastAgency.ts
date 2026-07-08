@@ -7,7 +7,7 @@ export function readLastAgency(): number | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const id = Number(raw);
-    return Number.isFinite(id) ? id : null;
+    return Number.isInteger(id) && id > 0 ? id : null;
   } catch {
     return null;
   }

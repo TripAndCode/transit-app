@@ -116,6 +116,7 @@ export function OnboardingGate() {
             return (
               <button
                 key={a.agency_id}
+                type="button"
                 onClick={() => select(a)}
                 disabled={selectedId != null}
                 style={{
