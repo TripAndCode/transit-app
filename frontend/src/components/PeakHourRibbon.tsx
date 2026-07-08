@@ -158,7 +158,7 @@ function PeakHourChart({
           const y = toY(v);
           const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
           const isPeak = h === peakIdx;
-          const fill = isPeak ? "#b45309" : "#475569";
+          const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
           const opacity = isPeak ? 0.95 : 0.3;
           return (
             <rect
@@ -167,7 +167,7 @@ function PeakHourChart({
               y={y}
               width={CELL_W - 2}
               height={bar_h}
-              fill={fill}
+              style={{ fill }}
               opacity={opacity}
               rx={2}
               ry={2}
@@ -182,7 +182,7 @@ function PeakHourChart({
               y1={avgY}
               x2={W - PAD_RIGHT}
               y2={avgY}
-              stroke="#cbd5e1"
+              style={{ stroke: "var(--border-subtle)" }}
               strokeWidth="1"
               strokeDasharray="4 4"
             />
@@ -190,7 +190,7 @@ function PeakHourChart({
               x={W - PAD_RIGHT + 4}
               y={avgY + 3}
               fontSize="10"
-              fill="#94a3b8"
+              style={{ fill: "var(--text-tertiary)" }}
               textAnchor="start"
             >
               {t("overview.peak_hour.avg_label")}
@@ -204,7 +204,7 @@ function PeakHourChart({
             y1={peakBarY - 2}
             x2={peakBarX + CELL_W / 2}
             y2={peakBarY - 12}
-            stroke="#b45309"
+            style={{ stroke: "var(--trend-bad)" }}
             strokeWidth="1"
           />
           <line
@@ -212,7 +212,7 @@ function PeakHourChart({
             y1={peakBarY - 12}
             x2={peakBarX + CELL_W / 2 + 4}
             y2={peakBarY - 12}
-            stroke="#b45309"
+            style={{ stroke: "var(--trend-bad)" }}
             strokeWidth="1"
           />
           <text
@@ -220,7 +220,7 @@ function PeakHourChart({
             y={peakBarY - 9}
             fontSize="11"
             fontWeight="600"
-            fill="#b45309"
+            style={{ fill: "var(--trend-bad)" }}
             textAnchor="start"
           >
             {t("overview.peak_hour.max_label", {
@@ -234,7 +234,7 @@ function PeakHourChart({
           y1={H - PAD_BOTTOM}
           x2={W - PAD_RIGHT}
           y2={H - PAD_BOTTOM}
-          stroke="#e5e7eb"
+          style={{ stroke: "var(--border-subtle)" }}
           strokeWidth="1"
         />
 
@@ -244,7 +244,7 @@ function PeakHourChart({
             x={PAD_LEFT + h * CELL_W + CELL_W / 2}
             y={H - 6}
             fontSize="10"
-            fill="#8e8e93"
+            style={{ fill: "var(--text-tertiary)" }}
             textAnchor="middle"
           >
             {h}
@@ -257,7 +257,7 @@ function PeakHourChart({
             y1={PAD_TOP - 2}
             x2={hover.svgX}
             y2={H - PAD_BOTTOM + 2}
-            stroke="rgba(71,85,105,0.30)"
+            style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
             strokeWidth="1"
           />
         )}

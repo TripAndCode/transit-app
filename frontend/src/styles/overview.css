@@ -212,7 +212,7 @@
   border-radius: 6px;
   transition: background-color 200ms ease;
 }
-.ov-pareto-row:hover { background: rgba(180, 83, 9, 0.04); }
+.ov-pareto-row:hover { background: color-mix(in srgb, var(--trend-bad) 4%, transparent); }
 .ov-pareto-label {
   color: var(--text-primary);
   font-weight: 500;
@@ -254,7 +254,7 @@
   position: relative;
   width: 100%;
 }
-.ov-peak-spread { fill: rgba(180, 83, 9, 0.06); }
+.ov-peak-spread { fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
 
 /* ---------- 5. Service split ---------- */
 .ov-svc-list {
@@ -292,7 +292,7 @@
 }
 .ov-svc-fill {
   height: 100%;
-  background: rgba(71, 85, 105, 0.5);
+  background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
   border-radius: 4px;
   transform-origin: left center;
 }
@@ -463,7 +463,7 @@
 .ov-hero.ov-clickable:hover { transform: translateY(-1px); }
 .ov-card.ov-clickable:focus-visible,
 .ov-hero.ov-clickable:focus-visible {
-  outline: 2px solid #475569;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
