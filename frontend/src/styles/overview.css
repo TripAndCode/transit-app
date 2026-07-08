@@ -142,6 +142,13 @@
   color: #ffffff;
   font-variant-numeric: tabular-nums;
 }
+/* Deliberately NOT tokenized to --trend-neutral/--trend-good: those tokens'
+   dark-mode values (#94a3b8, #4ade80) are bright/light, meant for use as
+   text/line color on a dark surface — as a solid fill under this badge's
+   fixed white number, they'd give ~2.3:1 and ~1.5:1 contrast, both far
+   below any legibility floor. Unlike .ov-chip-up/-down (soft --*-bg tint +
+   colored text, safe in both themes), this badge is solid-fill + white
+   text, so it stays a fixed, self-contained, always-legible chip instead. */
 .ov-rank-worse  { background: #475569; }
 .ov-rank-better { background: #166534; }
 
@@ -480,7 +487,7 @@
   gap: 2px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: rgba(71, 85, 105, 0.05);
+  background: color-mix(in srgb, var(--trend-neutral) 5%, transparent);
   min-width: 90px;
 }
 .ov-stat-pill-label {
