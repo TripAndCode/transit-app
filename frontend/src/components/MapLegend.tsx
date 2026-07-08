@@ -102,8 +102,6 @@ export function MapLegend({
         top: pos.y,
         zIndex: 5,
         background: "var(--map-badge-bg)",
-        backdropFilter: "blur(6px)",
-        WebkitBackdropFilter: "blur(6px)",
         border: "1px solid var(--border-subtle)",
         borderRadius: 8,
         boxShadow: "0 2px 12px rgba(0,0,0,0.10)",

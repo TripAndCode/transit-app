@@ -11,7 +11,7 @@
   --accent-soft: #e8ebf4;
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
-  --map-badge-bg: rgba(255, 255, 255, 0.92);
+  --map-badge-bg: rgba(255, 255, 255, 0.97);
   /* --surface-1/--surface-2 alias the two existing surface tiers under names
      already used by several admin pages (AdminOpsPage, AdminAgenciesPage,
      HeaderUserMenu, PresetMenu, GuestPrompt, AccountPage, AdminUser*Page) —
@@ -81,7 +81,7 @@
   --accent-soft: rgba(91, 108, 173, 0.16);
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
-  --map-badge-bg: rgba(20, 23, 38, 0.90);
+  --map-badge-bg: rgba(20, 23, 38, 0.97);
   --color-danger: #E0685B;
   --delay-severe: #F04438;
   --trend-good: #4ade80;
