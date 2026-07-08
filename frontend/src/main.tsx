@@ -17,8 +17,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 // OnboardingGate is a deliberate exception, imported eagerly above: it sits
 // on the "/" redirect-critical path (hit by every visitor) and has no heavy
 // deps of its own, so lazy-splitting it would only add a chunk-fetch delay
-// with no bundle-size benefit — review-branch perf/alternatives/practices
-// passes all independently flagged this.
+// with no bundle-size benefit.
 const OverviewTab = lazy(() => import("./tabs/OverviewTab").then((m) => ({ default: m.OverviewTab })));
 const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapTab })));
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));

@@ -26,11 +26,13 @@ export function OnboardingGate() {
   const { data: agencies, isLoading, isError, error, refetch } = useAgencies();
   // Hooks must run unconditionally on every render (Rules of Hooks) — declared
   // here, above the early returns below, rather than next to select() where
-  // it's used. Otherwise the post-click re-render (once writeLastAgency()
-  // makes `remembered` match and the early <Navigate> return fires first)
-  // would call fewer hooks than the render before it, and React throws
-  // "Rendered fewer hooks than expected."
+  // it's used.
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Snapshotted once at mount (lazy initializer), not re-read on every render:
+  // select() below writes a fresh choice to localStorage synchronously, and a
+  // live read here would immediately match that write on the next render,
+  // short-circuiting straight to <Navigate> and skipping the transition.
+  const [remembered] = useState(() => readLastAgency());
 
   // Deferred navigate lives in an effect (not the click handler's own
   // setTimeout) so an unmount inside the delay window cleans up the timer
@@ -42,7 +44,10 @@ export function OnboardingGate() {
   }, [selectedId, navigate]);
 
   if (isLoading) return <IndexLoadingPlaceholder />;
-  if (isError) {
+  // Only surface the error banner when there's no usable fallback: react-query
+  // keeps the last successful `data` during a failed background refetch, so a
+  // transient refetch failure shouldn't hide an already-loaded agency list.
+  if (isError && !agencies) {
     return (
       <div style={{ padding: 24 }}>
         <ErrorBanner error={error} onRetry={() => refetch()} />
@@ -58,12 +63,7 @@ export function OnboardingGate() {
     return <Navigate to={`/agencies/${agencies[0].agency_id}/map`} replace />;
   }
 
-  // selectedId == null guards this: select() below writes the choice to
-  // localStorage synchronously, so without this guard the re-render it
-  // triggers would immediately match here and short-circuit straight to
-  // <Navigate>, skipping the dim/highlight transition entirely.
-  const remembered = readLastAgency();
-  if (remembered != null && selectedId == null && agencies.some((a) => a.agency_id === remembered)) {
+  if (remembered != null && agencies.some((a) => a.agency_id === remembered)) {
     return <Navigate to={`/agencies/${remembered}/map`} replace />;
   }
 
