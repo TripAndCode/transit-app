@@ -175,9 +175,11 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 y={y + 0.5}
                 width={Math.max(1, cellW - 1)}
                 height={Math.max(1, cellH - 1)}
-                fill={fill}
                 opacity={opacity}
-                style={{ cursor: c ? "pointer" : "default" }}
+                // `fill` goes in `style`, not the SVG presentation attribute:
+                // delayColor()'s severe tier is now the literal "var(--delay-severe)",
+                // and var() only resolves in a CSS property, not a presentation attr.
+                style={{ fill, cursor: c ? "pointer" : "default" }}
                 onMouseEnter={() => c && setHover(c)}
                 onMouseLeave={() => setHover((v) => (v === c ? null : v))}
                 onClick={handleCellClick}

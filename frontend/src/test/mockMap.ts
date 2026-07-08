@@ -31,6 +31,9 @@ export function makeMockMap(
       // mirror maplibre: getSource(id) returns an object with setData()
       sources[id] = { ...def, setData: (d: unknown) => { (sources[id] as Record<string, unknown>).data = d; } };
     },
+    removeSource: (id: string) => {
+      delete sources[id];
+    },
     addLayer: (layer: MockLayer, beforeId?: string) => {
       if (beforeId) {
         const i = layers.findIndex((l) => l.id === beforeId);

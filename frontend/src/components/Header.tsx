@@ -5,6 +5,7 @@ import { AgencyPicker } from "./AgencyPicker";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { HeaderUserMenu } from "./HeaderUserMenu";
 import { LocaleToggle } from "./LocaleToggle";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Header() {
   const { t } = useTranslation();
@@ -73,6 +74,7 @@ export function Header() {
         </NavLink>
         <HeaderUserMenu />
         <LocaleToggle />
+        <ThemeToggle />
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}

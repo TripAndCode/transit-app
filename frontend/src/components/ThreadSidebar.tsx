@@ -602,7 +602,7 @@ function ContextMenuItem({ label, onClick, danger }: ContextMenuItemProps) {
         padding: "7px var(--space-4)",
         fontSize: 13,
         cursor: "pointer",
-        color: danger ? "#c0392b" : "var(--text-primary)",
+        color: danger ? "var(--color-danger)" : "var(--text-primary)",
         transition: "background var(--transition)",
       }}
       onMouseEnter={(e) => {

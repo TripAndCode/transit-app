@@ -11,6 +11,49 @@
   --accent-soft: #e8ebf4;
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
+  /* --surface-1/--surface-2 alias the two existing surface tiers under names
+     already used by several admin pages (AdminOpsPage, AdminAgenciesPage,
+     HeaderUserMenu, PresetMenu, GuestPrompt, AccountPage, AdminUser*Page) —
+     those files reference --surface-1/--surface-2 but neither was ever
+     defined, so they've been silently rendering with no background. */
+  --surface-1: var(--bg-surface);
+  --surface-2: var(--bg-soft);
+  /* Referenced via var(--color-warning, #C99A2E) fallbacks in several files
+     (RouteDrilldown, AdminOpsPage) and unguarded in AdminAgenciesPage — same
+     gap as --surface-1/--surface-2 above. Same value in both themes; passes
+     contrast comfortably on dark, matches the pre-existing (marginal) look
+     on light — not changing the light-mode value here, out of scope. */
+  --color-warning: #C99A2E;
+  --color-danger: #c0392b;
+  /* Tooltip is intentionally theme-invariant (always a dark chip with white
+     text, in both light and dark mode) — NOT derived from --text-primary,
+     which flips light-to-dark and would otherwise break tooltip contrast. */
+  --tooltip-bg: #2a2a2a;
+  --tooltip-fg: #ffffff;
+  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>10)). Theme-dependent for
+     WCAG AA contrast: #d92121 fails on the dark surfaces, #F04438 fails on the
+     light background — see the dark block below. tokens.ts reads this via
+     getComputedStyle so both CSS (var(--delay-severe)) and JS consumers
+     (MapLibre style expressions) resolve the same source of truth. */
+  --delay-severe: #d92121;
+  /* Overview trend chips / mover-streak dots + generic track/hover accents.
+     trend-* pairs are the "good/bad/neutral" semantic colors used by
+     .ov-chip-down/-up/-neutral and the mover-streak dots; track-bg is a
+     background fill for bar/rail tracks (pareto, service-split); hover-tint
+     is a bare (non-brand) hover feedback tint; skeleton-* feed .skeleton's
+     shimmer gradient. All theme-aware — light values below match the
+     pre-existing hardcoded overview.css hex exactly; dark values are lifted
+     to pass contrast / stay visible on the dark surfaces. */
+  --trend-good: #166534;
+  --trend-good-bg: rgba(22, 101, 52, 0.10);
+  --trend-bad: #b45309;
+  --trend-bad-bg: rgba(180, 83, 9, 0.10);
+  --trend-neutral: #475569;
+  --trend-neutral-bg: rgba(71, 85, 105, 0.08);
+  --track-bg: rgba(0, 0, 0, 0.03);
+  --hover-tint: rgba(0, 0, 0, 0.04);
+  --skeleton-a: #ececec;
+  --skeleton-b: #f5f5f5;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -23,6 +66,32 @@
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --bg-page: #0F1119;
+  --bg-surface: #141726;
+  --bg-soft: #1B1F35;
+  --border-soft: #232840;
+  --border-subtle: #2A3050;
+  --text-primary: #DDD9F3;
+  --text-secondary: #9894B8;
+  --text-tertiary: #5A607A;
+  --accent-soft: rgba(91, 108, 173, 0.16);
+  --error-bg: #2A1F14;
+  --error-fg: #E0B45C;
+  --color-danger: #E0685B;
+  --delay-severe: #F04438;
+  --trend-good: #4ade80;
+  --trend-good-bg: rgba(74, 222, 128, 0.16);
+  --trend-bad: #fbbf24;
+  --trend-bad-bg: rgba(251, 191, 36, 0.16);
+  --trend-neutral: #94a3b8;
+  --trend-neutral-bg: rgba(148, 163, 184, 0.16);
+  --track-bg: rgba(255, 255, 255, 0.08);
+  --hover-tint: rgba(255, 255, 255, 0.08);
+  --skeleton-a: #1B1F35;
+  --skeleton-b: #262b47;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,7 +127,7 @@ input:focus, select:focus, textarea:focus {
 summary::-webkit-details-marker { display: none; }
 
 .skeleton {
-  background: linear-gradient(90deg, #ececec 0%, #f5f5f5 50%, #ececec 100%);
+  background: linear-gradient(90deg, var(--skeleton-a) 0%, var(--skeleton-b) 50%, var(--skeleton-a) 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius);

@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
 import type { HeatmapCollection } from "../../api/types";
 import { whenStyleReady } from "./styleReady";
-import { DELAY_RAMP } from "../../styles/tokens";
+import { severityStepColors } from "../../styles/tokens";
+import { useThemeSignal } from "../../styles/theme";
 import type { SeverityKey } from "../../components/MapLegend";
 
 export const SOURCE = "delays";
@@ -68,6 +69,12 @@ export function useHeatmapLayer(
   colorField: 'avg_delay_min' | 'p90_delay_min' = 'avg_delay_min',
 ): void {
   const fittedRef = useRef(false);
+  // Re-render signal on theme toggle: severeColorResolved() reads the theme-aware
+  // --delay-severe CSS var, but a MapLibre paint expression is a plain JS value
+  // captured at build time — the browser cascade can't reach into it. Depending
+  // on this in the recolor effect below rebuilds the color expressions so the
+  // severe band tracks the theme without a data refresh.
+  const theme = useThemeSignal();
 
   // Re-arm the bounds fit when the data source changes. Without this the
   // camera latches on the first agency ever shown (e.g. Hiroshima) and never
@@ -130,11 +137,7 @@ export function useHeatmapLayer(
         "/", ["get", "dsum"], ["get", "point_count"],
       ];
       const clusterColor: maplibregl.ExpressionSpecification = [
-        "step", clusterAvgDelay,
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
+        "step", clusterAvgDelay, ...severityStepColors(),
       ];
       const clusterRadius: maplibregl.ExpressionSpecification = [
         "step", ["get", "point_count"], 15, 10, 19, 50, 25, 200, 32,
@@ -174,12 +177,7 @@ export function useHeatmapLayer(
       });
 
       const colorExpr: maplibregl.ExpressionSpecification = [
-        "step",
-        ["get", colorField],
-        DELAY_RAMP.ok,
-        2, DELAY_RAMP.mild,
-        5, DELAY_RAMP.moderate,
-        10, DELAY_RAMP.severe,
+        "step", ["get", colorField], ...severityStepColors(),
       ];
 
       // Dot SIZE encodes the DELAY itself — bigger = worse — so color and size
@@ -279,16 +277,24 @@ export function useHeatmapLayer(
     return whenStyleReady(m, applyData);
   }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch, colorField]);
 
-  // Update color/size when colorField changes without rebuilding the whole layer.
-  // Only runs after the layer setup effect has fired (layers exist on map).
+  // Update color when colorField OR the theme changes, without rebuilding the
+  // whole layer (setPaintProperty, not addLayer — leaves the build/style-race
+  // path in the effect above untouched). Only runs after the layer setup effect
+  // has fired (layers exist on map). Both the dots and the cluster bubbles embed
+  // severeColorResolved(), so both are re-read here on a theme toggle.
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
     if (!m.getLayer(LAYER)) return;
     const expr: maplibregl.ExpressionSpecification = [
-      "step", ["get", colorField],
-      DELAY_RAMP.ok, 2, DELAY_RAMP.mild, 5, DELAY_RAMP.moderate, 10, DELAY_RAMP.severe,
+      "step", ["get", colorField], ...severityStepColors(),
     ];
     m.setPaintProperty(LAYER, "circle-color", expr);
-  }, [mapRef, colorField]);
+    if (m.getLayer(CLUSTER_LAYER)) {
+      const clusterColor: maplibregl.ExpressionSpecification = [
+        "step", ["/", ["get", "dsum"], ["get", "point_count"]], ...severityStepColors(),
+      ];
+      m.setPaintProperty(CLUSTER_LAYER, "circle-color", clusterColor);
+    }
+  }, [mapRef, colorField, theme]);
 }
