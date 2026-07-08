@@ -15,7 +15,14 @@
      can't drift out of sync if --bg-surface is ever retuned — see the
      --surface-1/--surface-2 note below for the exact failure mode this
      avoids. Tracks whichever --bg-surface is active, light or dark, with
-     no separate dark-block entry needed. */
+     no separate dark-block entry needed. The plain fallback line first is
+     load-bearing, not redundant: on an engine without color-mix() support,
+     the color-mix declaration is invalid at compute time and the property
+     would resolve to its initial value (transparent) with no fallback —
+     leaving the legend with no background at all over the map. Browsers
+     that understand color-mix() take the later, more specific declaration
+     per the normal CSS cascade. */
+  --map-badge-bg: var(--bg-surface);
   --map-badge-bg: color-mix(in srgb, var(--bg-surface) 97%, transparent);
   /* --surface-1/--surface-2 alias the two existing surface tiers under names
      already used by several admin pages (AdminOpsPage, AdminAgenciesPage,

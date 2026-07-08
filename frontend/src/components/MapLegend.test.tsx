@@ -6,13 +6,16 @@ import { MapLegend } from "./MapLegend";
 
 // Pin the language explicitly rather than relying on jsdom's default
 // navigator.language — the shared i18n singleton's fallbackLng is "ja".
-// Restored after this file so the mutation doesn't outlive it if isolation
-// is ever relaxed.
+// Snapshot-and-restore (not a hardcoded "ja") so this doesn't outlive the
+// file with the wrong value if isolation is ever relaxed or the fallback
+// language changes later.
+let prevLanguage: string;
 beforeAll(async () => {
+  prevLanguage = i18n.language;
   await i18n.changeLanguage("en");
 });
 afterAll(async () => {
-  await i18n.changeLanguage("ja");
+  await i18n.changeLanguage(prevLanguage);
 });
 
 function renderLegend(overrides = {}) {
