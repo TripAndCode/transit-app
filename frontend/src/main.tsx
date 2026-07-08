@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import "./i18n";
 import App from "./App";
+import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
 import { RouteError } from "./components/RouteError";
-import { ChunkLoading, IndexLoadingPlaceholder } from "./components/RoutePlaceholders";
+import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -58,10 +59,10 @@ const router = createBrowserRouter([
     // an inline message instead of white-screening the whole app.
     errorElement: <RouteError />,
     children: [
-      // Index has no static target — AgencyPicker (in Header) auto-redirects
-      // to /agencies/<first>/map once agencies load. Sending Navigate to="overview"
-      // here loops with the catch-all because /overview is not a registered route.
-      { index: true, element: <IndexLoadingPlaceholder /> },
+      // Index has no static target — OnboardingGate owns the redirect once
+      // agencies load. Sending Navigate to="overview" here loops with the
+      // catch-all because /overview is not a registered route.
+      { index: true, element: <OnboardingGate /> },
       { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },
       { path: "agencies/:agencyId/overview", element: el(<OverviewTab />) },
       { path: "agencies/:agencyId/map", element: el(<MapTab />) },

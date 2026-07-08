@@ -14,6 +14,9 @@
     "forecast": "予測",
     "forecast_subtitle": "将来の遅延を予測"
   },
+  "onboarding": {
+    "subtitle": "あなたの事業者を選んでください"
+  },
   "forecast": {
     "title": "いつもの遅れ方",
     "eyebrow": "事業者全体の遅れやすい時間帯",
