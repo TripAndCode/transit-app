@@ -13,6 +13,7 @@ percentile, and percentiles cannot be recovered from per-bucket percentiles).
 """
 
 from collections.abc import Iterable, Mapping
+from datetime import date
 from typing import Any
 
 from api.triage import LOW_CONFIDENCE_SAMPLES
@@ -97,6 +98,29 @@ def _pooled(pairs: list[tuple[float, int]]) -> tuple[float | None, int]:
     if not n:
         return None, 0
     return sum(v * s for v, s in pairs) / n, n
+
+
+def hourly_cells_to_dow_band(
+    hourly: list[dict[str, Any]],
+    locale: str = "ja",
+) -> dict[str, Any]:
+    """Range-filtered {date,hour,avg_min,samples} rows (as returned by
+    compute_hourly_heatmap) -> a 7x5 dow x band grid + worst window, via
+    summarize_agency_overview. No route ranking (route_rows is always
+    empty here) and no disclaimer (summarize_agency_overview's disclaimer
+    text is forecast-specific "seasonal-naive historical average" framing —
+    wrong for a range-filtered historical card)."""
+    grid_rows = [
+        {
+            "dow": date.fromisoformat(r["date"]).isoweekday(),
+            "hour": r["hour"],
+            "avg_min": r["avg_min"],
+            "samples": r["samples"],
+        }
+        for r in hourly
+    ]
+    result = summarize_agency_overview(grid_rows, route_rows=[], locale=locale)
+    return {"grid": result["grid"], "worst": result["worst"]}
 
 
 def summarize_agency_overview(
