@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.reports.forecast import BANDS, band_of, summarize_agency_overview
+from pipeline.reports.forecast import BANDS, band_of, hourly_cells_to_dow_band, summarize_agency_overview
 
 
 def test_band_of_boundaries():
@@ -53,3 +53,36 @@ def test_routes_ranked_desc_low_conf_last_and_capped():
     out = summarize_agency_overview([], route_rows, top_n=2)
     assert [r["route_code"] for r in out["routes"]] == ["B", "A"]  # C sorted last, dropped by top_n
     assert out["routes"][0]["low_confidence"] is False
+
+
+def test_hourly_cells_to_dow_band_pools_by_derived_dow():
+    # 2026-05-19 is a Tuesday (dow=2), 2026-05-20 is a Wednesday (dow=3).
+    hourly = [
+        {"date": "2026-05-19", "hour": 9, "avg_min": 2.0, "samples": 10},
+        {"date": "2026-05-19", "hour": 12, "avg_min": 8.0, "samples": 40},
+        {"date": "2026-05-20", "hour": 17, "avg_min": 5.0, "samples": 60},
+    ]
+    out = hourly_cells_to_dow_band(hourly)
+    tue_midday = next(c for c in out["grid"] if c["dow"] == 2 and c["band"] == "midday")
+    assert tue_midday["expected_avg_min"] == pytest.approx((2 * 10 + 8 * 40) / 50, abs=0.05)
+    assert tue_midday["samples"] == 50
+    wed_evening = next(c for c in out["grid"] if c["dow"] == 3 and c["band"] == "evening")
+    assert wed_evening["expected_avg_min"] == pytest.approx(5.0, abs=0.05)
+
+
+def test_hourly_cells_to_dow_band_no_routes_or_disclaimer_keys():
+    out = hourly_cells_to_dow_band([])
+    assert set(out.keys()) == {"grid", "worst"}
+    assert len(out["grid"]) == 35
+    assert out["worst"] is None
+
+
+def test_hourly_cells_to_dow_band_worst_window():
+    hourly = [
+        {"date": "2026-05-22", "hour": 17, "avg_min": 9.0, "samples": 200},  # Fri (dow=5) evening
+        {"date": "2026-05-19", "hour": 9, "avg_min": 1.0, "samples": 200},  # Tue morning
+    ]
+    out = hourly_cells_to_dow_band(hourly)
+    assert out["worst"]["dow"] == 5
+    assert out["worst"]["band"] == "evening"
+    assert out["worst"]["expected_avg_min"] == pytest.approx(9.0, abs=0.05)

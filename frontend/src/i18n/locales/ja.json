@@ -797,6 +797,11 @@
       "tooltip_hour": "{{hour}}時 ・ 平均",
       "tooltip_metrics": "{{min}}分 ・ {{count}}件"
     },
+    "dow_band": {
+      "title": "いつもの遅れ方",
+      "worst_phrase": "過去{{days}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）",
+      "empty": "この期間のデータがありません。"
+    },
     "daily": {
       "empty": "期間内にデータがありません。",
       "svg_aria": "日次平均遅延チャート",
