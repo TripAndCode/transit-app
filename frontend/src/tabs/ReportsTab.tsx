@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
@@ -11,6 +11,9 @@ import { InsightHint } from "../components/InsightHint";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
+import { BandGrid, Legend } from "../components/charts/DowBandGrid";
+import { delayColor } from "../styles/tokens";
+import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 
 export function ReportsTab() {
@@ -147,7 +150,16 @@ export function ReportsTab() {
               </div>
             )}
             {detail.data.report_type === "trend" ? (
-              <TrendBlock data={detail.data.rows as unknown as { days: TrendDay[]; hourly: HourlyCell[] }[]} />
+              <TrendBlock
+                data={
+                  detail.data.rows as unknown as {
+                    days: TrendDay[];
+                    hourly: HourlyCell[];
+                    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
+                  }[]
+                }
+                ctx={ctx}
+              />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
@@ -187,12 +199,75 @@ export function ReportsTab() {
   );
 }
 
-function TrendBlock({ data }: { data: { days: TrendDay[]; hourly: HourlyCell[] }[] }) {
-  const payload = data[0] ?? { days: [], hourly: [] };
+const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+
+function TrendBlock({
+  data,
+  ctx,
+}: {
+  data: { days: TrendDay[]; hourly: HourlyCell[]; dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null } }[];
+  ctx: RangeCtx;
+}) {
+  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null } };
+  const rangeDays = Math.max(
+    1,
+    Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
+  );
   return (
     <div>
+      <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
       <DailyChart days={payload.days} />
       <HourlyHeatmap cells={payload.hourly} />
+    </div>
+  );
+}
+
+function DowBandHeatmapCard({
+  grid,
+  worst,
+  rangeDays,
+}: {
+  grid: ForecastOverviewGridCell[];
+  worst: ForecastOverviewWorst | null;
+  rangeDays: number;
+}) {
+  const { t } = useTranslation();
+  const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
+  const bandLabel = (b: Band) => t(`forecast.band_${b}`);
+  const axisMin = t("forecast.axis_min");
+  const values = grid.map((c) => c.expected_avg_min).filter((v): v is number => v != null);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+
+  return (
+    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16, marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0, fontSize: 14 }}>{t("reports.dow_band.title")}</h3>
+      {values.length === 0 ? (
+        <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>{t("reports.dow_band.empty")}</p>
+      ) : (
+        <>
+          {worst && (
+            <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+              {t("reports.dow_band.worst_phrase", {
+                days: rangeDays,
+                day: dayLabel(worst.dow),
+                band: bandLabel(worst.band),
+                min: worst.expected_avg_min.toFixed(1),
+              })}
+            </p>
+          )}
+          <BandGrid
+            grid={grid}
+            bandLabel={bandLabel}
+            dayLabel={dayLabel}
+            axisMin={axisMin}
+            colorFor={delayColor}
+            onTip={() => {}}
+            onLeave={() => {}}
+          />
+          <Legend min={min} max={max} unit={axisMin} colorFor={delayColor} />
+        </>
+      )}
     </div>
   );
 }
