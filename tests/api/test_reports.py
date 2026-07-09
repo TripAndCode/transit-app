@@ -242,6 +242,13 @@ async def test_reports_trend_reads_agg(reports_client):
     # hourly heatmap cells present (scheduled_time 10:00 → hour 10, ≥3 samples)
     hourly = rows[0]["hourly"]
     assert any(c["hour"] == 10 for c in hourly)
+    # dow_band: pooled from the same hourly cells, no routes/disclaimer keys
+    dow_band = rows[0]["dow_band"]
+    assert set(dow_band.keys()) == {"grid", "worst"}
+    assert len(dow_band["grid"]) == 35
+    # 2026-05-19 is a Tuesday (dow=2), hour 10 -> band "midday"
+    tue_midday = next(c for c in dow_band["grid"] if c["dow"] == 2 and c["band"] == "midday")
+    assert tue_midday["samples"] > 0
 
 
 @pytest.mark.asyncio

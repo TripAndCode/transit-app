@@ -26,7 +26,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import summarize_agency_overview, summarize_expected_delay_heatmap
+from pipeline.reports.forecast import hourly_cells_to_dow_band, summarize_agency_overview, summarize_expected_delay_heatmap
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -305,6 +305,7 @@ async def get_report(
         # Daily series + hour-of-day heatmap for the granular Trend tab.
         series = await compute_trend_series(agency_id, ctx, conn)
         hourly = await compute_hourly_heatmap(agency_id, ctx, conn)
+        dow_band = hourly_cells_to_dow_band(hourly, locale=locale)
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx)
@@ -313,7 +314,7 @@ async def get_report(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
             text=text,
-            rows=[{"days": days, "hourly": hourly}],
+            rows=[{"days": days, "hourly": hourly, "dow_band": dow_band}],
             ctx=_ctx_payload(ctx),
         )
     else:
