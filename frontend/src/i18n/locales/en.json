@@ -797,6 +797,11 @@
       "tooltip_hour": "{{hour}}:00 · avg",
       "tooltip_metrics": "{{min}} min · {{count}} obs."
     },
+    "dow_band": {
+      "title": "Usual delay pattern",
+      "worst_phrase": "Over the past {{days}} days, {{day}} {{band}} runs latest (avg +{{min}} min)",
+      "empty": "No data for this period."
+    },
     "daily": {
       "empty": "No data in this range.",
       "svg_aria": "Daily average delay chart",
