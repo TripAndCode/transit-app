@@ -48,7 +48,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
       style={{
         background: "var(--error-bg)",
         color: "var(--error-fg)",
-        border: "1px solid #f0e2b6",
+        border: "1px solid color-mix(in srgb, var(--error-fg) 35%, var(--error-bg))",
         padding: "10px 14px",
         borderRadius: "var(--radius)",
         display: "flex",
