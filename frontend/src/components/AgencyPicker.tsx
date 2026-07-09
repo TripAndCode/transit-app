@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { useMatch, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import { onActivateKey } from "../utils/a11y";
@@ -9,7 +9,6 @@ export function AgencyPicker() {
   const { data: agencies, isLoading } = useAgencies();
   const { agencyId } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const tabMatch = useMatch("/agencies/:agencyId/:tab/*");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -17,16 +16,6 @@ export function AgencyPicker() {
 
   const currentId = agencyId ? Number(agencyId) : null;
   const current = agencies?.find((a) => a.agency_id === currentId);
-
-  // Auto-redirect to first agency only from the root. Auth/account/admin
-  // routes have no :agencyId by design — without this guard the header
-  // hijacks every non-agency page back to the map.
-  useEffect(() => {
-    if (!agencies || agencies.length === 0) return;
-    if (currentId != null) return;
-    if (location.pathname !== "/") return;
-    navigate(`/agencies/${agencies[0].agency_id}/map`, { replace: true });
-  }, [agencies, currentId, location.pathname, navigate]);
 
   // close on outside click
   useEffect(() => {

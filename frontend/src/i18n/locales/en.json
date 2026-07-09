@@ -14,6 +14,10 @@
     "forecast": "Forecast",
     "forecast_subtitle": "Predict future delays"
   },
+  "onboarding": {
+    "subtitle": "Select your transit agency",
+    "no_agencies": "No agencies are configured yet."
+  },
   "forecast": {
     "title": "Typical delays",
     "eyebrow": "When this agency tends to run late",
