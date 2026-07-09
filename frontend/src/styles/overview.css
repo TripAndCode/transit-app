@@ -142,6 +142,13 @@
   color: #ffffff;
   font-variant-numeric: tabular-nums;
 }
+/* Deliberately NOT tokenized to --trend-neutral/--trend-good: those tokens'
+   dark-mode values (#94a3b8, #4ade80) are bright/light, meant for use as
+   text/line color on a dark surface — as a solid fill under this badge's
+   fixed white number, they'd give ~2.3:1 and ~1.5:1 contrast, both far
+   below any legibility floor. Unlike .ov-chip-up/-down (soft --*-bg tint +
+   colored text, safe in both themes), this badge is solid-fill + white
+   text, so it stays a fixed, self-contained, always-legible chip instead. */
 .ov-rank-worse  { background: #475569; }
 .ov-rank-better { background: #166534; }
 
@@ -212,7 +219,13 @@
   border-radius: 6px;
   transition: background-color 200ms ease;
 }
-.ov-pareto-row:hover { background: rgba(180, 83, 9, 0.04); }
+/* Plain fallback first: color-mix() has no built-in fallback, and an
+   engine without it would resolve `background` to its initial value
+   (transparent) — silently losing the hover feedback. The fallback is the
+   exact original literal (not a --trend-*-bg token, whose fixed opacity
+   doesn't match this rule's intended percentage) so it's a precise, not
+   approximate, degradation. */
+.ov-pareto-row:hover { background: rgba(180, 83, 9, 0.04); background: color-mix(in srgb, var(--trend-bad) 4%, transparent); }
 .ov-pareto-label {
   color: var(--text-primary);
   font-weight: 500;
@@ -254,7 +267,9 @@
   position: relative;
   width: 100%;
 }
-.ov-peak-spread { fill: rgba(180, 83, 9, 0.06); }
+/* Plain fallback first: an engine without color-mix() would otherwise
+   resolve `fill` to its initial value (black), not transparent. */
+.ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
 
 /* ---------- 5. Service split ---------- */
 .ov-svc-list {
@@ -292,7 +307,12 @@
 }
 .ov-svc-fill {
   height: 100%;
+  /* Plain fallback first: without color-mix() support, `background`
+     would otherwise resolve to transparent, hiding the progress fill.
+     The exact original literal, not a --trend-*-bg token — those are
+     fixed at 8-16% alpha, far off this rule's intended 50%. */
   background: rgba(71, 85, 105, 0.5);
+  background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
   border-radius: 4px;
   transform-origin: left center;
 }
@@ -463,7 +483,7 @@
 .ov-hero.ov-clickable:hover { transform: translateY(-1px); }
 .ov-card.ov-clickable:focus-visible,
 .ov-hero.ov-clickable:focus-visible {
-  outline: 2px solid #475569;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -480,7 +500,10 @@
   gap: 2px;
   padding: 10px 14px;
   border-radius: 10px;
+  /* Plain fallback first, same reasoning as .ov-svc-fill above: the exact
+     original literal, not a --trend-*-bg token (fixed alpha, off-target). */
   background: rgba(71, 85, 105, 0.05);
+  background: color-mix(in srgb, var(--trend-neutral) 5%, transparent);
   min-width: 90px;
 }
 .ov-stat-pill-label {

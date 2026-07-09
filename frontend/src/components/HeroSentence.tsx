@@ -259,8 +259,8 @@ export function HeroSentence({
             >
               <defs>
                 <linearGradient id="ovHeroFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(71,85,105,0.10)" />
-                  <stop offset="100%" stopColor="rgba(71,85,105,0)" />
+                  <stop offset="0%" style={{ stopColor: "var(--trend-neutral)", stopOpacity: 0.10 }} />
+                  <stop offset="100%" style={{ stopColor: "var(--trend-neutral)", stopOpacity: 0 }} />
                 </linearGradient>
               </defs>
               <path d={chart.area} fill="url(#ovHeroFill)" stroke="none" />
@@ -271,7 +271,7 @@ export function HeroSentence({
                     y1={chart.baselineY}
                     x2={SPARK_W - PAD_RIGHT}
                     y2={chart.baselineY}
-                    stroke="#cbd5e1"
+                    style={{ stroke: "var(--border-subtle)" }}
                     strokeWidth="1"
                     strokeDasharray="2 4"
                   />
@@ -279,7 +279,7 @@ export function HeroSentence({
                     x={SPARK_W - PAD_RIGHT + 4}
                     y={chart.baselineY + 3}
                     fontSize="10"
-                    fill="#94a3b8"
+                    style={{ fill: "var(--text-tertiary)" }}
                     textAnchor="start"
                   >
                     {t("overview.hero.baseline_label")}
@@ -289,7 +289,7 @@ export function HeroSentence({
               <polyline
                 className="ov-spark-line"
                 fill="none"
-                stroke="#475569"
+                style={{ stroke: "var(--trend-neutral)" }}
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -309,18 +309,18 @@ export function HeroSentence({
                           cx={c.x}
                           cy={c.y}
                           r="5"
-                          fill="rgba(71,85,105,0.20)"
+                          style={{ fill: "var(--trend-neutral)", fillOpacity: 0.20 }}
                         />
-                        <circle cx={c.x} cy={c.y} r="2.5" fill="#475569" />
+                        <circle cx={c.x} cy={c.y} r="2.5" style={{ fill: "var(--trend-neutral)" }} />
                       </>
                     ) : (
-                      <circle cx={c.x} cy={c.y} r="2" fill="#94a3b8" />
+                      <circle cx={c.x} cy={c.y} r="2" style={{ fill: "var(--text-tertiary)" }} />
                     )}
                     <text
                       x={c.x}
                       y={c.y - 8}
                       fontSize="10"
-                      fill="#6e6e73"
+                      style={{ fill: "var(--text-secondary)" }}
                       textAnchor="middle"
                     >
                       {c.v.toFixed(1)}
@@ -341,7 +341,7 @@ export function HeroSentence({
                     x={c.x}
                     y={chartH - 6}
                     fontSize="10"
-                    fill="#94a3b8"
+                    style={{ fill: "var(--text-tertiary)" }}
                     textAnchor="middle"
                   >
                     {dateLabels[i]}
@@ -355,7 +355,7 @@ export function HeroSentence({
                   y1={PAD_TOP - 4}
                   x2={hover.svgX}
                   y2={chartH - PAD_BOTTOM + 2}
-                  stroke="rgba(71,85,105,0.30)"
+                  style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
                   strokeWidth="1"
                 />
               )}

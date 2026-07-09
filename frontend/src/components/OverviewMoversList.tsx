@@ -41,7 +41,7 @@ export function MoversList({
     direction === "worse" ? "overview.mover.worsened" : "overview.mover.improved";
 
   // Tonal-gray sparkline for movers (color is reserved for delta chips)
-  const sparkAccent = "#475569";
+  const sparkAccent = "var(--trend-neutral)";
 
   const chipClass = direction === "worse" ? "ov-chip-up" : "ov-chip-down";
   const rankClass = direction === "worse" ? "ov-rank-worse" : "ov-rank-better";

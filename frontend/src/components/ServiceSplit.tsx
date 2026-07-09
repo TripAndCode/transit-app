@@ -279,14 +279,14 @@ function ServiceSplitDailyChart({
         <span>
           <span
             className="ov-svc-daily-legend-swatch"
-            style={{ background: "#475569" }}
+            style={{ background: "var(--trend-neutral)" }}
           />
           {t("overview.service_split.weekday_label")}
         </span>
         <span>
           <span
             className="ov-svc-daily-legend-swatch"
-            style={{ background: "#94a3b8" }}
+            style={{ background: "var(--text-tertiary)" }}
           />
           {t("overview.service_split.weekend_label")}
         </span>
@@ -310,7 +310,7 @@ function ServiceSplitDailyChart({
                 y1={y}
                 x2={DC_W - DC_PAD_RIGHT}
                 y2={y}
-                stroke="#e5e7eb"
+                style={{ stroke: "var(--border-subtle)" }}
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
               />
@@ -318,7 +318,7 @@ function ServiceSplitDailyChart({
                 x={DC_PAD_LEFT - 6}
                 y={y + 3}
                 fontSize="10"
-                fill="#8e8e93"
+                style={{ fill: "var(--text-tertiary)" }}
                 textAnchor="end"
               >
                 {v.toFixed(1)}
@@ -336,7 +336,7 @@ function ServiceSplitDailyChart({
               x={x}
               y={DC_H - DC_PAD_BOTTOM + 14}
               fontSize="10"
-              fill="#94a3b8"
+              style={{ fill: "var(--text-tertiary)" }}
               textAnchor="middle"
             >
               {dateLabels[i]}
@@ -346,7 +346,7 @@ function ServiceSplitDailyChart({
         {/* Lines */}
         <path
           d={weekdayPath}
-          stroke="#475569"
+          style={{ stroke: "var(--trend-neutral)" }}
           strokeWidth="1.8"
           fill="none"
           strokeLinecap="round"
@@ -354,7 +354,7 @@ function ServiceSplitDailyChart({
         />
         <path
           d={weekendPath}
-          stroke="#94a3b8"
+          style={{ stroke: "var(--text-tertiary)" }}
           strokeWidth="1.8"
           strokeDasharray="4 3"
           fill="none"
@@ -367,7 +367,7 @@ function ServiceSplitDailyChart({
             y1={DC_PAD_TOP}
             x2={hover.svgX}
             y2={DC_H - DC_PAD_BOTTOM}
-            stroke="rgba(71,85,105,0.30)"
+            style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
             strokeWidth="1"
           />
         )}

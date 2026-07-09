@@ -17,7 +17,7 @@ export function InlineSparkline({
   points,
   width = 160,
   height = 48,
-  accent = "#b45309",
+  accent = "var(--trend-bad)",
   forceAccent = false,
   showEndDot = true,
   showLabels = true,
@@ -29,7 +29,7 @@ export function InlineSparkline({
   // Trend down (last <= first) = improvement => muted green (unless forced).
   const first = points[0];
   const last_v = points[points.length - 1];
-  const stroke = forceAccent ? accent : last_v <= first ? "#166534" : accent;
+  const stroke = forceAccent ? accent : last_v <= first ? "var(--trend-good)" : accent;
 
   const y_min = Math.min(...points);
   const y_max = Math.max(...points);
@@ -75,23 +75,23 @@ export function InlineSparkline({
       role="img"
       aria-hidden
     >
-      <path d={area_path} fill={stroke} fillOpacity={0.12} stroke="none" />
+      <path d={area_path} style={{ fill: stroke, fillOpacity: 0.12 }} stroke="none" />
       <polyline
         fill="none"
-        stroke={stroke}
+        style={{ stroke }}
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         points={coords.join(" ")}
       />
-      {showEndDot && <circle cx={lastX} cy={lastY} r="2.5" fill={stroke} />}
+      {showEndDot && <circle cx={lastX} cy={lastY} r="2.5" style={{ fill: stroke }} />}
       {showLabels && (
         <>
           <text
             x={2}
             y={10}
             fontSize="10"
-            fill="#6e6e73"
+            style={{ fill: "var(--text-secondary)" }}
             textAnchor="start"
           >
             {first.toFixed(1)}
@@ -100,7 +100,7 @@ export function InlineSparkline({
             x={width - 2}
             y={10}
             fontSize="10"
-            fill="#6e6e73"
+            style={{ fill: "var(--text-secondary)" }}
             textAnchor="end"
           >
             {last_v.toFixed(1)}
