@@ -94,7 +94,13 @@ export function DailyChart({ days, height = 240 }: Props) {
               {/* `fill` goes in `style`, not the SVG presentation attribute:
                   delayColor()'s severe tier is now the literal "var(--delay-severe)",
                   and var() only resolves in a CSS property, not a presentation attr. */}
-              <circle cx={x} cy={y} r={hover === i ? 5 : 3} style={{ fill: c }} stroke="#fff" strokeWidth="1.5" />
+              <circle
+                cx={x}
+                cy={y}
+                r={hover === i ? 5 : 3}
+                style={{ fill: c, stroke: "var(--bg-surface)" }}
+                strokeWidth="1.5"
+              />
               <rect
                 x={padL + i * stepX - stepX / 2}
                 y={padT}

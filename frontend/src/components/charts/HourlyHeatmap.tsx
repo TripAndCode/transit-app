@@ -161,7 +161,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             const c = map.get(`${d}|${h}`);
             const x = padL + i * cellW;
             const y = padT + h * cellH;
-            const fill = c && c.avg_min != null ? delayColor(c.avg_min) : "#f0f0ee";
+            const fill = c && c.avg_min != null ? delayColor(c.avg_min) : "var(--bg-soft)";
             const opacity = c && c.avg_min != null ? Math.min(1, 0.35 + (c.samples / 200) * 0.5) : 0.35;
             const handleCellClick = () => {
               if (!c) return;
