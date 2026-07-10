@@ -61,7 +61,7 @@
   font-size: 10px;
 }
 
-/* ---- popover (opens downward) ---- */
+/* ---- popover (opens downward by default) ---- */
 .rp-pop {
   position: absolute;
   top: calc(100% + 6px);
@@ -74,6 +74,13 @@
   border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
   z-index: 20;
+}
+
+/* Flipped upward when there isn't enough room below the trigger (e.g. this
+ * component docked at the bottom of the viewport, inside QuestionDock). */
+.rp-pop-up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .rp-search-wrap {
