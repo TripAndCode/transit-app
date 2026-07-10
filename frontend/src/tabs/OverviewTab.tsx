@@ -43,14 +43,18 @@ export function OverviewTab() {
     peakHourSel?.dow ?? null,
   );
 
+  // movers is intentionally excluded here: since the retired MoversList/
+  // HeroSentence removal, movers no longer drives any main-view content
+  // (it's only consumed inside the collapsed ConcentrationBar). Checking
+  // it would let an agency with movers but no other signal skip
+  // EmptyState and render a hero row of "—"/an empty routes list/a
+  // details toggle that reveals nothing.
   const hasAnyData =
     !!data && (
       data.headline.samples > 0 ||
       data.concentration.top_routes.length > 0 ||
       data.peak_hour != null ||
-      Object.keys(data.service_split).length > 0 ||
-      data.movers.worse.length > 0 ||
-      data.movers.better.length > 0
+      Object.keys(data.service_split).length > 0
     );
 
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
