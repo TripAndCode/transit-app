@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
+import { buildCardTemplates, defaultsFor, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
 
 type QuestionDockProps = {
@@ -140,16 +140,4 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
       </div>
     </div>
   );
-}
-
-function defaultsFor(tpl: CardTemplate): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const p of tpl.params) {
-    if (p.kind === "limit") out[p.name] = p.default ?? 5;
-    else if (p.kind === "service") out[p.name] = p.default ?? "all";
-    else if (p.kind === "granularity") out[p.name] = p.default ?? "week";
-    else if (p.kind === "metric") out[p.name] = p.default ?? p.options[0].value;
-    // route stays unset (null) — required check will surface it
-  }
-  return out;
 }
