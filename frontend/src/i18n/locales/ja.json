@@ -413,6 +413,11 @@
       "play": "再生",
       "pause": "一時停止",
       "aria_label": "時間帯スクラバー"
+    },
+    "route_mode": {
+      "trend": "実績トレンド",
+      "hourly": "時間帯別",
+      "aria_label": "表示モード切替"
     }
   },
   "ask": {
