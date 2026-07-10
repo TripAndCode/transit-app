@@ -10,17 +10,13 @@
     "live_subtitle": "異常を素早く発見",
     "analysis": "分析",
     "analysis_subtitle": "いつ・なぜ遅れるか",
-    "network": "事業者比較",
-    "forecast": "予測",
-    "forecast_subtitle": "将来の遅延を予測"
+    "network": "事業者比較"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
     "no_agencies": "事業者がまだ登録されていません。"
   },
   "forecast": {
-    "title": "いつもの遅れ方",
-    "eyebrow": "事業者全体の遅れやすい時間帯",
     "overview_worst_label": "いま見るべき時間帯",
     "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均 +{{min}}分）",
     "overview_grid_title": "曜日 × 時間帯（全路線）",
@@ -35,11 +31,8 @@
     "band_night": "夜",
     "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（平均 +{{min}}分）",
     "detail_show_grid": "曜日×時間帯を詳しく",
-    "back_to_overview": "← 全体に戻る",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
-    "route_label": "路線",
-    "route_placeholder": "路線を検索…",
     "no_data": "この路線の計測記録がまだありません。",
     "axis_min": "分",
     "legend_unit": "遅延（分）",
@@ -774,7 +767,8 @@
       "trend": "トレンド",
       "compare_ranking": "比較ランキング",
       "dow_weekday": "平日傾向",
-      "dow_weekend": "週末傾向"
+      "dow_weekend": "週末傾向",
+      "route_forecast": "路線別予測"
     },
     "col": {
       "route": "路線",

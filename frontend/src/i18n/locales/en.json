@@ -10,17 +10,13 @@
     "live_subtitle": "Spot anomalies fast",
     "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
-    "network": "Agencies",
-    "forecast": "Forecast",
-    "forecast_subtitle": "Predict future delays"
+    "network": "Agencies"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
     "no_agencies": "No agencies are configured yet."
   },
   "forecast": {
-    "title": "Typical delays",
-    "eyebrow": "When this agency tends to run late",
     "overview_worst_label": "When to watch out",
     "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg +{{min}} min)",
     "overview_grid_title": "Day × time of day (all routes)",
@@ -35,11 +31,8 @@
     "band_night": "Night",
     "detail_worst_phrase": "Worst on {{day}} {{band}} (avg +{{min}} min)",
     "detail_show_grid": "Show day × hour detail",
-    "back_to_overview": "← Back to overview",
     "low_confidence_note": "Few measurements — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
-    "route_label": "Route",
-    "route_placeholder": "Search routes…",
     "no_data": "No delay measurements for this route yet.",
     "axis_min": "min",
     "legend_unit": "min delay",
@@ -774,7 +767,8 @@
       "trend": "Trend",
       "compare_ranking": "Compare ranking",
       "dow_weekday": "Weekday pattern",
-      "dow_weekend": "Weekend pattern"
+      "dow_weekend": "Weekend pattern",
+      "route_forecast": "Route forecast"
     },
     "col": {
       "route": "Route",

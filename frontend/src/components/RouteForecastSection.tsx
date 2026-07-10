@@ -1,23 +1,27 @@
 /**
- * ForecastTab — "いつもの遅れ方 / Typical delays".
+ * RouteForecastSection — the "Route forecast" entry inside the Analysis tab.
  *
- * A landing↔detail router on `selectedRoute`. With no route picked it shows the
- * agency-wide view (`AgencyLanding`): a worst-window headline, a 7-day × time-band
- * grid pooled across all routes, and a delay-ranked route list. Picking a route
- * (via the list or the search picker) shows `RouteDetail`: the per-route heatmap
- * collapsed to bands, a worst-window sentence, day/hour summaries, and the full
- * 7×24 grid behind a toggle. Data comes from `/forecast/overview` and the existing
- * per-route `/forecast/heatmap`; both are seasonal-naive historical averages.
+ * Renders the agency-wide forecast landing (worst-window headline, 7-day ×
+ * time-band grid pooled across all routes, delay-ranked route list) when no
+ * route is focused, or the per-route detail (band-collapsed grid, worst-window
+ * sentence, day/hour summaries, full 7×24 grid behind a toggle) when exactly
+ * one route is selected via the shared range-context route filter — mirrors
+ * MapTab.tsx's own focused-route pattern (self-contained: reads/writes
+ * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
+ * ForecastTab.tsx; picking a route updates the shared ctx.routes filter, so
+ * it also filters every other report type/tab — a deliberate, shared-filter
+ * consequence, not a bug. There is no in-view "back" button: clearing the
+ * route chip in the shared Filters bar is the way back, matching how every
+ * other tab's focused-route mode already works.
  */
 import { useState } from "react";
-import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
-import { RoutePickerPill } from "../components/paramPills/RoutePickerPill";
-import { OverviewModal } from "../components/OverviewModal";
-import { Skeleton } from "../components/Skeleton";
-import { ErrorBanner } from "../components/ErrorBanner";
-import { BandGrid, Legend } from "../components/charts/DowBandGrid";
+import { useRangeContext } from "../api/rangeContext";
+import { OverviewModal } from "./OverviewModal";
+import { Skeleton } from "./Skeleton";
+import { ErrorBanner } from "./ErrorBanner";
+import { BandGrid, Legend } from "./charts/DowBandGrid";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import {
   BAND_ORDER,
@@ -333,32 +337,25 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
   return grid;
 }
 
-export function ForecastTab() {
+export function RouteForecastSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const aid = agencyId ? Number(agencyId) : null;
+  const [ctx, update] = useRangeContext();
+  const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
 
-  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
   const [showGrid, setShowGrid] = useState(false);
 
-  // Reset the drill-down when the agency changes (the picker only swaps the
-  // :agencyId param, so this component instance is reused — without this, a
-  // selected route from the old agency would leak into the new one). This is
-  // the React "adjust state during render on prop change" pattern, not an effect.
-  const [prevAid, setPrevAid] = useState(aid);
-  if (aid !== prevAid) {
-    setPrevAid(aid);
-    setSelectedRoute(null);
+  // Reset in-view UI state (not the route selection itself, which is owned
+  // by the shared range-context) when the focused route changes — the
+  // React "adjust state during render on prop change" pattern, matching
+  // MapTab.tsx's own prevFocusedRoute handling.
+  const [prevRoute, setPrevRoute] = useState(focusedRoute);
+  if (focusedRoute !== prevRoute) {
+    setPrevRoute(focusedRoute);
     setView(null);
     setShowGrid(false);
   }
-
-  // Per-route avg delay for the picker's warm-ramp chips (same query the landing
-  // uses — react-query dedupes, so this does not double-fetch).
-  const { data: overview } = useForecastOverview(aid);
-  const delays = Object.fromEntries((overview?.routes ?? []).map((r) => [r.route_code, r.expected_avg_min]));
 
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
@@ -367,26 +364,8 @@ export function ForecastTab() {
   const onLeave = () => setTip(null);
 
   return (
-    <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
-      <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>{t("forecast.eyebrow")}</div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 16px" }}>{t("forecast.title")}</h1>
-
-      {aid != null && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 22, alignItems: "center", flexWrap: "wrap" }}>
-          {selectedRoute && (
-            <button
-              type="button"
-              onClick={() => { setSelectedRoute(null); setShowGrid(false); }}
-              style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 13, padding: 0 }}
-            >
-              {t("forecast.back_to_overview")}
-            </button>
-          )}
-          <RoutePickerPill label={t("forecast.route_label")} value={selectedRoute} agencyId={aid} placeholder={t("forecast.route_placeholder")} onChange={setSelectedRoute} delays={delays} />
-        </div>
-      )}
-
-      {aid != null && !selectedRoute && (
+    <div>
+      {!focusedRoute && (
         <AgencyLanding
           aid={aid}
           dayLabel={dayLabel}
@@ -401,16 +380,16 @@ export function ForecastTab() {
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
           worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min.toFixed(1) })}
-          onPick={setSelectedRoute}
+          onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
         />
       )}
 
-      {aid != null && selectedRoute && (
+      {focusedRoute && (
         <RouteDetail
           aid={aid}
-          route={selectedRoute}
+          route={focusedRoute}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
           axisMin={min1}

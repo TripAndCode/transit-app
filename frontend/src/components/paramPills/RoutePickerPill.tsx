@@ -5,8 +5,8 @@
  * placeholder when unset) opens a popover: a live-search input filtering
  * routes by code / short name / long name, then a list where each option shows the
  * line name with the code as a muted monospace sub-label. When `delays` is supplied
- * (ForecastTab passes per-route avg delay), each row also shows a warm-ramp delay
- * chip. Results are capped at 50. Closes on outside click, Escape, or selection.
+ * (a per-route avg delay map), each row also shows a warm-ramp delay chip. Results
+ * are capped at 50. Closes on outside click, Escape, or selection.
  *
  * Opens downward by default, but flips upward when there isn't enough room
  * below the trigger (e.g. this component also renders inside QuestionDock,

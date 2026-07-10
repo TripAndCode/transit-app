@@ -1,6 +1,6 @@
 /* RoutePickerPill — searchable route selector.
  * Co-located so the component stays styled wherever it loads first
- * (ForecastTab, ParamStrip) regardless of chunk order. */
+ * (e.g. ParamStrip) regardless of chunk order. */
 
 .rp {
   position: relative;
@@ -160,7 +160,7 @@
   font-size: 11px;
   color: var(--text-tertiary, #999);
 }
-/* avg-delay chip — only rendered when delay data is supplied (ForecastTab) */
+/* avg-delay chip — only rendered when delay data is supplied via the `delays` prop */
 .rp-opt-delay {
   display: inline-flex;
   align-items: center;

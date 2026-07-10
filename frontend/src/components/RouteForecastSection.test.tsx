@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent, within } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
-import { ForecastTab } from "./ForecastTab";
+import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
 import { BAND_ORDER, type ForecastOverview } from "../api/types";
 
@@ -57,53 +57,53 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
   return { route: "100", cells, disclaimer: "test disclaimer" };
 }
 
-function renderTab(ov: ForecastOverview | undefined = overview()) {
-  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false, isLoading: false, refetch: vi.fn() } as never);
+function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "") {
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: heatmap(), isPending: false, error: null, refetch: vi.fn() } as never);
+  const initialEntries = [`/agencies/1/analysis/route_forecast${initialRoute ? `?routes=${initialRoute}` : ""}`];
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/1/forecast"]}>
-      <Routes>
-        <Route path="/agencies/:agencyId/forecast" element={<ForecastTab />} />
-      </Routes>
+    <MemoryRouter initialEntries={initialEntries}>
+      <RouteForecastSection aid={1} />
     </MemoryRouter>,
   );
 }
 
-describe("ForecastTab", () => {
+describe("RouteForecastSection", () => {
   it("renders the agency landing with worst window, 35-cell grid, and ranked routes", () => {
-    renderTab();
+    renderSection();
     expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
     expect(screen.getByText(/When to watch out/i)).toBeInTheDocument();
     expect(screen.getAllByTestId("ov-band-cell").length).toBe(35);
     expect(screen.getByText("Main Line")).toBeInTheDocument();
     expect(screen.getByText("Side Line")).toBeInTheDocument();
     expect(screen.getAllByTestId("ranked-route").length).toBe(2);
-    // the "not a prediction" disclaimer is surfaced on the landing, not only in a modal
     expect(screen.getByText("test disclaimer")).toBeInTheDocument();
   });
 
   it("shows the empty-state message when the agency has no data", () => {
-    renderTab(overview({ grid: fullGrid([]), worst: null, routes: [] }));
+    renderSection(overview({ grid: fullGrid([]), worst: null, routes: [] }));
     expect(screen.getByText(/No measurements yet/i)).toBeInTheDocument();
   });
 
-  it("drills into a route from the ranked list and back", () => {
-    renderTab();
-    expect(screen.queryByText(/Back to overview/i)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Main Line"));
-    // detail view: back button + per-route band grid + worst sentence
-    expect(screen.getByText(/Back to overview/i)).toBeInTheDocument();
+  it("shows the per-route detail when exactly one route is already selected via the URL", () => {
+    renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
     expect(screen.getByTestId("fc-detail-bandgrid")).toBeInTheDocument();
-    // back to the agency landing
-    fireEvent.click(screen.getByText(/Back to overview/i));
-    expect(screen.getByTestId("worst-headline")).toBeInTheDocument();
+    // no in-view "back" button — clearing the route is done via the shared Filters bar, not tested here
+    expect(screen.queryByText(/Back to overview/i)).not.toBeInTheDocument();
+  });
+
+  it("drilling into a route from the ranked list updates the URL's routes param (shared range-context)", () => {
+    renderSection();
+    fireEvent.click(screen.getByText("Main Line"));
+    // RouteForecastSection reads focusedRoute from the same URL-backed context
+    // it just wrote to — re-rendering should now show the per-route detail.
+    expect(screen.getByTestId("detail-worst")).toBeInTheDocument();
+    expect(screen.getByTestId("fc-detail-bandgrid")).toBeInTheDocument();
   });
 
   it("expands the full day×hour grid on demand in the detail view", () => {
-    renderTab();
-    fireEvent.click(screen.getByText("Main Line"));
+    renderSection(overview(), "100");
     expect(screen.queryByTestId("fc-detail-fullgrid")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
     expect(screen.getByTestId("fc-detail-fullgrid")).toBeInTheDocument();
@@ -111,23 +111,15 @@ describe("ForecastTab", () => {
   });
 
   it("opens the by-day detail modal with stats + disclaimer", () => {
-    renderTab();
-    fireEvent.click(screen.getByText("Main Line"));
+    renderSection(overview(), "100");
     fireEvent.click(screen.getByTestId("fc-card-dow"));
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
-    // disclaimer renders on the detail base view (footnote) AND inside the modal
     expect(within(dialog).getByText("test disclaimer")).toBeInTheDocument();
   });
 
   it("shows visible amber badge on low-confidence heatmap cells", () => {
-    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false, isLoading: false, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
-      data: overview(),
-      isPending: false,
-      error: null,
-      refetch: vi.fn(),
-    } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: overview(), isPending: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({
       data: heatmap([{ d: 1, h: 9, v: 4, n: 5 }]),
       isPending: false,
@@ -135,13 +127,10 @@ describe("ForecastTab", () => {
       refetch: vi.fn(),
     } as never);
     renderWithProviders(
-      <MemoryRouter initialEntries={["/agencies/1/forecast"]}>
-        <Routes>
-          <Route path="/agencies/:agencyId/forecast" element={<ForecastTab />} />
-        </Routes>
+      <MemoryRouter initialEntries={["/agencies/1/analysis/route_forecast?routes=100"]}>
+        <RouteForecastSection aid={1} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByText("Main Line"));
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
     const lowConfBadges = screen.queryAllByTestId("hm-cell-lowconf");
     const visible = lowConfBadges.filter((el) => !el.hasAttribute("hidden"));
