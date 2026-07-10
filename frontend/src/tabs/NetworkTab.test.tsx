@@ -23,7 +23,7 @@ function renderTab() {
 }
 
 describe("NetworkTab", () => {
-  it("renders agencies in given order with stale chip, no-data dash, clamp %", () => {
+  it("renders agency cards in given order with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07",
@@ -38,12 +38,17 @@ describe("NetworkTab", () => {
     renderTab();
     const names = screen.getAllByText(/Hiroden|HiroBus|Aomori/).map((n) => n.textContent);
     expect(names).toEqual(["Hiroden", "HiroBus", "Aomori"]);
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    expect(screen.getByText("#2")).toBeInTheDocument();
+    expect(screen.getByText("#3")).toBeInTheDocument();
     expect(screen.getByText("10.0")).toBeInTheDocument();
-    expect(screen.getByText("10.00%")).toBeInTheDocument();
+    expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
+    expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
     expect(screen.getByText("Behind")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     // clamp dot boundary: present only for HiroBus (10%), absent for
-    // Hiroden (0.14 < 1) and Aomori (null).
+    // Hiroden (0.14 < 1) and Aomori (null) — no secondary line at all for
+    // Hiroden since neither clamp nor stale triggers.
     expect(screen.getAllByTestId("clamp-dot")).toHaveLength(1);
     expect(screen.getByText("2026-04-01 – 2026-04-02")).toBeInTheDocument();
     expect(screen.getByText("no data in range")).toBeInTheDocument();
@@ -68,27 +73,25 @@ describe("NetworkTab", () => {
       "href",
       "/agencies/7/overview?from=2026-04-01&to=2026-04-07",
     );
-    // title carries the advisory "view overview" hint without overriding the
-    // self-describing accessible name (WCAG label-in-name).
     expect(link).toHaveAttribute("title", "View Hiroden overview");
   });
 
-  it("renders the empty message and no table when there are no agencies", () => {
+  it("renders the empty message and no agency cards when there are no agencies", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
     expect(screen.getByText("No agencies.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("network-card-list")).not.toBeInTheDocument();
   });
 
-  it("shows a skeleton (no table) while pending", () => {
+  it("shows a skeleton (no cards) while pending", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: undefined, isPending: true, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("network-card-list")).not.toBeInTheDocument();
   });
 
   it("shows the error banner with a retry on error", () => {
