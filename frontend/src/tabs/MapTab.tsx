@@ -340,7 +340,18 @@ export function MapTab() {
         bandCounts={severityCounts}
       />
       {focusedRoute != null && (
-        <RouteModeToggle mode={routeMode} onModeChange={setRouteMode} />
+        <RouteModeToggle
+          mode={routeMode}
+          onModeChange={(m) => {
+            setRouteMode(m);
+            // Leaving hourly mode should stop playback — otherwise the
+            // scrub interval keeps ticking scrubHour/expectedDelayMin in
+            // the background every second with no visible effect (the
+            // paint-property effect early-returns when mode !== "hourly"),
+            // a wasted render loop a user has no way to notice or stop.
+            if (m !== "hourly") setScrubPlaying(false);
+          }}
+        />
       )}
       {focusedRoute != null && routeMode === "hourly" && (
         <MapHourScrubber
