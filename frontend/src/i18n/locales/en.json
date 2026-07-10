@@ -8,8 +8,8 @@
     "ask_subtitle": "Ask in plain language",
     "live": "Latest observations",
     "live_subtitle": "Spot anomalies fast",
-    "reports": "Reports",
-    "reports_subtitle": "Analyze trends",
+    "analysis": "Analysis",
+    "analysis_subtitle": "When and why delays happen",
     "network": "Agencies",
     "forecast": "Forecast",
     "forecast_subtitle": "Predict future delays"

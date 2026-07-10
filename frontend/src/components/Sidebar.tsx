@@ -10,7 +10,7 @@ const ITEMS: Item[] = [
   { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
   { to: "ask", labelKey: "nav.ask", subtitleKey: "nav.ask_subtitle", Icon: MessageSquare },
   { to: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: Activity },
-  { to: "reports", labelKey: "nav.reports", subtitleKey: "nav.reports_subtitle", Icon: BarChart3 },
+  { to: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
   { to: "forecast", labelKey: "nav.forecast", subtitleKey: "nav.forecast_subtitle", Icon: TrendingUp },
 ];
 

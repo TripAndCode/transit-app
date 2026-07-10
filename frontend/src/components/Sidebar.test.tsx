@@ -28,8 +28,8 @@ describe("Sidebar", () => {
     expect(screen.getByText("Ask in plain language")).toBeTruthy();
     expect(screen.getByText("Latest observations")).toBeTruthy();
     expect(screen.getByText("Spot anomalies fast")).toBeTruthy();
-    expect(screen.getByText("Reports")).toBeTruthy();
-    expect(screen.getByText("Analyze trends")).toBeTruthy();
+    expect(screen.getByText("Analysis")).toBeTruthy();
+    expect(screen.getByText("When and why delays happen")).toBeTruthy();
     expect(screen.getByText("Forecast")).toBeTruthy();
     expect(screen.getByText("Predict future delays")).toBeTruthy();
   });

@@ -8,8 +8,8 @@
     "ask_subtitle": "自然言語で質問",
     "live": "最新観測",
     "live_subtitle": "異常を素早く発見",
-    "reports": "レポート",
-    "reports_subtitle": "傾向を分析",
+    "analysis": "分析",
+    "analysis_subtitle": "いつ・なぜ遅れるか",
     "network": "事業者比較",
     "forecast": "予測",
     "forecast_subtitle": "将来の遅延を予測"
