@@ -34,7 +34,6 @@ export function MapHourScrubber({ hour, onHourChange, expectedDelayMin, playing,
       </span>
       <input
         type="range"
-        role="slider"
         aria-label={t("map.scrubber.aria_label")}
         min={6}
         max={23}
