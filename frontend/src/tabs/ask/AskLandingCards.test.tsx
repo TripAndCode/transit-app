@@ -16,12 +16,17 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function setup() {
+function setup(overrides: { busy?: boolean } = {}) {
   const onInstantSubmit = vi.fn();
   const onOpenChip = vi.fn();
   render(
     <I18nextProvider i18n={i18n}>
-      <AskLandingCards templates={templates} onInstantSubmit={onInstantSubmit} onOpenChip={onOpenChip} />
+      <AskLandingCards
+        templates={templates}
+        onInstantSubmit={onInstantSubmit}
+        onOpenChip={onOpenChip}
+        {...overrides}
+      />
     </I18nextProvider>,
   );
   return { onInstantSubmit, onOpenChip };
@@ -71,5 +76,23 @@ describe("AskLandingCards", () => {
     await user.click(firstPill);
     expect(onOpenChip).toHaveBeenCalledTimes(1);
     expect(onOpenChip.mock.calls[0][0].id).toBe("route_trend");
+  });
+
+  it("disables cards and pills and does not dispatch while busy", async () => {
+    const user = userEvent.setup();
+    const { onInstantSubmit, onOpenChip } = setup({ busy: true });
+    const topDelayTpl = templates.find((t) => t.id === "top_delay")!;
+    const cardLabel = topDelayTpl.buildSummary({ k: 5, service_type: "all" }, i18n.t.bind(i18n));
+    const card = screen.getByText(new RegExp(escapeRegExp(cardLabel))).closest("button")!;
+    expect(card).toBeDisabled();
+    await user.click(card);
+    expect(onInstantSubmit).not.toHaveBeenCalled();
+
+    const routeTrendTpl = templates.find((t) => t.id === "route_trend")!;
+    const pillLabel = routeTrendTpl.buildSummary({}, i18n.t.bind(i18n));
+    const [pill] = screen.getAllByText(new RegExp(escapeRegExp(pillLabel))).map((el) => el.closest("button")!);
+    expect(pill).toBeDisabled();
+    await user.click(pill);
+    expect(onOpenChip).not.toHaveBeenCalled();
   });
 });

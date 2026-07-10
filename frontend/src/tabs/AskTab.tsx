@@ -186,6 +186,7 @@ export function AskTab() {
   }
 
   function handleInstantSubmit(tpl: CardTemplate) {
+    if (busy) return;
     const args = { ...tpl.fixed_args, ...defaultsFor(tpl) };
     handleCardSubmit({ tool: tpl.tool, args, user_summary: tpl.buildSummary(defaultsFor(tpl), t) });
   }
@@ -307,6 +308,7 @@ export function AskTab() {
               templates={templates}
               onInstantSubmit={handleInstantSubmit}
               onOpenChip={handleChipTap}
+              busy={busy}
             />
           )}
         </div>

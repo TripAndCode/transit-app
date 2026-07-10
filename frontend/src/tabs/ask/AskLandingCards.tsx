@@ -5,9 +5,13 @@ type Props = {
   templates: CardTemplate[];
   onInstantSubmit: (tpl: CardTemplate) => void;
   onOpenChip: (tpl: CardTemplate) => void;
+  /** True while a dispatch is in flight — disables the buttons so a fast
+   *  double-click on an instant card can't fire two conversation/message
+   *  creates before the first one settles. */
+  busy?: boolean;
 };
 
-export function AskLandingCards({ templates, onInstantSubmit, onOpenChip }: Props) {
+export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy = false }: Props) {
   const { t } = useTranslation();
   const instant = templates.filter((tpl) => !needsRoute(tpl));
   const pills = templates.filter(needsRoute);
@@ -34,13 +38,16 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip }: Prop
                 key={tpl.id}
                 type="button"
                 onClick={() => onInstantSubmit(tpl)}
+                disabled={busy}
+                aria-disabled={busy}
                 style={{
                   background: "var(--bg-surface)",
                   border: "1px solid var(--border-soft)",
                   borderRadius: 8,
                   padding: "12px 14px",
                   textAlign: "left",
-                  cursor: "pointer",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  opacity: busy ? 0.6 : 1,
                   fontSize: 13,
                   color: "var(--accent)",
                   fontWeight: 600,
@@ -72,6 +79,8 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip }: Prop
                 key={tpl.id}
                 type="button"
                 onClick={() => onOpenChip(tpl)}
+                disabled={busy}
+                aria-disabled={busy}
                 style={{
                   padding: "6px 12px",
                   background: "var(--bg-soft)",
@@ -79,7 +88,8 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip }: Prop
                   borderRadius: 20,
                   fontSize: 12,
                   color: "var(--text-secondary)",
-                  cursor: "pointer",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  opacity: busy ? 0.6 : 1,
                 }}
               >
                 {tpl.emoji} {tpl.buildSummary({}, t)}
