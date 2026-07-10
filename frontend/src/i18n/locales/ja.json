@@ -130,6 +130,21 @@
       "stat_mean": "平均",
       "stat_days": "日数"
     },
+    "hero_row": {
+      "avg_delay_label": "ネットワーク平均遅延",
+      "avg_delay_compared": "先週比 {{sign}}{{min}}分",
+      "avg_delay_no_baseline": "比較データなし",
+      "delayed_count_label": "遅延中の路線",
+      "delayed_count_value": "{{count}} / {{total}}路線",
+      "feed_status_label": "フィード状況",
+      "feed_status_ok": "正常稼働中",
+      "feed_status_updated": "最終更新 {{when}}"
+    },
+    "routes_to_check": {
+      "title": "今すぐ確認すべき路線",
+      "empty": "確認が必要な路線はありません"
+    },
+    "details_toggle": "詳細を表示",
     "story": {
       "better": "今週は先週より改善しました。",
       "worse": "今週は先週より悪化しました。",

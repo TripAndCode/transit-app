@@ -8,11 +8,11 @@ import { useRangeContext } from "../api/rangeContext";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { HeroSentence } from "../components/HeroSentence";
-import { MoversList } from "../components/OverviewMoversList";
+import { OverviewHeroRow } from "../components/OverviewHeroRow";
 import { OverviewModal } from "../components/OverviewModal";
 import { PeakHourModal } from "../components/PeakHourModal";
 import { PeakHourRibbon } from "../components/PeakHourRibbon";
+import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
@@ -24,14 +24,7 @@ function useAgencyId(): number | null {
   return agencyId ? Number(agencyId) : null;
 }
 
-type OpenCard =
-  | "hero"
-  | "movers_worse"
-  | "movers_better"
-  | "concentration"
-  | "peak_hour"
-  | "service_split"
-  | null;
+type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 
 export function OverviewTab() {
   const { t } = useTranslation();
@@ -50,20 +43,21 @@ export function OverviewTab() {
     peakHourSel?.dow ?? null,
   );
 
+  // movers is intentionally excluded here: since the retired MoversList/
+  // HeroSentence removal, movers no longer drives any main-view content
+  // (it's only consumed inside the collapsed ConcentrationBar). Checking
+  // it would let an agency with movers but no other signal skip
+  // EmptyState and render a hero row of "—"/an empty routes list/a
+  // details toggle that reveals nothing.
   const hasAnyData =
     !!data && (
       data.headline.samples > 0 ||
       data.concentration.top_routes.length > 0 ||
       data.peak_hour != null ||
-      Object.keys(data.service_split).length > 0 ||
-      data.movers.worse.length > 0 ||
-      data.movers.better.length > 0
+      Object.keys(data.service_split).length > 0
     );
 
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
-    hero: "overview.modal.hero",
-    movers_worse: "overview.modal.movers_worse",
-    movers_better: "overview.modal.movers_better",
     concentration: "overview.modal.concentration",
     peak_hour: "overview.modal.peak_hour",
     service_split: "overview.modal.service_split",
@@ -80,51 +74,35 @@ export function OverviewTab() {
         )}
         {data && hasAnyData && (
           <>
-            {data.headline.samples > 0 && (
-              <HeroSentence
-                headline={data.headline}
-                sparkline_points={data.sparkline_points}
-                onClick={() => setOpen("hero")}
-              />
-            )}
-            {(data.movers.worse.length > 0 || data.movers.better.length > 0) && (
-              <div className="ov-movers">
-                {data.movers.worse.length > 0 && (
-                  <MoversList
-                    direction="worse"
-                    movers={data.movers.worse}
-                    onClick={() => setOpen("movers_worse")}
-                  />
-                )}
-                {data.movers.better.length > 0 && (
-                  <MoversList
-                    direction="better"
-                    movers={data.movers.better}
-                    onClick={() => setOpen("movers_better")}
-                  />
-                )}
-              </div>
-            )}
-            {data.concentration.top_routes.length > 0 && (
-              <ConcentrationBar
-                concentration={data.concentration}
-                movers={data.movers}
-                onClick={() => setOpen("concentration")}
-              />
-            )}
-            {data.peak_hour != null && (
-              <PeakHourRibbon
-                peak_hour={data.peak_hour}
-                onClick={() => setOpen("peak_hour")}
-                onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
-              />
-            )}
-            {Object.keys(data.service_split).length > 0 && (
-              <ServiceSplit
-                service_split={data.service_split}
-                onClick={() => setOpen("service_split")}
-              />
-            )}
+            <OverviewHeroRow
+              headline={data.headline}
+              delayedCount={data.top_delayed.delayed_count}
+              agencyId={agencyId!}
+            />
+            <RoutesToCheckList routes={data.top_delayed.routes} />
+            <details className="ov-details">
+              <summary className="ov-details-summary">{t("overview.details_toggle")}</summary>
+              {data.concentration.top_routes.length > 0 && (
+                <ConcentrationBar
+                  concentration={data.concentration}
+                  movers={data.movers}
+                  onClick={() => setOpen("concentration")}
+                />
+              )}
+              {data.peak_hour != null && (
+                <PeakHourRibbon
+                  peak_hour={data.peak_hour}
+                  onClick={() => setOpen("peak_hour")}
+                  onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
+                />
+              )}
+              {Object.keys(data.service_split).length > 0 && (
+                <ServiceSplit
+                  service_split={data.service_split}
+                  onClick={() => setOpen("service_split")}
+                />
+              )}
+            </details>
           </>
         )}
       </div>
@@ -134,33 +112,6 @@ export function OverviewTab() {
         onClose={() => setOpen(null)}
         title={open !== null ? t(modalTitleKey[open]) : ""}
       >
-        {data && open === "hero" && (
-          <HeroSentence
-            headline={data.headline}
-            sparkline_points={data.sparkline_points}
-            variant="modal"
-          />
-        )}
-        {data && open === "movers_worse" && (
-          <MoversList
-            direction="worse"
-            movers={data.movers.worse}
-            limit={10}
-            variant="modal"
-            windowFrom={data.headline.window_from}
-            windowTo={data.headline.window_to}
-          />
-        )}
-        {data && open === "movers_better" && (
-          <MoversList
-            direction="better"
-            movers={data.movers.better}
-            limit={10}
-            variant="modal"
-            windowFrom={data.headline.window_from}
-            windowTo={data.headline.window_to}
-          />
-        )}
         {data && open === "concentration" && (
           <ConcentrationBar
             concentration={data.concentration}

@@ -75,6 +75,23 @@ class Concentration(BaseModel):
     rest_route_count: int = 0
 
 
+class TopDelayedRoute(BaseModel):
+    """One route's absolute avg delay in the current 7-day window."""
+
+    route_code: str
+    route_short_name: str | None
+    avg_min: float
+
+
+class TopDelayed(BaseModel):
+    """Top-5 routes by absolute avg delay + a count of routes at/above the
+    2.0-min "not ok" threshold, both over the same window the headline
+    covers."""
+
+    routes: list[TopDelayedRoute]
+    delayed_count: int
+
+
 class PeakHour(BaseModel):
     """24 hourly buckets, peak hour highlighted."""
 
@@ -102,6 +119,7 @@ class OverviewSummary(BaseModel):
     headline: Headline
     movers: Movers
     concentration: Concentration
+    top_delayed: TopDelayed
     peak_hour: PeakHour | None
     peak_hour_weekday: PeakHour | None = None
     peak_hour_weekend: PeakHour | None = None

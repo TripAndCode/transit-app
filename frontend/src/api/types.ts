@@ -367,6 +367,17 @@ export type OverviewConcentration = {
   rest_route_count?: number;
 };
 
+export type OverviewTopDelayedRoute = {
+  route_code: string;
+  route_short_name: string | null;
+  avg_min: number;
+};
+
+export type OverviewTopDelayed = {
+  routes: OverviewTopDelayedRoute[];
+  delayed_count: number;
+};
+
 export type OverviewPeakHour = {
   by_hour: (number | null)[];
   peak_hour: number;
@@ -383,6 +394,7 @@ export type OverviewSummary = {
   headline: OverviewHeadline;
   movers: OverviewMovers;
   concentration: OverviewConcentration;
+  top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;
   /** Weekday-only 24-hour profile, used by the peak-hour modal split. */
   peak_hour_weekday?: OverviewPeakHour | null;
