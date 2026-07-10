@@ -58,14 +58,16 @@ export function NetworkTab() {
             {a.agency_name}
           </Link>
           <div style={{ textAlign: "right" }}>
-            <div style={delayValStyle}>
+            <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
               {a.avg_delay_min == null ? (
                 "—"
               ) : (
                 <span style={{ color: delayColor(a.avg_delay_min) }}>{a.avg_delay_min.toFixed(1)}</span>
               )}
             </div>
-            <div style={onTimeStyle}>{a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}</div>
+            <div style={onTimeStyle} aria-label={t("network.col_on_time")}>
+              {a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}
+            </div>
           </div>
         </div>
         <div style={barRow}>
@@ -107,6 +109,7 @@ export function NetworkTab() {
       <style>{`
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
+        .network-card a:hover { text-decoration: underline; }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
