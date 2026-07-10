@@ -8,6 +8,7 @@ import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
 const ROUTE_SOURCE = "route-line";
 const ROUTE_STOPS_SOURCE = "route-line-stops";
+export const ROUTE_CASING_LAYER = "route-line-casing";
 export const ROUTE_LAYER = "route-line-stroke";
 export const ROUTE_STOPS_LAYER = "route-stops";
 
@@ -49,6 +50,7 @@ export function useRouteOverlay(
       if (!m) return;
       if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
       if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
+      if (m.getLayer(ROUTE_CASING_LAYER)) m.removeLayer(ROUTE_CASING_LAYER);
       if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
       if (m.getSource(ROUTE_STOPS_SOURCE)) m.removeSource(ROUTE_STOPS_SOURCE);
     }
@@ -76,6 +78,20 @@ export function useRouteOverlay(
           properties: {},
         },
       });
+      // White casing drawn under the colored line so it stays legible against
+      // basemap colors it would otherwise blend into (earth-tone basemaps vs.
+      // the mild/moderate tiers of the delay ramp, both in the sand/tan range).
+      m.addLayer({
+        id: ROUTE_CASING_LAYER,
+        type: "line",
+        source: ROUTE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4, 13, 7, 17, 11],
+          "line-opacity": 0.9,
+        },
+      });
       m.addLayer({
         id: ROUTE_LAYER,
         type: "line",
@@ -84,7 +100,7 @@ export function useRouteOverlay(
         paint: {
           "line-color": scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
-          "line-opacity": 0.7,
+          "line-opacity": 1,
         },
       });
 

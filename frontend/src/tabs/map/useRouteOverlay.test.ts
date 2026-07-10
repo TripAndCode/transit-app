@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
-import { useRouteOverlay, ROUTE_STOPS_LAYER, ROUTE_LAYER } from "./useRouteOverlay";
+import { useRouteOverlay, ROUTE_STOPS_LAYER, ROUTE_LAYER, ROUTE_CASING_LAYER } from "./useRouteOverlay";
 import type { RouteShapeResponse } from "../../api/types";
 
 const SHAPE = {
@@ -130,6 +130,19 @@ describe("useRouteOverlay scrubbedDelayMin", () => {
     // second during playback.
     expect(map.getLayer(ROUTE_LAYER)).toBe(layerBefore);
     expect(map.getPaintProperty(ROUTE_LAYER, "line-color")).toBe("#d4b878");
+  });
+});
+
+describe("useRouteOverlay line casing", () => {
+  it("draws a white casing layer under the colored line for legibility against the basemap", () => {
+    const map = makeMockMap();
+    run(map);
+    const casingIndex = map.layers.findIndex((l) => l.id === ROUTE_CASING_LAYER);
+    const lineIndex = map.layers.findIndex((l) => l.id === ROUTE_LAYER);
+    expect(casingIndex).toBeGreaterThanOrEqual(0);
+    expect(lineIndex).toBeGreaterThan(casingIndex);
+    const casing = map.getLayer(ROUTE_CASING_LAYER) as MockLayer;
+    expect(casing.paint!["line-color"]).toBe("#ffffff");
   });
 });
 
