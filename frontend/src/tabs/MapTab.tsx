@@ -2,10 +2,11 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
-import { useHeatmap, useRouteShape } from "../api/hooks";
+import { useForecastHeatmap, useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
+import { delayColor } from "../styles/tokens";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { EmptyState } from "../components/EmptyState";
@@ -18,6 +19,8 @@ import { TabFilterBar } from "../components/TabFilterBar";
 import { CLUSTER_LAYER, LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapLayer";
 import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
 import { useBasemapDim } from "./map/useBasemapDim";
+import { MapHourScrubber } from "./map/MapHourScrubber";
+import { expectedDelayForHour } from "./map/expectedDelay";
 
 export function MapTab() {
   const { agencyId } = useParams();
@@ -28,6 +31,33 @@ export function MapTab() {
   // Single-route overlay: only fetch when exactly one route is selected.
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
   const { data: shape } = useRouteShape(id, focusedRoute, ctx);
+
+  // Hour scrubber — only meaningful in the single-route drill-down.
+  const [scrubHour, setScrubHour] = useState(15);
+  const [scrubPlaying, setScrubPlaying] = useState(false);
+  const { data: hourlyHeatmap } = useForecastHeatmap(id, focusedRoute ?? "");
+  const expectedDelayMin = hourlyHeatmap
+    ? expectedDelayForHour(hourlyHeatmap.cells, scrubHour, ctx.dow)
+    : null;
+  const scrubbedColor = focusedRoute && expectedDelayMin != null ? delayColor(expectedDelayMin) : null;
+
+  // Reset the scrubber (but not necessarily play state) when the focused
+  // route changes, so a stale hour/color from a previous route doesn't
+  // briefly show against the newly-selected route's line.
+  const [prevFocusedRoute, setPrevFocusedRoute] = useState(focusedRoute);
+  if (focusedRoute !== prevFocusedRoute) {
+    setPrevFocusedRoute(focusedRoute);
+    setScrubHour(15);
+    setScrubPlaying(false);
+  }
+
+  useEffect(() => {
+    if (!scrubPlaying) return;
+    const id = setInterval(() => {
+      setScrubHour((h) => (h >= 23 ? 6 : h + 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [scrubPlaying]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -223,7 +253,7 @@ export function MapTab() {
 
   useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch, heatmapField);
 
-  useRouteOverlay(mapRef, shape, styleEpoch);
+  useRouteOverlay(mapRef, shape, styleEpoch, scrubbedColor);
 
   // Stops per severity band (respecting the single-sample filter) so the legend
   // can disable bands that match nothing — clicking an empty band would just
@@ -307,6 +337,15 @@ export function MapTab() {
         onFocusedSeverityChange={setFocusedSeverity}
         bandCounts={severityCounts}
       />
+      {focusedRoute != null && (
+        <MapHourScrubber
+          hour={scrubHour}
+          onHourChange={setScrubHour}
+          expectedDelayMin={expectedDelayMin}
+          playing={scrubPlaying}
+          onTogglePlay={() => setScrubPlaying((p) => !p)}
+        />
+      )}
       {/* Empty state covers the map only when there's nothing to show.
           In single-route mode the route overlay (line + numbered stops)
           is the primary visual and may be present even if the heatmap
