@@ -5,13 +5,28 @@ import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { delayColor } from "../styles/tokens";
+import type { NetworkAgencyRow } from "../api/types";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
-const th: React.CSSProperties = { padding: "6px 10px", fontWeight: 500 };
-const thNum: React.CSSProperties = { ...th, textAlign: "right" };
-const td: React.CSSProperties = { padding: "8px 10px", color: "var(--text-primary)" };
-const tdNum: React.CSSProperties = { ...td, textAlign: "right" };
+const card: React.CSSProperties = {
+  padding: "14px 18px",
+  background: "var(--bg-surface)",
+  border: "1px solid var(--border-soft)",
+  borderRadius: 10,
+  marginBottom: 10,
+};
+const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
+const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
+const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
+const delayValStyle: React.CSSProperties = { fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
+const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
+const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
+const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
+const barFill: React.CSSProperties = { height: "100%", borderRadius: 3 };
+const samplesStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-tertiary)", marginBottom: 4 };
+const coverageStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--text-tertiary)" };
 
 export function NetworkTab() {
   const { t } = useTranslation();
@@ -23,23 +38,78 @@ export function NetworkTab() {
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
 
-  const cols = [
-    { key: "agency", label: t("network.col_agency"), help: t("network.help_agency"), num: false },
-    { key: "avg", label: t("network.col_avg_delay"), help: t("network.help_avg_delay"), num: true },
-    { key: "ontime", label: t("network.col_on_time"), help: t("network.help_on_time"), num: true },
-    { key: "samples", label: t("network.col_samples"), help: t("network.help_samples"), num: true },
-    { key: "feed", label: t("network.col_feed"), help: t("network.help_feed"), num: true },
-    { key: "fresh", label: t("network.col_freshness"), help: t("network.help_freshness"), num: false },
-    { key: "coverage", label: t("network.col_coverage"), help: t("network.help_coverage"), num: false },
-  ];
+  const maxDelay =
+    data && data.agencies.length > 0
+      ? Math.max(...data.agencies.map((a) => a.avg_delay_min ?? 0))
+      : 0;
+
+  function renderCard(a: NetworkAgencyRow, index: number) {
+    const showFeedFlag = a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT;
+    const showFreshnessFlag = a.is_stale;
+    return (
+      <div className="network-card" key={a.agency_id} style={card}>
+        <div style={cardTop}>
+          <span style={rankStyle}>#{index + 1}</span>
+          <Link
+            to={`/agencies/${a.agency_id}/overview${suffix}`}
+            title={t("network.view_agency", { name: a.agency_name })}
+            style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
+          >
+            {a.agency_name}
+          </Link>
+          <div style={{ textAlign: "right" }}>
+            <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
+              {a.avg_delay_min == null ? (
+                "—"
+              ) : (
+                <span style={{ color: delayColor(a.avg_delay_min) }}>{a.avg_delay_min.toFixed(1)}</span>
+              )}
+            </div>
+            <div style={onTimeStyle} aria-label={t("network.col_on_time")}>
+              {a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}
+            </div>
+          </div>
+        </div>
+        <div style={barRow}>
+          <div style={barBg}>
+            <div
+              style={{
+                ...barFill,
+                width: a.avg_delay_min != null && maxDelay > 0 ? `${(a.avg_delay_min / maxDelay) * 100}%` : "0%",
+                background: a.avg_delay_min == null ? "transparent" : delayColor(a.avg_delay_min),
+              }}
+            />
+          </div>
+          <span style={samplesStyle}>{a.samples.toLocaleString()}</span>
+        </div>
+        {(showFeedFlag || showFreshnessFlag) && (
+          <div style={secondaryRow}>
+            {showFeedFlag && (
+              <span>
+                <span data-testid="clamp-dot" aria-hidden style={{ color: "var(--error-fg)", marginRight: 4 }}>●</span>
+                {a.clamp_pct!.toFixed(2)}%
+              </span>
+            )}
+            {showFreshnessFlag && (
+              <span title={t("network.help_freshness")} style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4 }}>
+                {t("network.stale_badge")}
+              </span>
+            )}
+          </div>
+        )}
+        <div style={coverageStyle}>
+          {a.data_to == null ? t("network.no_data_in_range") : `${a.data_from} – ${a.data_to}`}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 1040, margin: "0 auto" }}>
       <style>{`
-        .network-row { transition: background var(--transition); }
-        .network-row:hover { background: var(--bg-soft); }
-        .network-row a { color: var(--accent); text-decoration: none; }
-        .network-row a:hover { text-decoration: underline; }
+        .network-card { transition: background var(--transition); }
+        .network-card:hover { background: var(--bg-soft); }
+        .network-card a:hover { text-decoration: underline; }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
@@ -79,69 +149,9 @@ export function NetworkTab() {
         <p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>
       )}
       {data && data.agencies.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-          <thead>
-            <tr style={{ color: "var(--text-tertiary)", fontSize: 12, textAlign: "left" }}>
-              {cols.map((c) => (
-                <th key={c.key} scope="col" title={c.help} style={c.num ? thNum : th}>
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.agencies.map((a) => (
-              <tr key={a.agency_id} className="network-row" style={{ borderTop: "1px solid var(--border-soft)" }}>
-                <td style={td}>
-                  <Link
-                    to={`/agencies/${a.agency_id}/overview${suffix}`}
-                    title={t("network.view_agency", { name: a.agency_name })}
-                  >
-                    {a.agency_name}
-                  </Link>
-                </td>
-                <td style={tdNum}>
-                  {a.avg_delay_min == null ? (
-                    "—"
-                  ) : (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: delayColor(a.avg_delay_min), flex: "0 0 auto" }} />
-                      {a.avg_delay_min.toFixed(1)}
-                    </span>
-                  )}
-                </td>
-                <td style={tdNum}>{a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}</td>
-                <td style={tdNum}>{a.samples.toLocaleString()}</td>
-                <td style={tdNum}>
-                  {a.clamp_pct == null ? (
-                    "—"
-                  ) : (
-                    <>
-                      {a.clamp_pct > CLAMP_NOTABLE_PCT && (
-                        <span data-testid="clamp-dot" aria-hidden style={{ color: "var(--error-fg)", marginRight: 4 }}>●</span>
-                      )}
-                      {a.clamp_pct.toFixed(2)}%
-                    </>
-                  )}
-                </td>
-                <td style={td}>
-                  {a.is_stale && (
-                    <span title={t("network.help_freshness")} style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>
-                      {t("network.stale_badge")}
-                    </span>
-                  )}
-                </td>
-                <td style={td}>
-                  {a.data_to == null ? (
-                    <span style={{ color: "var(--text-tertiary)" }}>{t("network.no_data_in_range")}</span>
-                  ) : (
-                    `${a.data_from} – ${a.data_to}`
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div data-testid="network-card-list">
+          {data.agencies.map((a, i) => renderCard(a, i))}
+        </div>
       )}
     </div>
   );
