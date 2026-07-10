@@ -669,6 +669,10 @@
         "summary": "Route {{route}} overview",
         "placeholder": "Select a route"
       }
+    },
+    "landing": {
+      "cards_title": "You can ask things like",
+      "pills_title": "More questions"
     }
   },
   "live": {

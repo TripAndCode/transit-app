@@ -669,6 +669,10 @@
         "summary": "路線 {{route}} の概況",
         "placeholder": "路線を選択してください"
       }
+    },
+    "landing": {
+      "cards_title": "こんな質問ができます",
+      "pills_title": "その他の質問"
     }
   },
   "live": {
