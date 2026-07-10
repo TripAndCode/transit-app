@@ -1,15 +1,21 @@
 import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
-import { severityStepColors } from "../../styles/tokens";
+import { delayColorResolved, severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
+import { buildTrendSegments } from "./routeTrendSegments";
 import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
 const ROUTE_SOURCE = "route-line";
 const ROUTE_STOPS_SOURCE = "route-line-stops";
-const ROUTE_LAYER = "route-line-stroke";
+const ROUTE_TREND_SOURCE = "route-trend-segments";
+export const ROUTE_CASING_LAYER = "route-line-casing";
+export const ROUTE_LAYER = "route-line-stroke";
+export const ROUTE_TREND_LAYER = "route-trend-line";
 export const ROUTE_STOPS_LAYER = "route-stops";
+
+export type RouteOverlayMode = "trend" | "hourly";
 
 // Every layer of the agency-wide delay overlay (dots + cluster bubbles + their
 // count labels). Single-route mode hides ALL of them, not just the dots —
@@ -23,21 +29,28 @@ function setDelayOverlayVisibility(m: MLMap, visibility: "visible" | "none") {
 }
 
 /**
- * Draw the single-route overlay when `shape` is present (polyline + one stop
- * layer that renders observed stops as delay-colored dots and unobserved stops
- * as hollow rings — both interactive); strip it and re-show the agency-wide
- * delay overlay (dots + clusters + count labels) when it isn't. Fits bounds to
- * the route on focus.
+ * Draw the single-route overlay when `shape` is present: a white casing
+ * (real GTFS road geometry when available) plus either a per-segment
+ * delay-colored "trend" line (mode "trend" — shows where along the route
+ * delay builds up, using the same severity scale as the stop dots) or a
+ * single flat line colored by the hour-scrubber's pooled value (mode
+ * "hourly"); plus one stop layer that renders observed stops as small
+ * delay-colored dots and unobserved stops as hollow rings — both
+ * interactive. Strips it and re-shows the agency-wide delay overlay (dots
+ * + clusters + count labels) when shape isn't present. Fits bounds to the
+ * route on focus.
  */
 export function useRouteOverlay(
   mapRef: React.MutableRefObject<MLMap | null>,
   shape: RouteShapeResponse | undefined,
   styleEpoch: number,
+  mode: RouteOverlayMode = "trend",
+  scrubbedDelayMin: number | null = null,
 ): void {
   // Rebuild the overlay on a theme toggle so the observed-stop dots' severe
-  // band re-reads the theme-aware severeColorResolved(). This effect already fully
-  // rebuilds (clearOverlay + drawOverlay re-adds the source/layers), so adding
-  // theme to its deps is enough — no setPaintProperty needed here.
+  // band re-reads the theme-aware severeColorResolved(). This effect already
+  // fully rebuilds (clearOverlay + drawOverlay re-adds the source/layers), so
+  // adding theme to its deps is enough — no setPaintProperty needed here.
   const theme = useThemeSignal();
 
   useEffect(() => {
@@ -48,7 +61,10 @@ export function useRouteOverlay(
       if (!m) return;
       if (m.getLayer(ROUTE_STOPS_LAYER)) m.removeLayer(ROUTE_STOPS_LAYER);
       if (m.getLayer(ROUTE_LAYER)) m.removeLayer(ROUTE_LAYER);
+      if (m.getLayer(ROUTE_TREND_LAYER)) m.removeLayer(ROUTE_TREND_LAYER);
+      if (m.getLayer(ROUTE_CASING_LAYER)) m.removeLayer(ROUTE_CASING_LAYER);
       if (m.getSource(ROUTE_SOURCE)) m.removeSource(ROUTE_SOURCE);
+      if (m.getSource(ROUTE_TREND_SOURCE)) m.removeSource(ROUTE_TREND_SOURCE);
       if (m.getSource(ROUTE_STOPS_SOURCE)) m.removeSource(ROUTE_STOPS_SOURCE);
     }
 
@@ -75,24 +91,71 @@ export function useRouteOverlay(
           properties: {},
         },
       });
+      // White casing drawn under the colored line(s) so it stays legible
+      // against basemap colors it would otherwise blend into (earth-tone
+      // basemaps vs. the mild/moderate tiers of the delay ramp, both in the
+      // sand/tan range). Renders in both modes — it's the "true path"
+      // context layer regardless of which color story is on top.
       m.addLayer({
-        id: ROUTE_LAYER,
+        id: ROUTE_CASING_LAYER,
         type: "line",
         source: ROUTE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#5b6cad",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
-          "line-opacity": 0.7,
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4, 13, 7, 17, 11],
+          "line-opacity": 0.9,
         },
       });
 
-      // One feature per stop, observed and unobserved together, distinguished by
-      // a `has_data` flag. A single layer means the existing route-stop click /
-      // hover handlers (registered on ROUTE_STOPS_LAYER in MapTab) cover every
-      // stop — unobserved ones are no longer dead, unexplained markers.
-      // RouteShapeStop carries avg_min/samples; UnobservedStop doesn't — accept
-      // either and only read the metrics for observed stops.
+      if (mode === "trend") {
+        // Per-segment coloring: shows where along the route delay
+        // accumulates, using straight stop-to-stop segments (not
+        // projected onto the real road geometry — the casing above
+        // already shows the true path for context; see spec's Non-goals).
+        const segments = buildTrendSegments(shape.stops, shape.unobserved_stops ?? []);
+        m.addSource(ROUTE_TREND_SOURCE, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: segments },
+        });
+        m.addLayer({
+          id: ROUTE_TREND_LAYER,
+          type: "line",
+          source: ROUTE_TREND_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": [
+              "case",
+              ["get", "has_data"],
+              ["step", ["get", "avg_min"], ...severityStepColors()],
+              "rgba(150,150,150,0.5)",
+            ],
+            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
+            "line-opacity": 1,
+          },
+        });
+      } else {
+        // Hourly mode: one flat line for the whole route, colored by the
+        // scrubber's pooled value for the currently-scrubbed hour.
+        m.addLayer({
+          id: ROUTE_LAYER,
+          type: "line",
+          source: ROUTE_SOURCE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad",
+            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
+            "line-opacity": 1,
+          },
+        });
+      }
+
+      // One feature per stop, observed and unobserved together, distinguished
+      // by a `has_data` flag. A single layer means the existing route-stop
+      // click/hover handlers (registered on ROUTE_STOPS_LAYER in MapTab)
+      // cover every stop — unobserved ones are no longer dead, unexplained
+      // markers. RouteShapeStop carries avg_min/samples; UnobservedStop
+      // doesn't — accept either and only read the metrics for observed stops.
       const toFeature = (s: RouteShapeStop | UnobservedStop, hasData: boolean) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [s.lon, s.lat] },
@@ -121,13 +184,19 @@ export function useRouteOverlay(
         type: "circle",
         source: ROUTE_STOPS_SOURCE,
         paint: {
-          // Observed stops are larger, delay-colored, white-ringed; unobserved
-          // stops are smaller hollow gray rings (transparent fill).
+          // Stop dots are now a secondary reference layer (the trend
+          // segments/hourly line carry the primary color story), so they're
+          // deliberately smaller than before — exact values stay available
+          // via the existing click/hover popup. A `zoom` expression may only
+          // be used as the direct input to a top-level `step`/`interpolate`
+          // — it can't be nested inside another expression (including
+          // arithmetic like `*`) — so `has_data` is resolved per zoom stop
+          // instead of wrapping a second interpolate.
           "circle-radius": [
-            "case",
-            ["get", "has_data"],
-            ["interpolate", ["linear"], ["zoom"], 10, 4, 14, 7, 17, 11],
-            ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
+            "interpolate", ["linear"], ["zoom"],
+            10, ["case", ["get", "has_data"], 3, 2],
+            14, ["case", ["get", "has_data"], 5, 3],
+            17, ["case", ["get", "has_data"], 8, 5],
           ],
           "circle-color": [
             "case",
@@ -161,5 +230,24 @@ export function useRouteOverlay(
       });
     }
     return whenStyleReady(m, drawOverlay);
-  }, [shape, mapRef, styleEpoch, theme]);
+    // scrubbedDelayMin is deliberately excluded: it only sets the *initial*
+    // line color on a real (re)draw in hourly mode, and is kept in sync
+    // afterward by the lightweight setPaintProperty effect below without
+    // tearing this one down. mode IS included — switching modes swaps which
+    // layer renders, which does need a full redraw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape, mapRef, styleEpoch, theme, mode]);
+
+  // Hour-scrub recoloring only — deliberately its own effect, not a dep of
+  // the draw effect above. The draw effect fully tears down and rebuilds all
+  // sources and layers (plus fitBounds); doing that on every scrub tick
+  // (every ~1s during playback) caused a visible flicker of the whole
+  // overlay. A color change only needs setPaintProperty on the already-drawn
+  // line, and only applies in hourly mode — trend mode has no flat line.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m || mode !== "hourly" || !m.getLayer(ROUTE_LAYER)) return;
+    const color = scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad";
+    m.setPaintProperty(ROUTE_LAYER, "line-color", color);
+  }, [scrubbedDelayMin, mode, theme, mapRef]);
 }

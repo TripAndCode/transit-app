@@ -403,6 +403,21 @@
     "heatmapMode": {
       "avg": "平均遅延",
       "p90": "90パーセンタイル"
+    },
+    "scrubber": {
+      "title": "時間帯別の予想遅延",
+      "subtitle": "この路線の典型的な混雑パターン(車両の現在位置ではありません)",
+      "hour_label": "{{hour}}:00",
+      "expected_delay": "期待遅延 {{min}}分",
+      "no_data": "この時間帯のデータが不足しています",
+      "play": "再生",
+      "pause": "一時停止",
+      "aria_label": "時間帯スクラバー"
+    },
+    "route_mode": {
+      "trend": "実績トレンド",
+      "hourly": "時間帯別",
+      "aria_label": "表示モード切替"
     }
   },
   "ask": {

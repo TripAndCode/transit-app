@@ -65,6 +65,15 @@ export function delayColor(minutes: number): string {
   return DELAY_RAMP.severe;
 }
 
+/** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
+ *  to a real hex via `severeColorResolved()` instead of the literal
+ *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use
+ *  this (not `delayColor()`) for any MapLibre paint property. */
+export function delayColorResolved(minutes: number): string {
+  if (minutes < 10) return delayColor(minutes);
+  return severeColorResolved();
+}
+
 /** The delay-ramp color/threshold pairs a MapLibre `step` expression needs after
  *  its `["step", <input>]` prefix: `[ok, 2, mild, 5, moderate, 10, severe]`.
  *  Single source of truth for the paint-expression stops shared by the heatmap

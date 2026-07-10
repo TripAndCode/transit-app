@@ -403,6 +403,21 @@
     "heatmapMode": {
       "avg": "Avg delay",
       "p90": "90th percentile"
+    },
+    "scrubber": {
+      "title": "Expected delay by time of day",
+      "subtitle": "This route's typical congestion pattern (not live vehicle position)",
+      "hour_label": "{{hour}}:00",
+      "expected_delay": "Expected delay {{min}} min",
+      "no_data": "Not enough data for this hour",
+      "play": "Play",
+      "pause": "Pause",
+      "aria_label": "Time-of-day scrubber"
+    },
+    "route_mode": {
+      "trend": "Historical trend",
+      "hourly": "By hour",
+      "aria_label": "Display mode"
     }
   },
   "ask": {
