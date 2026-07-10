@@ -1,45 +1,46 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { buildCardTemplates, defaultsFor, type CardTemplate } from "./askCardTemplates";
+import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
 
 type QuestionDockProps = {
   agencyId: number;
   busy: boolean;
-  /** Called when the user taps 実行. Caller is responsible for thread creation,
-   *  appendMsg dispatch, and clearing dock state via the returned promise. */
+  /** Called when the user taps 実行. Caller is responsible for thread
+   *  creation and appendMsg dispatch; call onRunComplete once that settles
+   *  (or immediately, matching the prior fire-and-forget behavior). */
   onSubmit: (payload: {
     tool: string;
     args: Record<string, unknown>;
     user_summary: string;
   }) => void | Promise<void>;
+  /** Which template is currently composing (or null if idle). Owned by the
+   *  caller so a landing-area pill can open a chip too. */
+  composingId: string | null;
+  /** Current param values for the composing template. */
+  values: Record<string, unknown>;
+  /** Chip tapped (toolbar chip, or a landing pill via the caller). */
+  onChipTap: (tpl: CardTemplate) => void;
+  onValueChange: (name: string, next: unknown) => void;
+  /** Called after Run dispatches, so the caller resets composingId/values. */
+  onRunComplete: () => void;
 };
 
-export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
+export function QuestionDock({
+  agencyId,
+  busy,
+  onSubmit,
+  composingId,
+  values,
+  onChipTap,
+  onValueChange,
+  onRunComplete,
+}: QuestionDockProps) {
   const { t, i18n } = useTranslation();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
-  const [composingId, setComposingId] = useState<string | null>(null);
-  const [values, setValues] = useState<Record<string, unknown>>({});
 
   const composing = templates.find((tpl) => tpl.id === composingId) ?? null;
-
-  function handleChipTap(tpl: CardTemplate) {
-    if (busy) return;
-    if (composingId === tpl.id) {
-      // Same chip from composing → collapse
-      setComposingId(null);
-      setValues({});
-      return;
-    }
-    // Idle → composing, or swap to a different chip's defaults
-    setComposingId(tpl.id);
-    setValues(defaultsFor(tpl));
-  }
-
-  function handleValueChange(name: string, next: unknown) {
-    setValues((prev) => ({ ...prev, [name]: next }));
-  }
 
   function handleRun() {
     if (!composing) return;
@@ -49,9 +50,7 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
     }
     const summary = composing.buildSummary(values, t);
     onSubmit({ tool: composing.tool, args, user_summary: summary });
-    // Caller's onSubmit handler is responsible for awaiting and resetting state.
-    setComposingId(null);
-    setValues({});
+    onRunComplete();
   }
 
   const missing = composing
@@ -83,7 +82,7 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
             template={composing}
             agencyId={agencyId}
             values={values}
-            onChange={handleValueChange}
+            onChange={onValueChange}
             onSubmit={handleRun}
             busy={busy}
             missing={missing}
@@ -101,7 +100,7 @@ export function QuestionDock({ agencyId, busy, onSubmit }: QuestionDockProps) {
               <button
                 key={tpl.id}
                 type="button"
-                onClick={() => handleChipTap(tpl)}
+                onClick={() => onChipTap(tpl)}
                 disabled={busy && !active}
                 aria-disabled={busy && !active}
                 aria-pressed={active}
