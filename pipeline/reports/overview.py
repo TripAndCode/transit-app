@@ -746,6 +746,8 @@ async def compute_overview_summary(
             movers = await _movers(agency_id, cur_ctx, base_ctx, conn)
         async with perf.timed_block("overview.concentration"):
             concentration = await _concentration(agency_id, ctx, conn)
+        async with perf.timed_block("overview.top_delayed"):
+            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn)
         async with perf.timed_block("overview.peaks"):
             peak = await _peak_hour(agency_id, ctx, conn)
             peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday")
@@ -779,6 +781,7 @@ async def compute_overview_summary(
             (baseline_avg, _),
             movers,
             concentration,
+            top_delayed,
             peak,
             peak_weekday,
             peak_weekend,
@@ -790,6 +793,7 @@ async def compute_overview_summary(
             _own_conn(_headline_stats, agency_id, base_ctx),
             _own_conn(_movers, agency_id, cur_ctx, base_ctx),
             _own_conn(_concentration, agency_id, ctx),
+            _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
             _peak_dow("weekday"),
             _peak_dow("weekend"),
@@ -817,6 +821,7 @@ async def compute_overview_summary(
         },
         "movers": movers,
         "concentration": concentration,
+        "top_delayed": top_delayed,
         "peak_hour": peak,
         "peak_hour_weekday": peak_weekday,
         "peak_hour_weekend": peak_weekend,

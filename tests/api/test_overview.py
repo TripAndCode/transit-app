@@ -869,6 +869,7 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     assert pool_out["headline"] == seq_out["headline"]
     assert pool_out["movers"] == seq_out["movers"]
     assert pool_out["concentration"] == seq_out["concentration"]
+    assert pool_out["top_delayed"] == seq_out["top_delayed"]
     assert pool_out["peak_hour"] == seq_out["peak_hour"]
     assert pool_out["peak_hour_weekday"] == seq_out["peak_hour_weekday"]
     assert pool_out["peak_hour_weekend"] == seq_out["peak_hour_weekend"]
