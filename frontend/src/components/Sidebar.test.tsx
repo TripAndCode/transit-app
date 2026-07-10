@@ -18,7 +18,7 @@ function renderSidebar(path = "/agencies/1/map") {
 }
 
 describe("Sidebar", () => {
-  it("renders all 6 nav items with their label and subtitle", () => {
+  it("renders all 5 nav items with their label and subtitle", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("What's happening right now")).toBeTruthy();
@@ -30,8 +30,6 @@ describe("Sidebar", () => {
     expect(screen.getByText("Spot anomalies fast")).toBeTruthy();
     expect(screen.getByText("Analysis")).toBeTruthy();
     expect(screen.getByText("When and why delays happen")).toBeTruthy();
-    expect(screen.getByText("Forecast")).toBeTruthy();
-    expect(screen.getByText("Predict future delays")).toBeTruthy();
   });
 
   it("marks the current route's nav link as active", () => {

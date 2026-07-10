@@ -24,7 +24,6 @@ const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskT
 const LiveTab = lazy(() => import("./tabs/LiveTab").then((m) => ({ default: m.LiveTab })));
 const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
-const ForecastTab = lazy(() => import("./tabs/ForecastTab").then((m) => ({ default: m.ForecastTab })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
@@ -74,7 +73,6 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: el(<LiveTab />) },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
       { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
-      { path: "agencies/:agencyId/forecast", element: el(<ForecastTab />) },
       { path: "network", element: el(<NetworkTab />) },
       { path: "me", element: el(<AccountPage />) },
       {
