@@ -19,6 +19,7 @@ import { CLUSTER_LAYER, LAYER, SOURCE, useHeatmapLayer } from "./map/useHeatmapL
 import { ROUTE_STOPS_LAYER, useRouteOverlay } from "./map/useRouteOverlay";
 import { useBasemapDim } from "./map/useBasemapDim";
 import { MapHourScrubber } from "./map/MapHourScrubber";
+import { RouteModeToggle, type RouteMode } from "./map/RouteModeToggle";
 import { expectedDelayForHour } from "./map/expectedDelay";
 
 export function MapTab() {
@@ -31,7 +32,9 @@ export function MapTab() {
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
   const { data: shape } = useRouteShape(id, focusedRoute, ctx);
 
-  // Hour scrubber — only meaningful in the single-route drill-down.
+  // Route overlay display mode — only meaningful in the single-route drill-down.
+  const [routeMode, setRouteMode] = useState<RouteMode>("trend");
+  // Hour scrubber — only relevant in "hourly" mode.
   const [scrubHour, setScrubHour] = useState(15);
   const [scrubPlaying, setScrubPlaying] = useState(false);
   const { data: hourlyHeatmap } = useForecastHeatmap(id, focusedRoute ?? "");
@@ -45,6 +48,7 @@ export function MapTab() {
   const [prevFocusedRoute, setPrevFocusedRoute] = useState(focusedRoute);
   if (focusedRoute !== prevFocusedRoute) {
     setPrevFocusedRoute(focusedRoute);
+    setRouteMode("trend");
     setScrubHour(15);
     setScrubPlaying(false);
   }
@@ -251,7 +255,7 @@ export function MapTab() {
 
   useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch, heatmapField);
 
-  useRouteOverlay(mapRef, shape, styleEpoch, expectedDelayMin);
+  useRouteOverlay(mapRef, shape, styleEpoch, routeMode, expectedDelayMin);
 
   // Stops per severity band (respecting the single-sample filter) so the legend
   // can disable bands that match nothing — clicking an empty band would just
@@ -336,6 +340,9 @@ export function MapTab() {
         bandCounts={severityCounts}
       />
       {focusedRoute != null && (
+        <RouteModeToggle mode={routeMode} onModeChange={setRouteMode} />
+      )}
+      {focusedRoute != null && routeMode === "hourly" && (
         <MapHourScrubber
           hour={scrubHour}
           onHourChange={setScrubHour}
