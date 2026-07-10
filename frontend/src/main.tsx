@@ -22,7 +22,7 @@ const OverviewTab = lazy(() => import("./tabs/OverviewTab").then((m) => ({ defau
 const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapTab })));
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
 const LiveTab = lazy(() => import("./tabs/LiveTab").then((m) => ({ default: m.LiveTab })));
-const ReportsTab = lazy(() => import("./tabs/ReportsTab").then((m) => ({ default: m.ReportsTab })));
+const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const ForecastTab = lazy(() => import("./tabs/ForecastTab").then((m) => ({ default: m.ForecastTab })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
@@ -72,8 +72,8 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/map", element: el(<MapTab />) },
       { path: "agencies/:agencyId/ask", element: el(<AskTab />) },
       { path: "agencies/:agencyId/live", element: el(<LiveTab />) },
-      { path: "agencies/:agencyId/reports", element: el(<ReportsTab />) },
-      { path: "agencies/:agencyId/reports/:reportType", element: el(<ReportsTab />) },
+      { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
+      { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
       { path: "agencies/:agencyId/forecast", element: el(<ForecastTab />) },
       { path: "network", element: el(<NetworkTab />) },
       { path: "me", element: el(<AccountPage />) },

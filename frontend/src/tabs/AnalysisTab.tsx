@@ -16,7 +16,7 @@ import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 
-export function ReportsTab() {
+export function AnalysisTab() {
   const { t } = useTranslation();
   const { agencyId, reportType } = useParams();
   const id = agencyId ? Number(agencyId) : null;
@@ -83,7 +83,7 @@ export function ReportsTab() {
             <button
               key={r.report_type}
               type="button"
-              onClick={() => navigate(`/agencies/${id}/reports/${r.report_type}${filterSuffix}`)}
+              onClick={() => navigate(`/agencies/${id}/analysis/${r.report_type}${filterSuffix}`)}
               aria-pressed={active}
               style={{
                 appearance: "none",
