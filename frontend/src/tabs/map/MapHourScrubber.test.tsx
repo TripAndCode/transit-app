@@ -27,6 +27,14 @@ describe("MapHourScrubber", () => {
     expect(screen.getByText("Expected delay 3.2 min")).toBeInTheDocument();
   });
 
+  it("explains what the control shows, so it isn't mistaken for live vehicle tracking", () => {
+    setup();
+    expect(screen.getByText("Expected delay by time of day")).toBeInTheDocument();
+    expect(
+      screen.getByText("This route's typical congestion pattern (not live vehicle position)"),
+    ).toBeInTheDocument();
+  });
+
   it("shows the no-data message when expectedDelayMin is null", () => {
     setup({ expectedDelayMin: null });
     expect(screen.getByText("Not enough data for this hour")).toBeInTheDocument();

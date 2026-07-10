@@ -405,6 +405,8 @@
       "p90": "90th percentile"
     },
     "scrubber": {
+      "title": "Expected delay by time of day",
+      "subtitle": "This route's typical congestion pattern (not live vehicle position)",
       "hour_label": "{{hour}}:00",
       "expected_delay": "Expected delay {{min}} min",
       "no_data": "Not enough data for this hour",
