@@ -6,7 +6,6 @@ import { useForecastHeatmap, useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
-import { delayColor } from "../styles/tokens";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { EmptyState } from "../components/EmptyState";
@@ -39,7 +38,6 @@ export function MapTab() {
   const expectedDelayMin = hourlyHeatmap
     ? expectedDelayForHour(hourlyHeatmap.cells, scrubHour, ctx.dow)
     : null;
-  const scrubbedColor = focusedRoute && expectedDelayMin != null ? delayColor(expectedDelayMin) : null;
 
   // Reset the scrubber (but not necessarily play state) when the focused
   // route changes, so a stale hour/color from a previous route doesn't
@@ -253,7 +251,7 @@ export function MapTab() {
 
   useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch, heatmapField);
 
-  useRouteOverlay(mapRef, shape, styleEpoch, scrubbedColor);
+  useRouteOverlay(mapRef, shape, styleEpoch, expectedDelayMin);
 
   // Stops per severity band (respecting the single-sample filter) so the legend
   // can disable bands that match nothing — clicking an empty band would just

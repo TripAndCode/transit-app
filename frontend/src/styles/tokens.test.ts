@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { DELAY_RAMP, delayColor, severeColorResolved } from "./tokens";
+import { DELAY_RAMP, delayColor, delayColorResolved, severeColorResolved } from "./tokens";
 
 // Two distinct severe-color surfaces:
 //  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
@@ -57,5 +57,24 @@ describe("severeColorResolved() (real hex for MapLibre)", () => {
   it("reads --delay-severe when it is set (the dark-mode value in a real cascade)", () => {
     document.documentElement.style.setProperty("--delay-severe", "#F04438");
     expect(severeColorResolved()).toBe("#F04438");
+  });
+});
+
+describe("delayColorResolved() (MapLibre-safe delayColor)", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--delay-severe");
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("matches delayColor() below the severe threshold", () => {
+    expect(delayColorResolved(0)).toBe(delayColor(0));
+    expect(delayColorResolved(3)).toBe(delayColor(3));
+    expect(delayColorResolved(7)).toBe(delayColor(7));
+  });
+
+  it("returns a real parseable hex (never the literal var() string) at/above the severe threshold", () => {
+    expect(delayColorResolved(15)).toBe("#d92121");
+    document.documentElement.style.setProperty("--delay-severe", "#F04438");
+    expect(delayColorResolved(15)).toBe("#F04438");
   });
 });

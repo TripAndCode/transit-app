@@ -60,13 +60,13 @@ describe("useRouteOverlay theme reactivity", () => {
   });
 });
 
-describe("useRouteOverlay scrubbedColor", () => {
+describe("useRouteOverlay scrubbedDelayMin", () => {
   afterEach(() => {
     document.documentElement.style.removeProperty("--delay-severe");
     delete document.documentElement.dataset.theme;
   });
 
-  it("uses the default flat color when scrubbedColor is not passed", () => {
+  it("uses the default flat color when scrubbedDelayMin is not passed", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
@@ -76,17 +76,17 @@ describe("useRouteOverlay scrubbedColor", () => {
     expect(layer.paint!["line-color"]).toBe("#5b6cad");
   });
 
-  it("uses scrubbedColor for the route line when provided", () => {
+  it("resolves scrubbedDelayMin to a delay-ramp color for the route line", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
-      useRouteOverlay(mapRef, SHAPE, 0, "#e07a3a");
+      useRouteOverlay(mapRef, SHAPE, 0, 6);
     });
     const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
     expect(layer.paint!["line-color"]).toBe("#e07a3a");
   });
 
-  it("falls back to the flat color when scrubbedColor is explicitly null", () => {
+  it("falls back to the flat color when scrubbedDelayMin is explicitly null", () => {
     const map = makeMockMap();
     renderHook(() => {
       const mapRef = useRef(map as never);
@@ -94,5 +94,17 @@ describe("useRouteOverlay scrubbedColor", () => {
     });
     const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
     expect(layer.paint!["line-color"]).toBe("#5b6cad");
+  });
+
+  it("resolves a >=10min scrubbedDelayMin to a real parseable hex, never the literal var() string", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useRouteOverlay(mapRef, SHAPE, 0, 14);
+    });
+    const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    const color = layer.paint!["line-color"] as string;
+    expect(color).not.toContain("var(");
+    expect(color).toBe("#d92121");
   });
 });
