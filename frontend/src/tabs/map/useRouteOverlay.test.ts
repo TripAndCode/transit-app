@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
-import { useRouteOverlay, ROUTE_STOPS_LAYER } from "./useRouteOverlay";
+import { useRouteOverlay, ROUTE_STOPS_LAYER, ROUTE_LAYER } from "./useRouteOverlay";
 import type { RouteShapeResponse } from "../../api/types";
 
 const SHAPE = {
@@ -57,5 +57,42 @@ describe("useRouteOverlay theme reactivity", () => {
     expect(
       JSON.stringify((map.getLayer(ROUTE_STOPS_LAYER) as MockLayer).paint!["circle-color"]),
     ).toContain("#F04438");
+  });
+});
+
+describe("useRouteOverlay scrubbedColor", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--delay-severe");
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("uses the default flat color when scrubbedColor is not passed", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useRouteOverlay(mapRef, SHAPE, 0);
+    });
+    const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    expect(layer.paint!["line-color"]).toBe("#5b6cad");
+  });
+
+  it("uses scrubbedColor for the route line when provided", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useRouteOverlay(mapRef, SHAPE, 0, "#e07a3a");
+    });
+    const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    expect(layer.paint!["line-color"]).toBe("#e07a3a");
+  });
+
+  it("falls back to the flat color when scrubbedColor is explicitly null", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useRouteOverlay(mapRef, SHAPE, 0, null);
+    });
+    const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    expect(layer.paint!["line-color"]).toBe("#5b6cad");
   });
 });

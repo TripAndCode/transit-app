@@ -8,7 +8,7 @@ import { CLUSTER_COUNT_LAYER, CLUSTER_LAYER, LAYER } from "./useHeatmapLayer";
 
 const ROUTE_SOURCE = "route-line";
 const ROUTE_STOPS_SOURCE = "route-line-stops";
-const ROUTE_LAYER = "route-line-stroke";
+export const ROUTE_LAYER = "route-line-stroke";
 export const ROUTE_STOPS_LAYER = "route-stops";
 
 // Every layer of the agency-wide delay overlay (dots + cluster bubbles + their
@@ -33,6 +33,7 @@ export function useRouteOverlay(
   mapRef: React.MutableRefObject<MLMap | null>,
   shape: RouteShapeResponse | undefined,
   styleEpoch: number,
+  scrubbedColor: string | null = null,
 ): void {
   // Rebuild the overlay on a theme toggle so the observed-stop dots' severe
   // band re-reads the theme-aware severeColorResolved(). This effect already fully
@@ -81,7 +82,7 @@ export function useRouteOverlay(
         source: ROUTE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#5b6cad",
+          "line-color": scrubbedColor ?? "#5b6cad",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
           "line-opacity": 0.7,
         },
@@ -161,5 +162,5 @@ export function useRouteOverlay(
       });
     }
     return whenStyleReady(m, drawOverlay);
-  }, [shape, mapRef, styleEpoch, theme]);
+  }, [shape, mapRef, styleEpoch, theme, scrubbedColor]);
 }
