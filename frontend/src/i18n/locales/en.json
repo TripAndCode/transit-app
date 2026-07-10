@@ -130,6 +130,16 @@
       "stat_mean": "Mean",
       "stat_days": "Days"
     },
+    "hero_row": {
+      "avg_delay_label": "Network avg delay",
+      "avg_delay_compared": "{{sign}}{{min}} min vs. last week",
+      "avg_delay_no_baseline": "No comparison data",
+      "delayed_count_label": "Routes delayed",
+      "delayed_count_value": "{{count}} / {{total}} routes",
+      "feed_status_label": "Feed status",
+      "feed_status_ok": "Running normally",
+      "feed_status_updated": "Last updated {{when}}"
+    },
     "story": {
       "better": "Better than last week.",
       "worse": "Worse than last week.",
