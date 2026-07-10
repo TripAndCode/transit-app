@@ -26,7 +26,10 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
-  const sign = hasBaseline && headline.delta_min! >= 0 ? "+" : "";
+  // Always render an explicit sign — the displayed magnitude is
+  // Math.abs(delta_min), so without this a delay improvement and a
+  // worsening of the same magnitude would render identically.
+  const sign = hasBaseline && headline.delta_min! >= 0 ? "+" : "-";
 
   // Mirrors DataStalenessBanner.tsx's days/hours label branching exactly
   // (that component does not have a sub-1-hour "minutes" case, despite

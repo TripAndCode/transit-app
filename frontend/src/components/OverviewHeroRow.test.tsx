@@ -52,6 +52,19 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByText("3 / 38 routes")).toBeInTheDocument();
   });
 
+  it("renders a negative delta with a minus sign, not indistinguishable from a positive one", () => {
+    mockHooks(38, 0.1);
+    renderWithProviders(
+      <OverviewHeroRow
+        headline={headline({ baseline_avg_min: 3.8, delta_min: -0.5, delta_pct: -13.2 })}
+        delayedCount={3}
+        agencyId={1}
+      />,
+    );
+    expect(screen.getByText(/-0\.5 min vs\. last week/)).toBeInTheDocument();
+    expect(screen.queryByText(/\+0\.5 min vs\. last week/)).not.toBeInTheDocument();
+  });
+
   it("shows 'no comparison data' when baseline_avg_min is null", () => {
     mockHooks(38, 0.1);
     renderWithProviders(
