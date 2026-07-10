@@ -774,7 +774,8 @@
       "trend": "Trend",
       "compare_ranking": "Compare ranking",
       "dow_weekday": "Weekday pattern",
-      "dow_weekend": "Weekend pattern"
+      "dow_weekend": "Weekend pattern",
+      "route_forecast": "Route forecast"
     },
     "col": {
       "route": "Route",

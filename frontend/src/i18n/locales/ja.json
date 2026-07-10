@@ -774,7 +774,8 @@
       "trend": "トレンド",
       "compare_ranking": "比較ランキング",
       "dow_weekday": "平日傾向",
-      "dow_weekend": "週末傾向"
+      "dow_weekend": "週末傾向",
+      "route_forecast": "路線別予測"
     },
     "col": {
       "route": "路線",

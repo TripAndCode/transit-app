@@ -15,6 +15,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
+import { RouteForecastSection } from "../components/RouteForecastSection";
 
 export function AnalysisTab() {
   const { t } = useTranslation();
@@ -27,7 +28,7 @@ export function AnalysisTab() {
   const filterQS = ctxToQueryString(ctx);
   const filterSuffix = filterQS ? `?${filterQS}` : "";
   const list = useReports(id);
-  const detail = useReport(id, reportType ?? null, ctx);
+  const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
 
   const reportLabels: Record<string, string> = useMemo(
     () => ({
@@ -39,6 +40,7 @@ export function AnalysisTab() {
       compare_ranking: t("reports.type.compare_ranking"),
       dow_weekday: t("reports.type.dow_weekday"),
       dow_weekend: t("reports.type.dow_weekend"),
+      route_forecast: t("reports.type.route_forecast"),
     }),
     [t],
   );
@@ -104,17 +106,44 @@ export function AnalysisTab() {
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={() => navigate(`/agencies/${id}/analysis/route_forecast${filterSuffix}`)}
+          aria-pressed={reportType === "route_forecast"}
+          style={{
+            appearance: "none",
+            font: "inherit",
+            textAlign: "left",
+            color: "inherit",
+            display: "block",
+            width: "100%",
+            padding: "10px 12px",
+            marginBottom: 4,
+            background: reportType === "route_forecast" ? "var(--accent-soft)" : "var(--bg-surface)",
+            border: "1px solid var(--border-soft)",
+            borderRadius: "var(--radius)",
+            cursor: "pointer",
+          }}
+        >
+          <div style={{ fontWeight: 500 }}>{reportLabels.route_forecast}</div>
+        </button>
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {!reportType && (
           <EmptyState title={t("reports.select_prompt")} />
         )}
-        {reportType && detail.error && (
+        {reportType === "route_forecast" && id != null && (
+          <div>
+            <h2 style={{ margin: "0 0 16px" }}>{reportLabels.route_forecast}</h2>
+            <RouteForecastSection aid={id} />
+          </div>
+        )}
+        {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && detail.isFetching && <Skeleton height={400} />}
-        {detail.data && (
+        {reportType && reportType !== "route_forecast" && detail.isFetching && <Skeleton height={400} />}
+        {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabels[detail.data.report_type] ?? detail.data.report_type}</h2>
