@@ -403,6 +403,14 @@
     "heatmapMode": {
       "avg": "Avg delay",
       "p90": "90th percentile"
+    },
+    "scrubber": {
+      "hour_label": "{{hour}}:00",
+      "expected_delay": "Expected delay {{min}} min",
+      "no_data": "Not enough data for this hour",
+      "play": "Play",
+      "pause": "Pause",
+      "aria_label": "Time-of-day scrubber"
     }
   },
   "ask": {

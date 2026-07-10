@@ -403,6 +403,14 @@
     "heatmapMode": {
       "avg": "平均遅延",
       "p90": "90パーセンタイル"
+    },
+    "scrubber": {
+      "hour_label": "{{hour}}:00",
+      "expected_delay": "期待遅延 {{min}}分",
+      "no_data": "この時間帯のデータが不足しています",
+      "play": "再生",
+      "pause": "一時停止",
+      "aria_label": "時間帯スクラバー"
     }
   },
   "ask": {
