@@ -431,6 +431,92 @@ async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency_id):
+    """Ranked by raw avg_min, not by _concentration()'s total-lateness-contribution
+    metric — a route with few samples but a high average outranks a route
+    with more samples but a lower average."""
+    # R_HIGH: avg 8.0 min, only 2 samples. R_LOW: avg 3.0 min, 20 samples.
+    # Under _concentration()'s SUM(avg_min*samples) metric R_LOW would win
+    # (60 > 16); under a true average, R_HIGH must win.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_HIGH", "平日", 8.0, 2)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_LOW", "平日", 3.0, 20)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    routes = out["top_delayed"]["routes"]
+    assert routes[0]["route_code"] == "R_HIGH"
+    assert routes[0]["avg_min"] == pytest.approx(8.0, abs=0.05)
+    assert routes[1]["route_code"] == "R_LOW"
+
+
+@pytest.mark.asyncio
+async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, aagency_id):
+    """delayed_count only counts routes at/above the 2.0-min DELAY_RAMP
+    'not ok' threshold — matching frontend/src/styles/tokens.ts's boundary."""
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OK", "平日", 1.5, 10)  # under threshold
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_EDGE", "平日", 2.0, 10)  # exactly at threshold
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_BAD", "平日", 6.0, 10)  # over threshold
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    assert out["top_delayed"]["delayed_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
+    """Caps at 5 routes even with more seeded; empty dataset returns
+    {routes: [], delayed_count: 0}, not an error."""
+    from pipeline.reports import compute_overview_summary
+
+    for i in range(7):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", 3.0 + i, 10)
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    routes = out["top_delayed"]["routes"]
+    assert len(routes) == 5
+    assert routes[0]["route_code"] == "R_6"  # highest avg_min (3.0 + 6)
+
+    # Empty-dataset agency: no seeded rows at all.
+    empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
+    empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn, "ja")
+    assert empty_out["top_delayed"] == {"routes": [], "delayed_count": 0}
+
+
+@pytest.mark.asyncio
+async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aagency_id):
+    """Non-default time_band bypasses agg_daily_trend and reads updates
+    directly, same fallback _concentration() already uses."""
+    base = datetime.combine(date(2026, 5, 18), time(8, 0), tzinfo=timezone.utc)
+    for i, dep in enumerate([300, 360]):  # 5.0, 6.0 min -> avg 5.5
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '08:00', 'R_TD', $5, $6)",
+            aagency_id,
+            f"td_{i}",
+            base + timedelta(minutes=i),
+            f"trip_td_{i + 1}",
+            i + 1,
+            dep,
+        )
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    routes = out["top_delayed"]["routes"]
+    assert len(routes) == 1
+    assert routes[0]["route_code"] == "R_TD"
+    assert routes[0]["avg_min"] == pytest.approx(5.5, abs=0.05)
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
     """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg.
 

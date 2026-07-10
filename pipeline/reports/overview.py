@@ -317,6 +317,70 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn) -> dict:
     }
 
 
+async def _top_delayed_routes(agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5) -> dict:
+    """Routes ranked by absolute current-window avg delay ("routes to check
+    now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
+    (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
+
+    Uses cur_ctx (the same last-7-days-of-ctx window compute_overview_summary
+    already builds for the headline), not the full ctx, so the KPI row's
+    three stats and the routes list all describe the same snapshot.
+
+    Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
+    each route's true weighted average (SUM(avg_min*samples)/SUM(samples)),
+    not _concentration()'s "total lateness contribution" sum — a route with
+    few samples but a high average must outrank a route with more samples
+    but a lower average, which _concentration()'s metric would get backwards.
+    Slow path falls back to live updates for a non-default time_band, same
+    as _concentration().
+    """
+    if cur_ctx.time_band == "all":
+        where, params, _ = _agg_filter(cur_ctx, next_param=2)
+        where_clause = f" AND ({where})" if where else ""
+        rows = await conn.fetch(
+            "SELECT route_code,\n"
+            "       SUM(avg_min * samples)::float / NULLIF(SUM(samples), 0) AS avg_min\n"
+            "FROM agg_daily_trend\n"
+            f"WHERE agency_id=$1{where_clause}\n"
+            "GROUP BY route_code\n"
+            "HAVING SUM(samples) > 0\n"
+            "ORDER BY avg_min DESC NULLS LAST",
+            agency_id,
+            *params,
+        )
+    else:
+        where, params, _ = build_updates_filter(cur_ctx, next_param=2)
+        rows = await conn.fetch(
+            f"WITH {_dedup_cte(where)}\n"
+            "SELECT route_code,\n"
+            "       (AVG(dep_delay) / 60.0)::float AS avg_min\n"
+            "FROM deduped\n"
+            "GROUP BY route_code\n"
+            "ORDER BY avg_min DESC NULLS LAST",
+            agency_id,
+            *params,
+        )
+
+    if not rows:
+        return {"routes": [], "delayed_count": 0}
+
+    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= 2.0)
+    top_n = rows[:limit]
+    codes = [r["route_code"] for r in top_n]
+    names = await _route_short_names(agency_id, codes, conn)
+    return {
+        "routes": [
+            {
+                "route_code": r["route_code"],
+                "route_short_name": names.get(r["route_code"]),
+                "avg_min": round(float(r["avg_min"]), 2),
+            }
+            for r in top_n
+        ],
+        "delayed_count": delayed_count,
+    }
+
+
 async def _peak_hour(agency_id: int, ctx: RangeCtx, conn) -> dict | None:
     """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
 
