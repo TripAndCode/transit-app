@@ -107,4 +107,38 @@ describe("useRouteOverlay scrubbedDelayMin", () => {
     expect(color).not.toContain("var(");
     expect(color).toBe("#d92121");
   });
+
+  it("updates the line color via setPaintProperty on a scrub tick, without tearing down and rebuilding the overlay", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ delay }: { delay: number }) => {
+        const mapRef = useRef(map as never);
+        useRouteOverlay(mapRef, SHAPE, 0, delay);
+      },
+      { initialProps: { delay: 6 } },
+    );
+
+    const layerBefore = map.getLayer(ROUTE_LAYER) as MockLayer;
+    expect(layerBefore.paint!["line-color"]).toBe("#e07a3a");
+
+    rerender({ delay: 3 });
+
+    // Same layer object identity: a real teardown/rebuild (clearOverlay() +
+    // addLayer()) would replace it with a new object. Regression guard for
+    // the bug where every scrub tick tore down and re-added both sources and
+    // both layers, causing a visible flicker of the whole overlay each
+    // second during playback.
+    expect(map.getLayer(ROUTE_LAYER)).toBe(layerBefore);
+    expect(map.getPaintProperty(ROUTE_LAYER, "line-color")).toBe("#d4b878");
+  });
+});
+
+describe("useRouteOverlay route-stops circle-radius", () => {
+  it("uses exactly one zoom-based interpolate expression (MapLibre rejects two in one paint property)", () => {
+    const map = makeMockMap();
+    run(map);
+    const layer = map.getLayer(ROUTE_STOPS_LAYER) as MockLayer;
+    const zoomInterpolateCount = (JSON.stringify(layer.paint!["circle-radius"]).match(/"zoom"/g) ?? []).length;
+    expect(zoomInterpolateCount).toBe(1);
+  });
 });

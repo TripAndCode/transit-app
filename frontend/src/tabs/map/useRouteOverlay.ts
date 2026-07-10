@@ -123,12 +123,16 @@ export function useRouteOverlay(
         source: ROUTE_STOPS_SOURCE,
         paint: {
           // Observed stops are larger, delay-colored, white-ringed; unobserved
-          // stops are smaller hollow gray rings (transparent fill).
+          // stops are smaller hollow gray rings (transparent fill). A `zoom`
+          // expression may only be used as the direct input to a top-level
+          // `step`/`interpolate` — it can't be nested inside another
+          // expression (including arithmetic like `*`), so `has_data` is
+          // resolved per zoom stop instead of wrapping a second interpolate.
           "circle-radius": [
-            "case",
-            ["get", "has_data"],
-            ["interpolate", ["linear"], ["zoom"], 10, 4, 14, 7, 17, 11],
-            ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 6],
+            "interpolate", ["linear"], ["zoom"],
+            10, ["case", ["get", "has_data"], 4, 2.5],
+            14, ["case", ["get", "has_data"], 7, 4],
+            17, ["case", ["get", "has_data"], 11, 6],
           ],
           "circle-color": [
             "case",
@@ -162,5 +166,22 @@ export function useRouteOverlay(
       });
     }
     return whenStyleReady(m, drawOverlay);
-  }, [shape, mapRef, styleEpoch, theme, scrubbedDelayMin]);
+    // scrubbedDelayMin is deliberately excluded: it only sets the *initial*
+    // line color on a real (re)draw, and is kept in sync afterward by the
+    // lightweight setPaintProperty effect below without tearing this one down.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape, mapRef, styleEpoch, theme]);
+
+  // Hour-scrub recoloring only — deliberately its own effect, not a dep of
+  // the draw effect above. The draw effect fully tears down and rebuilds
+  // both sources and both layers (plus fitBounds); doing that on every
+  // scrub tick (every ~1s during playback) caused a visible flicker of the
+  // whole overlay. A color change only needs setPaintProperty on the
+  // already-drawn line.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m || !m.getLayer(ROUTE_LAYER)) return;
+    const color = scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad";
+    m.setPaintProperty(ROUTE_LAYER, "line-color", color);
+  }, [scrubbedDelayMin, theme, mapRef]);
 }
