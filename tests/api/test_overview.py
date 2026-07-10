@@ -517,6 +517,30 @@ async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aage
 
 
 @pytest.mark.asyncio
+async def test_top_delayed_routes_uses_cur_ctx_not_full_ctx(aconn, aagency_id):
+    """top_delayed must reflect only the last-7-days-of-ctx window
+    (cur_ctx), not the full (wider) ctx — the same window the headline
+    already uses. A route with a much higher avg_min outside that 7-day
+    window must NOT appear, even though it's inside the full ctx.
+    """
+    # ctx spans 14 days (2026-05-05..2026-05-18). Latest data is on
+    # 2026-05-18, so cur_ctx anchors there and covers 2026-05-12..2026-05-18
+    # (last 7 days) — 2026-05-05 is inside ctx but outside cur_ctx.
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 5), "R_OLD", "平日", 9.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_NEW", "平日", 4.0, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 5), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    codes = [r["route_code"] for r in out["top_delayed"]["routes"]]
+    assert codes == ["R_NEW"]
+    # delayed_count must also exclude R_OLD (would otherwise be 2, not 1,
+    # if the full ctx were used instead of cur_ctx).
+    assert out["top_delayed"]["delayed_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_picks_hour_with_max_avg_delay(aconn, aagency_id):
     """Rows scheduled at 06:00, 08:00, 17:00; 08:00 has the worst avg.
 
