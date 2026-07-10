@@ -140,6 +140,10 @@
       "feed_status_ok": "正常稼働中",
       "feed_status_updated": "最終更新 {{when}}"
     },
+    "routes_to_check": {
+      "title": "今すぐ確認すべき路線",
+      "empty": "確認が必要な路線はありません"
+    },
     "story": {
       "better": "今週は先週より改善しました。",
       "worse": "今週は先週より悪化しました。",

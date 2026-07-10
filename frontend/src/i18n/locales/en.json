@@ -140,6 +140,10 @@
       "feed_status_ok": "Running normally",
       "feed_status_updated": "Last updated {{when}}"
     },
+    "routes_to_check": {
+      "title": "Routes to check now",
+      "empty": "No routes need attention"
+    },
     "story": {
       "better": "Better than last week.",
       "worse": "Worse than last week.",
