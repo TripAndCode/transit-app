@@ -144,6 +144,7 @@
       "title": "Routes to check now",
       "empty": "No routes need attention"
     },
+    "details_toggle": "Show details",
     "story": {
       "better": "Better than last week.",
       "worse": "Worse than last week.",

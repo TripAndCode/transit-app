@@ -638,3 +638,22 @@
   color: var(--text-secondary);
   margin-top: 6px;
 }
+
+/* ---------- Details section (concentration/peak-hour/service-split) ---------- */
+.ov-details {
+  margin-top: 24px;
+}
+.ov-details-summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  list-style: none;
+}
+.ov-details-summary::-webkit-details-marker {
+  display: none;
+}
+.ov-details[open] .ov-details-summary {
+  margin-bottom: 12px;
+}
