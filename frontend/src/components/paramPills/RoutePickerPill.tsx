@@ -2,16 +2,26 @@
  * RoutePickerPill — searchable route selector.
  *
  * A field-like trigger (search glyph + selected route name, or a search-prompt
- * placeholder when unset) opens a downward popover: a live-search input filtering
+ * placeholder when unset) opens a popover: a live-search input filtering
  * routes by code / short name / long name, then a list where each option shows the
  * line name with the code as a muted monospace sub-label. When `delays` is supplied
  * (ForecastTab passes per-route avg delay), each row also shows a warm-ramp delay
  * chip. Results are capped at 50. Closes on outside click, Escape, or selection.
+ *
+ * Opens downward by default, but flips upward when there isn't enough room
+ * below the trigger (e.g. this component also renders inside QuestionDock,
+ * which is docked at the bottom of the viewport) — otherwise the popover
+ * renders mostly or entirely off-screen with no way to scroll to it.
  */
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { useRoutes } from "../../api/hooks";
 import { delayColor } from "../../styles/tokens";
 import "./RoutePickerPill.css";
+
+/** Popover's own rendered height (search input + max-height list + padding/border),
+ *  matching RoutePickerPill.css's .rp-list max-height (280px) plus chrome. Used to
+ *  decide whether there's enough room below the trigger to open downward. */
+const POPOVER_HEIGHT_ESTIMATE = 340;
 
 const SearchIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -44,6 +54,7 @@ export function RoutePickerPill({
 }: RoutePickerPillProps) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [openUp, setOpenUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { data: routes = [], isLoading } = useRoutes(agencyId);
@@ -53,6 +64,16 @@ export function RoutePickerPill({
     setOpen(false);
     triggerRef.current?.focus();
   }
+
+  // Decide open direction once, right when the popover mounts — measuring the
+  // trigger's position against the viewport before paint avoids a visible flip.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    setOpenUp(spaceBelow < POPOVER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -110,7 +131,7 @@ export function RoutePickerPill({
         </span>
       </button>
       {open && (
-        <div role="listbox" className="rp-pop">
+        <div role="listbox" className={`rp-pop${openUp ? " rp-pop-up" : ""}`}>
           <div className="rp-search-wrap">
             <span className="rp-search-icon" aria-hidden>
               <SearchIcon />
