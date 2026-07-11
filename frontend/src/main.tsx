@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
+import { RedirectReportsToAnalysis, RedirectForecastToAnalysis } from "./routes/legacyRedirects";
 import "./i18n";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
@@ -73,6 +74,13 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: el(<LiveTab />) },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
       { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
+      // Phases 1 and 2 renamed Reports -> Analysis and folded Forecast into
+      // it, respectively, and deliberately left the old URLs 404-ing until
+      // this final phase. No Suspense wrapper needed — these render nothing
+      // but an immediate <Navigate>, not a lazy-loaded tab.
+      { path: "agencies/:agencyId/reports", element: <RedirectReportsToAnalysis /> },
+      { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportsToAnalysis /> },
+      { path: "agencies/:agencyId/forecast", element: <RedirectForecastToAnalysis /> },
       { path: "network", element: el(<NetworkTab />) },
       { path: "me", element: el(<AccountPage />) },
       {
