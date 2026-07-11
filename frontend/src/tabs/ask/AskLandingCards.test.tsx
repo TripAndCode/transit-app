@@ -95,4 +95,16 @@ describe("AskLandingCards", () => {
     await user.click(pill);
     expect(onOpenChip).not.toHaveBeenCalled();
   });
+
+  it("renders the landing header with icon, title, and subtitle", () => {
+    setup();
+    expect(screen.getByText(i18n.t("ask.landing.header_title"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("ask.landing.header_subtitle"))).toBeInTheDocument();
+  });
+
+  it("shows an example-answer line under instant cards that have one, none for pills", () => {
+    setup();
+    expect(screen.getByText(i18n.t("ask.card.top_delay.example_answer"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("ask.card.ontime_rank.example_answer"))).toBeInTheDocument();
+  });
 });

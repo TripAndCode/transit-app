@@ -696,6 +696,8 @@
       }
     },
     "landing": {
+      "header_title": "Route Intelligence",
+      "header_subtitle": "Answers via a 3-stage pipeline: rules → embedding search → RAG",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
     }

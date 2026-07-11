@@ -696,6 +696,8 @@
       }
     },
     "landing": {
+      "header_title": "路線インテリジェンス",
+      "header_subtitle": "ルール → 埋め込みNN → RAGの3段階で回答します",
       "cards_title": "こんな質問ができます",
       "pills_title": "その他の質問"
     }
