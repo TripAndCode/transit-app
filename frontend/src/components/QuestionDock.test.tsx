@@ -1,18 +1,58 @@
 import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { QuestionDock } from "./QuestionDock";
-import { buildCardTemplates } from "./askCardTemplates";
+import { buildCardTemplates, defaultsFor, type CardTemplate } from "./askCardTemplates";
 import i18n from "../i18n";
 
 const templates = buildCardTemplates();
 
-function setup(overrides: Partial<Parameters<typeof QuestionDock>[0]> = {}) {
-  const onSubmit = vi.fn();
-  renderWithProviders(
-    <QuestionDock agencyId={1} busy={false} onSubmit={onSubmit} {...overrides} />,
+/** Mimics AskTab's own composing-state ownership, so these tests exercise
+ *  QuestionDock exactly as it's used in production (a controlled component),
+ *  not a synthetic subset of props. */
+function Harness({
+  onSubmit,
+  busy = false,
+}: {
+  onSubmit: (payload: { tool: string; args: Record<string, unknown>; user_summary: string }) => void | Promise<void>;
+  busy?: boolean;
+}) {
+  const [composingId, setComposingId] = useState<string | null>(null);
+  const [values, setValues] = useState<Record<string, unknown>>({});
+
+  function handleChipTap(tpl: CardTemplate) {
+    if (busy) return;
+    if (composingId === tpl.id) {
+      setComposingId(null);
+      setValues({});
+      return;
+    }
+    setComposingId(tpl.id);
+    setValues(defaultsFor(tpl));
+  }
+
+  return (
+    <QuestionDock
+      agencyId={1}
+      busy={busy}
+      onSubmit={onSubmit}
+      composingId={composingId}
+      values={values}
+      onChipTap={handleChipTap}
+      onValueChange={(name, next) => setValues((prev) => ({ ...prev, [name]: next }))}
+      onRunComplete={() => {
+        setComposingId(null);
+        setValues({});
+      }}
+    />
   );
+}
+
+function setup(overrides: { busy?: boolean } = {}) {
+  const onSubmit = vi.fn();
+  renderWithProviders(<Harness onSubmit={onSubmit} {...overrides} />);
   return { onSubmit };
 }
 

@@ -9,7 +9,7 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -29,14 +29,16 @@ import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
 import { FilterContextBar } from "../components/FilterContextBar";
 import { QuestionDock } from "../components/QuestionDock";
+import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { MessageList } from "./ask/MessageList";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
+import { AskLandingCards } from "./ask/AskLandingCards";
 
 export function AskTab() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [rangeCtx] = useRangeContext();
@@ -44,6 +46,14 @@ export function AskTab() {
 
   // ── Thread state ──────────────────────────────────────────────────────────
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // ── Ask-dock composing state (lifted from QuestionDock so a landing-area
+  //    suggestion pill can open a specific chip, not just the bottom dock's
+  //    own toolbar) ───────────────────────────────────────────────────────
+  const [composingId, setComposingId] = useState<string | null>(null);
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
@@ -151,6 +161,34 @@ export function AskTab() {
     }
 
     appendMsg.mutate({ conversationId: convId, tool, args, user_summary, filter_ctx: filterCtx });
+  }
+
+  const busy = appendMsg.isPending || createConv.isPending;
+
+  function handleChipTap(tpl: CardTemplate) {
+    if (busy) return;
+    if (composingId === tpl.id) {
+      setComposingId(null);
+      setValues({});
+      return;
+    }
+    setComposingId(tpl.id);
+    setValues(defaultsFor(tpl));
+  }
+
+  function handleValueChange(name: string, next: unknown) {
+    setValues((prev) => ({ ...prev, [name]: next }));
+  }
+
+  function handleRunComplete() {
+    setComposingId(null);
+    setValues({});
+  }
+
+  function handleInstantSubmit(tpl: CardTemplate) {
+    if (busy) return;
+    const args = { ...tpl.fixed_args, ...defaultsFor(tpl) };
+    handleCardSubmit({ tool: tpl.tool, args, user_summary: tpl.buildSummary(defaultsFor(tpl), t) });
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -266,16 +304,12 @@ export function AskTab() {
               )}
             </>
           ) : (
-            <div
-              style={{
-                color: "var(--text-tertiary)",
-                fontSize: 13,
-                padding: "8px 4px",
-                textAlign: "center",
-              }}
-            >
-              {t("ask.dock.empty_hint")}
-            </div>
+            <AskLandingCards
+              templates={templates}
+              onInstantSubmit={handleInstantSubmit}
+              onOpenChip={handleChipTap}
+              busy={busy}
+            />
           )}
         </div>
 
@@ -283,8 +317,13 @@ export function AskTab() {
         {id != null && (
           <QuestionDock
             agencyId={id}
-            busy={appendMsg.isPending || createConv.isPending}
+            busy={busy}
             onSubmit={handleCardSubmit}
+            composingId={composingId}
+            values={values}
+            onChipTap={handleChipTap}
+            onValueChange={handleValueChange}
+            onRunComplete={handleRunComplete}
           />
         )}
       </div>
