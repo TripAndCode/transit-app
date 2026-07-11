@@ -86,3 +86,24 @@ def test_hourly_cells_to_dow_band_worst_window():
     assert out["worst"]["dow"] == 5
     assert out["worst"]["band"] == "evening"
     assert out["worst"]["expected_avg_min"] == pytest.approx(9.0, abs=0.05)
+
+
+def test_routes_carry_recent_daily_trend_oldest_first():
+    route_rows = [
+        {"route_code": "A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
+    ]
+    recent_daily_rows = [
+        {"date": "2026-06-01", "route_code": "A", "avg_min": 2.0},
+        {"date": "2026-06-02", "route_code": "A", "avg_min": 4.0},
+        {"date": "2026-06-03", "route_code": "A", "avg_min": 6.0},
+    ]
+    out = summarize_agency_overview([], route_rows, recent_daily_rows)
+    assert out["routes"][0]["recent_daily"] == [2.0, 4.0, 6.0]
+
+
+def test_routes_default_to_empty_recent_daily_when_absent():
+    route_rows = [
+        {"route_code": "A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
+    ]
+    out = summarize_agency_overview([], route_rows)
+    assert out["routes"][0]["recent_daily"] == []

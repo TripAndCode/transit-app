@@ -1,6 +1,7 @@
 """API tests for GET /api/{agency_id}/forecast/overview."""
 
 import os
+from datetime import date
 
 import asyncpg
 import httpx
@@ -48,10 +49,19 @@ async def overview_client(apply_schema):
             (aid, "200", "平日", 3, 17, 40.0, 4),
         ],
     )
+    await pool.executemany(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())",
+        [
+            (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
+            (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
+        ],
+    )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, aid, aid_empty
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE agencies, agg_route_hour_dow, static_routes CASCADE")
+        await conn.execute("TRUNCATE agencies, agg_route_hour_dow, agg_route_daily, static_routes CASCADE")
     await pool.close()
 
 
@@ -84,3 +94,14 @@ async def test_overview_empty_agency(overview_client):
     assert len(body["grid"]) == 35
     assert body["worst"] is None
     assert body["routes"] == []
+
+
+async def test_overview_route_recent_daily_trend(overview_client):
+    client, aid, _aid_empty = overview_client
+    r = await client.get(f"/api/{aid}/forecast/overview")
+    assert r.status_code == 200
+    body = r.json()
+    by_code = {x["route_code"]: x for x in body["routes"]}
+    assert by_code["100"]["recent_daily"] == pytest.approx([2.0, 4.0], abs=0.05)
+    # route 200 has no agg_route_daily rows at all -> empty, not missing/error
+    assert by_code["200"]["recent_daily"] == []
