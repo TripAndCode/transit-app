@@ -57,10 +57,11 @@ describe("BandGrid", () => {
 });
 
 describe("Legend", () => {
-  it("renders 6 gradient swatches with min/max/unit labels", () => {
-    render(<Legend min={1.2} max={3.3} unit="min" colorFor={() => "#123"} />);
+  it("renders 5 gradient swatches with min/max/unit labels", () => {
+    const { container } = render(<Legend min={1.2} max={3.3} unit="min" colorFor={() => "#123"} />);
     expect(screen.getByText("1.2")).toBeTruthy();
     expect(screen.getByText("3.3")).toBeTruthy();
     expect(screen.getByText("min")).toBeTruthy();
+    expect(container.querySelectorAll("span[style*='width: 14px']")).toHaveLength(5);
   });
 });

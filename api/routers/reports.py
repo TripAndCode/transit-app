@@ -167,6 +167,11 @@ class ForecastOverviewRoute(BaseModel):
     expected_avg_min: float
     samples: int
     low_confidence: bool
+    # Last 7 analyzed calendar days' average delay for this route, oldest
+    # first (from agg_route_daily — a different, seasonally-pooled source
+    # than expected_avg_min above). Empty when the route has no recent
+    # agg_route_daily rows (e.g. it hasn't run in the last week).
+    recent_daily: list[float] = []
 
 
 class ForecastOverviewResponse(BaseModel):
@@ -220,7 +225,25 @@ async def forecast_overview(
         "FROM ra LEFT JOIN labels l USING (route_code)",
         agency_id,
     )
-    return summarize_agency_overview(grid_rows, route_rows, locale)
+    # Last 7 analyzed calendar days per route, from agg_route_daily (real
+    # per-date rows) — a different table than route_rows above (which pools
+    # ALL time from the seasonal agg_route_hour_dow). Powers each route's
+    # sparkline. NULL MAX(date) (brand-new agency, no agg rows yet) makes the
+    # WHERE clause's date comparisons false, so this safely returns zero rows
+    # rather than erroring.
+    recent_daily_rows = await conn.fetch(
+        "WITH latest AS ("
+        "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
+        ") "
+        "SELECT d.date, d.route_code, "
+        "  SUM(d.avg_delay_sec * d.samples) / NULLIF(SUM(d.samples), 0) / 60.0 AS avg_min "
+        "FROM agg_route_daily d, latest "
+        "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
+        "GROUP BY d.date, d.route_code "
+        "ORDER BY d.route_code, d.date",
+        agency_id,
+    )
+    return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
 
 
 # Column headers used when emitting CSV. Japanese labels for operator-facing

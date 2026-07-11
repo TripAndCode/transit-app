@@ -126,6 +126,7 @@ def hourly_cells_to_dow_band(
 def summarize_agency_overview(
     grid_rows: Iterable[Mapping[str, Any]],
     route_rows: Iterable[Mapping[str, Any]],
+    recent_daily_rows: Iterable[Mapping[str, Any]] = (),
     locale: str = "ja",
     top_n: int | None = None,
 ) -> dict[str, Any]:
@@ -133,8 +134,10 @@ def summarize_agency_overview(
 
     `grid_rows`: per-(dow,hour) pooled mappings ``{dow,hour,avg_min,samples}``.
     `route_rows`: per-route mappings ``{route_code, route_name, avg_min, samples}``.
-    Pooling is exact (a sample-weighted mean of per-bucket means is the pooled
-    mean). The worst window excludes low-confidence buckets so a small-sample
+    `recent_daily_rows`: per-(date,route_code) mappings ``{date, route_code, avg_min}``,
+    already ordered by (route_code, date) — attached per route as `recent_daily`,
+    oldest first. Pooling is exact (a sample-weighted mean of per-bucket means is the
+    pooled mean). The worst window excludes low-confidence buckets so a small-sample
     fluke can never headline. No percentile (cannot pool per-bucket percentiles).
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
@@ -166,6 +169,12 @@ def summarize_agency_overview(
         worst.pop("_m")
 
     # ── routes: rank by delay desc, low-confidence last (top_n optional cap) ──
+    trend_by_route: dict[str, list[float]] = {}
+    for r in recent_daily_rows:
+        if r["avg_min"] is None:
+            continue
+        trend_by_route.setdefault(r["route_code"], []).append(round(float(r["avg_min"]), 1))
+
     routes: list[dict[str, Any]] = []
     for r in route_rows:
         if r["avg_min"] is None or not r["samples"]:
@@ -178,6 +187,7 @@ def summarize_agency_overview(
                 "expected_avg_min": round(float(r["avg_min"]), 1),
                 "samples": n,
                 "low_confidence": n < LOW_CONFIDENCE_SAMPLES,
+                "recent_daily": trend_by_route.get(r["route_code"], []),
             }
         )
     routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
