@@ -18,18 +18,22 @@ function renderSidebar(path = "/agencies/1/map") {
 }
 
 describe("Sidebar", () => {
-  it("renders all 5 nav items with their label and subtitle", () => {
+  it("renders the 4 main nav items with their label and subtitle", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("What's happening right now")).toBeTruthy();
     expect(screen.getByText("Map")).toBeTruthy();
     expect(screen.getByText("Where it's happening")).toBeTruthy();
-    expect(screen.getByText("Ask")).toBeTruthy();
-    expect(screen.getByText("Ask in plain language")).toBeTruthy();
-    expect(screen.getByText("Latest observations")).toBeTruthy();
-    expect(screen.getByText("Spot anomalies fast")).toBeTruthy();
     expect(screen.getByText("Analysis")).toBeTruthy();
     expect(screen.getByText("When and why delays happen")).toBeTruthy();
+    expect(screen.getByText("Agencies")).toBeTruthy();
+    expect(screen.getByText("How you compare to others")).toBeTruthy();
+  });
+
+  it("renders Ask as a distinct CTA, and does not render Live (moved to the header)", () => {
+    renderSidebar();
+    expect(screen.getByText("Ask")).toBeTruthy();
+    expect(screen.queryByText("Latest observations")).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
