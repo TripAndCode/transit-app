@@ -75,9 +75,9 @@ describe("useRouteOverlay hourly mode (the hour-scrubber's flat line)", () => {
 
   it("resolves scrubbedDelayMin to a delay-ramp color for the route line", () => {
     const map = makeMockMap();
-    run(map, "hourly", 6);
+    run(map, "hourly", 4);
     const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
-    expect(layer.paint!["line-color"]).toBe("#e07a3a");
+    expect(layer.paint!["line-color"]).toBe("#D4622A");
   });
 
   it("resolves a >=10min scrubbedDelayMin to a real parseable hex, never the literal var() string", () => {
@@ -102,16 +102,16 @@ describe("useRouteOverlay hourly mode (the hour-scrubber's flat line)", () => {
         const mapRef = useRef(map as never);
         useRouteOverlay(mapRef, SHAPE, 0, "hourly", delay);
       },
-      { initialProps: { delay: 6 } },
+      { initialProps: { delay: 4 } },
     );
 
     const layerBefore = map.getLayer(ROUTE_LAYER) as MockLayer;
-    expect(layerBefore.paint!["line-color"]).toBe("#e07a3a");
+    expect(layerBefore.paint!["line-color"]).toBe("#D4622A");
 
-    rerender({ delay: 3 });
+    rerender({ delay: 2 });
 
     expect(map.getLayer(ROUTE_LAYER)).toBe(layerBefore);
-    expect(map.getPaintProperty(ROUTE_LAYER, "line-color")).toBe("#d4b878");
+    expect(map.getPaintProperty(ROUTE_LAYER, "line-color")).toBe("#C99A2E");
   });
 });
 

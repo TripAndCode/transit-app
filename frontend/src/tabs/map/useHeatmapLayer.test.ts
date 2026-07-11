@@ -57,7 +57,7 @@ describe("useHeatmapLayer (clustering)", () => {
     // color steps on the cluster's average delay (sum / count)
     expect(paint["circle-color"]).toEqual([
       "step", ["/", ["get", "dsum"], ["get", "point_count"]],
-      "#8fb88f", 2, "#d4b878", 5, "#e07a3a", 10, "#d92121",
+      "#2EA87A", 1.5, "#C99A2E", 3, "#D4622A", 5, "#d92121",
     ]);
     // size steps on the number of stops
     expect((paint["circle-radius"] as unknown[])[1]).toEqual(["get", "point_count"]);

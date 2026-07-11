@@ -265,9 +265,9 @@ export function MapTab() {
     const p = f.properties ?? {};
     if (!showSingleSampleStops && (p.samples ?? 0) < 2) continue;
     const a = p.avg_delay_min ?? 0;
-    if (a < 2) severityCounts.ok += 1;
-    else if (a < 5) severityCounts.mild += 1;
-    else if (a < 10) severityCounts.moderate += 1;
+    if (a < 1.5) severityCounts.ok += 1;
+    else if (a < 3) severityCounts.mild += 1;
+    else if (a < 5) severityCounts.moderate += 1;
     else severityCounts.severe += 1;
   }
 
