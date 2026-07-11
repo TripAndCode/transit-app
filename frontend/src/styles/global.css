@@ -90,11 +90,17 @@
   --text-primary: #DDD9F3;
   --text-secondary: #9894B8;
   --text-tertiary: #5A607A;
-  --accent-soft: rgba(91, 108, 173, 0.16);
+  /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
+     Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
+  --accent: #1A8A72;
+  --accent-soft: rgba(26, 138, 114, 0.13);
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
-  --delay-severe: #F04438;
+  /* Mockup's literal severe red — fails WCAG AA contrast against --bg-page (2.95:1,
+     confirmed and deliberately accepted; see the design-parity spec). Do not
+     "fix" this by substituting a brighter red. */
+  --delay-severe: #A83A1A;
   --trend-good: #4ade80;
   --trend-good-bg: rgba(74, 222, 128, 0.16);
   --trend-bad: #fbbf24;
