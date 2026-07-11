@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
 import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER } from "./useHeatmapLayer";
 import type { HeatmapCollection } from "../../api/types";
+import type { SeverityKey } from "../../components/MapLegend";
 
 const DATA = {
   type: "FeatureCollection",
@@ -163,5 +164,60 @@ describe("useHeatmapLayer colorField", () => {
     rerender({ field: 'p90_delay_min' });
     const updated = map.getPaintProperty(LAYER, "circle-color");
     expect(JSON.stringify(updated)).toContain("p90_delay_min");
+  });
+});
+
+describe("useHeatmapLayer focusedSeverity filtering (inSeverityBand)", () => {
+  const BAND_DATA = {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.7, 40.8] },
+        properties: { avg_delay_min: 1.0, samples: 10 } }, // ok
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.71, 40.81] },
+        properties: { avg_delay_min: 2.0, samples: 10 } }, // mild
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.72, 40.82] },
+        properties: { avg_delay_min: 4.0, samples: 10 } }, // moderate
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.73, 40.83] },
+        properties: { avg_delay_min: 6.0, samples: 10 } }, // severe
+    ],
+  } as unknown as HeatmapCollection;
+
+  function runFocused(map: MockMap, focusedSeverity: SeverityKey | null) {
+    return renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, BAND_DATA, true, focusedSeverity, 1, 0);
+    });
+  }
+
+  it("keeps only the ok-band stop (< 1.5min) when focused on ok", () => {
+    const map = makeMockMap();
+    runFocused(map, "ok");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(1.0);
+  });
+
+  it("keeps only the mild-band stop (1.5-3min) when focused on mild", () => {
+    const map = makeMockMap();
+    runFocused(map, "mild");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(2.0);
+  });
+
+  it("keeps only the moderate-band stop (3-5min) when focused on moderate", () => {
+    const map = makeMockMap();
+    runFocused(map, "moderate");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(4.0);
+  });
+
+  it("keeps only the severe-band stop (>=5min) when focused on severe", () => {
+    const map = makeMockMap();
+    runFocused(map, "severe");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(6.0);
   });
 });
