@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readLastAgency, writeLastAgency } from "./lastAgency";
+import { readLastAgency, writeLastAgency, clearLastAgency } from "./lastAgency";
 
 describe("lastAgency (localStorage)", () => {
   beforeEach(() => localStorage.clear());
@@ -31,6 +31,20 @@ describe("lastAgency (localStorage)", () => {
       throw new Error("localStorage unavailable");
     });
     expect(() => writeLastAgency(1)).not.toThrow();
+    spy.mockRestore();
+  });
+
+  it("clears the stored id", () => {
+    writeLastAgency(42);
+    clearLastAgency();
+    expect(readLastAgency()).toBeNull();
+  });
+
+  it("doesn't throw when localStorage.removeItem throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("localStorage unavailable");
+    });
+    expect(() => clearLastAgency()).not.toThrow();
     spy.mockRestore();
   });
 });
