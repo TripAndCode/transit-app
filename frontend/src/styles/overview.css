@@ -622,9 +622,9 @@
   margin-bottom: 8px;
 }
 .ov-kpi-value {
-  font-size: 32px;
+  font-size: 52px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   line-height: 1;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;

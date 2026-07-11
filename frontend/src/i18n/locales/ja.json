@@ -125,6 +125,8 @@
     },
     "hero_row": {
       "avg_delay_label": "ネットワーク平均遅延",
+      "baseline_hint_title": "先週比について",
+      "baseline_hint_body": "選択した期間の平均遅延を、その直前の同じ日数分の期間と比較しています。",
       "avg_delay_compared": "先週比 {{sign}}{{min}}分",
       "avg_delay_no_baseline": "比較データなし",
       "delayed_count_label": "遅延中の路線",
