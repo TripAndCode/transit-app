@@ -38,23 +38,23 @@ function renderLegend(overrides = {}) {
 describe("MapLegend", () => {
   it("renders all 4 severity band labels", () => {
     renderLegend();
-    // Real i18n copy (map.legend.band_lt_2/band_2_5/band_5_10/band_gt_10 in
+    // Real i18n copy (map.legend.band_lt_1_5/band_1_5_3/band_3_5/band_gt_5 in
     // en.json) uses en-dashes, not hyphens — verified directly, not guessed.
-    expect(screen.getByText("< 2 min")).toBeTruthy();
-    expect(screen.getByText("2–5 min")).toBeTruthy();
-    expect(screen.getByText("5–10 min")).toBeTruthy();
-    expect(screen.getByText("> 10 min")).toBeTruthy();
+    expect(screen.getByText("< 1.5 min")).toBeTruthy();
+    expect(screen.getByText("1.5–3 min")).toBeTruthy();
+    expect(screen.getByText("3–5 min")).toBeTruthy();
+    expect(screen.getByText("> 5 min")).toBeTruthy();
   });
 
   it("clicking a band with stops calls onFocusedSeverityChange with that band's key", () => {
     const props = renderLegend();
-    fireEvent.click(screen.getByText("< 2 min"));
+    fireEvent.click(screen.getByText("< 1.5 min"));
     expect(props.onFocusedSeverityChange).toHaveBeenCalledWith("ok");
   });
 
   it("does not call onFocusedSeverityChange when clicking a band with zero stops", () => {
     const props = renderLegend();
-    fireEvent.click(screen.getByText("> 10 min"));
+    fireEvent.click(screen.getByText("> 5 min"));
     expect(props.onFocusedSeverityChange).not.toHaveBeenCalled();
   });
 
