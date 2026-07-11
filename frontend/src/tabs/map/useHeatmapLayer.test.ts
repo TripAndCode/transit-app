@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
 import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER } from "./useHeatmapLayer";
 import type { HeatmapCollection } from "../../api/types";
+import type { SeverityKey } from "../../components/MapLegend";
 
 const DATA = {
   type: "FeatureCollection",
@@ -163,5 +164,116 @@ describe("useHeatmapLayer colorField", () => {
     rerender({ field: 'p90_delay_min' });
     const updated = map.getPaintProperty(LAYER, "circle-color");
     expect(JSON.stringify(updated)).toContain("p90_delay_min");
+  });
+});
+
+describe("useHeatmapLayer focusedSeverity filtering (inSeverityBand)", () => {
+  const BAND_DATA = {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.7, 40.8] },
+        properties: { avg_delay_min: 1.0, samples: 10 } }, // ok
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.71, 40.81] },
+        properties: { avg_delay_min: 2.0, samples: 10 } }, // mild
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.72, 40.82] },
+        properties: { avg_delay_min: 4.0, samples: 10 } }, // moderate
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.73, 40.83] },
+        properties: { avg_delay_min: 6.0, samples: 10 } }, // severe
+    ],
+  } as unknown as HeatmapCollection;
+
+  function runFocused(map: MockMap, focusedSeverity: SeverityKey | null) {
+    return renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, BAND_DATA, true, focusedSeverity, 1, 0);
+    });
+  }
+
+  it("keeps only the ok-band stop (< 1.5min) when focused on ok", () => {
+    const map = makeMockMap();
+    runFocused(map, "ok");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(1.0);
+  });
+
+  it("keeps only the mild-band stop (1.5-3min) when focused on mild", () => {
+    const map = makeMockMap();
+    runFocused(map, "mild");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(2.0);
+  });
+
+  it("keeps only the moderate-band stop (3-5min) when focused on moderate", () => {
+    const map = makeMockMap();
+    runFocused(map, "moderate");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(4.0);
+  });
+
+  it("keeps only the severe-band stop (>=5min) when focused on severe", () => {
+    const map = makeMockMap();
+    runFocused(map, "severe");
+    const src = map.getSource(SOURCE) as { data: HeatmapCollection };
+    expect(src.data.features).toHaveLength(1);
+    expect(src.data.features[0].properties?.avg_delay_min).toBe(6.0);
+  });
+
+  // Exact boundary values — the interior-only tests above (1.0/2.0/4.0/6.0)
+  // wouldn't catch a </<= flip or an off-by-a-tick shift at the real cutoffs.
+  const BOUNDARY_DATA = {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.7, 40.8] },
+        properties: { avg_delay_min: 1.5, samples: 10 } }, // exactly mild's lower edge
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.71, 40.81] },
+        properties: { avg_delay_min: 3.0, samples: 10 } }, // exactly moderate's lower edge
+      { type: "Feature", geometry: { type: "Point", coordinates: [140.72, 40.82] },
+        properties: { avg_delay_min: 5.0, samples: 10 } }, // exactly severe's lower edge
+    ],
+  } as unknown as HeatmapCollection;
+
+  function runBoundary(map: MockMap, focusedSeverity: SeverityKey | null) {
+    return renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, BOUNDARY_DATA, true, focusedSeverity, 1, 0);
+    });
+  }
+
+  it("classifies exactly 1.5min as mild, not ok (lower bound is inclusive on mild)", () => {
+    const okMap = makeMockMap();
+    runBoundary(okMap, "ok");
+    expect((okMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features).toHaveLength(0);
+
+    const mildMap = makeMockMap();
+    runBoundary(mildMap, "mild");
+    const kept = (mildMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features;
+    expect(kept.some((f) => f.properties?.avg_delay_min === 1.5)).toBe(true);
+  });
+
+  it("classifies exactly 3.0min as moderate, not mild (lower bound is inclusive on moderate)", () => {
+    const mildMap = makeMockMap();
+    runBoundary(mildMap, "mild");
+    const notKept = (mildMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features;
+    expect(notKept.some((f) => f.properties?.avg_delay_min === 3.0)).toBe(false);
+
+    const moderateMap = makeMockMap();
+    runBoundary(moderateMap, "moderate");
+    const kept = (moderateMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features;
+    expect(kept.some((f) => f.properties?.avg_delay_min === 3.0)).toBe(true);
+  });
+
+  it("classifies exactly 5.0min as severe, not moderate (lower bound is inclusive on severe)", () => {
+    const moderateMap = makeMockMap();
+    runBoundary(moderateMap, "moderate");
+    const notKept = (moderateMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features;
+    expect(notKept.some((f) => f.properties?.avg_delay_min === 5.0)).toBe(false);
+
+    const severeMap = makeMockMap();
+    runBoundary(severeMap, "severe");
+    const kept = (severeMap.getSource(SOURCE) as { data: HeatmapCollection }).data.features;
+    expect(kept.some((f) => f.properties?.avg_delay_min === 5.0)).toBe(true);
   });
 });

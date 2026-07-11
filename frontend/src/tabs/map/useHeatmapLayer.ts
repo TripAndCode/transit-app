@@ -37,13 +37,13 @@ const CASING_OPACITY = 0.85;
 function inSeverityBand(avg: number, band: SeverityKey): boolean {
   switch (band) {
     case "ok":
-      return avg < 2;
+      return avg < 1.5;
     case "mild":
-      return avg >= 2 && avg < 5;
+      return avg >= 1.5 && avg < 3;
     case "moderate":
-      return avg >= 5 && avg < 10;
+      return avg >= 3 && avg < 5;
     case "severe":
-      return avg >= 10;
+      return avg >= 5;
   }
 }
 
