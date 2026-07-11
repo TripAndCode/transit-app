@@ -710,6 +710,35 @@
   margin-top: 6px;
 }
 
+/* ---------- Mini-map strip (decorative live snapshot between the KPI row
+   and the routes-to-check list) ---------- */
+.ov-map-strip {
+  position: relative;
+  height: 180px;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-bottom: 24px;
+  border-radius: var(--radius-lg);
+}
+.ov-map-fade-t {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: linear-gradient(var(--bg-page), transparent);
+  pointer-events: none;
+}
+.ov-map-fade-b {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: linear-gradient(transparent, var(--bg-page));
+  pointer-events: none;
+}
+
 /* ---------- Details section (concentration/peak-hour/service-split) ---------- */
 .ov-details {
   margin-top: 24px;
