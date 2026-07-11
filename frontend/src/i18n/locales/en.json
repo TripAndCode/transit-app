@@ -209,7 +209,6 @@
     "apply": "Apply",
     "cancel": "Cancel",
     "close": "Close",
-    "collapse": "Collapse",
     "details": "Details",
     "expand": "Expand",
     "hint_aria": "Hint",
@@ -353,8 +352,7 @@
       "few_to_many": "delay: low → high",
       "color_explainer": "Color: average delay band",
       "bubble_explainer": "Bubble: a group of stops (number = how many stops)",
-      "size_explainer": "Dot size: bigger = longer delay",
-      "drag_handle": "Move legend (arrow keys)"
+      "size_explainer": "Dot size: bigger = longer delay"
     },
     "popup": {
       "platform_label": "Platform",
