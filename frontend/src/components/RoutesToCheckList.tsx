@@ -33,7 +33,7 @@ export function RoutesToCheckList({ routes }: Props) {
                 }
               }}
             >
-              <span className="ov-check-code">{r.route_code}</span>
+              <span className="ov-check-code" title={r.route_code}>{r.route_code}</span>
               <span className="ov-check-name">{r.route_short_name ?? r.route_code}</span>
               <span className="ov-check-track">
                 <span

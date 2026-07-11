@@ -291,8 +291,11 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: var(--text-secondary);
-  width: 44px;
+  max-width: 80px;
   flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ov-check-name {
   font-size: 12.5px;
