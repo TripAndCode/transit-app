@@ -78,7 +78,8 @@
     "col_coverage": "Coverage",
     "no_data_in_range": "no data in range",
     "view_agency": "View {{name}} overview",
-    "delay_unit": "min"
+    "delay_unit": "min",
+    "you_badge": "YOU"
   },
   "app": {
     "data_stale": {

@@ -78,7 +78,8 @@
     "col_coverage": "データ範囲",
     "no_data_in_range": "期間内のデータなし",
     "view_agency": "{{name}} の概況を見る",
-    "delay_unit": "分"
+    "delay_unit": "分",
+    "you_badge": "あなた"
   },
   "app": {
     "data_stale": {

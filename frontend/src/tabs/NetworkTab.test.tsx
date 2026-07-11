@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
 import * as hooks from "../api/hooks";
@@ -14,10 +14,12 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
   };
 }
 
-function renderTab() {
+function renderTab(agencyId = "1") {
   renderWithProviders(
-    <MemoryRouter initialEntries={["/network"]}>
-      <NetworkTab />
+    <MemoryRouter initialEntries={[`/agencies/${agencyId}/network`]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -64,8 +66,10 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderWithProviders(
-      <MemoryRouter initialEntries={["/network?from=2026-04-01&to=2026-04-07"]}>
-        <NetworkTab />
+      <MemoryRouter initialEntries={["/agencies/7/network?from=2026-04-01&to=2026-04-07"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
       </MemoryRouter>,
     );
     const link = screen.getByRole("link", { name: "Hiroden" });
@@ -100,5 +104,40 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("shows a 'you' badge and highlights the card matching the current agencyId in the URL", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07",
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden" }),
+          row({ agency_id: 2, agency_name: "HiroBus" }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab("2"); // viewing agency 2 (HiroBus)
+    const badges = screen.getAllByTestId("you-badge");
+    expect(badges).toHaveLength(1);
+    // the badge sits inside HiroBus's card, not Hiroden's
+    const hiroBusCard = screen.getByText("HiroBus").closest(".network-card");
+    expect(hiroBusCard).toContainElement(badges[0]);
+  });
+
+  it("shows no 'you' badge when there is no agencyId in the URL", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07",
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/network"]}>
+        <NetworkTab />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
   });
 });
