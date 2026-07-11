@@ -670,13 +670,15 @@
       "missing_required": "*",
       "top_delay": {
         "title": "Top-N delays",
-        "summary": "Top {{k}} routes ({{service}})"
+        "summary": "Top {{k}} routes ({{service}})",
+        "example_answer": "e.g., shows routes like K05 +6.2 min, S12 +5.4 min, A03 +5.1 min — ranked by delay."
       },
       "ontime_rank": {
         "title": "On-time rate ranking",
         "best": "Best first",
         "worst": "Worst first",
-        "summary": "{{dir}}, {{k}} routes"
+        "summary": "{{dir}}, {{k}} routes",
+        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first."
       },
       "route_trend": {
         "title": "Route delay trend",
@@ -695,6 +697,8 @@
       }
     },
     "landing": {
+      "header_title": "Route Intelligence",
+      "header_subtitle": "Answers via a 3-stage pipeline: rules → embedding search → RAG",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
     }

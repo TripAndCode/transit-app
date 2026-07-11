@@ -27,6 +27,12 @@ export type CardTemplate = {
   params: ParamSpec[];
   /** Renders the user_summary preview string from current values. */
   buildSummary: (values: Record<string, unknown>, t: TFunction) => string;
+  /** i18n key for an illustrative example-answer line shown under the
+   *  question on the landing card (instant-run templates only — a static
+   *  example wouldn't make sense before a route is picked on the
+   *  route-required templates). Always explicitly "e.g."-framed, never
+   *  phrased as live data. */
+  example_answer_key?: string;
 };
 
 /**
@@ -54,6 +60,7 @@ export function buildCardTemplates(): CardTemplate[] {
             `ask.card.param.service.${(v.service_type as string) ?? "all"}`,
           ),
         }),
+      example_answer_key: "ask.card.top_delay.example_answer",
     },
     {
       id: "ontime_rank",
@@ -81,6 +88,7 @@ export function buildCardTemplates(): CardTemplate[] {
               ? t("ask.card.ontime_rank.best")
               : t("ask.card.ontime_rank.worst"),
         }),
+      example_answer_key: "ask.card.ontime_rank.example_answer",
     },
     {
       id: "route_trend",
