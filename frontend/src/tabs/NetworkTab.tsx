@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
@@ -19,7 +19,8 @@ const card: React.CSSProperties = {
 const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
 const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
 const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
-const delayValStyle: React.CSSProperties = { fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
+const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
+const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
 const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
 const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
 const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
@@ -27,9 +28,27 @@ const barFill: React.CSSProperties = { height: "100%", borderRadius: 3 };
 const samplesStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
 const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-tertiary)", marginBottom: 4 };
 const coverageStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--text-tertiary)" };
+const youBadgeStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  padding: "2px 7px",
+  borderRadius: 4,
+  // Solid fill, not --accent-soft — the highlighted card itself uses
+  // --accent-soft as its background, so a soft-tint badge would be
+  // invisible against it. Matches .ov-rank's solid-fill + white-text
+  // precedent (frontend/src/styles/overview.css).
+  background: "var(--accent)",
+  color: "#ffffff",
+  marginLeft: 8,
+  flexShrink: 0,
+};
 
 export function NetworkTab() {
   const { t } = useTranslation();
+  const { agencyId } = useParams();
+  const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
 
@@ -46,8 +65,17 @@ export function NetworkTab() {
   function renderCard(a: NetworkAgencyRow, index: number) {
     const showFeedFlag = a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT;
     const showFreshnessFlag = a.is_stale;
+    const isCurrent = currentAgencyId != null && a.agency_id === currentAgencyId;
     return (
-      <div className="network-card" key={a.agency_id} style={card}>
+      <div
+        className="network-card"
+        key={a.agency_id}
+        style={
+          isCurrent
+            ? { ...card, borderColor: "var(--accent)", background: "var(--accent-soft)" }
+            : card
+        }
+      >
         <div style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
@@ -57,12 +85,17 @@ export function NetworkTab() {
           >
             {a.agency_name}
           </Link>
+          {isCurrent && <span data-testid="you-badge" style={youBadgeStyle}>{t("network.you_badge")}</span>}
           <div style={{ textAlign: "right" }}>
             <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
               {a.avg_delay_min == null ? (
                 "—"
               ) : (
-                <span style={{ color: delayColor(a.avg_delay_min) }}>{a.avg_delay_min.toFixed(1)}</span>
+                <span style={{ color: delayColor(a.avg_delay_min) }}>
+                  {a.avg_delay_min >= 0 ? "+" : ""}
+                  {a.avg_delay_min.toFixed(1)}
+                  <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
+                </span>
               )}
             </div>
             <div style={onTimeStyle} aria-label={t("network.col_on_time")}>

@@ -66,7 +66,7 @@
     "col_freshness": "鮮度",
     "stale_badge": "未更新",
     "empty": "事業者がありません。",
-    "help": "全事業者を同じ期間で比較します。平均遅延の大きい順に並びます — フィード列はフィード停止、鮮度列は数値が最新まで反映されているかを確認できます。",
+    "help": "平均遅延 — 少ないほど良い",
     "howto_title": "この表の見方",
     "help_agency": "交通事業者。",
     "help_avg_delay": "期間中の平均的な遅れ（分）。ドットは深刻度を示します。",
@@ -77,7 +77,9 @@
     "help_coverage": "この事業者が期間内に実際にデータを持つ日付範囲。",
     "col_coverage": "データ範囲",
     "no_data_in_range": "期間内のデータなし",
-    "view_agency": "{{name}} の概況を見る"
+    "view_agency": "{{name}} の概況を見る",
+    "delay_unit": "分",
+    "you_badge": "あなた"
   },
   "app": {
     "data_stale": {

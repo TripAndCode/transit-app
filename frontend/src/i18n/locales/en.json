@@ -66,7 +66,7 @@
     "col_freshness": "Freshness",
     "stale_badge": "Behind",
     "empty": "No agencies.",
-    "help": "Compare every agency over the same window. Rows are ranked by worst average delay first — scan Feed for frozen-feed problems and Freshness for pipelines that are behind.",
+    "help": "Average delay — lower is better",
     "howto_title": "How to read this",
     "help_agency": "Transit agency.",
     "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
@@ -77,7 +77,9 @@
     "help_coverage": "The date span this agency actually has data for within the window.",
     "col_coverage": "Coverage",
     "no_data_in_range": "no data in range",
-    "view_agency": "View {{name}} overview"
+    "view_agency": "View {{name}} overview",
+    "delay_unit": "min",
+    "you_badge": "YOU"
   },
   "app": {
     "data_stale": {
