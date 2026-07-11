@@ -1,4 +1,4 @@
-import { Link, NavLink, useParams } from "react-router-dom";
+import { NavLink, useParams } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgencyPicker } from "./AgencyPicker";
@@ -28,43 +28,10 @@ export function Header() {
         gap: 24,
       }}
     >
-      <Link
-        to="/"
-        style={{
-          textDecoration: "none",
-          color: "var(--text-primary)",
-          display: "flex",
-          flexDirection: "column",
-          lineHeight: 1.1,
-        }}
-      >
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 600,
-            fontSize: 20,
-            margin: 0,
-            letterSpacing: "0.01em",
-          }}
-        >
-          {t("header.app_title")}
-        </h1>
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            marginTop: 2,
-            letterSpacing: "0.04em",
-          }}
-        >
-          {t("header.app_tagline")}
-        </span>
-      </Link>
-      <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+      <div style={{ display: "flex", alignItems: "center" }}>
         <AgencyPicker />
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, flex: 1, justifyContent: "flex-end", alignItems: "center" }}>
         {/* Live moved here from the sidebar (artifact-parity Branch 2) — the
             mockup's sidebar has no equivalent screen, so this preserves the
             feature at a secondary access point instead of removing it.

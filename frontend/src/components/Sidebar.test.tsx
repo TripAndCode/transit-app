@@ -42,7 +42,13 @@ describe("Sidebar", () => {
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
-  it("renders an empty placeholder aside when there is no agencyId", () => {
+  it("renders the brand block above the nav items", () => {
+    renderSidebar();
+    expect(screen.getByText("Delay Dashboard")).toBeTruthy();
+    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
+  });
+
+  it("renders the brand block even when there is no agencyId, but not the nav items", () => {
     render(
       <I18nextProvider i18n={i18n}>
         <MemoryRouter initialEntries={["/"]}>
@@ -50,6 +56,8 @@ describe("Sidebar", () => {
         </MemoryRouter>
       </I18nextProvider>
     );
+    expect(screen.getByText("Delay Dashboard")).toBeTruthy();
+    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
     expect(screen.queryByText("Overview")).toBeNull();
   });
 });
