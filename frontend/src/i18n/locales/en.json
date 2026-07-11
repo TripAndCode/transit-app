@@ -77,7 +77,8 @@
     "help_coverage": "The date span this agency actually has data for within the window.",
     "col_coverage": "Coverage",
     "no_data_in_range": "no data in range",
-    "view_agency": "View {{name}} overview"
+    "view_agency": "View {{name}} overview",
+    "delay_unit": "min"
   },
   "app": {
     "data_stale": {

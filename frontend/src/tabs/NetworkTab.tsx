@@ -19,7 +19,8 @@ const card: React.CSSProperties = {
 const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
 const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
 const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
-const delayValStyle: React.CSSProperties = { fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
+const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
+const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
 const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
 const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
 const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
@@ -62,7 +63,11 @@ export function NetworkTab() {
               {a.avg_delay_min == null ? (
                 "—"
               ) : (
-                <span style={{ color: delayColor(a.avg_delay_min) }}>{a.avg_delay_min.toFixed(1)}</span>
+                <span style={{ color: delayColor(a.avg_delay_min) }}>
+                  {a.avg_delay_min >= 0 ? "+" : ""}
+                  {a.avg_delay_min.toFixed(1)}
+                  <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
+                </span>
               )}
             </div>
             <div style={onTimeStyle} aria-label={t("network.col_on_time")}>

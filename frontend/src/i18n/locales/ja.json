@@ -77,7 +77,8 @@
     "help_coverage": "この事業者が期間内に実際にデータを持つ日付範囲。",
     "col_coverage": "データ範囲",
     "no_data_in_range": "期間内のデータなし",
-    "view_agency": "{{name}} の概況を見る"
+    "view_agency": "{{name}} の概況を見る",
+    "delay_unit": "分"
   },
   "app": {
     "data_stale": {

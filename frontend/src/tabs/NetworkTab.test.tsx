@@ -41,7 +41,7 @@ describe("NetworkTab", () => {
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByText("#2")).toBeInTheDocument();
     expect(screen.getByText("#3")).toBeInTheDocument();
-    expect(screen.getByText("10.0")).toBeInTheDocument();
+    expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
     expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
     expect(screen.getByText("Behind")).toBeInTheDocument();
