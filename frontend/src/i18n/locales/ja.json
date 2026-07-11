@@ -10,7 +10,8 @@
     "live_subtitle": "異常を素早く発見",
     "analysis": "分析",
     "analysis_subtitle": "いつ・なぜ遅れるか",
-    "network": "事業者比較"
+    "network": "事業者比較",
+    "network_subtitle": "他社と比べてどうか"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",

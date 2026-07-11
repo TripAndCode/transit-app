@@ -10,7 +10,8 @@
     "live_subtitle": "Spot anomalies fast",
     "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
-    "network": "Agencies"
+    "network": "Agencies",
+    "network_subtitle": "How you compare to others"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
