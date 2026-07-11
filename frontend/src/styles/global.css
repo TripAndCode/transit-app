@@ -43,11 +43,14 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
-  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>10)). Theme-dependent for
-     WCAG AA contrast: #d92121 fails on the dark surfaces, #F04438 fails on the
-     light background — see the dark block below. tokens.ts reads this via
-     getComputedStyle so both CSS (var(--delay-severe)) and JS consumers
-     (MapLibre style expressions) resolve the same source of truth. */
+  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>5)). Theme-dependent:
+     this light value (#d92121) passes WCAG AA on the light background but
+     fails on the dark surfaces — see the dark block below, whose #A83A1A
+     (the artifact mockup's literal severe-red) only reaches ~2.95:1 there,
+     a deliberately accepted tradeoff for design parity, not an oversight.
+     tokens.ts reads this via getComputedStyle so both CSS (var(--delay-severe))
+     and JS consumers (MapLibre style expressions) resolve the same source
+     of truth. */
   --delay-severe: #d92121;
   /* Overview trend chips / mover-streak dots + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
