@@ -17,12 +17,24 @@ import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../a
 import { ReportTable } from "../components/ReportTable";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 
+/** "This week" = the 7 days ending today, in the ctx's from/to string
+ *  format. Used by the "no data" EmptyState's recovery action to jump to a
+ *  window likely to have real data, rather than leaving the user stuck on
+ *  whatever empty range they'd filtered to. */
+function thisWeekRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - 6);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  return { from: fmt(from), to: fmt(to) };
+}
+
 export function AnalysisTab() {
   const { t } = useTranslation();
   const { agencyId, reportType } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
-  const [ctx] = useRangeContext();
+  const [ctx, update] = useRangeContext();
   // Build the filter querystring from ctx so navigating between reports
   // carries only the filter dimensions — not unrelated keys like ?admin=1.
   const filterQS = ctxToQueryString(ctx);
@@ -195,7 +207,11 @@ export function AnalysisTab() {
                 rows={detail.data.rows as unknown[][]}
               />
             ) : (
-              <EmptyState title={t("reports.no_data.title")} hint={t("reports.no_data.hint")} />
+              <EmptyState
+                title={t("reports.no_data.title")}
+                hint={t("reports.no_data.hint")}
+                action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
+              />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
