@@ -169,7 +169,7 @@ export function LiveTab() {
               alignItems: "center",
               gap: 8,
               padding: "6px 10px",
-              background: "var(--bg-muted, #faf7f2)",
+              background: "var(--bg-soft)",
               borderRadius: 4,
               marginBottom: 2,
               fontWeight: 600,
