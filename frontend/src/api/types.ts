@@ -313,6 +313,10 @@ export interface ForecastOverviewRoute {
   expected_avg_min: number;
   samples: number;
   low_confidence: boolean;
+  /** Last 7 analyzed calendar days' avg delay, oldest first. Optional —
+   *  absent in older cached responses or test fixtures; empty array when
+   *  the route has no recent agg_route_daily rows. */
+  recent_daily?: number[];
 }
 
 export interface ForecastOverview {

@@ -80,6 +80,24 @@ describe("RouteForecastSection", () => {
     expect(screen.getByText("test disclaimer")).toBeInTheDocument();
   });
 
+  it("renders a sparkline for a route with recent_daily data, none for a route without", () => {
+    renderSection(
+      overview({
+        routes: [
+          { route_code: "100", route_name: "Main Line", expected_avg_min: 6.8, samples: 250, low_confidence: false, recent_daily: [2.0, 4.0, 6.0] },
+          { route_code: "200", route_name: "Side Line", expected_avg_min: 9.9, samples: 5, low_confidence: true },
+        ],
+      }),
+    );
+    const rows = screen.getAllByTestId("ranked-route");
+    expect(rows).toHaveLength(2);
+    // InlineSparkline's <svg> carries aria-hidden (it's decorative next to the
+    // numeric value), so it must be queried with { hidden: true } — otherwise
+    // testing-library's accessibility-tree filtering excludes it from getByRole.
+    expect(within(rows[0]).getByRole("img", { hidden: true })).toBeInTheDocument();
+    expect(within(rows[1]).queryByRole("img", { hidden: true })).not.toBeInTheDocument();
+  });
+
   it("shows the empty-state message when the agency has no data", () => {
     renderSection(overview({ grid: fullGrid([]), worst: null, routes: [] }));
     expect(screen.getByText(/No measurements yet/i)).toBeInTheDocument();

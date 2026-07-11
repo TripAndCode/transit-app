@@ -18,6 +18,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import { InlineSparkline } from "./InlineSparkline";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -103,7 +104,7 @@ function RankedRoutes({
           key={r.route_code}
           data-testid="ranked-route"
           {...clickable(() => onPick(r.route_code))}
-          style={{ display: "grid", gridTemplateColumns: "minmax(120px, 38%) 1fr auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
+          style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
           <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {r.route_name}
@@ -112,6 +113,7 @@ function RankedRoutes({
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
             <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: relativeDelayColor(r.expected_avg_min, min, max), borderRadius: 3 }} />
           </span>
+          <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showLabels={false} showEndDot={false} />
           <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
             {r.expected_avg_min.toFixed(1)}
             {axisMin}
