@@ -35,8 +35,10 @@ export default function App() {
       <ActivityStrip />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar />
-        <main style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          <Outlet key={agencyId ?? "root"} />
+        <main style={{ flex: 1, overflowY: "auto" }}>
+          <div style={{ padding: 24 }}>
+            <Outlet key={agencyId ?? "root"} />
+          </div>
         </main>
       </div>
     </div>
