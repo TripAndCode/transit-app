@@ -136,6 +136,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
               background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              color: "var(--text-primary)",
               cursor: value <= min ? "not-allowed" : "pointer",
               fontSize: 14,
             }}
@@ -161,6 +162,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
               borderRadius: 4,
               background: "var(--bg-surface, white)",
+              color: "var(--text-primary)",
             }}
             aria-label={label}
           />
@@ -174,6 +176,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
               background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              color: "var(--text-primary)",
               cursor: value >= max ? "not-allowed" : "pointer",
               fontSize: 14,
             }}

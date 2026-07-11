@@ -54,7 +54,7 @@ export function AccountPage() {
       <button
         onClick={() => logout.mutate(undefined, { onSuccess: () => (window.location.href = "/") })}
         disabled={logout.isPending}
-        style={{ padding: "8px 16px", background: "var(--surface-2)", border: "none", borderRadius: 4 }}
+        style={{ padding: "8px 16px", background: "var(--surface-2)", color: "var(--text-primary)", border: "none", borderRadius: 4 }}
       >
         {t("account.logout")}
       </button>

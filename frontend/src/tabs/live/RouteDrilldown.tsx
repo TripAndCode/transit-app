@@ -58,7 +58,7 @@ export function RouteDrilldown({
       >
       <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, flex: 1 }}>{t("live.drill.title", { route: routeName })}</h3>
-        <button type="button" onClick={onClose} style={{ background: "transparent", border: "1px solid var(--border-subtle)", borderRadius: 4, padding: "4px 12px" }}>
+        <button type="button" onClick={onClose} style={{ background: "transparent", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", borderRadius: 4, padding: "4px 12px" }}>
           {t("live.drill.close")}
         </button>
       </div>

@@ -71,7 +71,7 @@ export function GuestPrompt() {
           localStorage.setItem(DISMISSED, String(Date.now()));
           setShow(false);
         }}
-        style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 16 }}
+        style={{ background: "transparent", color: "inherit", border: "none", cursor: "pointer", fontSize: 16 }}
       >
         ×
       </button>

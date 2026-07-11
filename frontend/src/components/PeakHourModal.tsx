@@ -81,6 +81,7 @@ export function PeakHourModal({
             onClick={onClose}
             style={{
               background: "transparent",
+              color: "var(--text-primary)",
               border: "1px solid var(--border-subtle)",
               borderRadius: 4,
               padding: "3px 10px",

@@ -60,6 +60,7 @@ export function AgencyPicker() {
         onClick={() => setOpen((v) => !v)}
         style={{
           background: "var(--bg-surface)",
+          color: "var(--text-primary)",
           border: "1px solid var(--border-subtle)",
           borderRadius: "var(--radius)",
           padding: "6px 12px",
