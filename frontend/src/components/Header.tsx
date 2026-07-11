@@ -1,4 +1,4 @@
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useParams } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgencyPicker } from "./AgencyPicker";
@@ -6,9 +6,14 @@ import { SettingsDrawer } from "./SettingsDrawer";
 import { HeaderUserMenu } from "./HeaderUserMenu";
 import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
+import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
 export function Header() {
   const { t } = useTranslation();
+  const { agencyId } = useParams();
+  const [ctx] = useRangeContext();
+  const filterQS = ctxToQueryString(ctx);
+  const suffix = filterQS ? `?${filterQS}` : "";
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
@@ -60,18 +65,26 @@ export function Header() {
         <AgencyPicker />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <NavLink
-          to="/network"
-          style={({ isActive }) => ({
-            alignSelf: "center",
-            fontSize: 13,
-            textDecoration: "none",
-            color: isActive ? "var(--accent)" : "var(--text-secondary)",
-            fontWeight: isActive ? 600 : 400,
-          })}
-        >
-          {t("nav.network")}
-        </NavLink>
+        {/* Live moved here from the sidebar (artifact-parity Branch 2) — the
+            mockup's sidebar has no equivalent screen, so this preserves the
+            feature at a secondary access point instead of removing it.
+            Network moved the other way (into the sidebar). Gated on agencyId
+            like Sidebar's agency-scoped items — unlike the old Network link
+            here, which rendered unconditionally. */}
+        {agencyId && (
+          <NavLink
+            to={`/agencies/${agencyId}/live${suffix}`}
+            style={({ isActive }) => ({
+              alignSelf: "center",
+              fontSize: 13,
+              textDecoration: "none",
+              color: isActive ? "var(--accent)" : "var(--text-secondary)",
+              fontWeight: isActive ? 600 : 400,
+            })}
+          >
+            {t("nav.live")}
+          </NavLink>
+        )}
         <HeaderUserMenu />
         <LocaleToggle />
         <ThemeToggle />

@@ -5,12 +5,11 @@
     "map": "Map",
     "map_subtitle": "Where it's happening",
     "ask": "Ask",
-    "ask_subtitle": "Ask in plain language",
     "live": "Latest observations",
-    "live_subtitle": "Spot anomalies fast",
     "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
-    "network": "Agencies"
+    "network": "Agencies",
+    "network_subtitle": "How you compare to others"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",

@@ -1,5 +1,5 @@
 import { NavLink, useParams } from "react-router-dom";
-import { Map as MapIcon, MessageSquare, Activity, BarChart3, LayoutDashboard, type LucideIcon } from "lucide-react";
+import { Map as MapIcon, BarChart3, LayoutDashboard, GitCompare, HelpCircle, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 
@@ -8,9 +8,8 @@ type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIco
 const ITEMS: Item[] = [
   { to: "overview", labelKey: "nav.overview", subtitleKey: "nav.overview_subtitle", Icon: LayoutDashboard },
   { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
-  { to: "ask", labelKey: "nav.ask", subtitleKey: "nav.ask_subtitle", Icon: MessageSquare },
-  { to: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: Activity },
   { to: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
+  { to: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
 ];
 
 export function Sidebar() {
@@ -32,6 +31,8 @@ export function Sidebar() {
         borderRight: "1px solid var(--border-soft)",
         padding: "16px 0",
         flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <nav style={{ display: "flex", flexDirection: "column" }}>
@@ -61,6 +62,28 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      {/* Distinct CTA below the uniform nav list, matching the artifact
+          mockup's dashed-border Ask button — Ask is deliberately not in the
+          ITEMS loop above so it reads as an action, not a peer tab. */}
+      <NavLink
+        to={`/agencies/${agencyId}/ask${suffix}`}
+        style={({ isActive }) => ({
+          margin: "8px 12px 0",
+          padding: "10px 12px",
+          borderRadius: 7,
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          color: isActive ? "var(--accent)" : "var(--text-secondary)",
+          fontSize: 13,
+          border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
+          textDecoration: "none",
+          transition: "all var(--transition)",
+        })}
+      >
+        <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
+        {t("nav.ask")}
+      </NavLink>
     </aside>
   );
 }
