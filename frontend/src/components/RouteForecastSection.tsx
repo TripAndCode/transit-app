@@ -568,7 +568,10 @@ function RouteDetail({
   return (
     <>
       {worstBand && (
-        <div data-testid="detail-worst" style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>
+        <div
+          data-testid="detail-worst"
+          style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
+        >
           {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), min: (worstBand.expected_avg_min as number).toFixed(1) })}
         </div>
       )}
