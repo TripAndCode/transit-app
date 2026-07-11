@@ -669,13 +669,15 @@
       "missing_required": "*",
       "top_delay": {
         "title": "遅延の大きい路線 Top-N",
-        "summary": "上位 {{k}} 件 ({{service}})"
+        "summary": "上位 {{k}} 件 ({{service}})",
+        "example_answer": "例: K05 +6.2分、S12 +5.4分、A03 +5.1分のように、遅延が大きい順に表示します。"
       },
       "ontime_rank": {
         "title": "オンタイム率ランキング",
         "best": "良い順",
         "worst": "悪い順",
-        "summary": "{{dir}} {{k}} 件"
+        "summary": "{{dir}} {{k}} 件",
+        "example_answer": "例: 定時率の高い順（または低い順）に、路線と割合を一覧表示します。"
       },
       "route_trend": {
         "title": "路線の遅延推移",
