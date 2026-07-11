@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { type Map as MLMap } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop, UnobservedStop } from "../../api/types";
-import { delayColorResolved, severityStepColors } from "../../styles/tokens";
+import { accentColorResolved, delayColorResolved, severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
 import { buildTrendSegments } from "./routeTrendSegments";
@@ -143,7 +143,7 @@ export function useRouteOverlay(
           source: ROUTE_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad",
+            "line-color": scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : accentColorResolved(),
             "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 13, 4, 17, 7],
             "line-opacity": 1,
           },
@@ -247,7 +247,7 @@ export function useRouteOverlay(
   useEffect(() => {
     const m = mapRef.current;
     if (!m || mode !== "hourly" || !m.getLayer(ROUTE_LAYER)) return;
-    const color = scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : "#5b6cad";
+    const color = scrubbedDelayMin != null ? delayColorResolved(scrubbedDelayMin) : accentColorResolved();
     m.setPaintProperty(ROUTE_LAYER, "line-color", color);
   }, [scrubbedDelayMin, mode, theme, mapRef]);
 }

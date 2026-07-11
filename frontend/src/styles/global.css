@@ -43,11 +43,14 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
-  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>10)). Theme-dependent for
-     WCAG AA contrast: #d92121 fails on the dark surfaces, #F04438 fails on the
-     light background — see the dark block below. tokens.ts reads this via
-     getComputedStyle so both CSS (var(--delay-severe)) and JS consumers
-     (MapLibre style expressions) resolve the same source of truth. */
+  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>5)). Theme-dependent:
+     this light value (#d92121) passes WCAG AA on the light background but
+     fails on the dark surfaces — see the dark block below, whose #A83A1A
+     (the artifact mockup's literal severe-red) only reaches ~2.95:1 there,
+     a deliberately accepted tradeoff for design parity, not an oversight.
+     tokens.ts reads this via getComputedStyle so both CSS (var(--delay-severe))
+     and JS consumers (MapLibre style expressions) resolve the same source
+     of truth. */
   --delay-severe: #d92121;
   /* Overview trend chips / mover-streak dots + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
@@ -90,11 +93,17 @@
   --text-primary: #DDD9F3;
   --text-secondary: #9894B8;
   --text-tertiary: #5A607A;
-  --accent-soft: rgba(91, 108, 173, 0.16);
+  /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
+     Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
+  --accent: #1A8A72;
+  --accent-soft: rgba(26, 138, 114, 0.13);
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
-  --delay-severe: #F04438;
+  /* Mockup's literal severe red — fails WCAG AA contrast against --bg-page (2.95:1,
+     confirmed and deliberately accepted; see the design-parity spec). Do not
+     "fix" this by substituting a brighter red. */
+  --delay-severe: #A83A1A;
   --trend-good: #4ade80;
   --trend-good-bg: rgba(74, 222, 128, 0.16);
   --trend-bad: #fbbf24;

@@ -1,13 +1,15 @@
 // Severity ramp for delays (minutes -> color). Calm at the low end so the
-// usual data isn't visually loud; severe (>10 min) is a true red so the
+// usual data isn't visually loud; severe (>5 min) is a true red so the
 // genuinely problematic stops pop without ambiguity.
 
-// The severe tier (>10 min) is theme-aware: at #d92121 (the light-mode red)
+// The severe tier (>5 min) is theme-aware: at #d92121 (the light-mode red)
 // contrast against the new dark backgrounds is ~3.6:1 — fails WCAG AA's 4.5:1
-// for normal text; #F04438 fixes that on dark (~5:1) but itself fails on the
-// light background (~3.8:1), so the two themes need genuinely different values.
-// Both live in the `--delay-severe` CSS custom property (light #d92121 / dark
-// #F04438, defined in global.css) so the cascade is the single source of truth.
+// for normal text; the dark value is now the artifact mockup's literal
+// #A83A1A, which only reaches ~2.95:1 on dark — a deliberately accepted
+// tradeoff for design-parity (see global.css's comment on --delay-severe),
+// not an oversight. Both live in the `--delay-severe` CSS custom property
+// (light #d92121 / dark #A83A1A, defined in global.css) so the cascade is
+// the single source of truth.
 //
 // TWO surfaces, deliberately split — pick by how the caller renders the color:
 //  - DOM/React (renders into an inline `style` prop): use `DELAY_RAMP.severe` /
@@ -42,26 +44,43 @@ export function severeColorResolved(): string {
   return v || SEVERE_FALLBACK;
 }
 
+// Light-mode accent — the fallback when --accent can't be resolved (SSR /
+// jsdom), matching global.css's base :root value.
+const ACCENT_FALLBACK = "#5b6cad";
+
+/** Resolve `--accent` to a concrete hex for callers that need a real,
+ *  parseable color string — MapLibre paint expressions, which can't consume
+ *  `var()`. Mirrors severeColorResolved() for the same reason: the default
+ *  (no-scrubbed-delay) route-line color needs to track the active theme's
+ *  accent, not stay pinned to the old hardcoded blue-purple. */
+export function accentColorResolved(): string {
+  if (typeof document === "undefined") return ACCENT_FALLBACK;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent")
+    .trim();
+  return v || ACCENT_FALLBACK;
+}
+
 const BASE_RAMP = {
-  ok: "#8fb88f",       // < 2 min   sage
-  mild: "#d4b878",     // 2 – 5 min sand
-  moderate: "#e07a3a", // 5 – 10 min orange
+  ok: "#2EA87A",       // < 1.5 min
+  mild: "#C99A2E",     // 1.5 – 3 min
+  moderate: "#D4622A", // 3 – 5 min
 } as const;
 
 export const DELAY_RAMP = {
   ...BASE_RAMP,
   // Literal CSS var string for DOM/React consumers — see the block comment
   // above. MapLibre call sites use severeColorResolved() instead.
-  severe: SEVERE_VAR, // > 10 min red, per-theme via --delay-severe
+  severe: SEVERE_VAR, // > 5 min red, per-theme via --delay-severe
 } as const;
 
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
 export function delayColor(minutes: number): string {
   if (minutes <= 0) return DELAY_RAMP.ok;
-  if (minutes < 2) return DELAY_RAMP.ok;
-  if (minutes < 5) return DELAY_RAMP.mild;
-  if (minutes < 10) return DELAY_RAMP.moderate;
+  if (minutes < 1.5) return DELAY_RAMP.ok;
+  if (minutes < 3) return DELAY_RAMP.mild;
+  if (minutes < 5) return DELAY_RAMP.moderate;
   return DELAY_RAMP.severe;
 }
 
@@ -70,12 +89,12 @@ export function delayColor(minutes: number): string {
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use
  *  this (not `delayColor()`) for any MapLibre paint property. */
 export function delayColorResolved(minutes: number): string {
-  if (minutes < 10) return delayColor(minutes);
+  if (minutes < 5) return delayColor(minutes);
   return severeColorResolved();
 }
 
 /** The delay-ramp color/threshold pairs a MapLibre `step` expression needs after
- *  its `["step", <input>]` prefix: `[ok, 2, mild, 5, moderate, 10, severe]`.
+ *  its `["step", <input>]` prefix: `[ok, 1.5, mild, 3, moderate, 5, severe]`.
  *  Single source of truth for the paint-expression stops shared by the heatmap
  *  and route-overlay layers — spread it (`["step", input, ...severityStepColors()]`)
  *  rather than hand-assembling the array, so a new call site can't accidentally
@@ -87,11 +106,11 @@ export function severityStepColors(): readonly [
 ] {
   return [
     DELAY_RAMP.ok,
-    2,
+    1.5,
     DELAY_RAMP.mild,
-    5,
+    3,
     DELAY_RAMP.moderate,
-    10,
+    5,
     severeColorResolved(),
   ];
 }
