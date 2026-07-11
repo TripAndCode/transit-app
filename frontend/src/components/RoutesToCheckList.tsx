@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../styles/tokens";
+import { useRangeContext } from "../api/rangeContext";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
@@ -8,30 +9,43 @@ type Props = {
 
 export function RoutesToCheckList({ routes }: Props) {
   const { t } = useTranslation();
+  const [, update] = useRangeContext();
 
   return (
-    <div className="ov-card">
-      <p className="ov-card-eyebrow">{t("overview.routes_to_check.title")}</p>
+    <div>
+      <p className="ov-check-section-hd">{t("overview.routes_to_check.title")}</p>
       {routes.length === 0 ? (
-        <p className="ov-pareto-rest">{t("overview.routes_to_check.empty")}</p>
+        <p className="ov-check-empty">{t("overview.routes_to_check.empty")}</p>
       ) : (
         (() => {
           const maxMin = Math.max(...routes.map((r) => r.avg_min));
           return routes.map((r) => (
-            <div className="ov-pareto-row" key={r.route_code}>
-              <div className="ov-pareto-label">
-                {r.route_short_name ? `${r.route_short_name} (${r.route_code})` : r.route_code}
-              </div>
-              <div className="ov-pareto-track">
-                <div
-                  className="ov-pareto-fill"
+            <div
+              className="ov-check-row"
+              key={r.route_code}
+              role="button"
+              tabIndex={0}
+              onClick={() => update({ routes: [r.route_code] })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  update({ routes: [r.route_code] });
+                }
+              }}
+            >
+              <span className="ov-check-code" title={r.route_code}>{r.route_code}</span>
+              <span className="ov-check-name">{r.route_short_name ?? r.route_code}</span>
+              <span className="ov-check-track">
+                <span
+                  className="ov-check-fill"
                   style={{
                     width: `${maxMin > 0 ? (r.avg_min / maxMin) * 100 : 0}%`,
                     background: delayColor(r.avg_min),
                   }}
                 />
-              </div>
-              <div className="ov-pareto-pct">{r.avg_min.toFixed(1)}</div>
+              </span>
+              <span className="ov-check-value">{r.avg_min.toFixed(1)}</span>
+              <span className="ov-check-arrow" aria-hidden="true">›</span>
             </div>
           ));
         })()

@@ -1,5 +1,5 @@
 // frontend/src/tabs/OverviewTab.tsx
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 
@@ -18,6 +18,12 @@ import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
 import "../styles/overview.css";
+
+// Keeps maplibre-gl out of Overview's default chunk, matching main.tsx's
+// existing lazy-split convention for MapTab itself.
+const OverviewMiniMap = lazy(() =>
+  import("../components/OverviewMiniMap").then((m) => ({ default: m.OverviewMiniMap })),
+);
 
 function useAgencyId(): number | null {
   const { agencyId } = useParams();
@@ -79,6 +85,9 @@ export function OverviewTab() {
               delayedCount={data.top_delayed.delayed_count}
               agencyId={agencyId!}
             />
+            <Suspense fallback={<Skeleton height={180} style={{ marginBottom: 24 }} />}>
+              <OverviewMiniMap agencyId={agencyId!} ctx={ctx} />
+            </Suspense>
             <RoutesToCheckList routes={data.top_delayed.routes} />
             <details className="ov-details">
               <summary className="ov-details-summary">{t("overview.details_toggle")}</summary>

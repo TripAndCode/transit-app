@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewHeadline } from "../api/types";
+import { delayColor } from "../styles/tokens";
+import { InsightHint } from "./InsightHint";
 
 type Props = {
   headline: OverviewHeadline;
@@ -49,20 +51,28 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
     }
   }
 
+  const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
+
   return (
     <div className="ov-kpi-row">
       <div className="ov-kpi-tile">
         <div className="ov-kpi-label">{t("overview.hero_row.avg_delay_label")}</div>
-        <div className="ov-kpi-value">{headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}</div>
+        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+          {headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}
+        </div>
         <div className="ov-kpi-context">
           {hasBaseline
             ? t("overview.hero_row.avg_delay_compared", { sign, min: Math.abs(headline.delta_min!).toFixed(1) })
             : t("overview.hero_row.avg_delay_no_baseline")}
+          <InsightHint
+            title={t("overview.hero_row.baseline_hint_title")}
+            body={t("overview.hero_row.baseline_hint_body")}
+          />
         </div>
       </div>
       <div className="ov-kpi-tile">
         <div className="ov-kpi-label">{t("overview.hero_row.delayed_count_label")}</div>
-        <div className="ov-kpi-value">
+        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
           {t("overview.hero_row.delayed_count_value", { count: delayedCount, total: totalRoutes })}
         </div>
       </div>

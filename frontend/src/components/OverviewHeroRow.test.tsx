@@ -82,4 +82,10 @@ describe("OverviewHeroRow", () => {
     renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
     expect(screen.getByText(/Last updated/)).toBeInTheDocument();
   });
+
+  it("renders an inline info hint next to the baseline comparison", () => {
+    mockHooks(38, 0.1);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
+  });
 });

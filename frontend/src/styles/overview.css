@@ -262,6 +262,80 @@
   margin: 12px 0 0;
 }
 
+/* ---------- Routes-to-check list (dedicated — do NOT reuse .ov-pareto-*,
+   which ConcentrationBar.tsx and PeakHourRibbon.tsx also depend on) ---------- */
+.ov-check-section-hd {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+}
+.ov-check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.ov-check-row:hover {
+  background: var(--bg-soft);
+}
+.ov-check-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-width: 80px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-check-name {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-check-track {
+  width: 120px;
+  flex-shrink: 0;
+  height: 4px;
+  background: var(--bg-soft);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ov-check-fill {
+  height: 100%;
+  border-radius: 2px;
+}
+.ov-check-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.ov-check-arrow {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.ov-check-empty {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
 /* ---------- 4. Peak hour ---------- */
 .ov-peak-svg-wrap {
   position: relative;
@@ -622,9 +696,9 @@
   margin-bottom: 8px;
 }
 .ov-kpi-value {
-  font-size: 32px;
+  font-size: 52px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   line-height: 1;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
@@ -637,6 +711,35 @@
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 6px;
+}
+
+/* ---------- Mini-map strip (decorative live snapshot between the KPI row
+   and the routes-to-check list) ---------- */
+.ov-map-strip {
+  position: relative;
+  height: 180px;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-bottom: 24px;
+  border-radius: var(--radius-lg);
+}
+.ov-map-fade-t {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: linear-gradient(var(--bg-page), transparent);
+  pointer-events: none;
+}
+.ov-map-fade-b {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: linear-gradient(transparent, var(--bg-page));
+  pointer-events: none;
 }
 
 /* ---------- Details section (concentration/peak-hour/service-split) ---------- */

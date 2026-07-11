@@ -126,6 +126,8 @@
     },
     "hero_row": {
       "avg_delay_label": "Network avg delay",
+      "baseline_hint_title": "About the vs. last week comparison",
+      "baseline_hint_body": "Compares the average delay for the selected date range against the same-length period immediately before it.",
       "avg_delay_compared": "{{sign}}{{min}} min vs. last week",
       "avg_delay_no_baseline": "No comparison data",
       "delayed_count_label": "Routes delayed",
