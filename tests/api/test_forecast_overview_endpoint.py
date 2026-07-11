@@ -54,6 +54,12 @@ async def overview_client(apply_schema):
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())",
         [
+            # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
+            # 7-day window at agency, not route, grain — but only route 100
+            # has any agg_route_daily rows here). Window is
+            # (latest-7, latest] = (2026-05-26, 2026-06-02].
+            (aid, date(2026, 5, 26), "100", "平日", 600, 600, 5, 50),  # 10.0 min — latest-7, EXCLUDED
+            (aid, date(2026, 5, 27), "100", "平日", 60, 60, 5, 50),  # 1.0 min — latest-6, INCLUDED (oldest in-window)
             (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
             (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
         ],
@@ -102,6 +108,9 @@ async def test_overview_route_recent_daily_trend(overview_client):
     assert r.status_code == 200
     body = r.json()
     by_code = {x["route_code"]: x for x in body["routes"]}
-    assert by_code["100"]["recent_daily"] == pytest.approx([2.0, 4.0], abs=0.05)
+    # window is (latest-7, latest] = (2026-05-26, 2026-06-02]: 05-27 (latest-6)
+    # is the oldest INCLUDED day; 05-26 (latest-7, exactly on the boundary) is
+    # EXCLUDED and must not appear.
+    assert by_code["100"]["recent_daily"] == pytest.approx([1.0, 2.0, 4.0], abs=0.05)
     # route 200 has no agg_route_daily rows at all -> empty, not missing/error
     assert by_code["200"]["recent_daily"] == []

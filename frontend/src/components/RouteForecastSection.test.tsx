@@ -96,6 +96,12 @@ describe("RouteForecastSection", () => {
     // testing-library's accessibility-tree filtering excludes it from getByRole.
     expect(within(rows[0]).getByRole("img", { hidden: true })).toBeInTheDocument();
     expect(within(rows[1]).queryByRole("img", { hidden: true })).not.toBeInTheDocument();
+    // The sparkline's grid cell must stay present even when InlineSparkline
+    // itself renders null (row 1 has no recent_daily) — otherwise CSS grid
+    // auto-placement shifts the trailing delay-number into the sparkline's
+    // fixed-width track, misaligning it against rows that do show one.
+    expect(rows[0].children).toHaveLength(4);
+    expect(rows[1].children).toHaveLength(4);
   });
 
   it("shows the empty-state message when the agency has no data", () => {

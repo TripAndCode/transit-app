@@ -107,3 +107,19 @@ def test_routes_default_to_empty_recent_daily_when_absent():
     ]
     out = summarize_agency_overview([], route_rows)
     assert out["routes"][0]["recent_daily"] == []
+
+
+def test_routes_skip_null_avg_min_in_recent_daily():
+    # NULLIF(SUM(samples), 0) in the SQL can legitimately produce a NULL
+    # avg_min for a (date, route_code) with zero total samples — this must
+    # be dropped, not appended as a None/gap in the sparkline's point list.
+    route_rows = [
+        {"route_code": "A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
+    ]
+    recent_daily_rows = [
+        {"date": "2026-06-01", "route_code": "A", "avg_min": 2.0},
+        {"date": "2026-06-02", "route_code": "A", "avg_min": None},
+        {"date": "2026-06-03", "route_code": "A", "avg_min": 6.0},
+    ]
+    out = summarize_agency_overview([], route_rows, recent_daily_rows)
+    assert out["routes"][0]["recent_daily"] == [2.0, 6.0]

@@ -113,7 +113,13 @@ function RankedRoutes({
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
             <span style={{ display: "block", height: "100%", width: `${Math.max((r.expected_avg_min / max) * 100, 2)}%`, background: relativeDelayColor(r.expected_avg_min, min, max), borderRadius: 3 }} />
           </span>
-          <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showLabels={false} showEndDot={false} />
+          {/* Always render this grid cell, even when InlineSparkline itself
+              returns null (fewer than 2 points) — otherwise CSS grid
+              auto-places the remaining 3 children into columns 1-3,
+              shifting the delay number out of its trailing `auto` track. */}
+          <span>
+            <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showLabels={false} showEndDot={false} />
+          </span>
           <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
             {r.expected_avg_min.toFixed(1)}
             {axisMin}
