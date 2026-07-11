@@ -63,8 +63,8 @@ export function Sidebar() {
         ))}
       </nav>
       {/* Distinct CTA below the uniform nav list, matching the artifact
-          mockup's dashed-border "質問する" button — Ask is deliberately not
-          in the ITEMS loop above so it reads as an action, not a peer tab. */}
+          mockup's dashed-border Ask button — Ask is deliberately not in the
+          ITEMS loop above so it reads as an action, not a peer tab. */}
       <NavLink
         to={`/agencies/${agencyId}/ask${suffix}`}
         style={({ isActive }) => ({
