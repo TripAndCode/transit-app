@@ -9,7 +9,11 @@
     "analysis": "分析",
     "analysis_subtitle": "いつ・なぜ遅れるか",
     "network": "事業者比較",
-    "network_subtitle": "他社と比べてどうか"
+    "network_subtitle": "他社と比べてどうか",
+    "prototype_section_label": "PROTOTYPE",
+    "prototype_onboarding": "初回ログイン画面",
+    "prototype_stale_feed": "フィード遅延状態",
+    "prototype_no_data": "データなし状態"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",

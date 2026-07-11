@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 
 function renderSidebar(path = "/agencies/1/map") {
   return render(
@@ -59,5 +61,33 @@ describe("Sidebar", () => {
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
     expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
     expect(screen.queryByText("Overview")).toBeNull();
+  });
+
+  it("renders the dev-only PROTOTYPE section with all three state links", () => {
+    renderSidebar();
+    expect(screen.getByText("PROTOTYPE")).toBeTruthy();
+    expect(screen.getByText("First-time login screen")).toBeTruthy();
+    expect(screen.getByText("Feed-stale state")).toBeTruthy();
+    expect(screen.getByText("No-data state")).toBeTruthy();
+  });
+
+  it("clears the remembered agency and navigates to / when the onboarding prototype link is clicked", async () => {
+    const user = userEvent.setup();
+    writeLastAgency(1);
+    renderSidebar();
+    await user.click(screen.getByText("First-time login screen"));
+    expect(readLastAgency()).toBeNull();
+  });
+
+  it("points the no-data prototype link at a far-future date range on the current agency", () => {
+    renderSidebar("/agencies/8/map");
+    const link = screen.getByRole("link", { name: "No-data state" });
+    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+  });
+
+  it("points the feed-stale prototype link at the current agency's overview, preserving the active filter", () => {
+    renderSidebar("/agencies/8/map?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Feed-stale state" });
+    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
   });
 });
