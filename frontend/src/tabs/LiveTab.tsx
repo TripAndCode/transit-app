@@ -168,10 +168,9 @@ export function LiveTab() {
               display: "flex",
               alignItems: "center",
               gap: 8,
-              padding: "6px 10px",
-              background: "var(--bg-soft)",
-              borderRadius: 4,
-              marginBottom: 2,
+              padding: "0 0 6px",
+              borderBottom: "1px solid var(--border-soft)",
+              marginBottom: 8,
               fontWeight: 600,
               fontSize: 13,
             }}
