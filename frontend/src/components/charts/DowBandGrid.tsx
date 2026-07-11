@@ -1,7 +1,7 @@
 import { delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 
-const RAMP_STOPS = 6;
+const RAMP_STOPS = 5;
 
 /** Anchored min→max colour ramp legend (shown inline, not only in the modal).
  * `colorFor` defaults to the absolute ramp; pass a relative ramp to match a grid
