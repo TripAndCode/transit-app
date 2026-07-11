@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
-import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 import type { TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
@@ -22,11 +22,7 @@ import { RouteForecastSection } from "../components/RouteForecastSection";
  *  window likely to have real data, rather than leaving the user stuck on
  *  whatever empty range they'd filtered to. */
 function thisWeekRange(): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 6);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return { from: fmt(from), to: fmt(to) };
+  return { from: isoDaysAgo(6), to: todayISO() };
 }
 
 export function AnalysisTab() {

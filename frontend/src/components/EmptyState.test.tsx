@@ -4,8 +4,9 @@ import { EmptyState } from "./EmptyState";
 
 describe("EmptyState", () => {
   it("renders the title, a default icon, and no action button by default", () => {
-    render(<EmptyState title="Nothing here" />);
+    const { container } = render(<EmptyState title="Nothing here" />);
     expect(screen.getByText("Nothing here")).toBeInTheDocument();
+    expect(container.querySelector("svg")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
