@@ -70,7 +70,19 @@ describe("useRouteOverlay hourly mode (the hour-scrubber's flat line)", () => {
     const map = makeMockMap();
     run(map, "hourly");
     const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    // jsdom doesn't apply global.css's cascade, so --accent resolves to
+    // accentColorResolved()'s fallback (the light-mode accent) — same
+    // shape as severeColorResolved()'s own jsdom fallback above.
     expect(layer.paint!["line-color"]).toBe("#5b6cad");
+  });
+
+  it("resolves the default flat color to the live --accent value when the cascade sets it", () => {
+    const map = makeMockMap();
+    document.documentElement.style.setProperty("--accent", "#1A8A72");
+    run(map, "hourly");
+    const layer = map.getLayer(ROUTE_LAYER) as MockLayer;
+    expect(layer.paint!["line-color"]).toBe("#1A8A72");
+    document.documentElement.style.removeProperty("--accent");
   });
 
   it("resolves scrubbedDelayMin to a delay-ramp color for the route line", () => {
