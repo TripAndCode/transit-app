@@ -20,6 +20,7 @@ describe("legacy redirects", () => {
     expect(screen.getByText("analysis-landing")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/8/analysis");
     expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 
   it("redirects /agencies/:id/reports/:reportType to /agencies/:id/analysis/:reportType", () => {
@@ -34,6 +35,7 @@ describe("legacy redirects", () => {
     expect(screen.getByText("analysis-detail")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/8/analysis/trend");
     expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 
   it("redirects /agencies/:id/forecast to /agencies/:id/analysis/route_forecast", () => {
@@ -48,5 +50,6 @@ describe("legacy redirects", () => {
     expect(screen.getByText("route-forecast-landing")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/8/analysis/route_forecast");
     expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 });
