@@ -816,7 +816,8 @@
     },
     "no_data": {
       "title": "No matching data",
-      "hint": "Try a different range or filters"
+      "hint": "Try a different range or filters",
+      "reset_action": "View this week"
     },
     "heatmap": {
       "empty": "No time-band data.",

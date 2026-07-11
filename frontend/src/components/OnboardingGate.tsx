@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
@@ -120,6 +121,7 @@ export function OnboardingGate() {
                 onClick={() => select(a)}
                 disabled={selectedId != null}
                 style={{
+                  position: "relative",
                   background: isSelected ? "var(--accent-soft)" : "var(--bg-surface)",
                   border: `1px solid ${isSelected ? "var(--accent)" : "var(--border-subtle)"}`,
                   borderRadius: "var(--radius)",
@@ -132,6 +134,26 @@ export function OnboardingGate() {
                   transition: "background var(--transition), border-color var(--transition), opacity var(--transition)",
                 }}
               >
+                {isSelected && (
+                  <span
+                    data-testid="agency-check-badge"
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      right: 10,
+                      width: 20,
+                      height: 20,
+                      borderRadius: "50%",
+                      background: "var(--accent)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Check size={12} strokeWidth={3} color="#fff" />
+                  </span>
+                )}
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>
               </button>
             );

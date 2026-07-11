@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, fireEvent, act } from "@testing-library/react";
+import { screen, fireEvent, act, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OnboardingGate } from "./OnboardingGate";
@@ -108,6 +108,26 @@ describe("OnboardingGate", () => {
       vi.advanceTimersByTime(250);
     });
     expect(screen.getByText("landed:2")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("shows the checkmark badge only on the clicked card, only after the click", () => {
+    vi.useFakeTimers();
+    mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+    renderGate();
+    expect(screen.queryByTestId("agency-check-badge")).toBeNull();
+
+    fireEvent.click(screen.getByText("Second"));
+
+    const badges = screen.getAllByTestId("agency-check-badge");
+    expect(badges).toHaveLength(1);
+    const secondCard = screen.getByText("Second").closest("button");
+    expect(secondCard).not.toBeNull();
+    expect(within(secondCard as HTMLElement).getByTestId("agency-check-badge")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
     vi.useRealTimers();
   });
 });
