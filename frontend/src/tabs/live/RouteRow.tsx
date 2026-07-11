@@ -42,6 +42,7 @@ export function RouteRow({
         width: "100%",
         textAlign: "left",
         background: "transparent",
+        color: "var(--text-primary)",
         border: "none",
         borderBottom: "1px solid var(--border-subtle)",
         padding: "8px 10px",

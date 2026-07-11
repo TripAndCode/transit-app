@@ -77,7 +77,7 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
-            style={{ background: "transparent", border: "1px solid var(--border-subtle)", padding: "6px 12px", borderRadius: 4 }}
+            style={{ background: "transparent", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", padding: "6px 12px", borderRadius: 4 }}
           >
             {t("common.cancel")}
           </button>

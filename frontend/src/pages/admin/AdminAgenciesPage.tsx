@@ -150,7 +150,7 @@ function AgencyFormModal({
             type="button"
             onClick={onClose}
             style={{
-              background: "transparent", border: "1px solid var(--border-subtle)",
+              background: "transparent", color: "var(--text-primary)", border: "1px solid var(--border-subtle)",
               padding: "6px 14px", borderRadius: 4,
             }}
           >

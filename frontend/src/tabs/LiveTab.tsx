@@ -108,6 +108,7 @@ export function LiveTab() {
           onClick={() => refetch()}
           style={{
             background: "transparent",
+            color: "var(--text-primary)",
             border: "1px solid var(--border-subtle)",
             padding: "4px 12px",
             borderRadius: 4,

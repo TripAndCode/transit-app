@@ -94,6 +94,7 @@ export function Header() {
           aria-label={t("header.settings_aria")}
           style={{
             background: "transparent",
+            color: "var(--text-primary)",
             border: "1px solid var(--border-subtle)",
             padding: "6px 10px",
             borderRadius: 4,
