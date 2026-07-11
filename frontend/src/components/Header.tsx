@@ -68,9 +68,9 @@ export function Header() {
         {/* Live moved here from the sidebar (artifact-parity Branch 2) — the
             mockup's sidebar has no equivalent screen, so this preserves the
             feature at a secondary access point instead of removing it.
-            Network moved the other way (into the sidebar); this link only
-            renders when viewing a specific agency, matching how the old
-            Network link behaved. */}
+            Network moved the other way (into the sidebar). Gated on agencyId
+            like Sidebar's agency-scoped items — unlike the old Network link
+            here, which rendered unconditionally. */}
         {agencyId && (
           <NavLink
             to={`/agencies/${agencyId}/live${suffix}`}

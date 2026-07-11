@@ -24,7 +24,9 @@ export default function App() {
   useDocumentTitle();
   // Remount the routed tab when the agency changes so no tab carries another
   // agency's in-component state across a switch (e.g. a selected Ask thread or
-  // forecast route). Non-agency routes (network, account) share the "root" key.
+  // forecast route). Non-agency routes (account) share the "root" key — Network
+  // is now agency-scoped (agencies/:agencyId/network) and remounts like every
+  // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>

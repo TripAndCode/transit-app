@@ -28,6 +28,12 @@ describe("Header", () => {
     expect(screen.getByRole("link", { name: "Latest observations" })).toBeTruthy();
   });
 
+  it("points the Live link at the current agency's live route, preserving the filter query string", () => {
+    renderHeader("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Latest observations" });
+    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
+  });
+
   it("does not render a Live link outside any agency context", () => {
     renderHeader("/");
     expect(screen.queryByRole("link", { name: "Latest observations" })).toBeNull();
