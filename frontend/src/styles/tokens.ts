@@ -43,9 +43,9 @@ export function severeColorResolved(): string {
 }
 
 const BASE_RAMP = {
-  ok: "#8fb88f",       // < 2 min   sage
-  mild: "#d4b878",     // 2 – 5 min sand
-  moderate: "#e07a3a", // 5 – 10 min orange
+  ok: "#2EA87A",       // < 1.5 min
+  mild: "#C99A2E",     // 1.5 – 3 min
+  moderate: "#D4622A", // 3 – 5 min
 } as const;
 
 export const DELAY_RAMP = {
@@ -59,9 +59,9 @@ export const DELAY_RAMP = {
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
 export function delayColor(minutes: number): string {
   if (minutes <= 0) return DELAY_RAMP.ok;
-  if (minutes < 2) return DELAY_RAMP.ok;
-  if (minutes < 5) return DELAY_RAMP.mild;
-  if (minutes < 10) return DELAY_RAMP.moderate;
+  if (minutes < 1.5) return DELAY_RAMP.ok;
+  if (minutes < 3) return DELAY_RAMP.mild;
+  if (minutes < 5) return DELAY_RAMP.moderate;
   return DELAY_RAMP.severe;
 }
 
@@ -70,12 +70,12 @@ export function delayColor(minutes: number): string {
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use
  *  this (not `delayColor()`) for any MapLibre paint property. */
 export function delayColorResolved(minutes: number): string {
-  if (minutes < 10) return delayColor(minutes);
+  if (minutes < 5) return delayColor(minutes);
   return severeColorResolved();
 }
 
 /** The delay-ramp color/threshold pairs a MapLibre `step` expression needs after
- *  its `["step", <input>]` prefix: `[ok, 2, mild, 5, moderate, 10, severe]`.
+ *  its `["step", <input>]` prefix: `[ok, 1.5, mild, 3, moderate, 5, severe]`.
  *  Single source of truth for the paint-expression stops shared by the heatmap
  *  and route-overlay layers — spread it (`["step", input, ...severityStepColors()]`)
  *  rather than hand-assembling the array, so a new call site can't accidentally
@@ -87,11 +87,11 @@ export function severityStepColors(): readonly [
 ] {
   return [
     DELAY_RAMP.ok,
-    2,
+    1.5,
     DELAY_RAMP.mild,
-    5,
+    3,
     DELAY_RAMP.moderate,
-    10,
+    5,
     severeColorResolved(),
   ];
 }
