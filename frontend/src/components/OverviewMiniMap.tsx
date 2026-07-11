@@ -18,7 +18,12 @@ type Props = {
  *  duplicating any map logic. No click handlers, no legend, no zoom/pan:
  *  this is a glance-strip, not a second full map. Always loaded via
  *  React.lazy (see OverviewTab.tsx) so maplibre-gl stays out of Overview's
- *  default bundle chunk. */
+ *  default bundle chunk.
+ *
+ *  No unit test: like MapTab.tsx, this renders a real MapLibre canvas,
+ *  which isn't practically exercisable in jsdom. The only pure logic here
+ *  (severity coloring, band filtering) lives in and is already tested via
+ *  useHeatmapLayer.test.ts. */
 export function OverviewMiniMap({ agencyId, ctx }: Props) {
   const { i18n } = useTranslation();
   const { data } = useHeatmap(agencyId, ctx);
@@ -30,6 +35,10 @@ export function OverviewMiniMap({ agencyId, ctx }: Props) {
     const m = new maplibregl.Map({
       container: containerRef.current,
       style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), i18n.language),
+      // Aomori pre-fit placeholder, not agency-specific — useHeatmapLayer's
+      // fitToData() re-pivots the camera to the real agency's stops on the
+      // first non-empty payload (re-armed per agencyId), so this only shows
+      // briefly for agencies other than Aomori before data loads.
       center: [140.7474, 40.8246],
       zoom: 11,
       interactive: false,

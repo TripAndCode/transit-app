@@ -61,4 +61,24 @@ describe("RoutesToCheckList", () => {
     fireEvent.click(screen.getByText("K31"));
     expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
   });
+
+  it("narrows the filter on Enter and Space, but not on other keys", () => {
+    const update = vi.fn();
+    vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([
+      { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+      update,
+    ]);
+    renderList(routes());
+    const row = screen.getByText("K31").closest('[role="button"]')!;
+
+    fireEvent.keyDown(row, { key: "Tab" });
+    expect(update).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
+
+    update.mockClear();
+    fireEvent.keyDown(row, { key: " " });
+    expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
+  });
 });
