@@ -138,6 +138,7 @@
       "delayed_count_value": "{{count}} / {{total}}路線",
       "feed_status_label": "フィード状況",
       "feed_status_ok": "正常稼働中",
+      "feed_status_stale": "データ遅延あり",
       "feed_status_updated": "最終更新 {{when}}"
     },
     "routes_to_check": {

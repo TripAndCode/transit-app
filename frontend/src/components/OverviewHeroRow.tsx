@@ -3,6 +3,7 @@ import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewHeadline } from "../api/types";
 import { delayColor } from "../styles/tokens";
 import { InsightHint } from "./InsightHint";
+import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 
 type Props = {
   headline: OverviewHeadline;
@@ -40,9 +41,11 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
   // it doesn't itself use).
   const captured = feedSummary?.latest_captured_at;
   let ageLabel: string | null = null;
+  let feedIsStale = false;
   if (captured) {
     const ageH = relativeAgeHours(captured);
     if (Number.isFinite(ageH)) {
+      feedIsStale = ageH >= STALE_THRESHOLD_HOURS;
       const days = Math.floor(ageH / 24);
       ageLabel =
         days >= 1
@@ -78,7 +81,9 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
       </div>
       <div className="ov-kpi-tile">
         <div className="ov-kpi-label">{t("overview.hero_row.feed_status_label")}</div>
-        <div className="ov-kpi-value ov-kpi-value-small">{t("overview.hero_row.feed_status_ok")}</div>
+        <div className="ov-kpi-value ov-kpi-value-small">
+          {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
+        </div>
         {ageLabel && (
           <div className="ov-kpi-context">{t("overview.hero_row.feed_status_updated", { when: ageLabel })}</div>
         )}

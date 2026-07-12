@@ -88,4 +88,18 @@ describe("OverviewHeroRow", () => {
     renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
+
+  it("shows a stale-feed label instead of 'Running normally' when the feed is stale", () => {
+    mockHooks(38, 30 * 24); // 30 days old — well past the 24h threshold
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    expect(screen.getByText("Data delayed")).toBeInTheDocument();
+    expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
+  });
+
+  it("keeps 'Running normally' when the feed is fresh", () => {
+    mockHooks(38, 0.1);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    expect(screen.getByText("Running normally")).toBeInTheDocument();
+    expect(screen.queryByText("Data delayed")).not.toBeInTheDocument();
+  });
 });
