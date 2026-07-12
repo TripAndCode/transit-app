@@ -37,7 +37,9 @@ export function Sidebar() {
   return (
     <aside
       style={{
-        width: 210,
+        // 230, not 210 — the brand block's title ("遅延ダッシュボード") needs
+        // ~135px alongside the 32px icon + gap; 210 wrapped it to two lines.
+        width: 230,
         background: "var(--bg-surface)",
         borderRight: "1px solid var(--border-soft)",
         padding: "16px 0",
