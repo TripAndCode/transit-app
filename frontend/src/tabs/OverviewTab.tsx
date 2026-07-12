@@ -55,11 +55,15 @@ export function OverviewTab() {
   // it would let an agency with movers but no other signal skip
   // EmptyState and render a hero row of "—"/an empty routes list/a
   // details toggle that reveals nothing.
+  // peak_hour is excluded for the same reason, but structurally: it reads
+  // agg_route_hour, a fixed analyze-period rollup with no date column (see
+  // pipeline/reports/overview.py's _peak_hour docstring), so it ignores
+  // ctx's date range entirely and stays non-null for any range once an
+  // agency has ever had data — it can never signal "no data in THIS range".
   const hasAnyData =
     !!data && (
       data.headline.samples > 0 ||
       data.concentration.top_routes.length > 0 ||
-      data.peak_hour != null ||
       Object.keys(data.service_split).length > 0
     );
 

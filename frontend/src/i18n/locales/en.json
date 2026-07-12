@@ -9,7 +9,11 @@
     "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
     "network": "Agencies",
-    "network_subtitle": "How you compare to others"
+    "network_subtitle": "How you compare to others",
+    "prototype_section_label": "PROTOTYPE",
+    "prototype_onboarding": "First-time login screen",
+    "prototype_stale_feed": "Feed-stale state",
+    "prototype_no_data": "No-data state"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
