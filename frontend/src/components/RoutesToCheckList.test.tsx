@@ -71,6 +71,17 @@ describe("RoutesToCheckList", () => {
     expect(screen.getByText("No routes need attention")).toBeInTheDocument();
   });
 
+  it("shows the empty-state message when routes is non-empty but every route is in the excluded ok band", () => {
+    // The backend's worst-N query has no minimum-delay floor, so a healthy
+    // agency's routes prop can be non-empty while every route is <1.5min
+    // (dropped by groupBySeverityBand). Gating the empty-state on
+    // routes.length instead of groups.length would render the "Routes to
+    // check now" header over blank space here -- regression test for that.
+    renderList([{ route_code: "A", route_short_name: null, avg_min: 0.5 }]);
+    expect(screen.getByText("No routes need attention")).toBeInTheDocument();
+    expect(document.querySelector(".ov-check-row")).not.toBeInTheDocument();
+  });
+
   it("narrows the shared route filter to the clicked route", () => {
     const update = vi.fn();
     vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([

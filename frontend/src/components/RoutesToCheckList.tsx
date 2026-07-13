@@ -18,7 +18,11 @@ export function RoutesToCheckList({ routes }: Props) {
   return (
     <div>
       <p className="ov-check-section-hd">{t("overview.routes_to_check.title")}</p>
-      {routes.length === 0 ? (
+      {/* groups.length, not routes.length: the backend's worst-N list has no
+          minimum-delay floor, so a healthy agency's routes can all land in
+          the excluded "ok" band, leaving groups empty even when routes isn't —
+          gating on routes.length would render this header over blank space. */}
+      {groups.length === 0 ? (
         <p className="ov-check-empty">{t("overview.routes_to_check.empty")}</p>
       ) : (
         groups.map((g) => (
