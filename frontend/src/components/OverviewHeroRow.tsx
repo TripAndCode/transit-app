@@ -13,11 +13,14 @@ type Props = {
   sparklinePoints: number[];
 };
 
-// Mirrors DataStalenessBanner.tsx's relativeAgeHours() exactly, including
+// Same shape as DataStalenessBanner.tsx's relativeAgeHours() — including
 // hoisting the Date.now() read into a top-level helper (an inline IIFE in
 // the component body trips react-hooks/purity's "impure function during
-// render" check; a named top-level function like this — the same shape
-// the sibling component already uses — does not).
+// render" check) — but deliberately NOT identical: this one returns NaN on
+// an invalid timestamp (guarded below by Number.isFinite, so a bad
+// timestamp reads as "no age" rather than being mistaken for "0h ago =
+// fresh"), where the banner returns 0. Don't dedup these into one shared
+// helper without preserving that difference.
 function relativeAgeHours(iso: string): number {
   const captured = new Date(iso).getTime();
   if (!Number.isFinite(captured)) return NaN;
