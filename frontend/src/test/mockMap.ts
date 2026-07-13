@@ -79,28 +79,8 @@ export function makeMockMap(
       styleLoadedFlag = true;
       map.fire("idle");
     },
-    // Camera calls are recorded (not just no-op'd) so tests can assert what
-    // fitToData() actually asked for — needed by the minFitZoom clamp test.
-    lastCamera: null as { method: string; center?: unknown; zoom?: number } | null,
-    flyTo(opts: { center: unknown; zoom: number }) {
-      map.lastCamera = { method: "flyTo", center: opts.center, zoom: opts.zoom };
-    },
-    fitBounds() {
-      map.lastCamera = { method: "fitBounds", center: undefined, zoom: undefined };
-    },
-    easeTo(opts: { center: unknown; zoom: number }) {
-      map.lastCamera = { method: "easeTo", center: opts.center, zoom: opts.zoom };
-    },
-    // Test-settable: the zoom cameraForBounds "computes" for the given
-    // bounds+container. Default (8) is deliberately below CLUSTER_MAX_ZOOM
-    // (13), reproducing the real small-container-strip bug this mock exists
-    // to test. Tests that need a different computed zoom set this directly
-    // on the returned map object before calling the hook.
-    _cameraForBoundsZoom: 8,
-    cameraForBounds(bounds: [[number, number], [number, number]]) {
-      const [[minLon, minLat], [maxLon, maxLat]] = bounds;
-      return { center: [(minLon + maxLon) / 2, (minLat + maxLat) / 2], zoom: map._cameraForBoundsZoom };
-    },
+    flyTo: () => {},
+    fitBounds: () => {},
   };
   return map;
 }

@@ -67,8 +67,6 @@ export function useHeatmapLayer(
   agencyId: number | null,
   styleEpoch: number,
   colorField: 'avg_delay_min' | 'p90_delay_min' = 'avg_delay_min',
-  // Only set by OverviewMiniMap — see fitToData() below for why.
-  minFitZoom?: number,
 ): void {
   const fittedRef = useRef(false);
   // Re-render signal on theme toggle: severeColorResolved() reads the theme-aware
@@ -267,21 +265,7 @@ export function useHeatmapLayer(
           if (lat < minLat) minLat = lat;
           if (lat > maxLat) maxLat = lat;
         }
-        const bounds: [[number, number], [number, number]] = [[minLon, minLat], [maxLon, maxLat]];
-        if (minFitZoom != null) {
-          // fitBounds computes zoom purely from the container's pixel size vs.
-          // the bounds' real-world extent, with no floor. In a small container
-          // (the Overview mini-map's ~180px-tall strip) this can force a zoom
-          // low enough that clustering collapses nearly every stop into one
-          // supercluster. cameraForBounds computes the same camera WITHOUT
-          // moving it, so the zoom can be clamped to a floor before applying.
-          const camera = m.cameraForBounds(bounds, { padding: 40 });
-          if (camera) {
-            m.easeTo({ center: camera.center, zoom: Math.max(camera.zoom ?? 0, minFitZoom), duration: 600 });
-          }
-        } else {
-          m.fitBounds(bounds, { padding: 40, duration: 600 });
-        }
+        m.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 40, duration: 600 });
         fittedRef.current = true;
       }
     }
@@ -291,7 +275,7 @@ export function useHeatmapLayer(
     // after style.load but before basemap tiles finish (isStyleLoaded() false)
     // still attaches instead of waiting on an event that won't fire again.
     return whenStyleReady(m, applyData);
-  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch, colorField, minFitZoom]);
+  }, [data, showSingleSampleStops, focusedSeverity, mapRef, styleEpoch, colorField]);
 
   // Update color when colorField OR the theme changes, without rebuilding the
   // whole layer (setPaintProperty, not addLayer — leaves the build/style-race

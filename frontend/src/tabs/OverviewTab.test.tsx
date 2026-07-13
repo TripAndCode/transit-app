@@ -50,17 +50,14 @@ describe("OverviewTab", () => {
     expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
   });
 
-  it("renders the routes-to-check list before the map (actionable content first)", () => {
+  it("does not render a mini-map — removed as low-value decorative content, spatial exploration stays on the dedicated Map tab", () => {
     renderOverview(
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
         top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1 },
       }),
     );
-    const routesHeading = screen.getByText("Routes to check now");
-    const mapPlaceholder = document.querySelector(".skeleton, .ov-map-strip")!;
-    expect(mapPlaceholder).toBeTruthy();
-    // DOCUMENT_POSITION_FOLLOWING means mapPlaceholder comes AFTER routesHeading
-    expect(routesHeading.compareDocumentPosition(mapPlaceholder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Routes to check now")).toBeInTheDocument();
+    expect(document.querySelector(".ov-map-strip")).not.toBeInTheDocument();
   });
 });
