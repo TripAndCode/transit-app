@@ -40,7 +40,7 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
 describe("OverviewHeroRow", () => {
   it("renders the network avg delay with a positive delta", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByText("Network avg delay")).toBeInTheDocument();
     expect(screen.getByText(/3\.3/)).toBeInTheDocument();
     expect(screen.getByText(/\+0\.5 min vs\. last week/)).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("OverviewHeroRow", () => {
 
   it("renders the delayed-route count over the total from useRoutes", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByText("3 / 38 routes")).toBeInTheDocument();
   });
 
@@ -59,6 +59,7 @@ describe("OverviewHeroRow", () => {
         headline={headline({ baseline_avg_min: 3.8, delta_min: -0.5, delta_pct: -13.2 })}
         delayedCount={3}
         agencyId={1}
+        sparklinePoints={[2.1, 2.8, 3.3]}
       />,
     );
     expect(screen.getByText(/-0\.5 min vs\. last week/)).toBeInTheDocument();
@@ -72,6 +73,7 @@ describe("OverviewHeroRow", () => {
         headline={headline({ baseline_avg_min: null, delta_min: null, delta_pct: null })}
         delayedCount={3}
         agencyId={1}
+        sparklinePoints={[2.1, 2.8, 3.3]}
       />,
     );
     expect(screen.getByText("No comparison data")).toBeInTheDocument();
@@ -79,27 +81,43 @@ describe("OverviewHeroRow", () => {
 
   it("shows the feed's last-updated age", () => {
     mockHooks(38, 2);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByText(/Last updated/)).toBeInTheDocument();
   });
 
   it("renders an inline info hint next to the baseline comparison", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
 
   it("shows a stale-feed label instead of 'Running normally' when the feed is stale", () => {
     mockHooks(38, 30 * 24); // 30 days old — well past the 24h threshold
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByText("Data delayed")).toBeInTheDocument();
     expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
   });
 
   it("keeps 'Running normally' when the feed is fresh", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} />);
+    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
     expect(screen.getByText("Running normally")).toBeInTheDocument();
     expect(screen.queryByText("Data delayed")).not.toBeInTheDocument();
+  });
+
+  it("renders a trend sparkline when there are at least 2 points", () => {
+    mockHooks(38, 0.1);
+    renderWithProviders(
+      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />,
+    );
+    expect(screen.getByRole("img", { hidden: true })).toBeInTheDocument();
+  });
+
+  it("renders no sparkline when there are fewer than 2 points", () => {
+    mockHooks(38, 0.1);
+    renderWithProviders(
+      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[3.3]} />,
+    );
+    expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
 });

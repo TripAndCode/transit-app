@@ -3,12 +3,14 @@ import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewHeadline } from "../api/types";
 import { delayColor } from "../styles/tokens";
 import { InsightHint } from "./InsightHint";
+import { InlineSparkline } from "./InlineSparkline";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 
 type Props = {
   headline: OverviewHeadline;
   delayedCount: number;
   agencyId: number;
+  sparklinePoints: number[];
 };
 
 // Mirrors DataStalenessBanner.tsx's relativeAgeHours() exactly, including
@@ -22,7 +24,7 @@ function relativeAgeHours(iso: string): number {
   return (Date.now() - captured) / (1000 * 60 * 60);
 }
 
-export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
+export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoints }: Props) {
   const { t } = useTranslation();
   const { data: routes } = useRoutes(agencyId);
   const totalRoutes = (routes ?? []).filter((r) => r.route_code != null).length;
@@ -60,8 +62,11 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId }: Props) {
     <div className="ov-kpi-row">
       <div className="ov-kpi-tile">
         <div className="ov-kpi-label">{t("overview.hero_row.avg_delay_label")}</div>
-        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-          {headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+            {headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}
+          </div>
+          <InlineSparkline points={sparklinePoints.slice(-7)} width={72} height={22} showLabels={false} showEndDot={false} />
         </div>
         <div className="ov-kpi-context">
           {hasBaseline

@@ -88,6 +88,7 @@ export function OverviewTab() {
               headline={data.headline}
               delayedCount={data.top_delayed.delayed_count}
               agencyId={agencyId!}
+              sparklinePoints={data.sparkline_points}
             />
             <Suspense fallback={<Skeleton height={180} style={{ marginBottom: 24 }} />}>
               <OverviewMiniMap agencyId={agencyId!} ctx={ctx} />
