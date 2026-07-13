@@ -721,8 +721,8 @@
   margin-top: 6px;
 }
 
-/* ---------- Mini-map strip (decorative live snapshot between the KPI row
-   and the routes-to-check list) ---------- */
+/* ---------- Mini-map strip (decorative live snapshot after the routes-to-
+   check list — the actionable content comes first) ---------- */
 .ov-map-strip {
   position: relative;
   height: 180px;

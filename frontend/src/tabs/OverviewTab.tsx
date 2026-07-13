@@ -90,10 +90,10 @@ export function OverviewTab() {
               agencyId={agencyId!}
               sparklinePoints={data.sparkline_points}
             />
+            <RoutesToCheckList routes={data.top_delayed.routes} />
             <Suspense fallback={<Skeleton height={180} style={{ marginBottom: 24 }} />}>
               <OverviewMiniMap agencyId={agencyId!} ctx={ctx} />
             </Suspense>
-            <RoutesToCheckList routes={data.top_delayed.routes} />
             <details className="ov-details">
               <summary className="ov-details-summary">{t("overview.details_toggle")}</summary>
               {data.concentration.top_routes.length > 0 && (
