@@ -50,6 +50,15 @@ describe("RoutesToCheckList", () => {
     expect(screen.getAllByText("W53")).toHaveLength(1);
   });
 
+  it("falls back to the bare code when route_short_name is an empty string, not just null", () => {
+    // Real backend data can return "" (not null) for an unnamed route --
+    // `??` doesn't catch that, only `||` does. Regression test for a real
+    // blank-row bug found in production data (route_code 1404722872).
+    renderList([{ route_code: "R99", route_short_name: "", avg_min: 4.0 }]);
+    expect(screen.getByText("R99")).toBeInTheDocument();
+    expect(screen.queryByText("()")).not.toBeInTheDocument();
+  });
+
   it("scales each bar relative to the list's own max avg_min", () => {
     renderList(routes());
     const bars = document.querySelectorAll(".ov-check-fill");

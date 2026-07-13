@@ -42,7 +42,11 @@ export function RoutesToCheckList({ routes }: Props) {
                 }}
               >
                 <span className="ov-check-name">
-                  {r.route_short_name ?? r.route_code}
+                  {r.route_short_name || r.route_code}
+                  {/* "" is a real value the backend can return for an unnamed
+                      route, not just null/undefined — `||` (not `??`) so an
+                      empty string falls back to the code too, instead of
+                      rendering a blank row. */}
                   {r.route_short_name && <span className="ov-check-name-code"> ({r.route_code})</span>}
                 </span>
                 <span className="ov-check-track">
