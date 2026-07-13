@@ -272,6 +272,24 @@
   color: var(--text-tertiary);
   margin-bottom: 10px;
 }
+.ov-check-band-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.ov-check-band-count {
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+.ov-check-name-code {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
 .ov-check-row {
   display: flex;
   align-items: center;
@@ -286,16 +304,6 @@
 }
 .ov-check-row:hover {
   background: var(--bg-soft);
-}
-.ov-check-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
-  max-width: 80px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .ov-check-name {
   font-size: 12.5px;
