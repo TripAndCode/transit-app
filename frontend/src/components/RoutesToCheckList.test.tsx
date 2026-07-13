@@ -26,15 +26,37 @@ function renderList(rs: OverviewTopDelayedRoute[]) {
 }
 
 describe("RoutesToCheckList", () => {
-  it("renders one row per route with a separate code column, name, and absolute delay", () => {
+  it("groups routes into severity bands with a worst-first header, count, and no empty bands", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
-    expect(screen.getByText("K31")).toBeInTheDocument();
+    // K31 (6.6) and K37 (5.7) are both >= 5min -> "severe" band, header first
+    expect(screen.getByText("> 5 min")).toBeInTheDocument();
+    // W53 (2.1) is 1.5-3min -> "mild" band. Note: the real i18n string uses an
+    // en-dash with NO surrounding spaces ("1.5–3 min", "3–5 min") -- verified
+    // against frontend/src/i18n/locales/en.json, not guessed.
+    expect(screen.getByText("1.5–3 min")).toBeInTheDocument();
+    // no routes fall in 3-5min ("moderate") or <1.5min ("ok") -- their headers must be absent
+    expect(screen.queryByText("3–5 min")).not.toBeInTheDocument();
+    expect(screen.queryByText("< 1.5 min")).not.toBeInTheDocument();
+  });
+
+  it("shows short_name with the code de-emphasized in parens, not as a separate raw-code column", () => {
+    renderList(routes());
+    // K31 and K37 share the same short_name -- both rows render it
     expect(screen.getAllByText("観光通り線")).toHaveLength(2);
-    expect(screen.getByText("6.6")).toBeInTheDocument();
-    // W53 has no route_short_name — the name column falls back to the code,
-    // so "W53" appears twice (once in the code column, once in the name column).
-    expect(screen.getAllByText("W53")).toHaveLength(2);
+    expect(screen.getByText("(K31)")).toBeInTheDocument();
+    expect(screen.getByText("(K37)")).toBeInTheDocument();
+    // W53 has no short_name -- falls back to the bare code, only once (no duplication)
+    expect(screen.getAllByText("W53")).toHaveLength(1);
+  });
+
+  it("falls back to the bare code when route_short_name is an empty string, not just null", () => {
+    // Real backend data can return "" (not null) for an unnamed route --
+    // `??` doesn't catch that, only `||` does. Regression test for a real
+    // blank-row bug found in production data (route_code 1404722872).
+    renderList([{ route_code: "R99", route_short_name: "", avg_min: 4.0 }]);
+    expect(screen.getByText("R99")).toBeInTheDocument();
+    expect(screen.queryByText("()")).not.toBeInTheDocument();
   });
 
   it("scales each bar relative to the list's own max avg_min", () => {
@@ -42,13 +64,22 @@ describe("RoutesToCheckList", () => {
     const bars = document.querySelectorAll(".ov-check-fill");
     expect(bars).toHaveLength(3);
     expect((bars[0] as HTMLElement).style.width).toBe("100%");
-    const w53Width = parseFloat((bars[2] as HTMLElement).style.width);
-    expect(w53Width).toBeCloseTo((2.1 / 6.6) * 100, 0);
   });
 
   it("shows the empty-state message when there are no routes", () => {
     renderList([]);
     expect(screen.getByText("No routes need attention")).toBeInTheDocument();
+  });
+
+  it("shows the empty-state message when routes is non-empty but every route is in the excluded ok band", () => {
+    // The backend's worst-N query has no minimum-delay floor, so a healthy
+    // agency's routes prop can be non-empty while every route is <1.5min
+    // (dropped by groupBySeverityBand). Gating the empty-state on
+    // routes.length instead of groups.length would render the "Routes to
+    // check now" header over blank space here -- regression test for that.
+    renderList([{ route_code: "A", route_short_name: null, avg_min: 0.5 }]);
+    expect(screen.getByText("No routes need attention")).toBeInTheDocument();
+    expect(document.querySelector(".ov-check-row")).not.toBeInTheDocument();
   });
 
   it("narrows the shared route filter to the clicked route", () => {
@@ -58,7 +89,9 @@ describe("RoutesToCheckList", () => {
       update,
     ]);
     renderList(routes());
-    fireEvent.click(screen.getByText("K31"));
+    // K31 (6.6) sorts before K37 (5.7) within the "severe" band (worst-first),
+    // so the first "観光通り線" match is K31's row.
+    fireEvent.click(screen.getAllByText("観光通り線")[0]);
     expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
   });
 
@@ -69,7 +102,7 @@ describe("RoutesToCheckList", () => {
       update,
     ]);
     renderList(routes());
-    const row = screen.getByText("K31").closest('[role="button"]')!;
+    const row = screen.getByText("(K31)").closest('[role="button"]')!;
 
     fireEvent.keyDown(row, { key: "Tab" });
     expect(update).not.toHaveBeenCalled();

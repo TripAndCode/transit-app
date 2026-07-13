@@ -138,6 +138,7 @@
       "delayed_count_value": "{{count}} / {{total}} routes",
       "feed_status_label": "Feed status",
       "feed_status_ok": "Running normally",
+      "feed_status_stale": "Data delayed",
       "feed_status_updated": "Last updated {{when}}"
     },
     "routes_to_check": {

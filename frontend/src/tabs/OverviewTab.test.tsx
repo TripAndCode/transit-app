@@ -49,4 +49,15 @@ describe("OverviewTab", () => {
     renderOverview(summary({ headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" } }));
     expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
   });
+
+  it("does not render a mini-map — removed as low-value decorative content, spatial exploration stays on the dedicated Map tab", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1 },
+      }),
+    );
+    expect(screen.getByText("Routes to check now")).toBeInTheDocument();
+    expect(document.querySelector(".ov-map-strip")).not.toBeInTheDocument();
+  });
 });

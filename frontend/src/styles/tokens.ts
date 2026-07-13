@@ -74,14 +74,23 @@ export const DELAY_RAMP = {
   severe: SEVERE_VAR, // > 5 min red, per-theme via --delay-severe
 } as const;
 
+export type DelayBand = "ok" | "mild" | "moderate" | "severe";
+
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
+// Single source of truth for the delay/severity cutoffs — delayColor() and
+// any other consumer that needs the band (not just its color) both go
+// through this, so a future retune can't silently desync one from the other.
+export function delayBand(minutes: number): DelayBand {
+  if (minutes <= 0) return "ok";
+  if (minutes < 1.5) return "ok";
+  if (minutes < 3) return "mild";
+  if (minutes < 5) return "moderate";
+  return "severe";
+}
+
 export function delayColor(minutes: number): string {
-  if (minutes <= 0) return DELAY_RAMP.ok;
-  if (minutes < 1.5) return DELAY_RAMP.ok;
-  if (minutes < 3) return DELAY_RAMP.mild;
-  if (minutes < 5) return DELAY_RAMP.moderate;
-  return DELAY_RAMP.severe;
+  return DELAY_RAMP[delayBand(minutes)];
 }
 
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
