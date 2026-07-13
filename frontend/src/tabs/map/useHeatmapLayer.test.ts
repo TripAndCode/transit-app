@@ -98,6 +98,39 @@ describe("useHeatmapLayer (clustering)", () => {
   });
 });
 
+describe("useHeatmapLayer (fit-to-data zoom clamp)", () => {
+  it("without minFitZoom, calls fitBounds directly (unchanged existing behavior)", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, DATA, true, null, 1, 0);
+    });
+    expect(map.lastCamera?.method).toBe("fitBounds");
+  });
+
+  it("with minFitZoom, clamps a too-low computed zoom up to the floor", () => {
+    const map = makeMockMap();
+    map._cameraForBoundsZoom = 8; // below the 11 floor this test sets
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, DATA, true, null, 1, 0, "avg_delay_min", 11);
+    });
+    expect(map.lastCamera?.method).toBe("easeTo");
+    expect(map.lastCamera?.zoom).toBe(11);
+  });
+
+  it("with minFitZoom, leaves an already-adequate computed zoom untouched", () => {
+    const map = makeMockMap();
+    map._cameraForBoundsZoom = 14; // already above the 11 floor
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useHeatmapLayer(mapRef, DATA, true, null, 1, 0, "avg_delay_min", 11);
+    });
+    expect(map.lastCamera?.method).toBe("easeTo");
+    expect(map.lastCamera?.zoom).toBe(14);
+  });
+});
+
 describe("useHeatmapLayer colorField", () => {
   afterEach(() => {
     document.documentElement.style.removeProperty("--delay-severe");

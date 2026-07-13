@@ -57,7 +57,11 @@ export function OverviewMiniMap({ agencyId, ctx }: Props) {
   // showSingleSampleStops=false, focusedSeverity=null, styleEpoch=0 (fixed —
   // there's no basemap-style switcher on this strip to bump it), matching
   // MapTab's own defaults for its equivalent stop-dot layer.
-  useHeatmapLayer(mapRef, data, false, null, agencyId, 0);
+  // minFitZoom=11 matches this strip's own placeholder zoom above — the
+  // value already proven to keep this agency's stops visually distinct at
+  // this exact container size (see useHeatmapLayer's minFitZoom for why a
+  // small container needs a floor the full Map tab doesn't).
+  useHeatmapLayer(mapRef, data, false, null, agencyId, 0, "avg_delay_min", 11);
 
   return (
     <div className="ov-map-strip">
