@@ -23,8 +23,10 @@ export type RangeCtx = {
 };
 
 type RangeCtxPatch = {
-  from?: string;
-  to?: string;
+  /** Pass `null` to clear (letting useDefaultRangeAnchor re-derive the
+   *  default), otherwise the new value. */
+  from?: string | null;
+  to?: string | null;
   dow?: DowFilter;
   time_band?: TimeBand;
   service?: ServiceFilter;
