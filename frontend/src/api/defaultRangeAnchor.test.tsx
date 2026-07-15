@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
@@ -28,6 +28,8 @@ function renderAnchor(agencyId: number | null, initialPath: string) {
 }
 
 describe("useDefaultRangeAnchor", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("does nothing when the URL already has an explicit from/to", () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
       data: [agency({ latest_data_date: "2026-01-01" })],
