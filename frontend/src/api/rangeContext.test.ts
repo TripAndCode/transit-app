@@ -3,6 +3,7 @@ import {
   ctxToQueryString,
   toJstISO,
   isoDaysAgo,
+  isoDaysBefore,
   jstYearMonth,
   type RangeCtx,
 } from "./rangeContext";
@@ -72,5 +73,19 @@ describe("JST date helpers", () => {
       year: 2024,
       month: 1,
     });
+  });
+});
+
+describe("isoDaysBefore", () => {
+  it("subtracts calendar days from a given ISO date, not from now", () => {
+    expect(isoDaysBefore("2026-06-15", 29)).toBe("2026-05-17");
+  });
+
+  it("handles a month boundary", () => {
+    expect(isoDaysBefore("2026-03-01", 1)).toBe("2026-02-28");
+  });
+
+  it("handles days=0 (returns the same date)", () => {
+    expect(isoDaysBefore("2026-06-15", 0)).toBe("2026-06-15");
   });
 });

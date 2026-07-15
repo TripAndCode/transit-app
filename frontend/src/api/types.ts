@@ -3,6 +3,7 @@ export type Agency = {
   agency_name: string;
   feed_url: string;
   static_url: string | null;
+  latest_data_date: string | null;
 };
 
 export type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";

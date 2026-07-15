@@ -60,6 +60,16 @@ export function isoDaysAgo(days: number): string {
   return toJstISO(new Date(Date.now() - days * 86_400_000));
 }
 
+/** YYYY-MM-DD `days` calendar days before the given YYYY-MM-DD date — pure
+ *  date-string arithmetic, no "now" involved (unlike isoDaysAgo). Used to
+ *  anchor a default range at an agency's real latest data date instead of
+ *  today, when today's default window would otherwise be empty. */
+export function isoDaysBefore(dateISO: string, days: number): string {
+  const d = new Date(`${dateISO}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return toJstISO(d);
+}
+
 /** JST calendar (year, month=1..12) of a Date. */
 export function jstYearMonth(d: Date): { year: number; month: number } {
   const parts = jstFmt.formatToParts(d);
