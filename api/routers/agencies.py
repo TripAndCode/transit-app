@@ -40,9 +40,11 @@ class AgencyOut(BaseModel):
     static_url: str | None
     # ISO date string (YYYY-MM-DD) of the latest date with real aggregated
     # data for this agency, or None if it has none yet. Powers the frontend's
-    # smart-default-range redirect — reads the same agg_route_daily MAX(date)
-    # signal pipeline/health.py's freshness check already uses, not a live
-    # scan of `updates`.
+    # smart-default-range redirect. Same table/freshness signal as
+    # pipeline/health.py's _AGG_MAX_SQL, but computed as a per-agency
+    # correlated subquery rather than a bare GROUP BY over agg_route_daily —
+    # this endpoint is public and frequently hit, so it needs the
+    # index-backed backward scan per agency rather than a full-table scan.
     latest_data_date: str | None = None
 
 
@@ -71,10 +73,9 @@ def _agency_row_to_dict(row) -> dict:
 @router.get("", response_model=list[AgencyOut])
 async def list_agencies(conn=Depends(get_conn)):
     rows = await conn.fetch(
-        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, m.d AS latest_data_date "
+        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
+        "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
         "FROM agencies a "
-        "LEFT JOIN (SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id) m "
-        "  ON m.agency_id = a.agency_id "
         "WHERE a.deleted_at IS NULL ORDER BY a.agency_id"
     )
     return [_agency_row_to_dict(r) for r in rows]
@@ -83,10 +84,9 @@ async def list_agencies(conn=Depends(get_conn)):
 @router.get("/{agency_id}", response_model=AgencyOut)
 async def get_agency(agency_id: int, conn=Depends(get_conn)):
     row = await conn.fetchrow(
-        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, m.d AS latest_data_date "
+        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
+        "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
         "FROM agencies a "
-        "LEFT JOIN (SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id) m "
-        "  ON m.agency_id = a.agency_id "
         "WHERE a.agency_id=$1 AND a.deleted_at IS NULL",
         agency_id,
     )
