@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
@@ -28,6 +29,7 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
+  useDefaultRangeAnchor(agencyId ? Number(agencyId) : null);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <GuestPrompt />
