@@ -429,6 +429,7 @@ async def test_list_agencies_includes_latest_data_date(agencies_client):
     )
     aid = create_resp.json()["agency_id"]
     from api.main import app
+
     async with app.state.pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO agg_route_daily "
@@ -471,6 +472,7 @@ async def test_get_agency_includes_latest_data_date(agencies_client):
     )
     aid = create_resp.json()["agency_id"]
     from api.main import app
+
     async with app.state.pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO agg_route_daily "
