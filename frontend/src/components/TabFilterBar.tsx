@@ -3,9 +3,6 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
 import {
-  DEFAULT_RANGE_DAYS,
-  isoDaysAgo,
-  todayISO,
   useRangeContext,
   type DowFilter,
   type ServiceFilter,
@@ -189,12 +186,15 @@ export function TabFilterBar() {
   function reset() {
     // Reset includes the date range — drilldowns from the trend heatmap set
     // from=to=<single day>; without resetting the dates here, "全てクリア" // i18n-ignore: comment
-    // leaves the user stuck on a one-day window.
+    // leaves the user stuck on a one-day window. Clearing (not hardcoding
+    // today's window) lets useDefaultRangeAnchor re-derive the right
+    // default — hardcoding today's window here would trap a lagging
+    // agency on a guaranteed-empty range with no way back to its real data.
     const cleared: Draft = { dow: "all", time_band: "all", service: "all", routes: [] };
     setDraft(cleared);
     setCtx({
-      from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1),
-      to: todayISO(),
+      from: null,
+      to: null,
       dow: "all",
       time_band: "all",
       service: "all",

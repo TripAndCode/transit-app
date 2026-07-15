@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import asyncpg
 import httpx
@@ -62,7 +62,7 @@ async def agencies_client(apply_schema):
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, "
+        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
         "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     # Pre-truncate so each test starts from a known-empty state — otherwise
@@ -91,7 +91,7 @@ async def agencies_client_real_validator(apply_schema):
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, "
+        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
         "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     async with pool.acquire() as conn:
@@ -416,3 +416,72 @@ async def test_create_agency_rejects_internal_ip(agencies_client_real_validator)
         cookies={"sid": sid},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_agencies_includes_latest_data_date(agencies_client):
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "HasData", "feed_url": "http://hasdata.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    from api.main import app
+
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_daily "
+            "(agency_id, date, route_code, service_type, avg_delay_sec, "
+            "worst_delay_sec, trips_observed, samples, last_seen_at) "
+            "VALUES ($1, $2, 'R1', '平日', 120, 180, 5, 50, now())",
+            aid,
+            date(2026, 6, 15),
+        )
+    resp = await client.get("/api/agencies")
+    assert resp.status_code == 200
+    by_id = {a["agency_id"]: a for a in resp.json()}
+    assert by_id[aid]["latest_data_date"] == "2026-06-15"
+
+
+@pytest.mark.asyncio
+async def test_list_agencies_latest_data_date_null_when_no_data(agencies_client):
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "NoData", "feed_url": "http://nodata.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    resp = await client.get("/api/agencies")
+    assert resp.status_code == 200
+    by_id = {a["agency_id"]: a for a in resp.json()}
+    assert by_id[aid]["latest_data_date"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_agency_includes_latest_data_date(agencies_client):
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "SingleFetch", "feed_url": "http://single.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    from api.main import app
+
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_daily "
+            "(agency_id, date, route_code, service_type, avg_delay_sec, "
+            "worst_delay_sec, trips_observed, samples, last_seen_at) "
+            "VALUES ($1, $2, 'R1', '平日', 60, 90, 3, 20, now())",
+            aid,
+            date(2026, 5, 1),
+        )
+    resp = await client.get(f"/api/agencies/{aid}")
+    assert resp.status_code == 200
+    assert resp.json()["latest_data_date"] == "2026-05-01"

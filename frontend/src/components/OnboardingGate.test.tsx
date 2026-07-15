@@ -7,7 +7,7 @@ import * as hooks from "../api/hooks";
 import type { Agency } from "../api/types";
 
 function agency(over: Partial<Agency>): Agency {
-  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, ...over };
+  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
 }
 
 function MapProbe() {
