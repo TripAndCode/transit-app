@@ -346,7 +346,9 @@ def cmd_build_rag_index(args):
         pool = await asyncpg.create_pool(DATABASE_URL)
         if args.all_agencies:
             async with pool.acquire() as conn:
-                rows = await conn.fetch("SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+                rows = await conn.fetch(
+                    "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+                )
             ids = [(r["agency_id"], r["agency_name"]) for r in rows]
         else:
             if args.agency_id is None:

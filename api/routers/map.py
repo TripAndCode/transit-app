@@ -426,11 +426,7 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dic
     c = cohort[stop_id]
     cohort_avg = c["cohort_avg_delay_sec"]
     route_count = c["cohort_route_count"]
-    is_outlier = (
-        cohort_avg is not None
-        and route_count >= 2
-        and route_avg_sec > cohort_avg * 1.5
-    )
+    is_outlier = cohort_avg is not None and route_count >= 2 and route_avg_sec > cohort_avg * 1.5
     return {
         "cohort_avg_delay_sec": cohort_avg,
         "cohort_route_count": route_count,

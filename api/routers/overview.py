@@ -166,7 +166,9 @@ async def peak_hour_breakdown(
             ORDER BY avg_min DESC
             LIMIT 20
             """,
-            agency_id, dow, hour,
+            agency_id,
+            dow,
+            hour,
         )
     else:
         rows = await conn.fetch(
@@ -181,7 +183,8 @@ async def peak_hour_breakdown(
             ORDER BY avg_min DESC
             LIMIT 20
             """,
-            agency_id, hour,
+            agency_id,
+            hour,
         )
     return PeakHourBreakdown(
         hour=hour,

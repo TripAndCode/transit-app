@@ -1,4 +1,5 @@
 """Tests for GET /api/{agency_id}/delays/heatmap — p90_delay_min field."""
+
 import os
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -26,7 +27,11 @@ async def hmap_client(apply_schema):
     await pool.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
         "VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5,$4),4326))",
-        aid, "S1", "駅前", 40.7, 140.7,
+        aid,
+        "S1",
+        "駅前",
+        40.7,
+        140.7,
     )
     today = date.today()
     # Three daily rows with delay_sum/samples giving per-day avgs: 60s, 120s, 600s
@@ -37,7 +42,13 @@ async def hmap_client(apply_schema):
             "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7) "
             "ON CONFLICT DO NOTHING",
-            aid, "S1", today - timedelta(days=d_offset), "平日", "朝", ds, s,
+            aid,
+            "S1",
+            today - timedelta(days=d_offset),
+            "平日",
+            "朝",
+            ds,
+            s,
         )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
@@ -78,7 +89,8 @@ async def stop_profile_client(apply_schema):
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
-        "StopCohortAgency", "http://stop-cohort-test.example.com",
+        "StopCohortAgency",
+        "http://stop-cohort-test.example.com",
     )
     aid = row["agency_id"]
 
@@ -87,18 +99,27 @@ async def stop_profile_client(apply_schema):
         await pool.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
             "VALUES ($1,$2,$3,$4,$5,ST_SetSRID(ST_MakePoint($5,$4),4326))",
-            aid, stop_id, name, lat, lon,
+            aid,
+            stop_id,
+            name,
+            lat,
+            lon,
         )
     # Route K31 trips: stop_seq 1→S1, 2→S2
     await pool.execute(
         "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1,$2,$3,$4)",
-        aid, "T1", "K31", "WD",
+        aid,
+        "T1",
+        "K31",
+        "WD",
     )
     for seq, stop_id in [(1, "S1"), (2, "S2")]:
         await pool.execute(
-            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
-            "VALUES ($1,$2,$3,$4)",
-            aid, "T1", seq, stop_id,
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1,$2,$3,$4)",
+            aid,
+            "T1",
+            seq,
+            stop_id,
         )
     # Raw updates for today (K31 with big delay at S1)
     today = date.today()
@@ -108,13 +129,29 @@ async def stop_profile_client(apply_schema):
         "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
         "scheduled_time, route_code, stop_sequence, dep_delay) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        aid, "f1.pb", ts, "T1", "平日", time(9, 0), "K31", 1, 600,
+        aid,
+        "f1.pb",
+        ts,
+        "T1",
+        "平日",
+        time(9, 0),
+        "K31",
+        1,
+        600,
     )
     await pool.execute(
         "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
         "scheduled_time, route_code, stop_sequence, dep_delay) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        aid, "f1.pb", ts, "T1", "平日", time(9, 0), "K31", 2, 60,
+        aid,
+        "f1.pb",
+        ts,
+        "T1",
+        "平日",
+        time(9, 0),
+        "K31",
+        2,
+        60,
     )
     # agg_route_stop_daily: S1 has three routes — K31 (600s avg), K99 (200s avg), K98 (100s avg)
     # cohort_avg = (600+200+100)/3 = 300s; K31 avg 600 > 300*1.5=450 → is_outlier=True for K31
@@ -123,14 +160,28 @@ async def stop_profile_client(apply_schema):
             "INSERT INTO agg_route_stop_daily "
             "(agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",
-            aid, route_code, "S1", today, "平日", "朝", ds, s,
+            aid,
+            route_code,
+            "S1",
+            today,
+            "平日",
+            "朝",
+            ds,
+            s,
         )
     # S2 only has K31 — cohort_route_count=1, so never outlier
     await pool.execute(
         "INSERT INTO agg_route_stop_daily "
         "(agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",
-        aid, "K31", "S2", today, "平日", "朝", 60, 1,
+        aid,
+        "K31",
+        "S2",
+        today,
+        "平日",
+        "朝",
+        60,
+        1,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid

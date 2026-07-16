@@ -281,6 +281,7 @@ async def delete_user(
 
 # ── Ops health endpoint ──────────────────────────────────────────────────
 
+
 class MigrationStatusOut(BaseModel):
     applied: str | None
     latest: str | None
@@ -327,17 +328,19 @@ async def admin_ops(
     agencies_ok = True
     try:
         for af in await aggregate_freshness(conn):
-            agencies_out.append(AgencyFreshnessOut(
-                agency_id=af.agency_id,
-                agency_name=af.agency_name,
-                last_analyzed_at=af.last_analyzed_at.isoformat() if af.last_analyzed_at else None,
-                analyze_age_hours=af.analyze_age_hours,
-                agg_fresh=af.agg_fresh,
-                agg_behind_days=af.agg_behind_days,
-                is_stale=af.is_stale,
-                data_to=af.data_to,
-                clamp_pct=af.clamp_pct,
-            ))
+            agencies_out.append(
+                AgencyFreshnessOut(
+                    agency_id=af.agency_id,
+                    agency_name=af.agency_name,
+                    last_analyzed_at=af.last_analyzed_at.isoformat() if af.last_analyzed_at else None,
+                    analyze_age_hours=af.analyze_age_hours,
+                    agg_fresh=af.agg_fresh,
+                    agg_behind_days=af.agg_behind_days,
+                    is_stale=af.is_stale,
+                    data_to=af.data_to,
+                    clamp_pct=af.clamp_pct,
+                )
+            )
     except Exception:
         agencies_out = []
         agencies_ok = False
