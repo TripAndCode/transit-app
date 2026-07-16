@@ -180,7 +180,7 @@ def summarize_agency_overview(
         if r["avg_min"] is None:
             continue
         trend_points.setdefault(r["route_code"], []).append((r["date"], round(float(r["avg_min"]), 1)))
-    trend_by_route = {code: [v for _, v in sorted(pts)] for code, pts in trend_points.items()}
+    trend_by_route = {code: [v for _, v in sorted(pts, key=lambda p: p[0])] for code, pts in trend_points.items()}
 
     routes: list[dict[str, Any]] = []
     for r in route_rows:

@@ -9,6 +9,7 @@ import csv
 import io
 from datetime import datetime, timezone
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -187,7 +188,7 @@ class ForecastOverviewResponse(BaseModel):
     disclaimer: str
 
 
-async def _fetch_recent_daily_rows(conn, agency_id: int):
+async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> list[asyncpg.Record]:
     """Last 7 analyzed calendar days per route, from agg_route_daily (real
     per-date rows) — a different table than route_rows in forecast_overview
     (which pools ALL time from the seasonal agg_route_hour_dow). Powers each
