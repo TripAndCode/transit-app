@@ -187,6 +187,28 @@ class ForecastOverviewResponse(BaseModel):
     disclaimer: str
 
 
+async def _fetch_recent_daily_rows(conn, agency_id: int):
+    """Last 7 analyzed calendar days per route, from agg_route_daily (real
+    per-date rows) — a different table than route_rows in forecast_overview
+    (which pools ALL time from the seasonal agg_route_hour_dow). Powers each
+    route's sparkline. NULL MAX(date) (brand-new agency, no agg rows yet)
+    makes the WHERE clause's date comparisons false, so this safely returns
+    zero rows rather than erroring.
+    """
+    return await conn.fetch(
+        "WITH latest AS ("
+        "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
+        ") "
+        "SELECT d.date, d.route_code, "
+        "  SUM(d.avg_delay_sec * d.samples) / NULLIF(SUM(d.samples), 0) / 60.0 AS avg_min "
+        "FROM agg_route_daily d, latest "
+        "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
+        "GROUP BY d.date, d.route_code "
+        "ORDER BY d.route_code, d.date",
+        agency_id,
+    )
+
+
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def forecast_overview(
@@ -229,24 +251,12 @@ async def forecast_overview(
         "FROM ra LEFT JOIN labels l USING (route_code)",
         agency_id,
     )
-    # Last 7 analyzed calendar days per route, from agg_route_daily (real
-    # per-date rows) — a different table than route_rows above (which pools
-    # ALL time from the seasonal agg_route_hour_dow). Powers each route's
-    # sparkline. NULL MAX(date) (brand-new agency, no agg rows yet) makes the
-    # WHERE clause's date comparisons false, so this safely returns zero rows
-    # rather than erroring.
-    recent_daily_rows = await conn.fetch(
-        "WITH latest AS ("
-        "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
-        ") "
-        "SELECT d.date, d.route_code, "
-        "  SUM(d.avg_delay_sec * d.samples) / NULLIF(SUM(d.samples), 0) / 60.0 AS avg_min "
-        "FROM agg_route_daily d, latest "
-        "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
-        "GROUP BY d.date, d.route_code "
-        "ORDER BY d.route_code, d.date",
-        agency_id,
-    )
+    # Purely decorative (unlike grid_rows/route_rows above), so a failure here
+    # degrades to no sparklines instead of 500ing the whole response.
+    try:
+        recent_daily_rows = await _fetch_recent_daily_rows(conn, agency_id)
+    except Exception:
+        recent_daily_rows = []
     return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
 
 

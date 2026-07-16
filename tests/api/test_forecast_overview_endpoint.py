@@ -115,3 +115,19 @@ async def test_overview_route_recent_daily_trend(overview_client):
     assert by_code["100"]["recent_daily"] == pytest.approx([1.0, 2.0, 4.0], abs=0.05)
     # route 200 has no agg_route_daily rows at all -> empty, not missing/error
     assert by_code["200"]["recent_daily"] == []
+
+
+async def test_overview_recent_daily_failure_degrades_gracefully(overview_client, monkeypatch):
+    """A failing recent_daily sub-query returns [] per route, not a 500 for the whole response."""
+    import api.routers.reports as reports_mod
+
+    async def boom(conn, agency_id):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(reports_mod, "_fetch_recent_daily_rows", boom)
+    client, aid, _aid_empty = overview_client
+    r = await client.get(f"/api/{aid}/forecast/overview")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["routes"]) > 0
+    assert all(x["recent_daily"] == [] for x in body["routes"])

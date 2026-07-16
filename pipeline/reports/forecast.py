@@ -134,11 +134,14 @@ def summarize_agency_overview(
 
     `grid_rows`: per-(dow,hour) pooled mappings ``{dow,hour,avg_min,samples}``.
     `route_rows`: per-route mappings ``{route_code, route_name, avg_min, samples}``.
-    `recent_daily_rows`: per-(date,route_code) mappings ``{date, route_code, avg_min}``,
-    already ordered by (route_code, date) — attached per route as `recent_daily`,
-    oldest first. Pooling is exact (a sample-weighted mean of per-bucket means is the
-    pooled mean). The worst window excludes low-confidence buckets so a small-sample
-    fluke can never headline. No percentile (cannot pool per-bucket percentiles).
+    `recent_daily_rows`: per-(date,route_code) mappings ``{date, route_code, avg_min}``
+    — attached per route as `recent_daily`, sorted oldest first. Missing calendar
+    days (no agg_route_daily row, e.g. no service that day) are simply omitted
+    rather than null-padded, so `recent_daily`'s point spacing reflects "days
+    observed," not a calendar-uniform week. Pooling is exact (a sample-weighted
+    mean of per-bucket means is the pooled mean). The worst window excludes
+    low-confidence buckets so a small-sample fluke can never headline. No
+    percentile (cannot pool per-bucket percentiles).
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
@@ -169,11 +172,15 @@ def summarize_agency_overview(
         worst.pop("_m")
 
     # ── routes: rank by delay desc, low-confidence last (top_n optional cap) ──
-    trend_by_route: dict[str, list[float]] = {}
+    # Sorted by date here rather than trusted from the caller's row order, so
+    # `recent_daily` stays oldest-first even if a future caller feeds rows in
+    # a different order.
+    trend_points: dict[str, list[tuple[Any, float]]] = {}
     for r in recent_daily_rows:
         if r["avg_min"] is None:
             continue
-        trend_by_route.setdefault(r["route_code"], []).append(round(float(r["avg_min"]), 1))
+        trend_points.setdefault(r["route_code"], []).append((r["date"], round(float(r["avg_min"]), 1)))
+    trend_by_route = {code: [v for _, v in sorted(pts)] for code, pts in trend_points.items()}
 
     routes: list[dict[str, Any]] = []
     for r in route_rows:
