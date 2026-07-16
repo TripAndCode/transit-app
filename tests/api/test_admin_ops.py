@@ -21,7 +21,9 @@ async def _seed_admin_session(conn) -> str:
     sid = f"sid-ops-{uid}"
     await conn.execute(
         "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid, uid, datetime.now(timezone.utc) + timedelta(days=1),
+        sid,
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=1),
     )
     return sid
 
@@ -33,9 +35,7 @@ async def ops_client(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
     async with pool.acquire() as conn:
-        await conn.execute(
-            "TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE"
-        )
+        await conn.execute("TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE")
         admin_sid = await _seed_admin_session(conn)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, admin_sid, pool
@@ -77,13 +77,15 @@ async def test_ops_agency_freshness(ops_client):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
-            "OpsTestAgency", "http://ops.example.com",
+            "OpsTestAgency",
+            "http://ops.example.com",
         )
         aid = row["agency_id"]
         analyzed = datetime.now(timezone.utc) - timedelta(hours=3)
         await conn.execute(
             "INSERT INTO agg_meta (agency_id, analyzed_at) VALUES ($1, $2)",
-            aid, analyzed,
+            aid,
+            analyzed,
         )
     resp = await c.get("/api/admin/ops", cookies={"sid": sid})
     body = resp.json()

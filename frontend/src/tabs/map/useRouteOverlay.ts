@@ -15,7 +15,7 @@ export const ROUTE_LAYER = "route-line-stroke";
 export const ROUTE_TREND_LAYER = "route-trend-line";
 export const ROUTE_STOPS_LAYER = "route-stops";
 
-export type RouteOverlayMode = "trend" | "hourly";
+type RouteOverlayMode = "trend" | "hourly";
 
 // Every layer of the agency-wide delay overlay (dots + cluster bubbles + their
 // count labels). Single-route mode hides ALL of them, not just the dots —

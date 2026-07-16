@@ -96,8 +96,13 @@ async def _seed_agg_route_stats(aconn, agency_id, route_code, service_type, avg_
         "ON CONFLICT (agency_id, route_code, service_type) DO UPDATE "
         "SET avg_min=EXCLUDED.avg_min, p90_min=EXCLUDED.p90_min, "
         "    late5_pct=EXCLUDED.late5_pct, samples=EXCLUDED.samples",
-        agency_id, route_code, service_type,
-        float(avg_min), float(p90_min), float(late5_pct), int(samples),
+        agency_id,
+        route_code,
+        service_type,
+        float(avg_min),
+        float(p90_min),
+        float(late5_pct),
+        int(samples),
     )
 
 
@@ -108,8 +113,13 @@ async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, d
         "VALUES ($1,$2,$3,$4,$5,$6,$7) "
         "ON CONFLICT (agency_id, route_code, service_type, dow, hour) DO UPDATE "
         "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples",
-        agency_id, route_code, service_type, dow, hour,
-        float(avg_min), int(samples),
+        agency_id,
+        route_code,
+        service_type,
+        dow,
+        hour,
+        float(avg_min),
+        int(samples),
     )
 
 
@@ -120,8 +130,14 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
         " trips_observed, samples, last_seen_at) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO NOTHING",
-        agency_id, date_, route_code, service_type,
-        int(avg_delay_sec), int(avg_delay_sec), 1, int(samples),
+        agency_id,
+        date_,
+        route_code,
+        service_type,
+        int(avg_delay_sec),
+        int(avg_delay_sec),
+        1,
+        int(samples),
         datetime.combine(date_, time(12, 0), tzinfo=timezone.utc),
     )
 
@@ -905,6 +921,7 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_route_summary_includes_late5_pct(client, aconn, aagency_id):
     from datetime import date
+
     d = date.today()
     await _seed_agg_route_daily(aconn, aagency_id, d, "K31", "平日", 360, 100)
     await _seed_agg_route_stats(aconn, aagency_id, "K31", "平日", 6.0, 8.0, 23.5, 100)
@@ -919,6 +936,7 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency_id):
     from datetime import date
+
     d = date.today()
     await _seed_agg_route_daily(aconn, aagency_id, d, "K99", "平日", 120, 5)
     # No agg_route_stats row → late5_pct must be None

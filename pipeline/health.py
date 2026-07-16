@@ -18,8 +18,8 @@ from db.migrate import _versions_on_disk
 @dataclass(frozen=True)
 class MigrationStatus:
     applied: str | None  # latest applied version string, e.g. "0025"
-    latest: str | None   # latest on-disk version string
-    behind: int          # count of on-disk versions not in schema_migrations
+    latest: str | None  # latest on-disk version string
+    behind: int  # count of on-disk versions not in schema_migrations
 
 
 async def migration_status(conn: asyncpg.Connection) -> MigrationStatus:
@@ -132,15 +132,17 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
         clamp_pct = round(clamp / raw * 100, 2) if raw else None
 
-        result.append(AgencyFreshness(
-            agency_id=aid,
-            agency_name=a["agency_name"],
-            last_analyzed_at=analyzed_at,
-            analyze_age_hours=round(age_hours, 2) if age_hours is not None else None,
-            agg_fresh=not stale,
-            agg_behind_days=behind,
-            is_stale=stale,
-            data_to=data_to,
-            clamp_pct=clamp_pct,
-        ))
+        result.append(
+            AgencyFreshness(
+                agency_id=aid,
+                agency_name=a["agency_name"],
+                last_analyzed_at=analyzed_at,
+                analyze_age_hours=round(age_hours, 2) if age_hours is not None else None,
+                agg_fresh=not stale,
+                agg_behind_days=behind,
+                is_stale=stale,
+                data_to=data_to,
+                clamp_pct=clamp_pct,
+            )
+        )
     return result

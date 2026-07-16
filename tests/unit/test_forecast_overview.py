@@ -123,3 +123,18 @@ def test_routes_skip_null_avg_min_in_recent_daily():
     ]
     out = summarize_agency_overview([], route_rows, recent_daily_rows)
     assert out["routes"][0]["recent_daily"] == [2.0, 6.0]
+
+
+def test_routes_sort_recent_daily_by_date_even_if_rows_arrive_unsorted():
+    # summarize_agency_overview must not trust the caller's row order for
+    # "oldest first" — it sorts by date itself.
+    route_rows = [
+        {"route_code": "A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
+    ]
+    recent_daily_rows = [
+        {"date": "2026-06-03", "route_code": "A", "avg_min": 6.0},
+        {"date": "2026-06-01", "route_code": "A", "avg_min": 2.0},
+        {"date": "2026-06-02", "route_code": "A", "avg_min": 4.0},
+    ]
+    out = summarize_agency_overview([], route_rows, recent_daily_rows)
+    assert out["routes"][0]["recent_daily"] == [2.0, 4.0, 6.0]

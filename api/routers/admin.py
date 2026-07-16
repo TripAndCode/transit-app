@@ -281,6 +281,7 @@ async def delete_user(
 
 # ── Ops health endpoint ──────────────────────────────────────────────────
 
+
 class MigrationStatusOut(BaseModel):
     applied: str | None
     latest: str | None
@@ -300,7 +301,7 @@ class AgencyFreshnessOut(BaseModel):
 
 
 class OpsHealth(BaseModel):
-    migrations: Any  # MigrationStatusOut | None
+    migrations: MigrationStatusOut | None
     agencies: list[AgencyFreshnessOut]
     # False only when the agencies sub-check itself threw — lets the frontend
     # tell "checked, zero agencies" apart from "check failed" (both would
@@ -316,28 +317,30 @@ async def admin_ops(
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
     from pipeline.health import aggregate_freshness, migration_status
 
-    mig: Any = None
+    mig: MigrationStatusOut | None = None
     try:
         ms = await migration_status(conn)
-        mig = {"applied": ms.applied, "latest": ms.latest, "behind": ms.behind}
+        mig = MigrationStatusOut(applied=ms.applied, latest=ms.latest, behind=ms.behind)
     except Exception:
         pass  # mig stays None
 
-    agencies_out: list[dict] = []
+    agencies_out: list[AgencyFreshnessOut] = []
     agencies_ok = True
     try:
         for af in await aggregate_freshness(conn):
-            agencies_out.append({
-                "agency_id": af.agency_id,
-                "agency_name": af.agency_name,
-                "last_analyzed_at": af.last_analyzed_at.isoformat() if af.last_analyzed_at else None,
-                "analyze_age_hours": af.analyze_age_hours,
-                "agg_fresh": af.agg_fresh,
-                "agg_behind_days": af.agg_behind_days,
-                "is_stale": af.is_stale,
-                "data_to": af.data_to,
-                "clamp_pct": af.clamp_pct,
-            })
+            agencies_out.append(
+                AgencyFreshnessOut(
+                    agency_id=af.agency_id,
+                    agency_name=af.agency_name,
+                    last_analyzed_at=af.last_analyzed_at.isoformat() if af.last_analyzed_at else None,
+                    analyze_age_hours=af.analyze_age_hours,
+                    agg_fresh=af.agg_fresh,
+                    agg_behind_days=af.agg_behind_days,
+                    is_stale=af.is_stale,
+                    data_to=af.data_to,
+                    clamp_pct=af.clamp_pct,
+                )
+            )
     except Exception:
         agencies_out = []
         agencies_ok = False

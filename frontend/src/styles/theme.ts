@@ -5,7 +5,7 @@ export type Theme = "light" | "dark";
 /** Event name applyTheme dispatches on `window` when the theme changes, so
  *  imperative (non-CSS) consumers can react. DOM/CSS consumers recolor via the
  *  cascade for free and don't need it. */
-export const THEME_CHANGE_EVENT = "themechange";
+const THEME_CHANGE_EVENT = "themechange";
 
 const PREF_KEY = "transit.theme";
 const DEFAULT_THEME: Theme = "dark";
