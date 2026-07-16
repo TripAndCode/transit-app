@@ -437,8 +437,12 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
 
 
 async def _seed_heatmap(pool, agency_id):
-    from datetime import datetime, time, timezone
+    from datetime import date, datetime, time, timedelta, timezone
 
+    # Anchored to "yesterday" (not a fixed calendar date) so this stays inside
+    # the heatmap endpoint's default 30-day-ending-today window indefinitely —
+    # a hardcoded past date silently ages out of that window as real time passes.
+    captured_at = datetime.combine(date.today() - timedelta(days=1), time(8, 10), tzinfo=timezone.utc)
     async with pool.acquire() as c:
         await c.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
@@ -456,7 +460,7 @@ async def _seed_heatmap(pool, agency_id):
                 "VALUES ($1,$2,$3,'T','平日',$4,'R1',1,$5)",
                 agency_id,
                 f"f{i}.pb",
-                datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+                captured_at,
                 time(8, 10),
                 d,
             )
@@ -486,8 +490,12 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
     90.33s / 60 = 1.5055 -> ROUND(...,2) = 1.51. Guards two things: (1) float (not
     integer) division in the avg — 271//3//60 would give 1.50; (2) distinct trips
     are NOT collapsed by the dedup (only repeated polls of the SAME event are)."""
-    from datetime import datetime, time, timezone
+    from datetime import date, datetime, time, timedelta, timezone
 
+    # Anchored to "yesterday" (not a fixed calendar date) — see _seed_heatmap
+    # for why: a hardcoded past date silently ages out of the heatmap
+    # endpoint's default 30-day-ending-today window as real time passes.
+    captured_at = datetime.combine(date.today() - timedelta(days=1), time(8, 10), tzinfo=timezone.utc)
     app, agency_id = map_app
     async with app.state.pool.acquire() as c:
         await c.execute(
@@ -507,7 +515,7 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
                 "VALUES ($1,$2,$3,$4,'平日',$5,'R1',1,$6)",
                 agency_id,
                 f"{trip}.pb",
-                datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
+                captured_at,
                 trip,
                 time(8, 10),
                 d,
