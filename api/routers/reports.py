@@ -26,7 +26,11 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.forecast import hourly_cells_to_dow_band, summarize_agency_overview, summarize_expected_delay_heatmap
+from pipeline.reports.forecast import (
+    hourly_cells_to_dow_band,
+    summarize_agency_overview,
+    summarize_expected_delay_heatmap,
+)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 

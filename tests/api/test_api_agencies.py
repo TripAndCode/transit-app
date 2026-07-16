@@ -49,8 +49,8 @@ async def _seed_admin(conn) -> str:
 
 @pytest.fixture
 async def agencies_client(apply_schema):
-    from api.main import app
     import api.routers.agencies as _agencies_mod
+    from api.main import app
 
     # Patch validate_feed_url so example.com / test URLs pass;
     # the real validator's SSRF logic is tested explicitly via file:// and 127.0.0.1.
