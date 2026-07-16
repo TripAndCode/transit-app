@@ -1,6 +1,6 @@
 import type { RouteShapeStop, UnobservedStop } from "../../api/types";
 
-export interface TrendSegmentFeature {
+interface TrendSegmentFeature {
   type: "Feature";
   geometry: { type: "LineString"; coordinates: [number, number][] };
   properties: { avg_min: number; has_data: boolean };

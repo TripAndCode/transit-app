@@ -23,7 +23,7 @@ const BAND_ORDER: { band: "severe" | "moderate" | "mild"; labelKey: string }[] =
   { band: "mild", labelKey: "map.legend.band_1_5_3" },
 ];
 
-export type BandGroup = { band: "severe" | "moderate" | "mild"; labelKey: string; routes: OverviewTopDelayedRoute[] };
+type BandGroup = { band: "severe" | "moderate" | "mild"; labelKey: string; routes: OverviewTopDelayedRoute[] };
 
 export function groupBySeverityBand(routes: OverviewTopDelayedRoute[]): BandGroup[] {
   return BAND_ORDER.map(({ band, labelKey }) => ({

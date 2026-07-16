@@ -147,7 +147,7 @@ export type AgencyFreshnessItem = {
   clamp_pct: number | null;
 };
 
-export type OpsHealth = {
+type OpsHealth = {
   migrations: { applied: string | null; latest: string | null; behind: number } | null;
   agencies: AgencyFreshnessItem[];
   // False only when the agencies sub-check itself failed — distinguishes

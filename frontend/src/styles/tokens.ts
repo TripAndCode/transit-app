@@ -74,7 +74,7 @@ export const DELAY_RAMP = {
   severe: SEVERE_VAR, // > 5 min red, per-theme via --delay-severe
 } as const;
 
-export type DelayBand = "ok" | "mild" | "moderate" | "severe";
+type DelayBand = "ok" | "mild" | "moderate" | "severe";
 
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
