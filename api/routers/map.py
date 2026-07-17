@@ -9,8 +9,8 @@ Three resources back the Map tab:
   can draw a stop-coordinate polyline as a graceful degrade.
 - ``GET /delays/heatmap``: per-stop average delay GeoJSON, scoped by
   the user's range / DOW / time-band filter. Stops are clustered by
-  ``stop_name`` plus a spatial bucket so inbound/outbound platforms of
-  the same logical stop merge into one circle.
+  ``stop_name`` plus actual spatial proximity (``ST_ClusterDBSCAN``) so
+  inbound/outbound platforms of the same logical stop merge into one circle.
 
 The heatmap and route-shape endpoints honor :class:`~api.range.RangeCtx`
 so the displayed colors match what compute_ranking et al. show under
@@ -565,12 +565,27 @@ async def delay_heatmap(
 ):
     """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band.
 
-    Clustering: two physical platforms with the same ``stop_name`` within a
-    ~5 km grid (``ST_SnapToGrid(geom, 0.05)`` ≈ 5.5 km lat × 4.2 km lon at
-    lat 40°) collapse into one circle. Same name far apart stays separate
-    because the spatial bucket changes. Stops without a ``stop_name`` fall
-    back to spatial-only bucketing using ``stop_id`` as the synthetic key
-    and a tighter ~1 km grid.
+    Clustering: two physical platforms with the same ``stop_name`` within
+    ~550 m (``ST_ClusterDBSCAN(geom, eps := 0.005, minpoints := 1)``,
+    partitioned by name so only same-named stops can merge) collapse into one
+    circle. ``minpoints := 1`` means every point is a core point, so DBSCAN
+    chains transitively (A-B-C merge if each consecutive hop is within
+    ``eps``, even if A-C alone exceeds it) — real multi-platform hubs are
+    exactly this shape (checked on real data: the widest legitimate hubs
+    chain up to ~580m total span, but no single hop between platinforms of
+    the same hub exceeds ~320m, and the next-nearest *coincidental* reuse of
+    a name starts at ~19 km away). ``eps`` sits well above the real hop
+    ceiling and nowhere near that 19 km gap, so it merges every genuine hub
+    without bridging unrelated same-named stops — an oversized `eps` (the
+    first version of this fix reused the old grid's ~5 km CELL SIZE as if it
+    were a merge RADIUS, a different quantity) chained across multiple
+    unrelated stops on real data. DBSCAN clusters by actual pairwise distance
+    rather than a fixed grid, so two close platforms also can't fail to merge
+    purely from straddling a grid-cell boundary the way ``ST_SnapToGrid`` did
+    (confirmed on real data, ~1.2% of same-named pairs within 200m). Stops
+    without a ``stop_name`` fall back to a synthetic ``stop_id``-based key,
+    so each stands alone (its own singleton partition — DBSCAN never runs on
+    more than one point per partition there).
 
     Output coordinates are the centroid of the merged poles so the dot sits
     between paired platforms rather than on one of them.
@@ -580,6 +595,54 @@ async def delay_heatmap(
     ``agg_route_stop_daily`` (pre-split by ``route_code``). Both aggregates are
     deduped to one row per trip-stop event, so ``samples`` is an observation count.
     """
+    # `name_key` names the partition each cluster is confined to: same key ->
+    # DBSCAN may merge; different key -> never (guarantees name is never lost
+    # across a merge, and unnamed stops — key is already unique per stop_id —
+    # each land alone). `cluster_id` is DBSCAN's within-partition cluster label.
+    # Computed once over `static_stops` (a few thousand rows/agency) rather
+    # than inline against the agg join — running the window function per
+    # *stop* instead of per (stop, date, time_band) agg row it joins to
+    # measured ~4x faster on real data (429ms vs 1.86s for one agency-month).
+    # `name_key` is computed in an inner SELECT so PARTITION BY can reference
+    # its alias once, rather than repeating the CASE expression.
+    stop_clusters_cte = """
+        stop_clusters AS (
+            SELECT stop_id, stop_name, platform_code, stop_code, geom, name_key,
+                ST_ClusterDBSCAN(geom, eps := 0.005, minpoints := 1) OVER (PARTITION BY name_key) AS cluster_id
+            FROM (
+                SELECT stop_id, stop_name, platform_code, stop_code, geom,
+                    CASE WHEN NULLIF(stop_name, '') IS NOT NULL THEN stop_name ELSE 'unnamed:' || stop_id END
+                        AS name_key
+                FROM static_stops
+                WHERE agency_id = $1 AND geom IS NOT NULL
+            ) named
+        )
+    """
+    # Shared by both branches below: aggregates `joined` rows into one
+    # heatmap feature per (name_key, cluster_id) — the only thing that
+    # differs between the branches is how `joined` is built (route_code vs.
+    # route_codes, and which agg table/filter feeds it).
+    cluster_projection_sql = """
+        SELECT
+            AVG(ST_X(geom))::numeric AS lon,
+            AVG(ST_Y(geom))::numeric AS lat,
+            string_agg(DISTINCT stop_name, ' / ' ORDER BY stop_name) AS stop_name,
+            string_agg(DISTINCT stop_id, ',') AS stop_ids,
+            string_agg(DISTINCT NULLIF(platform_code, ''), ',' ORDER BY NULLIF(platform_code, ''))
+                AS platform_codes,
+            string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
+                AS stop_codes,
+            string_agg(DISTINCT {route_codes_expr}, ',' ORDER BY {route_codes_expr}) AS route_codes,
+            ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
+            ROUND(
+                PERCENTILE_CONT(0.9) WITHIN GROUP (
+                    ORDER BY delay_sum::float / NULLIF(samples, 0)
+                )::numeric / 60.0,
+            2) AS p90_delay_min,
+            SUM(samples) AS samples
+        FROM joined
+        GROUP BY name_key, cluster_id
+    """
     if ctx.routes:
         # Route filter → aggregate path (agg_route_stop_daily is pre-split by route_code).
         # Mirrors the no-route branch's spatial grouping; adds a route_code = ANY($2)
@@ -587,38 +650,15 @@ async def delay_heatmap(
         agg_where, params, _ = build_agg_stop_filter(ctx, next_param=3)
         rows = await conn.fetch(
             f"""
-            SELECT
-                AVG(ST_X(ss.geom))::numeric AS lon,
-                AVG(ST_Y(ss.geom))::numeric AS lat,
-                string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
-                string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
-                string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
-                    AS platform_codes,
-                string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
-                    AS stop_codes,
-                string_agg(DISTINCT a.route_code, ',' ORDER BY a.route_code) AS route_codes,
-                ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
-                ROUND(
-                    PERCENTILE_CONT(0.9) WITHIN GROUP (
-                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
-                    )::numeric / 60.0,
-                2) AS p90_delay_min,
-                SUM(a.samples) AS samples
-            FROM agg_route_stop_daily a
-            JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
-            WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND ss.geom IS NOT NULL
-                AND {agg_where}
-            GROUP BY
-                CASE
-                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                        THEN ss.stop_name
-                    ELSE 'unnamed:' || ss.stop_id
-                END,
-                CASE
-                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                        THEN ST_SnapToGrid(ss.geom, 0.05)
-                    ELSE ST_SnapToGrid(ss.geom, 0.01)
-                END
+            WITH {stop_clusters_cte},
+            joined AS (
+                SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
+                    sc.name_key, sc.cluster_id, a.route_code, a.delay_sum, a.samples
+                FROM agg_route_stop_daily a
+                JOIN stop_clusters sc ON sc.stop_id = a.stop_id
+                WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND {agg_where}
+            )
+            {cluster_projection_sql.format(route_codes_expr="route_code")}
             """,
             agency_id,
             list(ctx.routes),
@@ -629,38 +669,16 @@ async def delay_heatmap(
         agg_where, params, _ = build_agg_stop_filter(ctx, next_param=2)
         rows = await conn.fetch(
             f"""
-            SELECT
-                AVG(ST_X(ss.geom))::numeric AS lon,
-                AVG(ST_Y(ss.geom))::numeric AS lat,
-                string_agg(DISTINCT ss.stop_name, ' / ' ORDER BY ss.stop_name) AS stop_name,
-                string_agg(DISTINCT ss.stop_id, ',') AS stop_ids,
-                string_agg(DISTINCT NULLIF(ss.platform_code, ''), ',' ORDER BY NULLIF(ss.platform_code, ''))
-                    AS platform_codes,
-                string_agg(DISTINCT NULLIF(ss.stop_code, ''), ' / ' ORDER BY NULLIF(ss.stop_code, ''))
-                    AS stop_codes,
-                string_agg(DISTINCT r.route_codes, ',') AS route_codes,
-                ROUND(SUM(a.delay_sum)::numeric / SUM(a.samples) / 60.0, 2) AS avg_delay_min,
-                ROUND(
-                    PERCENTILE_CONT(0.9) WITHIN GROUP (
-                        ORDER BY a.delay_sum::float / NULLIF(a.samples, 0)
-                    )::numeric / 60.0,
-                2) AS p90_delay_min,
-                SUM(a.samples) AS samples
-            FROM agg_stop_daily a
-            JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = a.stop_id
-            LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
-            WHERE a.agency_id = $1 AND ss.geom IS NOT NULL AND {agg_where}
-            GROUP BY
-                CASE
-                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                        THEN ss.stop_name
-                    ELSE 'unnamed:' || ss.stop_id
-                END,
-                CASE
-                    WHEN COALESCE(NULLIF(ss.stop_name, ''), '') <> ''
-                        THEN ST_SnapToGrid(ss.geom, 0.05)
-                    ELSE ST_SnapToGrid(ss.geom, 0.01)
-                END
+            WITH {stop_clusters_cte},
+            joined AS (
+                SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
+                    sc.name_key, sc.cluster_id, r.route_codes, a.delay_sum, a.samples
+                FROM agg_stop_daily a
+                JOIN stop_clusters sc ON sc.stop_id = a.stop_id
+                LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
+                WHERE a.agency_id = $1 AND {agg_where}
+            )
+            {cluster_projection_sql.format(route_codes_expr="route_codes")}
             """,
             agency_id,
             *params,

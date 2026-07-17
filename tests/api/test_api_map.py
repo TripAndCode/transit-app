@@ -121,6 +121,45 @@ async def test_heatmap_route_filter_from_aggregate(map_app):
 
 
 @pytest.mark.asyncio
+async def test_heatmap_merges_same_name_stops_across_a_grid_boundary(map_app):
+    """Two platforms of the same named stop, ~171m apart, straddling a
+    ST_SnapToGrid(0.05) rounding boundary (139.974 rounds to the 139.95 grid
+    point, 139.976 rounds to the 140.00 grid point — the midpoint boundary
+    sits at 139.975) must still merge into ONE heatmap dot.
+
+    Grid-snap clustering is axis-aligned and unshifted, so two points this
+    close can still land on different grid points purely from boundary
+    alignment — confirmed happening on real data (agencies with real GTFS
+    feeds) for ~1.2% of same-named pairs within 200m. Distance-based
+    clustering (ST_ClusterDBSCAN) doesn't have this failure mode."""
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'SA', '境界前', 40.0, 139.974, ST_SetSRID(ST_MakePoint(139.974, 40.0), 4326)), "
+            "       ($1, 'SB', '境界前', 40.0, 139.976, ST_SetSRID(ST_MakePoint(139.976, 40.0), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO agg_stop_daily (agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
+            "VALUES ($1,'SA','2026-06-06','weekday','morning',60,1), "
+            "       ($1,'SB','2026-06-06','weekday','morning',180,1)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?from=2026-06-06&to=2026-06-06")
+    assert resp.status_code == 200
+    feats = resp.json()["features"]
+    assert len(feats) == 1, feats  # would be 2 under plain ST_SnapToGrid
+    props = feats[0]["properties"]
+    assert props["samples"] == 2
+    assert props["avg_delay_min"] == 2.0  # (60+180)/2/60
+    lon, _lat = feats[0]["geometry"]["coordinates"]
+    assert 139.974 < lon < 139.976  # centroid of the two merged points
+
+
+@pytest.mark.asyncio
 async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
     """When static_trips.shape_id resolves to a static_shapes row, the
     endpoint returns a GeoJSON LineString."""
