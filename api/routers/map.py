@@ -572,7 +572,7 @@ async def delay_heatmap(
     chains transitively (A-B-C merge if each consecutive hop is within
     ``eps``, even if A-C alone exceeds it) — real multi-platform hubs are
     exactly this shape (checked on real data: the widest legitimate hubs
-    chain up to ~580m total span, but no single hop between platinforms of
+    chain up to ~580m total span, but no single hop between platforms of
     the same hub exceeds ~320m, and the next-nearest *coincidental* reuse of
     a name starts at ~19 km away). ``eps`` sits well above the real hop
     ceiling and nowhere near that 19 km gap, so it merges every genuine hub
@@ -618,10 +618,12 @@ async def delay_heatmap(
             ) named
         )
     """
-    # Shared by both branches below: aggregates `joined` rows into one
-    # heatmap feature per (name_key, cluster_id) — the only thing that
-    # differs between the branches is how `joined` is built (route_code vs.
-    # route_codes, and which agg table/filter feeds it).
+    # Shared by both branches below: aggregates `joined` rows into one heatmap
+    # feature per (name_key, cluster_id). `joined` aliases each branch's route
+    # column to the common name `route_code_val` (a.route_code vs. r.route_codes)
+    # so this one projection works for both — the only thing that actually
+    # differs between the branches is how `joined` is built (which agg
+    # table/filter feeds it).
     cluster_projection_sql = """
         SELECT
             AVG(ST_X(geom))::numeric AS lon,
@@ -632,7 +634,7 @@ async def delay_heatmap(
                 AS platform_codes,
             string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
                 AS stop_codes,
-            string_agg(DISTINCT {route_codes_expr}, ',' ORDER BY {route_codes_expr}) AS route_codes,
+            string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
             ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
             ROUND(
                 PERCENTILE_CONT(0.9) WITHIN GROUP (
@@ -653,12 +655,12 @@ async def delay_heatmap(
             WITH {stop_clusters_cte},
             joined AS (
                 SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
-                    sc.name_key, sc.cluster_id, a.route_code, a.delay_sum, a.samples
+                    sc.name_key, sc.cluster_id, a.route_code AS route_code_val, a.delay_sum, a.samples
                 FROM agg_route_stop_daily a
                 JOIN stop_clusters sc ON sc.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND {agg_where}
             )
-            {cluster_projection_sql.format(route_codes_expr="route_code")}
+            {cluster_projection_sql}
             """,
             agency_id,
             list(ctx.routes),
@@ -672,13 +674,13 @@ async def delay_heatmap(
             WITH {stop_clusters_cte},
             joined AS (
                 SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
-                    sc.name_key, sc.cluster_id, r.route_codes, a.delay_sum, a.samples
+                    sc.name_key, sc.cluster_id, r.route_codes AS route_code_val, a.delay_sum, a.samples
                 FROM agg_stop_daily a
                 JOIN stop_clusters sc ON sc.stop_id = a.stop_id
                 LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND {agg_where}
             )
-            {cluster_projection_sql.format(route_codes_expr="route_codes")}
+            {cluster_projection_sql}
             """,
             agency_id,
             *params,

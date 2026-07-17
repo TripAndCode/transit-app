@@ -160,6 +160,38 @@ async def test_heatmap_merges_same_name_stops_across_a_grid_boundary(map_app):
 
 
 @pytest.mark.asyncio
+async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
+    """Two same-named stops ~841m apart (beyond `eps`) must stay two dots.
+
+    DBSCAN with minpoints := 1 makes every point a core point, so clusters
+    chain transitively — an `eps` reused from the old grid's ~5.5km cell
+    SIZE (rather than sized as an actual merge radius) bridged genuinely
+    distant same-named stops on real data (confirmed: agency 10's 公会堂前,
+    two unrelated locations ~3km apart, merged into one dot). This pins the
+    tuned eps (~550m) actually rejecting a same-name pair well beyond it."""
+    app, agency_id = map_app
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'FA', '遠方前', 41.0, 141.000, ST_SetSRID(ST_MakePoint(141.000, 41.0), 4326)), "
+            "       ($1, 'FB', '遠方前', 41.0, 141.010, ST_SetSRID(ST_MakePoint(141.010, 41.0), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO agg_stop_daily (agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
+            "VALUES ($1,'FA','2026-06-06','weekday','morning',60,1), "
+            "       ($1,'FB','2026-06-06','weekday','morning',180,1)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?from=2026-06-06&to=2026-06-06")
+    assert resp.status_code == 200
+    feats = resp.json()["features"]
+    assert len(feats) == 2, feats  # would be 1 under an oversized eps
+
+
+@pytest.mark.asyncio
 async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
     """When static_trips.shape_id resolves to a static_shapes row, the
     endpoint returns a GeoJSON LineString."""
