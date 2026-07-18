@@ -49,7 +49,7 @@ export function RouteModeToggle({
             fontSize: 12,
             fontWeight: mode === m ? 700 : 500,
             background: mode === m ? "var(--accent-soft)" : "transparent",
-            color: mode === m ? "var(--accent)" : "var(--text-secondary)",
+            color: mode === m ? "var(--chip-accent)" : "var(--chip-text-secondary)",
             border: "none",
             cursor: "pointer",
           }}

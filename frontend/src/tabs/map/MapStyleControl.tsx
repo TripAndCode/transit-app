@@ -67,7 +67,7 @@ function Tile({
           fontSize: 12,
           lineHeight: 1.1,
           fontWeight: active ? 700 : 500,
-          color: active ? "var(--accent)" : "var(--text-secondary)",
+          color: active ? "var(--chip-accent)" : "var(--chip-text-secondary)",
           textAlign: "center",
         }}
       >
@@ -124,7 +124,7 @@ export function MapStyleControl({
           height={THUMB_PX}
           style={{ borderRadius: 12, objectFit: "cover", outline: "1px solid rgba(0,0,0,0.12)" }}
         />
-        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--chip-text-primary)" }}>
           {t("map.style.layers")}
         </span>
       </button>
