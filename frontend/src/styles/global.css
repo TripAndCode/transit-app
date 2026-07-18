@@ -46,6 +46,19 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
+  /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
+     map overlay chrome that hardcodes a white pill background (so it reads
+     over any basemap, including dark aerial imagery) instead of using
+     --bg-surface: MapStyleControl and RouteModeToggle. Pairing that fixed
+     white with --text-primary/--text-secondary/--accent broke contrast in
+     dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
+     (#DDD9F3) on white computed to 1.37:1. These values equal the light
+     theme's --text-primary/--text-secondary/--accent and are defined once,
+     not overridden in the dark block, so both themes render the same
+     dark-on-white chip regardless of app theme. */
+  --chip-text-primary: #2a2a2a;
+  --chip-text-secondary: #6a6a6a;
+  --chip-accent: #5b6cad;
   /* Severe-delay red (DELAY_RAMP.severe / delayColor(>5)). Theme-dependent:
      this light value (#d92121) passes WCAG AA on the light background but
      fails on the dark surfaces — see the dark block below, whose #A83A1A
