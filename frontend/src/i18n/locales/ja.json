@@ -347,6 +347,8 @@
   "map": {
     "legend": {
       "title": "凡例",
+      "collapse": "凡例を折りたたむ",
+      "expand": "凡例を開く",
       "show_single_sample": "1観測のみも表示",
       "delay_avg": "遅延 (平均)",
       "band_lt_1_5": "< 1.5分",

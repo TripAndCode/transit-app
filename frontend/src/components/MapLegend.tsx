@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_RAMP } from "../styles/tokens";
 
@@ -16,10 +17,13 @@ type MapLegendProps = {
 /**
  * Fixed, translucent-blurred legend badge in the map's top-left corner,
  * matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
- * No longer draggable or collapsible — those were chrome, not real
- * functionality. Everything else (click-to-filter, per-band counts, the
- * single-sample-stops checkbox, the size/density key, the no-data key, and
- * the explainer text) stays exactly as before.
+ * Not draggable — that stays removed as chrome, not real functionality.
+ * Collapsible (added back 2026-07-18: the legend takes up more noticeable
+ * map space now the map fills the full viewport height) via a chevron
+ * toggle in the header; starts expanded on every mount, no persistence.
+ * Everything else (click-to-filter, per-band counts, the single-sample-stops
+ * checkbox, the size/density key, the no-data key, and the explainer text)
+ * stays exactly as before.
  *
  * Clicking a delay-ramp swatch focuses that severity band: the map is FILTERED
  * to stops in that band (cluster bubbles + dots re-form from only those stops),
@@ -33,6 +37,7 @@ export function MapLegend({
   bandCounts,
 }: MapLegendProps) {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <div
@@ -55,11 +60,33 @@ export function MapLegend({
       <div
         style={{
           padding: "5px 8px",
-          borderBottom: "1px solid var(--border-soft)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          borderBottom: collapsed ? "none" : "1px solid var(--border-soft)",
         }}
       >
         <strong style={{ color: "var(--text-primary)", fontSize: 12 }}>{t("map.legend.title")}</strong>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? t("map.legend.expand") : t("map.legend.collapse")}
+          style={{
+            appearance: "none",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--text-secondary)",
+            fontSize: 12,
+            lineHeight: 1,
+            padding: 2,
+          }}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
       </div>
+      {!collapsed && (
       <div style={{ padding: "8px 10px" }}>
         <label
           style={{
@@ -161,6 +188,7 @@ export function MapLegend({
           {t("map.legend.size_explainer")}
         </div>
       </div>
+      )}
     </div>
   );
 }

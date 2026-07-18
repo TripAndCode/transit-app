@@ -347,6 +347,8 @@
   "map": {
     "legend": {
       "title": "Legend",
+      "collapse": "Collapse legend",
+      "expand": "Expand legend",
       "show_single_sample": "Show single-sample stops",
       "delay_avg": "Delay (avg)",
       "band_lt_1_5": "< 1.5 min",
