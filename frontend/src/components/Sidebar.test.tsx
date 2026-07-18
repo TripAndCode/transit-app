@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -89,5 +89,34 @@ describe("Sidebar", () => {
     renderSidebar("/agencies/8/map?from=2026-06-01&to=2026-06-07");
     const link = screen.getByRole("link", { name: "Feed-stale state" });
     expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+  });
+
+  describe("collapse", () => {
+    beforeEach(() => localStorage.clear());
+
+    it("hides nav labels/subtitles and the PROTOTYPE section, but keeps the nav links, after collapsing", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.queryByText("What's happening right now")).toBeNull();
+      expect(screen.queryByText("PROTOTYPE")).toBeNull();
+      expect(screen.getByRole("link", { name: "Map" })).toBeTruthy();
+    });
+
+    it("shows an expand toggle once collapsed, which restores the labels when clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
+      expect(screen.getByText("Overview")).toBeTruthy();
+    });
+
+    it("persists the collapsed state to localStorage and restores it on remount", () => {
+      localStorage.setItem("transit.sidebarCollapsed", "1");
+      renderSidebar();
+      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+    });
   });
 });
