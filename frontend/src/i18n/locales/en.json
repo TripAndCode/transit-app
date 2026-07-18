@@ -272,12 +272,15 @@
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",
     "logout": "Sign out",
+    "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "login": {
       "error": {
         "state": "Your sign-in request has expired. Please try again.",
         "unverified_email": "Email address is not verified. Please complete verification with your provider.",
         "no_email": "Could not retrieve a verified email from GitHub. Make your primary email public or sign in with another method.",
         "provider_down": "Provider is having temporary issues. Please retry shortly.",
+        "invalid_credentials": "Incorrect username or password.",
+        "too_many_attempts": "Too many attempts. Please try again shortly.",
         "generic": "Sign-in failed."
       },
       "sso_disabled_title": "SSO not configured",
@@ -289,6 +292,10 @@
       "google_continue": "Continue with Google",
       "github_aria": "Sign in with GitHub",
       "github_continue": "Continue with GitHub",
+      "or_divider": "or",
+      "username_label": "Username",
+      "password_label": "Password",
+      "local_submit": "Sign in",
       "terms_prefix": "By continuing, you agree to the",
       "terms_link": "Terms of Service",
       "terms_and": "and",

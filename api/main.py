@@ -33,6 +33,7 @@ from api.routers.admin import router as admin_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.ask_dashboard import router as ask_dashboard_router
+from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
 from api.routers.debug import router as debug_router
@@ -140,6 +141,11 @@ async def lifespan(app: FastAPI):
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
+    # Break-glass local-admin account (independent of the OAuth env block
+    # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
+    # are both set. See api.routers.auth.seed_local_admin.
+    await seed_local_admin(app.state.pool)
+
     # Phase 2: warm the embedding model so first request doesn't pay the
     # load cost. Non-fatal: if the model can't load, the router will fall
     # through to the LLM path (Phase 1 behavior).
@@ -234,9 +240,10 @@ async def health():
 
 @app.get("/api/config")
 async def config():
-    """Public client config. Lets the SPA hide login UI when SSO is unconfigured."""
+    """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
+    and separately show/hide the break-glass local-admin password form."""
     enabled, _ = auth_status()
-    return {"auth_enabled": enabled}
+    return {"auth_enabled": enabled, "local_admin_enabled": local_admin_enabled()}
 
 
 def _maybe_mount_static(app: FastAPI) -> None:

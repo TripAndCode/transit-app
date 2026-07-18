@@ -272,12 +272,15 @@
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
     "logout": "ログアウト",
+    "logout_error": "ログアウトできませんでした。接続を確認して再度お試しください。",
     "login": {
       "error": {
         "state": "ログインのリクエストが期限切れです。もう一度お試しください。",
         "unverified_email": "メールアドレスが未確認です。プロバイダ側で確認を完了してください。",
         "no_email": "GitHubの確認済みメールが取得できませんでした。プライマリメールを公開設定にするか、別の方法でログインしてください。",
         "provider_down": "プロバイダ側に一時的な問題が発生しています。しばらくしてから再試行してください。",
+        "invalid_credentials": "ユーザー名またはパスワードが正しくありません。",
+        "too_many_attempts": "試行回数が多すぎます。しばらくしてから再試行してください。",
         "generic": "ログインに失敗しました。"
       },
       "sso_disabled_title": "SSO 未設定",
@@ -289,6 +292,10 @@
       "google_continue": "Googleで続ける",
       "github_aria": "GitHubでログイン",
       "github_continue": "GitHubで続ける",
+      "or_divider": "または",
+      "username_label": "ユーザー名",
+      "password_label": "パスワード",
+      "local_submit": "サインイン",
       "terms_prefix": "続行することで、",
       "terms_link": "利用規約",
       "terms_and": "と",

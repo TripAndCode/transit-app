@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
+import { ApiError, apiPost } from "../api/client";
 import "./LoginPage.css";
 
 const ERROR_KEYS: Record<string, string> = {
@@ -21,12 +22,38 @@ export function LoginPage() {
   const [pending, setPending] = useState<"google" | "github" | null>(null);
   const { data: config } = useConfig();
 
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [localPending, setLocalPending] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
   const handleSubmit = (provider: "google" | "github") => () => {
     setPending(provider);
     window.location.assign(loginUrl(provider, next));
   };
 
-  if (config && !config.auth_enabled) {
+  async function handleLocalSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLocalPending(true);
+    setLocalError(null);
+    try {
+      await apiPost("/api/auth/local/login", { username, password });
+      // Full reload (not client-side navigate) so react-query's cached
+      // /api/me resolves fresh against the session cookie just set.
+      window.location.assign(next);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        setLocalError(t("account.login.error.too_many_attempts"));
+      } else if (err instanceof ApiError && err.status === 401) {
+        setLocalError(t("account.login.error.invalid_credentials"));
+      } else {
+        setLocalError(t("account.login.error.generic"));
+      }
+      setLocalPending(false);
+    }
+  }
+
+  if (config && !config.auth_enabled && !config.local_admin_enabled) {
     return (
       <div className="login-shell">
         <div className="login-shell__grid" aria-hidden="true" />
@@ -65,29 +92,78 @@ export function LoginPage() {
             <span>{ERROR_KEYS[error] ? t(ERROR_KEYS[error]) : t("account.login.error.generic")}</span>
           </div>
         )}
+        {localError && (
+          <div className="login-card__error" role="alert">
+            <AlertCircle size={16} aria-hidden="true" />
+            <span>{localError}</span>
+          </div>
+        )}
 
-        <div className="login-card__buttons">
-          <button
-            type="button"
-            className="login-card__btn login-card__btn--google"
-            aria-label={t("account.login.google_aria")}
-            aria-disabled={pending !== null}
-            onClick={handleSubmit("google")}
-          >
-            {pending === "google" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GoogleMark />}
-            <span>{t("account.login.google_continue")}</span>
-          </button>
-          <button
-            type="button"
-            className="login-card__btn login-card__btn--github"
-            aria-label={t("account.login.github_aria")}
-            aria-disabled={pending !== null}
-            onClick={handleSubmit("github")}
-          >
-            {pending === "github" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GitHubMark />}
-            <span>{t("account.login.github_continue")}</span>
-          </button>
-        </div>
+        {config?.auth_enabled && (
+          <div className="login-card__buttons">
+            <button
+              type="button"
+              className="login-card__btn login-card__btn--google"
+              aria-label={t("account.login.google_aria")}
+              aria-disabled={pending !== null}
+              onClick={handleSubmit("google")}
+            >
+              {pending === "google" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GoogleMark />}
+              <span>{t("account.login.google_continue")}</span>
+            </button>
+            <button
+              type="button"
+              className="login-card__btn login-card__btn--github"
+              aria-label={t("account.login.github_aria")}
+              aria-disabled={pending !== null}
+              onClick={handleSubmit("github")}
+            >
+              {pending === "github" ? <Loader2 className="login-card__spinner" aria-hidden="true" /> : <GitHubMark />}
+              <span>{t("account.login.github_continue")}</span>
+            </button>
+          </div>
+        )}
+
+        {config?.auth_enabled && config?.local_admin_enabled && (
+          <div className="login-card__divider">{t("account.login.or_divider")}</div>
+        )}
+
+        {config?.local_admin_enabled && (
+          <form className="login-card__local-form" onSubmit={handleLocalSubmit}>
+            <div className="login-card__field">
+              <label htmlFor="login-username">{t("account.login.username_label")}</label>
+              <input
+                id="login-username"
+                name="username"
+                autoComplete="username"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+            <div className="login-card__field">
+              <label htmlFor="login-password">{t("account.login.password_label")}</label>
+              <input
+                id="login-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              className="login-card__btn login-card__btn--local"
+              aria-disabled={localPending}
+              disabled={localPending}
+            >
+              {localPending && <Loader2 className="login-card__spinner" aria-hidden="true" />}
+              <span>{t("account.login.local_submit")}</span>
+            </button>
+          </form>
+        )}
 
         {/*
           Terms paragraph: the inventory pre-split it into seven keys
