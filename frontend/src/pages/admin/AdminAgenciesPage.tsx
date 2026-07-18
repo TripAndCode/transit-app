@@ -241,8 +241,12 @@ export function AdminAgenciesPage() {
               <td style={{ fontSize: 12, color: "var(--text-tertiary)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {a.feed_url}
               </td>
-              <td style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-                {a.ingest_strategy ?? "—"}
+              <td>
+                {a.ingest_strategy ? (
+                  <StatusChip tone="neutral">{a.ingest_strategy}</StatusChip>
+                ) : (
+                  <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
+                )}
               </td>
               <td>
                 <StatusChip tone={a.deleted_at ? "neutral" : "good"}>
