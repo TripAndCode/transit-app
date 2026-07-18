@@ -9,6 +9,7 @@ import {
   useRestoreAgency,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { AdminButton, StatusChip } from "./adminControls";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -146,30 +147,16 @@ function AgencyFormModal({
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: "transparent", color: "var(--text-primary)", border: "1px solid var(--border-subtle)",
-              padding: "6px 14px", borderRadius: 4,
-            }}
-          >
+          <AdminButton variant="secondary" onClick={onClose}>
             {t("common.cancel")}
-          </button>
-          <button
-            type="submit"
-            disabled={isPending}
-            style={{
-              background: "var(--accent)", color: "#fff", border: "none",
-              padding: "6px 16px", borderRadius: 4,
-            }}
-          >
+          </AdminButton>
+          <AdminButton variant="primary" type="submit" disabled={isPending}>
             {isPending
               ? t("admin.agencies.form_submitting")
               : isEdit
               ? t("admin.agencies.form_submit_edit")
               : t("admin.agencies.form_submit_add")}
-          </button>
+          </AdminButton>
         </div>
       </form>
     </div>
@@ -222,99 +209,81 @@ export function AdminAgenciesPage() {
     <div style={{ padding: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.agencies.title")}</h1>
-        <button
-          type="button"
+        <AdminButton
+          variant="primary"
           onClick={() => {
             create.reset();
             patch.reset();
             setEditing(undefined);
           }}
-          style={{
-            background: "var(--accent)", color: "#fff", border: "none",
-            padding: "6px 14px", borderRadius: 4, cursor: "pointer",
-          }}
         >
           {t("admin.agencies.add_button")}
-        </button>
+        </AdminButton>
       </div>
 
       {error && <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{formatApiError(error)}</div>}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
 
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+      <table className="admin-table">
         <thead>
-          <tr style={{ background: "var(--surface-1)" }}>
-            <th style={{ padding: "8px 12px", textAlign: "left" }}>{t("admin.agencies.col_name")}</th>
-            <th style={{ padding: "8px 12px", textAlign: "left" }}>{t("admin.agencies.col_feed_url")}</th>
-            <th style={{ padding: "8px 12px", textAlign: "left" }}>{t("admin.agencies.col_strategy")}</th>
-            <th style={{ padding: "8px 12px", textAlign: "left" }}>{t("admin.agencies.col_status")}</th>
-            <th style={{ padding: "8px 12px" }} />
+          <tr>
+            <th>{t("admin.agencies.col_name")}</th>
+            <th>{t("admin.agencies.col_feed_url")}</th>
+            <th>{t("admin.agencies.col_strategy")}</th>
+            <th>{t("admin.agencies.col_status")}</th>
+            <th />
           </tr>
         </thead>
         <tbody>
           {agencies?.map((a) => (
-            <tr
-              key={a.agency_id}
-              style={{
-                borderBottom: "1px solid var(--surface-2)",
-                opacity: a.deleted_at ? 0.5 : 1,
-              }}
-            >
-              <td style={{ padding: "8px 12px" }}>{a.agency_name}</td>
-              <td style={{ padding: "8px 12px", fontSize: 12, color: "var(--text-tertiary)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <tr key={a.agency_id} style={{ opacity: a.deleted_at ? 0.5 : 1 }}>
+              <td style={{ fontWeight: 500 }}>{a.agency_name}</td>
+              <td style={{ fontSize: 12, color: "var(--text-tertiary)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {a.feed_url}
               </td>
-              <td style={{ padding: "8px 12px", color: "var(--text-tertiary)", fontSize: 12 }}>
+              <td style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
                 {a.ingest_strategy ?? "—"}
               </td>
-              <td style={{ padding: "8px 12px" }}>
-                <span
-                  style={{
-                    fontSize: 11, padding: "2px 8px", borderRadius: 4,
-                    background: a.deleted_at ? "var(--surface-2)" : "var(--accent-soft)",
-                    color: a.deleted_at ? "var(--text-tertiary)" : "var(--accent)",
-                  }}
-                >
+              <td>
+                <StatusChip tone={a.deleted_at ? "neutral" : "good"}>
                   {a.deleted_at ? t("admin.agencies.status_deleted") : t("admin.agencies.status_active")}
-                </span>
+                </StatusChip>
               </td>
-              <td style={{ padding: "8px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+              <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                 {!a.deleted_at && (
                   <>
-                    <button
-                      type="button"
+                    <AdminButton
+                      variant="secondary"
                       onClick={() => {
                         create.reset();
                         patch.reset();
                         setEditing(a);
                       }}
-                      style={{ marginRight: 8, fontSize: 13 }}
+                      style={{ marginRight: 8 }}
                     >
                       {t("admin.agencies.action_edit")}
-                    </button>
-                    <button
-                      type="button"
+                    </AdminButton>
+                    <AdminButton
+                      variant="danger"
                       disabled={del.isPending && del.variables === a.agency_id}
                       onClick={() => {
                         if (confirm(t("admin.agencies.confirm_delete", { name: a.agency_name }))) {
                           del.mutate(a.agency_id);
                         }
                       }}
-                      style={{ fontSize: 13 }}
                     >
                       {t("admin.agencies.action_delete")}
-                    </button>
+                    </AdminButton>
                   </>
                 )}
                 {a.deleted_at && (
-                  <button
-                    type="button"
+                  <AdminButton
+                    variant="secondary"
                     disabled={restore.isPending && restore.variables === a.agency_id}
                     onClick={() => restore.mutate(a.agency_id)}
-                    style={{ fontSize: 13 }}
                   >
                     {t("admin.agencies.action_restore")}
-                  </button>
+                  </AdminButton>
                 )}
               </td>
             </tr>
