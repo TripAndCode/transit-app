@@ -47,6 +47,8 @@ export function PresetMenu({
     );
   }
 
+  const saveDisabled = !name.trim() || create.isPending;
+
   return (
     <div style={{ position: "relative", display: "inline-block" }}>
       <select
@@ -66,7 +68,7 @@ export function PresetMenu({
           background: "var(--bg-surface)",
           color: "var(--text-primary)",
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
+          borderRadius: 4,
           fontSize: 12,
           padding: "5px 10px",
           cursor: "pointer",
@@ -87,16 +89,18 @@ export function PresetMenu({
             style={{ display: "block", marginBottom: 8, padding: 4, width: 200 }}
           />
           <button
-            disabled={!name.trim() || create.isPending}
+            disabled={saveDisabled}
             onClick={() => create.mutate(name.trim())}
             style={{
-              background: !name.trim() || create.isPending ? "var(--bg-soft)" : "var(--accent)",
-              color: !name.trim() || create.isPending ? "var(--text-tertiary)" : "#fff",
+              background: saveDisabled ? "var(--bg-soft)" : "var(--accent)",
+              color: saveDisabled ? "var(--text-tertiary)" : "#fff",
               border: "none",
               borderRadius: 4,
               fontSize: 13,
-              padding: "6px 14px",
-              cursor: !name.trim() || create.isPending ? "not-allowed" : "pointer",
+              fontWeight: 500,
+              padding: "6px 18px",
+              cursor: saveDisabled ? "not-allowed" : "pointer",
+              boxShadow: saveDisabled ? "none" : "0 1px 2px rgba(91,108,173,0.25)",
             }}
           >
             {t("common.save")}
