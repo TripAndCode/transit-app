@@ -7,6 +7,7 @@ import {
   GitCompare,
   HelpCircle,
   Clock,
+  History,
   CircleSlash,
   SquareDashed,
   ChevronLeft,
@@ -17,9 +18,7 @@ import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
-import { HeaderUserMenu } from "./HeaderUserMenu";
-import { LocaleToggle } from "./LocaleToggle";
-import { ThemeToggle } from "./ThemeToggle";
+import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
 
 type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIcon };
@@ -29,6 +28,7 @@ const ITEMS: Item[] = [
   { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
   { to: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
   { to: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
+  { to: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: History },
 ];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
@@ -230,47 +230,6 @@ export function Sidebar() {
         </nav>
       )}
       <div style={{ flex: 1 }} />
-      {/* Global controls (agency-independent), moved in from the standalone
-          top Header — Header rendered these unconditionally regardless of
-          agency context (e.g. on /me, /admin, the onboarding page), so they
-          stay ungated here too, unlike the nav/Ask/prototype blocks below. */}
-      {!collapsed && (
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "0 12px 12px" }}>
-          {agencyId && (
-            <NavLink
-              to={`/agencies/${agencyId}/live${suffix}`}
-              style={({ isActive }) => ({
-                fontSize: 12,
-                textDecoration: "none",
-                color: isActive ? "var(--accent)" : "var(--text-secondary)",
-                fontWeight: isActive ? 600 : 400,
-              })}
-            >
-              {t("nav.live")}
-            </NavLink>
-          )}
-          <HeaderUserMenu />
-          <LocaleToggle />
-          <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label={t("header.settings_aria")}
-            title={t("header.settings_aria")}
-            style={{
-              background: "transparent",
-              color: "var(--text-secondary)",
-              border: "none",
-              padding: 4,
-              cursor: "pointer",
-              fontSize: 14,
-              lineHeight: 1,
-            }}
-          >
-            ⚙
-          </button>
-        </div>
-      )}
       {!agencyId ? null : (
         <>
           {/* Distinct CTA below the uniform nav list, matching the artifact
@@ -298,7 +257,13 @@ export function Sidebar() {
             {!collapsed && t("nav.ask")}
           </NavLink>
           {!collapsed && import.meta.env.DEV && (
-            <div style={{ marginTop: 16 }}>
+            <div style={{ marginTop: 12 }}>
+              {/* Visually quarantined from the real account controls below
+                  (SidebarUserMenu) — a divider plus reduced opacity, so a
+                  dev-only debug link never sits flush against sign-in/
+                  settings the way it used to. */}
+              <div style={{ height: 1, background: "var(--border-soft)", margin: "0 14px 12px" }} />
+              <div style={{ opacity: 0.75 }}>
               <div
                 style={{
                   padding: "0 22px",
@@ -365,10 +330,12 @@ export function Sidebar() {
                 <SquareDashed size={15} strokeWidth={1.5} aria-hidden="true" />
                 {t("nav.prototype_no_data")}
               </NavLink>
+              </div>
             </div>
           )}
         </>
       )}
+      {!collapsed && <SidebarUserMenu onOpenSettings={() => setSettingsOpen(true)} />}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </aside>
   );
