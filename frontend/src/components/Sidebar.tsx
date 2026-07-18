@@ -256,13 +256,15 @@ export function Sidebar() {
             type="button"
             onClick={() => setSettingsOpen(true)}
             aria-label={t("header.settings_aria")}
+            title={t("header.settings_aria")}
             style={{
               background: "transparent",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border-subtle)",
-              padding: "6px 10px",
-              borderRadius: 4,
+              color: "var(--text-secondary)",
+              border: "none",
+              padding: 4,
               cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
             }}
           >
             ⚙

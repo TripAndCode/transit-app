@@ -30,19 +30,26 @@ export default function App() {
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   useDefaultRangeAnchor(agencyId ? Number(agencyId) : null);
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <GuestPrompt />
-      <DataStalenessBanner />
-      <FeedHealthBanner />
-      <ActivityStrip />
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <Sidebar />
-        <main style={{ flex: 1, overflowY: "auto" }}>
-          <div style={{ padding: 24, height: "100%", boxSizing: "border-box" }}>
-            <Outlet key={agencyId ?? "root"} />
-          </div>
-        </main>
-      </div>
+    <div style={{ display: "flex", height: "100vh" }}>
+      <Sidebar />
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+        {/* Scoped to the content area, not the whole app shell — these are
+            notices about the agency data being viewed, not app-wide chrome,
+            so they shouldn't span above the sidebar (a full-height nav rail
+            that has nothing to do with feed staleness or in-flight mutations). */}
+        <GuestPrompt />
+        <DataStalenessBanner />
+        <FeedHealthBanner />
+        <ActivityStrip />
+        {/* flex: 1, not height: "100%" — main is now a flex column whose
+            other children (the banners/strip above) take variable height, so
+            a percentage here would overflow main's box; flex: 1 fills
+            exactly what's left, same trick the outer app shell used before
+            this block moved inside main. */}
+        <div style={{ padding: 24, flex: 1, boxSizing: "border-box" }}>
+          <Outlet key={agencyId ?? "root"} />
+        </div>
+      </main>
     </div>
   );
 }

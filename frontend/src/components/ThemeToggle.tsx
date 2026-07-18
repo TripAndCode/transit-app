@@ -15,14 +15,13 @@ export function ThemeToggle() {
       title={label}
       style={{
         background: "transparent",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 4,
-        width: 28,
-        height: 28,
+        border: "none",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         color: "var(--text-secondary)",
+        cursor: "pointer",
+        padding: 4,
       }}
     >
       {theme === "dark" ? (

@@ -7,16 +7,15 @@ const LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i1
 
 const triggerStyle: CSSProperties = {
   background: "transparent",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  padding: "6px 12px",
+  color: "var(--text-secondary)",
+  border: "none",
+  padding: 0,
   fontSize: 12,
-  fontWeight: 500,
+  fontWeight: 400,
   cursor: "pointer",
   display: "inline-flex",
   alignItems: "center",
-  gap: 6,
+  gap: 4,
 };
 
 const menuStyle: CSSProperties = {
