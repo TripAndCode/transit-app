@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   Map as MapIcon,
@@ -8,6 +9,8 @@ import {
   Clock,
   CircleSlash,
   SquareDashed,
+  ChevronLeft,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +26,26 @@ const ITEMS: Item[] = [
   { to: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
 ];
 
+const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
+
+/** Read the persisted collapse preference. No-ops to `false` (expanded) if
+ *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */
+function readCollapsedPref(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsedPref(collapsed: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSED_PREF_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
@@ -33,13 +56,23 @@ export function Sidebar() {
   const [ctx] = useRangeContext();
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
+  const [collapsed, setCollapsed] = useState(readCollapsedPref);
+
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      writeCollapsedPref(next);
+      return next;
+    });
+  }
 
   return (
     <aside
       style={{
         // 230, not 210 — the brand block's title ("遅延ダッシュボード") needs
         // ~135px alongside the 32px icon + gap; 210 wrapped it to two lines.
-        width: 230,
+        // Collapsed rail is 64: 32px icon + 16px padding each side.
+        width: collapsed ? 64 : 230,
         background: "var(--bg-surface)",
         borderRight: "1px solid var(--border-soft)",
         padding: "16px 0",
@@ -47,61 +80,111 @@ export function Sidebar() {
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        transition: "width var(--transition)",
       }}
     >
-      <Link
-        to="/"
+      <div
         style={{
-          textDecoration: "none",
-          color: "var(--text-primary)",
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          padding: "0 22px 16px",
+          justifyContent: collapsed ? "center" : "space-between",
+          gap: 4,
+          padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
         }}
       >
-        <span
-          aria-hidden="true"
+        <Link
+          to="/"
           style={{
-            width: 32,
-            height: 32,
-            flexShrink: 0,
-            borderRadius: 8,
-            background: "var(--accent)",
-            color: "#fff",
+            textDecoration: "none",
+            color: "var(--text-primary)",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 700,
-            fontSize: 15,
+            gap: 10,
+            minWidth: 0,
           }}
         >
-          {t("header.app_title").slice(0, 1)}
-        </span>
-        <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
           <span
+            aria-hidden="true"
             style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 600,
+              width: 32,
+              height: 32,
+              flexShrink: 0,
+              borderRadius: 8,
+              background: "var(--accent)",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
               fontSize: 15,
-              letterSpacing: "0.01em",
             }}
           >
-            {t("header.app_title")}
+            {t("header.app_title").slice(0, 1)}
           </span>
-          <span
+          {!collapsed && (
+            <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, minWidth: 0 }}>
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  letterSpacing: "0.01em",
+                }}
+              >
+                {t("header.app_title")}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: 10.5,
+                  color: "var(--text-tertiary)",
+                  marginTop: 2,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {t("header.app_tagline")}
+              </span>
+            </span>
+          )}
+        </Link>
+        {!collapsed && (
+          <button
+            type="button"
+            aria-label={t("nav.collapse_sidebar")}
+            onClick={toggleCollapsed}
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 10.5,
+              background: "transparent",
+              border: "none",
               color: "var(--text-tertiary)",
-              marginTop: 2,
-              letterSpacing: "0.04em",
+              cursor: "pointer",
+              display: "flex",
+              padding: 4,
+              flexShrink: 0,
             }}
           >
-            {t("header.app_tagline")}
-          </span>
-        </span>
-      </Link>
+            <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      {collapsed && (
+        <button
+          type="button"
+          aria-label={t("nav.expand_sidebar")}
+          onClick={toggleCollapsed}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-tertiary)",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "center",
+            padding: "0 0 12px",
+            width: "100%",
+          }}
+        >
+          <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+      )}
       {!agencyId ? null : (
         <>
           <nav style={{ display: "flex", flexDirection: "column" }}>
@@ -109,11 +192,13 @@ export function Sidebar() {
               <NavLink
                 key={item.to}
                 to={`/agencies/${agencyId}/${item.to}${suffix}`}
+                title={collapsed ? t(item.labelKey) : undefined}
                 style={({ isActive }) => ({
                   display: "flex",
-                  alignItems: "flex-start",
+                  alignItems: collapsed ? "center" : "flex-start",
+                  justifyContent: collapsed ? "center" : "flex-start",
                   gap: 12,
-                  padding: "12px 22px",
+                  padding: collapsed ? "12px 0" : "12px 22px",
                   color: isActive ? "var(--accent)" : "var(--text-primary)",
                   background: isActive ? "var(--accent-soft)" : "transparent",
                   borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
@@ -121,13 +206,15 @@ export function Sidebar() {
                   transition: "background var(--transition)",
                 })}
               >
-                <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0 }} />
-                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span>{t(item.labelKey)}</span>
-                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
-                    {t(item.subtitleKey)}
+                <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsed ? 0 : 2, flexShrink: 0 }} />
+                {!collapsed && (
+                  <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span>{t(item.labelKey)}</span>
+                    <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
+                      {t(item.subtitleKey)}
+                    </span>
                   </span>
-                </span>
+                )}
               </NavLink>
             ))}
           </nav>
@@ -137,12 +224,14 @@ export function Sidebar() {
               ITEMS loop above so it reads as an action, not a peer tab. */}
           <NavLink
             to={`/agencies/${agencyId}/ask${suffix}`}
+            title={collapsed ? t("nav.ask") : undefined}
             style={({ isActive }) => ({
               margin: "8px 12px 0",
-              padding: "10px 12px",
+              padding: collapsed ? "10px 0" : "10px 12px",
               borderRadius: 7,
               display: "flex",
               alignItems: "center",
+              justifyContent: collapsed ? "center" : "flex-start",
               gap: 9,
               color: isActive ? "var(--accent)" : "var(--text-secondary)",
               fontSize: 13,
@@ -152,9 +241,9 @@ export function Sidebar() {
             })}
           >
             <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
-            {t("nav.ask")}
+            {!collapsed && t("nav.ask")}
           </NavLink>
-          {import.meta.env.DEV && (
+          {!collapsed && import.meta.env.DEV && (
             <div style={{ marginTop: 16 }}>
               <div
                 style={{
