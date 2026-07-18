@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
@@ -40,7 +40,7 @@ type Draft = {
   routes: string[];
 };
 
-export function TabFilterBar() {
+export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   const { t } = useTranslation();
   const [ctx, setCtx] = useRangeContext();
   const agencyIdNum = useAgencyId();
@@ -320,6 +320,8 @@ export function TabFilterBar() {
           {t("filters.clear_all")}
         </button>
       )}
+
+      {after && <div style={{ marginLeft: "auto" }}>{after}</div>}
 
       {open && (
         <div

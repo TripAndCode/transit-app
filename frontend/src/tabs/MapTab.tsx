@@ -273,27 +273,26 @@ export function MapTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 400 }}>
-      <TabFilterBar />
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        fontSize: 12, color: "var(--text-tertiary)",
-        margin: "4px 0 8px",
-      }}>
-        {t("nav.map")}
-        <InsightHint
-          title={t("map.hint.title")}
-          body={
-            <>
-              <strong>{t("map.hint.color_strong")}</strong>{t("map.hint.color_meaning")}<strong>{t("map.hint.size_strong")}</strong>{t("map.hint.size_meaning")}
-              {t("map.hint.body_1")}
-              {t("map.hint.body_2")}
-              <br /><br />
-              {t("map.hint.hotspots_intro")}<em>{t("map.hint.hotspots_em")}</em>{t("map.hint.hotspots_outro")}
-              {t("map.hint.ontime_intro")}<em>{t("map.hint.ontime_em")}</em>{t("map.hint.ontime_outro")}
-            </>
-          }
-        />
-      </div>
+      <TabFilterBar
+        after={
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-tertiary)" }}>
+            {t("nav.map")}
+            <InsightHint
+              title={t("map.hint.title")}
+              body={
+                <>
+                  <strong>{t("map.hint.color_strong")}</strong>{t("map.hint.color_meaning")}<strong>{t("map.hint.size_strong")}</strong>{t("map.hint.size_meaning")}
+                  {t("map.hint.body_1")}
+                  {t("map.hint.body_2")}
+                  <br /><br />
+                  {t("map.hint.hotspots_intro")}<em>{t("map.hint.hotspots_em")}</em>{t("map.hint.hotspots_outro")}
+                  {t("map.hint.ontime_intro")}<em>{t("map.hint.ontime_em")}</em>{t("map.hint.ontime_outro")}
+                </>
+              }
+            />
+          </div>
+        }
+      />
       {/* Render the error inline above the map instead of replacing the
           whole tab — losing the filter bar and tab nav on a transient
           5xx is jarring. The map container below stays mounted so the
