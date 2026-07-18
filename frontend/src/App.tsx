@@ -6,7 +6,6 @@ import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
-import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 
 /**
@@ -33,7 +32,6 @@ export default function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <GuestPrompt />
-      <Header />
       <DataStalenessBanner />
       <FeedHealthBanner />
       <ActivityStrip />

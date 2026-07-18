@@ -16,6 +16,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { clearLastAgency } from "../api/lastAgency";
+import { AgencyPicker } from "./AgencyPicker";
+import { HeaderUserMenu } from "./HeaderUserMenu";
+import { LocaleToggle } from "./LocaleToggle";
+import { ThemeToggle } from "./ThemeToggle";
+import { SettingsDrawer } from "./SettingsDrawer";
 
 type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIcon };
 
@@ -57,6 +62,7 @@ export function Sidebar() {
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function toggleCollapsed() {
     setCollapsed((c) => {
@@ -185,40 +191,86 @@ export function Sidebar() {
           <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
         </button>
       )}
+      {!collapsed && (
+        <div style={{ padding: "0 22px 16px" }}>
+          <AgencyPicker />
+        </div>
+      )}
+      {agencyId && (
+        <nav style={{ display: "flex", flexDirection: "column" }}>
+          {ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={`/agencies/${agencyId}/${item.to}${suffix}`}
+              title={collapsed ? t(item.labelKey) : undefined}
+              style={({ isActive }) => ({
+                display: "flex",
+                alignItems: collapsed ? "center" : "flex-start",
+                justifyContent: collapsed ? "center" : "flex-start",
+                gap: 12,
+                padding: collapsed ? "12px 0" : "12px 22px",
+                color: isActive ? "var(--accent)" : "var(--text-primary)",
+                background: isActive ? "var(--accent-soft)" : "transparent",
+                borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
+                textDecoration: "none",
+                transition: "background var(--transition)",
+              })}
+            >
+              <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsed ? 0 : 2, flexShrink: 0 }} />
+              {!collapsed && (
+                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span>{t(item.labelKey)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
+                    {t(item.subtitleKey)}
+                  </span>
+                </span>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+      )}
+      <div style={{ flex: 1 }} />
+      {/* Global controls (agency-independent), moved in from the standalone
+          top Header — Header rendered these unconditionally regardless of
+          agency context (e.g. on /me, /admin, the onboarding page), so they
+          stay ungated here too, unlike the nav/Ask/prototype blocks below. */}
+      {!collapsed && (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "0 12px 12px" }}>
+          {agencyId && (
+            <NavLink
+              to={`/agencies/${agencyId}/live${suffix}`}
+              style={({ isActive }) => ({
+                fontSize: 12,
+                textDecoration: "none",
+                color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                fontWeight: isActive ? 600 : 400,
+              })}
+            >
+              {t("nav.live")}
+            </NavLink>
+          )}
+          <HeaderUserMenu />
+          <LocaleToggle />
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label={t("header.settings_aria")}
+            style={{
+              background: "transparent",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border-subtle)",
+              padding: "6px 10px",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            ⚙
+          </button>
+        </div>
+      )}
       {!agencyId ? null : (
         <>
-          <nav style={{ display: "flex", flexDirection: "column" }}>
-            {ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={`/agencies/${agencyId}/${item.to}${suffix}`}
-                title={collapsed ? t(item.labelKey) : undefined}
-                style={({ isActive }) => ({
-                  display: "flex",
-                  alignItems: collapsed ? "center" : "flex-start",
-                  justifyContent: collapsed ? "center" : "flex-start",
-                  gap: 12,
-                  padding: collapsed ? "12px 0" : "12px 22px",
-                  color: isActive ? "var(--accent)" : "var(--text-primary)",
-                  background: isActive ? "var(--accent-soft)" : "transparent",
-                  borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
-                  textDecoration: "none",
-                  transition: "background var(--transition)",
-                })}
-              >
-                <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsed ? 0 : 2, flexShrink: 0 }} />
-                {!collapsed && (
-                  <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span>{t(item.labelKey)}</span>
-                    <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
-                      {t(item.subtitleKey)}
-                    </span>
-                  </span>
-                )}
-              </NavLink>
-            ))}
-          </nav>
-          <div style={{ flex: 1 }} />
           {/* Distinct CTA below the uniform nav list, matching the artifact
               mockup's dashed-border Ask button — Ask is deliberately not in the
               ITEMS loop above so it reads as an action, not a peer tab. */}
@@ -315,6 +367,7 @@ export function Sidebar() {
           )}
         </>
       )}
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </aside>
   );
 }
