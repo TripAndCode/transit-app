@@ -3,19 +3,23 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
+import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 
 function renderSidebar(path = "/agencies/1/map") {
+  const queryClient = new QueryClient();
   return render(
-    <I18nextProvider i18n={i18n}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
-        </Routes>
-      </MemoryRouter>
-    </I18nextProvider>
+    <QueryClientProvider client={queryClient}>
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -32,10 +36,33 @@ describe("Sidebar", () => {
     expect(screen.getByText("How you compare to others")).toBeTruthy();
   });
 
-  it("renders Ask as a distinct CTA, and does not render Live (moved to the header)", () => {
+  it("renders Ask as a distinct CTA", () => {
     renderSidebar();
     expect(screen.getByText("Ask")).toBeTruthy();
-    expect(screen.queryByText("Latest observations")).toBeNull();
+  });
+
+  it("renders a Live link when viewing a specific agency", () => {
+    renderSidebar("/agencies/8/overview");
+    expect(screen.getByRole("link", { name: "Latest observations" })).toBeTruthy();
+  });
+
+  it("points the Live link at the current agency's live route, preserving the filter query string", () => {
+    renderSidebar("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Latest observations" });
+    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
+  });
+
+  it("does not render a Live link outside any agency context", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <I18nextProvider i18n={i18n}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Sidebar />
+          </MemoryRouter>
+        </I18nextProvider>
+      </QueryClientProvider>
+    );
+    expect(screen.queryByRole("link", { name: "Latest observations" })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
@@ -52,11 +79,13 @@ describe("Sidebar", () => {
 
   it("renders the brand block even when there is no agencyId, but not the nav items", () => {
     render(
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={["/"]}>
-          <Sidebar />
-        </MemoryRouter>
-      </I18nextProvider>
+      <QueryClientProvider client={new QueryClient()}>
+        <I18nextProvider i18n={i18n}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Sidebar />
+          </MemoryRouter>
+        </I18nextProvider>
+      </QueryClientProvider>
     );
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
     expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
