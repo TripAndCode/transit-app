@@ -63,4 +63,17 @@ describe("MapLegend", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     expect(props.onShowSingleSampleStopsChange).toHaveBeenCalledWith(true);
   });
+
+  it("collapses and expands, hiding the body but keeping the title visible", () => {
+    renderLegend();
+    // Expanded by default: a band label is visible.
+    expect(screen.getByText("< 1.5 min")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse legend" }));
+    expect(screen.queryByText("< 1.5 min")).toBeNull();
+    expect(screen.getByText("Legend")).toBeTruthy(); // title stays visible
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand legend" }));
+    expect(screen.getByText("< 1.5 min")).toBeTruthy();
+  });
 });

@@ -40,7 +40,7 @@ export default function App() {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar />
         <main style={{ flex: 1, overflowY: "auto" }}>
-          <div style={{ padding: 24 }}>
+          <div style={{ padding: 24, height: "100%", boxSizing: "border-box" }}>
             <Outlet key={agencyId ?? "root"} />
           </div>
         </main>

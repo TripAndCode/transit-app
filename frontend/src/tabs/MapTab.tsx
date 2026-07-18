@@ -251,7 +251,7 @@ export function MapTab() {
 
   // Before the overlay hooks so the scrim is inserted beneath their layers
   // (effect order follows hook-call order).
-  useBasemapDim(mapRef, styleEpoch);
+  useBasemapDim(mapRef, styleEpoch, focusedRoute != null);
 
   useHeatmapLayer(mapRef, data, showSingleSampleStops, focusedSeverity, id, styleEpoch, heatmapField);
 

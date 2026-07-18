@@ -12,7 +12,7 @@ import type { TFunction } from "i18next";
  * - stop_code shows as a subtitle only when distinct from stop_name
  *   (Aomori's stop_name is often "<station> ②のりば" which already // i18n-ignore: JSDoc
  *   contains the stop_code, so duplicating it would be noisy)
- * - meta line ("停留所 #N ・ 系統 X") only renders when sequence or // i18n-ignore: JSDoc
+ * - meta line ("停留所 #N ・ 路線 X") only renders when sequence or // i18n-ignore: JSDoc
  *   active_route is set; absent in plain heatmap mode
  * - contributing_routes lists the keito codes that contributed to a
  *   heatmap cluster's average — truncated to first 4 + "+N" overflow
@@ -23,6 +23,12 @@ import type { TFunction } from "i18next";
  * `t` is passed in from the React caller because this module is plain
  * TS (no hooks). All user-visible JP literals route through i18n keys
  * under `map.popup.*` + shared `common.unit_min` / `common.unit_count`.
+ *
+ * Colors are all CSS custom properties (`var(--text-secondary)` etc.),
+ * not hardcoded hex — the popup's outer chrome (background/border) is
+ * themed globally in `styles/global.css` (`.maplibregl-popup-content`),
+ * and every color used here must match that same light/dark-adaptive
+ * token set rather than hardcoding a value tuned for one background.
  */
 
 type StopPopupData = {
@@ -54,7 +60,7 @@ function poleBadgeHTML(platform_code: string | null | undefined, t: TFunction): 
   const poles = (platform_code || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (poles.length === 0) return "";
   return (
-    `<span style="display:inline-block;background:#eef0fa;color:#5b6cad;` +
+    `<span style="display:inline-block;background:var(--accent-soft);color:var(--accent);` +
     `border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;` +
     `vertical-align:middle">${escapeHtml(t("map.popup.platform_label"))} ${escapeHtml(poles.join("/"))}</span>`
   );
@@ -63,7 +69,7 @@ function poleBadgeHTML(platform_code: string | null | undefined, t: TFunction): 
 function stopCodeSubtitleHTML(stop_code: string | null | undefined, stop_name: string): string {
   const sc = (stop_code || "").trim();
   if (!sc || sc === stop_name) return "";
-  return `<div style="font-size:12px;color:#666;margin-top:1px">${escapeHtml(sc)}</div>`;
+  return `<div style="font-size:12px;color:var(--text-secondary);margin-top:1px">${escapeHtml(sc)}</div>`;
 }
 
 function metaLineHTML(
@@ -75,7 +81,7 @@ function metaLineHTML(
   if (typeof seq === "number") bits.push(`${escapeHtml(t("map.popup.stop_seq_prefix"))}${seq}`);
   if (active_route) bits.push(`${escapeHtml(t("map.popup.route_prefix"))} ${escapeHtml(active_route)}`);
   if (bits.length === 0) return "";
-  return `<div style="color:#888;font-size:11px;margin-top:2px">${bits.join(" ・ ")}</div>`; // i18n-ignore: separator
+  return `<div style="color:var(--text-tertiary);font-size:11px;margin-top:2px">${bits.join(" ・ ")}</div>`; // i18n-ignore: separator
 }
 
 function routesLineHTML(d: StopPopupData, t: TFunction): string {
@@ -88,7 +94,7 @@ function routesLineHTML(d: StopPopupData, t: TFunction): string {
     routes.length <= 4
       ? routes.join(", ")
       : `${routes.slice(0, 4).join(", ")} +${routes.length - 4}`;
-  return `<br/>${escapeHtml(t("map.popup.routes_label"))} <span style="color:#555">${escapeHtml(label)}</span>`;
+  return `<br/>${escapeHtml(t("map.popup.routes_label"))} <span style="color:var(--text-secondary)">${escapeHtml(label)}</span>`;
 }
 
 function stopIdLineHTML(stop_id: string | null | undefined): string {
@@ -96,7 +102,7 @@ function stopIdLineHTML(stop_id: string | null | undefined): string {
   if (ids.length === 0) return "";
   const shown = ids.length <= 3 ? ids.join(", ") : `${ids.slice(0, 3).join(", ")} +${ids.length - 3}`;
   return (
-    `<div style="font-size:11px;color:#888;margin-top:6px">` +
+    `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">` +
     `stop_id: <span style="font-family:ui-monospace,monospace">${escapeHtml(shown)}</span>` +
     `</div>`
   );
@@ -106,7 +112,7 @@ function stopIdLineHTML(stop_id: string | null | undefined): string {
  * unobserved stops (samples 0), so they don't masquerade as a real 0.0-min reading. */
 function metricBlockHTML(d: StopPopupData, t: TFunction): string {
   if (d.samples === 0) {
-    return `<div style="margin-top:6px;color:#888">${escapeHtml(t("map.popup.no_data"))}</div>`;
+    return `<div style="margin-top:6px;color:var(--text-secondary)">${escapeHtml(t("map.popup.no_data"))}</div>`;
   }
   const unitMin = escapeHtml(t("common.unit_min"));
   const unitCount = escapeHtml(t("common.unit_count"));
@@ -127,7 +133,7 @@ export function renderStopPopupHTML(d: StopPopupData, period: Period, t: TFuncti
     metaLineHTML(d.stop_sequence, d.active_route, t) +
     metricBlockHTML(d, t) +
     stopIdLineHTML(d.stop_id) +
-    `<div style="font-size:11px;color:#888;margin-top:4px">` +
+    `<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">` +
     `${escapeHtml(t("map.popup.period_label"))} ${escapeHtml(period.from)} ${escapeHtml(t("common.range_separator"))} ${escapeHtml(period.to)}` +
     `</div>` +
     `</div>`
