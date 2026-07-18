@@ -158,3 +158,21 @@ summary::-webkit-details-marker { display: none; }
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* MapLibre's default popup is hardcoded white — its content was inheriting
+   the app's dark-theme --text-primary (tuned for the near-black page
+   background), producing near-invisible pale-on-white text in dark mode.
+   Theme it with our own tokens instead so it adapts to both themes. */
+.maplibregl-popup-content {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+  color: var(--text-primary);
+}
+.maplibregl-popup-tip {
+  display: none;
+}
+.maplibregl-popup-close-button {
+  color: var(--text-secondary);
+  font-size: 16px;
+}
