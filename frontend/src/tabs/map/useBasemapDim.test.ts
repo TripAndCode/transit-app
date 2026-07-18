@@ -80,4 +80,36 @@ describe("useBasemapDim", () => {
     map.settleViaIdle(); // only `idle` fires
     expect(map.getLayer(SCRIM_LAYER)).toBeDefined();
   });
+
+  it("widens the zoom-gated ramp to start at 6 (not 12) when isRouteMode is true", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useBasemapDim(mapRef, 0, true);
+    });
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.5,
+    ]);
+    expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, -0.12,
+    ]);
+    expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 6, 1, 14, 0.92,
+    ]);
+    const scrim = map.getLayer(SCRIM_LAYER)!;
+    expect((scrim.paint as Record<string, unknown>)["background-opacity"]).toEqual([
+      "interpolate", ["linear"], ["zoom"], 6, 0, 14, 0.2,
+    ]);
+  });
+
+  it("keeps the 12->14 ramp when isRouteMode is false or omitted (default heatmap view)", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useBasemapDim(mapRef, 0, false);
+    });
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+    ]);
+  });
 });
