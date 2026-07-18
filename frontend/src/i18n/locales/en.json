@@ -272,6 +272,7 @@
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",
     "logout": "Sign out",
+    "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "login": {
       "error": {
         "state": "Your sign-in request has expired. Please try again.",

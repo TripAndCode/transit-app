@@ -272,6 +272,7 @@
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
     "logout": "ログアウト",
+    "logout_error": "ログアウトできませんでした。接続を確認して再度お試しください。",
     "login": {
       "error": {
         "state": "ログインのリクエストが期限切れです。もう一度お試しください。",
