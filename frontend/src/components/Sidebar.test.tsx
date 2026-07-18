@@ -9,7 +9,7 @@ import { Sidebar } from "./Sidebar";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 
 function renderSidebar(path = "/agencies/1/map") {
-  const queryClient = new QueryClient();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
@@ -24,7 +24,7 @@ function renderSidebar(path = "/agencies/1/map") {
 }
 
 describe("Sidebar", () => {
-  it("renders the 4 main nav items with their label and subtitle", () => {
+  it("renders the 5 main nav items with their label and subtitle", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("What's happening right now")).toBeTruthy();
@@ -34,6 +34,8 @@ describe("Sidebar", () => {
     expect(screen.getByText("When and why delays happen")).toBeTruthy();
     expect(screen.getByText("Agencies")).toBeTruthy();
     expect(screen.getByText("How you compare to others")).toBeTruthy();
+    expect(screen.getByText("Latest observations")).toBeTruthy();
+    expect(screen.getByText("Stop-by-stop readings")).toBeTruthy();
   });
 
   it("renders Ask as a distinct CTA", () => {
@@ -41,20 +43,20 @@ describe("Sidebar", () => {
     expect(screen.getByText("Ask")).toBeTruthy();
   });
 
-  it("renders a Live link when viewing a specific agency", () => {
+  it("renders Live as a nav item when viewing a specific agency", () => {
     renderSidebar("/agencies/8/overview");
-    expect(screen.getByRole("link", { name: "Latest observations" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Latest observations/ })).toBeTruthy();
   });
 
-  it("points the Live link at the current agency's live route, preserving the filter query string", () => {
+  it("points the Live nav item at the current agency's live route, preserving the filter query string", () => {
     renderSidebar("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Latest observations" });
+    const link = screen.getByRole("link", { name: /Latest observations/ });
     expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
   });
 
-  it("does not render a Live link outside any agency context", () => {
+  it("does not render the Live nav item outside any agency context", () => {
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
           <MemoryRouter initialEntries={["/"]}>
             <Sidebar />
@@ -62,7 +64,7 @@ describe("Sidebar", () => {
         </I18nextProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByRole("link", { name: "Latest observations" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
@@ -79,7 +81,7 @@ describe("Sidebar", () => {
 
   it("renders the brand block even when there is no agencyId, but not the nav items", () => {
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
           <MemoryRouter initialEntries={["/"]}>
             <Sidebar />
@@ -147,5 +149,22 @@ describe("Sidebar", () => {
       expect(screen.queryByText("Overview")).toBeNull();
       expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
     });
+
+    it("hides the account-menu trigger while collapsed", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      expect(await screen.findByRole("button", { name: "Account menu" })).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
+    });
+  });
+
+  it("renders the account-menu trigger (agency-independent) at the bottom of the sidebar", async () => {
+    // A prior test in this file (the "collapse" describe) persists the
+    // collapsed preference to localStorage; clear it so this test starts
+    // from the expanded state regardless of run order.
+    localStorage.clear();
+    renderSidebar();
+    expect(await screen.findByRole("button", { name: "Account menu" })).toBeTruthy();
   });
 });
