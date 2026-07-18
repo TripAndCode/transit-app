@@ -14,19 +14,24 @@ sticky server-side state between login start and callback. Starlette's
 ``request.session`` defensively; we just don't rely on it for security.
 """
 
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from pydantic import BaseModel
 
 from api.deps import get_conn
+from api.middleware.ratelimit import limiter
 from api.oauth import oauth
-from api.security import User, cookie_secure, csrf_guard, current_user
+from api.security import User, cookie_secure, csrf_guard, current_user, hash_password, verify_password
 from pipeline.audit import record_event
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -36,6 +41,38 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 TX_COOKIE = "oauth_tx"
 TX_TTL_SEC = 5 * 60
+
+
+def local_admin_enabled() -> bool:
+    """True when both break-glass local-admin env vars are set. Read live
+    (not import-frozen) so tests can monkeypatch + reimport like the OAuth vars."""
+    return bool(os.environ.get("DEFAULT_ADMIN_USERNAME")) and bool(os.environ.get("DEFAULT_ADMIN_PASSWORD"))
+
+
+async def seed_local_admin(pool: asyncpg.Pool) -> None:
+    """Upsert the break-glass local-admin account from DEFAULT_ADMIN_USERNAME/
+    DEFAULT_ADMIN_PASSWORD at startup (api.main's lifespan). No-ops if either
+    is unset. Re-hashes and re-applies the password on every boot, so rotating
+    it is just editing .env and restarting — the same mental model as
+    rotating an OAuth client secret. Role is force-set to 'admin' every time:
+    this account only exists to bootstrap/break-glass, it should never end up
+    demoted by accident.
+    """
+    if not local_admin_enabled():
+        return
+    username = os.environ["DEFAULT_ADMIN_USERNAME"]
+    password_hash = hash_password(os.environ["DEFAULT_ADMIN_PASSWORD"])
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (email, name, role, password_hash)
+            VALUES ($1, 'Local Admin', 'admin', $2)
+            ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'admin'
+            """,
+            username,
+            password_hash,
+        )
+
 
 _signer = URLSafeTimedSerializer(
     os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
@@ -218,6 +255,34 @@ async def _upsert_user(
     return uid, role
 
 
+async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str:
+    """Insert a sessions row for ``uid`` and return the new ``sid``. Shared by
+    the OAuth callback and the local-admin login — both mint a session the
+    same way once they've settled on a user_id."""
+    sid = secrets.token_urlsafe(32)
+    await conn.execute(
+        "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
+        sid,
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
+        ua,
+        ip,
+    )
+    return sid
+
+
+def _set_session_cookie(resp, sid: str) -> None:
+    resp.set_cookie(
+        SESSION_COOKIE_NAME,
+        sid,
+        max_age=SESSION_TTL_DAYS * 86400,
+        httponly=True,
+        secure=cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
 async def _fail_login(conn, request: Request, provider: str, reason: str) -> RedirectResponse:
     """Audit + redirect helper for OAuth callback failure paths."""
     await record_event(
@@ -258,13 +323,18 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
 
     client = oauth.create_client(provider)
     try:
-        # Authlib reads the state from request.session by default; we pass
-        # code_verifier explicitly since we kept it in our signed cookie.
-        token = await client.authorize_access_token(
-            request,
-            code_verifier=tx["verifier"],
-        )
+        # Do NOT pass code_verifier explicitly here — authorize_redirect (in
+        # the /login handler) already stashed it in the Starlette session via
+        # Authlib's own state machinery, and authorize_access_token's
+        # _format_state_params() pulls it back out of that session state
+        # automatically. Supplying it again as a kwarg collided with that
+        # (TypeError: got multiple values for keyword argument
+        # 'code_verifier'), breaking every real login attempt in production —
+        # the tx cookie is the actual security boundary (state/TTL/signature
+        # check above), not this now-redundant kwarg.
+        token = await client.authorize_access_token(request)
     except Exception:
+        _log.exception("OAuth token exchange failed for provider=%s", provider)
         return await _fail_login(conn, request, provider, "provider_down")
 
     info = await _fetch_userinfo(client, token, provider)
@@ -276,29 +346,64 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     ip = request.client.host if request.client else None
     async with conn.transaction():
         uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
-        sid = secrets.token_urlsafe(32)
-        await conn.execute(
-            "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
-            sid,
-            uid,
-            datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
-            ua,
-            ip,
-        )
+        sid = await _create_session(conn, uid, ua, ip)
         await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider=provider, ip=ip, user_agent=ua)
 
     next_url = sanitize_next(tx.get("next"))
     resp = RedirectResponse(url=next_url, status_code=302)
-    resp.set_cookie(
-        SESSION_COOKIE_NAME,
-        sid,
-        max_age=SESSION_TTL_DAYS * 86400,
-        httponly=True,
-        secure=cookie_secure(),
-        samesite="lax",
-        path="/",
-    )
+    _set_session_cookie(resp, sid)
     resp.delete_cookie(TX_COOKIE, path="/")
+    return resp
+
+
+class LocalLoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/local/login")
+@limiter.limit("5/minute")
+async def local_login(
+    request: Request,
+    body: LocalLoginBody,
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Password login for the single break-glass admin account (seeded at
+    startup from DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD — see
+    api.main's lifespan). Exists so there's always a way into /admin that
+    doesn't depend on OAuth being configured or reachable. Rate-limited
+    per IP; every attempt (success or failure) is audited to login_events
+    the same way OAuth failures already are.
+    """
+    if not local_admin_enabled():
+        raise HTTPException(status_code=503, detail="local admin login not configured")
+
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
+    row = await conn.fetchrow(
+        "SELECT user_id, password_hash FROM users WHERE email=$1",
+        body.username,
+    )
+    if row is None or not verify_password(body.password, row["password_hash"]):
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=None,
+            kind="login_failed",
+            provider="local",
+            ip=ip,
+            user_agent=ua,
+            meta={"reason": "bad_credentials", "username": body.username},
+        )
+        return JSONResponse(status_code=401, content={"error": "invalid_credentials"})
+
+    uid = row["user_id"]
+    async with conn.transaction():
+        sid = await _create_session(conn, uid, ua, ip)
+        await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider="local", ip=ip, user_agent=ua)
+
+    resp = JSONResponse(status_code=200, content={"ok": True})
+    _set_session_cookie(resp, sid)
     return resp
 
 

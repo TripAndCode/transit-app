@@ -7,7 +7,10 @@ equality against the env-driven allow-list. Keep this module
 dependency-free of asyncpg so it stays cheap to import in unit tests.
 """
 
+import hashlib
+import hmac
 import os as _os
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -16,6 +19,32 @@ from fastapi import HTTPException, Request
 
 _PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 _ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
+
+_SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
+
+
+def hash_password(password: str) -> str:
+    """Hash ``password`` with scrypt (stdlib, no new dependency) for the one
+    local/break-glass admin account. Format: ``scrypt$<salt-hex>$<hash-hex>``."""
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_SCRYPT_DKLEN)
+    return f"scrypt${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str | None) -> bool:
+    """Constant-time check against a hash produced by ``hash_password``.
+    Returns False (never raises) for malformed/missing hashes."""
+    if not stored:
+        return False
+    try:
+        algo, salt_hex, hash_hex = stored.split("$")
+        if algo != "scrypt":
+            return False
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        return False
+    dk = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_SCRYPT_DKLEN)
+    return hmac.compare_digest(dk.hex(), hash_hex)
 
 
 def cookie_secure() -> bool:

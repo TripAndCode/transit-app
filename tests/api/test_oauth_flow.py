@@ -21,10 +21,26 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 @pytest.fixture(autouse=True)
 def _set_oauth_env(monkeypatch):
-    """Stuff env vars + reload api.routers.auth so module-level reads pick them up.
+    """Stuff env vars that auth.py reads live (os.environ.get at call time —
+    _require_sso_configured, PUBLIC_BASE_URL, etc.), so plain monkeypatch.setenv
+    is enough with no reload.
 
-    ADMIN_EMAILS is built at import-time as a frozen set; tests that need
-    a different set monkeypatch ``auth_mod.ADMIN_EMAILS`` directly after import.
+    ADMIN_EMAILS is the one exception: it's built at import-time as a frozen
+    set, so monkeypatch.setenv("ADMIN_EMAILS", ...) alone wouldn't change it.
+    Tests that need a different set monkeypatch ``auth_mod.ADMIN_EMAILS``
+    directly instead (see test_admin_email_promotes) — cheaper and more
+    explicit than reloading the whole module to re-freeze it.
+
+    Historical note: this fixture used to importlib.reload(api.routers.auth)
+    on every test. That's unnecessary (everything it "refreshed" either reads
+    env live already, per above, or — like the oauth-tx signer — is fine
+    staying frozen at whatever it was on first import, since every test
+    round-trips through the same frozen instance). Worse, the reload re-ran
+    auth.py's `@limiter.limit(...)` decorators each time, registering a
+    duplicate rate-limit rule against the shared slowapi Limiter singleton
+    per test — 12 tests here meant 12 accumulated duplicate rules for any
+    rate-limited auth route, which was silently starving that route's quota
+    in a DIFFERENT test file's tests whenever both ran in the same session.
     """
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "g")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "gs")
@@ -33,11 +49,6 @@ def _set_oauth_env(monkeypatch):
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://test")
     monkeypatch.setenv("ADMIN_EMAILS", "")
     monkeypatch.setenv("SESSION_SIGNING_KEY", "test-signing-key")
-    import importlib
-
-    import api.routers.auth as auth_mod
-
-    importlib.reload(auth_mod)
     yield
 
 
@@ -312,3 +323,51 @@ async def test_logout_deletes_session(auth_client, aconn):
     assert resp.status_code == 204
     n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE sid=$1", sid)
     assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(auth_client, aconn, monkeypatch):
+    """Regression test for a real bug that broke every production login: the
+    callback passed ``code_verifier`` explicitly to ``authorize_access_token``,
+    but Authlib's own ``_format_state_params`` also injects ``code_verifier``
+    from the Starlette session state that ``authorize_redirect`` (in /login)
+    already stored there — passing both raised ``TypeError: got multiple
+    values for keyword argument 'code_verifier'`` on every real attempt.
+
+    Unlike the other tests in this file, this one does NOT mock
+    ``authorize_access_token`` itself (that would mock away the exact bug).
+    It drives the real /login endpoint first so the session is populated for
+    real, then only stubs the network-bound token fetch one level deeper.
+    Uses github (no OIDC discovery network call needed for authorize_redirect,
+    unlike google's server_metadata_url config).
+    """
+    from api.routers import auth as auth_mod
+
+    login_resp = await auth_client.get("/api/auth/github/login", follow_redirects=False)
+    assert login_resp.status_code == 302
+    tx_cookie = login_resp.cookies.get("oauth_tx")
+    assert tx_cookie
+    tx = auth_mod._signer.loads(tx_cookie)
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "real-sub", "email": "real@x", "email_verified": True, "name": "Real", "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+
+    client = auth_mod.oauth.create_client("github")
+
+    async def fake_fetch_access_token(**kwargs):
+        return {"access_token": "tok"}
+
+    monkeypatch.setattr(client, "fetch_access_token", fake_fetch_access_token)
+
+    # oauth_tx + the Starlette session cookie both persist on auth_client's
+    # own cookie jar from the /login response above — no need to pass them
+    # explicitly (and doing so would duplicate the Cookie header).
+    resp = await auth_client.get(
+        f"/api/auth/github/callback?state={tx['state']}&code=c",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+    assert "error=" not in resp.headers["location"]
