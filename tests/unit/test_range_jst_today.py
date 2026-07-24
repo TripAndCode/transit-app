@@ -36,3 +36,22 @@ def test_get_range_ctx_default_window_uses_jst_today(monkeypatch):
     monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
     ctx = range_mod.get_range_ctx(from_=None, to=None, dow="all", time_band="all", service="all", routes=None)
     assert ctx.to_date == date(2026, 1, 2)
+
+
+def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
+    """pipeline/query/tools.py's _apply_date_overrides is a sibling of
+    get_range_ctx's default-window logic (same today-29d..today pattern) and
+    must anchor to the same JST civil calendar, not the server's local time."""
+    from pipeline.query.tools import _apply_date_overrides
+
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
+
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+    ctx = range_mod.RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 31))
+    derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # from set, to omitted -> defaults to today
+    assert derived.to_date == date(2026, 1, 2)

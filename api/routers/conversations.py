@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from api.deps import get_agency, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx
+from api.range import RangeCtx, jst_today
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
@@ -247,7 +247,7 @@ async def append_message_endpoint(
 
     # Build a RangeCtx from the conversation's filter_ctx
     fc = conv["filter_ctx"] or {}
-    today = date.today()
+    today = jst_today()
     ctx_obj = RangeCtx(
         from_date=date.fromisoformat(fc["from_date"]) if fc.get("from_date") else today - timedelta(days=29),
         to_date=date.fromisoformat(fc["to_date"]) if fc.get("to_date") else today,

@@ -160,7 +160,7 @@ class UserPatch(BaseModel):
     suspended: bool | None = None
 
 
-async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int):
+async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> tuple[asyncpg.Record | None, int]:
     """Lock ``uid``'s row plus every active-admin row in one statement,
     always in ``user_id`` order.
 

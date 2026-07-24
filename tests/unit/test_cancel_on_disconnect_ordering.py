@@ -66,3 +66,38 @@ async def test_disconnect_cancel_does_not_raise_when_wrapped_by_basehttpmiddlewa
 
     await app(scope, receive, send)  # must not raise RuntimeError: No response returned.
     assert any(m["type"] == "http.response.start" for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_cancel_does_not_double_start_a_response_already_in_flight():
+    """If the wrapped app already sent http.response.start before being
+    cancelled (e.g. a future streaming GET mid-body), the middleware must
+    not send a second one - two http.response.start messages is an ASGI
+    protocol violation, distinct from the no-response-at-all case the
+    other test covers."""
+
+    async def _streaming_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"partial", "more_body": True})
+        await asyncio.Event().wait()  # hangs mid-body until cancelled
+
+    middleware = CancelGETOnDisconnectMiddleware(_streaming_app)
+
+    scope = {"type": "http", "method": "GET", "path": "/stream"}
+    sent_request = False
+
+    async def receive():
+        nonlocal sent_request
+        if not sent_request:
+            sent_request = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.disconnect"}
+
+    messages = []
+
+    async def send(message):
+        messages.append(message)
+
+    await middleware(scope, receive, send)
+    starts = [m for m in messages if m["type"] == "http.response.start"]
+    assert len(starts) == 1

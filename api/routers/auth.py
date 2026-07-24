@@ -71,8 +71,11 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
         return
     username = os.environ["DEFAULT_ADMIN_USERNAME"]
     password_hash = hash_password(os.environ["DEFAULT_ADMIN_PASSWORD"])
-    async with pool.acquire() as conn:
-        existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=$1", username)
+    async with pool.acquire() as conn, conn.transaction():
+        # FOR UPDATE + a single transaction closes the window a concurrent
+        # OAuth login could otherwise use to create/link this email between
+        # the guard's read and the INSERT below.
+        existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=$1 FOR UPDATE", username)
         if existing is not None:
             has_oauth = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM oauth_identities WHERE user_id=$1)", existing["user_id"]
@@ -204,6 +207,17 @@ async def _fetch_userinfo(client, token, provider: str) -> dict:
     }
 
 
+class LocalAccountConflict(Exception):
+    """Raised when an OAuth login's verified email matches an existing
+    password-only (break-glass/local-admin) account.
+
+    Auto-linking by email here would hand that account over to whoever
+    controls the OAuth-verified email address rather than the operator who
+    set its password — the same takeover class :func:`seed_local_admin`'s
+    OAuth-linked guard closes in the other direction.
+    """
+
+
 async def _upsert_user(
     conn,
     provider: str,
@@ -214,7 +228,11 @@ async def _upsert_user(
 ) -> tuple[int, str]:
     """Returns (user_id, role). Auto-links by verified email; promotes per ADMIN_EMAILS.
     ``ip`` / ``user_agent`` are forwarded onto the account_created audit row when
-    a fresh user is created."""
+    a fresh user is created.
+
+    Raises :class:`LocalAccountConflict` instead of auto-linking when the
+    email belongs to an existing password-only account.
+    """
     sub = info["sub"]
     email = info["email"]
 
@@ -227,6 +245,12 @@ async def _upsert_user(
     if row:
         uid = row["user_id"]
     else:
+        local_only = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE email=$1 AND password_hash IS NOT NULL)",
+            email,
+        )
+        if local_only:
+            raise LocalAccountConflict(email)
         # 2. Match by verified email (auto-link). ON CONFLICT DO UPDATE is a
         # no-op write that lets us use RETURNING whether the row was new or
         # existing — race-tolerant against concurrent first-time logins for
@@ -376,10 +400,13 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
 
     ua = request.headers.get("user-agent")
     ip = request.client.host if request.client else None
-    async with conn.transaction():
-        uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
-        sid = await _create_session(conn, uid, ua, ip)
-        await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider=provider, ip=ip, user_agent=ua)
+    try:
+        async with conn.transaction():
+            uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
+            sid = await _create_session(conn, uid, ua, ip)
+            await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider=provider, ip=ip, user_agent=ua)
+    except LocalAccountConflict:
+        return await _fail_login(conn, request, provider, "local_account_conflict")
 
     next_url = sanitize_next(tx.get("next"))
     resp = RedirectResponse(url=next_url, status_code=302)

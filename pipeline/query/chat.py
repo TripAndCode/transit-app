@@ -58,8 +58,12 @@ def _cache_enabled() -> bool:
 
 
 def _allowed_providers() -> set[str] | None:
-    """Providers the primary Ask path may use, from ``ASK_CHAT_PROVIDERS_PREFER_SAFE``.
+    """Providers the primary Ask path may use, from ``ASK_CHAT_ALLOWED_PROVIDERS``.
 
+    This is a hard allowlist, not a soft preference: if set, only these
+    providers are tried, and an empty intersection with the configured
+    ``CHAT_PROVIDERS`` ladder fails the request rather than falling back
+    (see ``LLMClient.chat_completions``'s ``allowed_providers`` handling).
     Unset by default (returns ``None``, i.e. no restriction) so the
     documented historical default — Groq — is unchanged. Some models
     (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
@@ -69,7 +73,7 @@ def _allowed_providers() -> set[str] | None:
     primary Ask path by default would change cost/latency/answer-quality
     for the main feature, so operators opt in explicitly here instead.
     """
-    raw = os.environ.get("ASK_CHAT_PROVIDERS_PREFER_SAFE", "").strip()
+    raw = os.environ.get("ASK_CHAT_ALLOWED_PROVIDERS", "").strip()
     if not raw:
         return None
     return {n.strip().lower() for n in raw.split(",") if n.strip()}

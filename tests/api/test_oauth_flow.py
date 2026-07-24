@@ -196,6 +196,44 @@ async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_oauth_login_refuses_to_take_over_a_local_password_account(auth_client, aconn, monkeypatch):
+    """A break-glass/local-password account (password_hash set, no linked
+    OAuth identity) must not be silently claimed by an OAuth login whose
+    verified email happens to match — that would hand whoever controls the
+    email address a live admin session, the same takeover class
+    seed_local_admin's OAuth-linked guard closes in the other direction."""
+    uid = (
+        await aconn.fetchrow(
+            "INSERT INTO users (email, name, role, password_hash) "
+            "VALUES ('root@local', 'Local Admin', 'admin', 'hash') RETURNING user_id"
+        )
+    )["user_id"]
+
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "g-sub", "email": "root@local", "email_verified": True, "name": "Someone", "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert "error=" in resp.headers["location"]
+    # No OAuth identity got linked to the local account, and no session was minted for it.
+    n_identities = await aconn.fetchval("SELECT count(*) FROM oauth_identities WHERE user_id=$1", uid)
+    assert n_identities == 0
+    n_sessions = await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id=$1", uid)
+    assert n_sessions == 0
+
+
+@pytest.mark.asyncio
 async def test_first_login_emits_account_created(auth_client, aconn, monkeypatch):
     """Brand-new user: account_created fires once, alongside the login event."""
     from api.routers import auth as auth_mod
