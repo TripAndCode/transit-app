@@ -12,6 +12,7 @@ const ERROR_KEYS: Record<string, string> = {
   unverified_email: "account.login.error.unverified_email",
   no_email: "account.login.error.no_email",
   provider_down: "account.login.error.provider_down",
+  local_account_conflict: "account.login.error.local_account_conflict",
 };
 
 export function LoginPage() {

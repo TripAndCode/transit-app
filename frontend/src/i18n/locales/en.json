@@ -279,6 +279,7 @@
         "unverified_email": "Email address is not verified. Please complete verification with your provider.",
         "no_email": "Could not retrieve a verified email from GitHub. Make your primary email public or sign in with another method.",
         "provider_down": "Provider is having temporary issues. Please retry shortly.",
+        "local_account_conflict": "This email already has a password sign-in. Please sign in with your username and password instead.",
         "invalid_credentials": "Incorrect username or password.",
         "too_many_attempts": "Too many attempts. Please try again shortly.",
         "generic": "Sign-in failed."
