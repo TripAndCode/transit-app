@@ -62,6 +62,15 @@ class CancelGETOnDisconnectMiddleware:
                 app_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await app_task
+                # In production this middleware nests inside Locale/APIKey/
+                # Session (all BaseHTTPMiddleware) — their call_next requires
+                # the wrapped app to eventually send http.response.start, or
+                # Starlette raises RuntimeError: No response returned. on
+                # every legitimate disconnect-cancel. The client is already
+                # gone, so this send is a no-op over the wire; it exists
+                # only to satisfy that contract.
+                await send({"type": "http.response.start", "status": 499, "headers": []})
+                await send({"type": "http.response.body", "body": b""})
             else:
                 # Normal completion — re-raise handler exceptions, if any.
                 await app_task

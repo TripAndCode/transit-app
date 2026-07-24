@@ -57,6 +57,24 @@ def _cache_enabled() -> bool:
     return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _allowed_providers() -> set[str] | None:
+    """Providers the primary Ask path may use, from ``ASK_CHAT_PROVIDERS_PREFER_SAFE``.
+
+    Unset by default (returns ``None``, i.e. no restriction) so the
+    documented historical default — Groq — is unchanged. Some models
+    (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
+    injected into user text rather than the system prompt (see
+    ``pipeline/query/followup.py``, which defaults to Cerebras-only for
+    exactly this reason); unlike the follow-up path, restricting the
+    primary Ask path by default would change cost/latency/answer-quality
+    for the main feature, so operators opt in explicitly here instead.
+    """
+    raw = os.environ.get("ASK_CHAT_PROVIDERS_PREFER_SAFE", "").strip()
+    if not raw:
+        return None
+    return {n.strip().lower() for n in raw.split(",") if n.strip()}
+
+
 _BUILD_SENTINEL = "__build__"
 
 
@@ -292,6 +310,7 @@ async def chat_with_tools(
                 temperature=0.0,
                 model_override=model,
                 response_format={"type": "json_object"},
+                allowed_providers=_allowed_providers(),
             )
         return client.chat_completions(
             messages=messages,
@@ -299,6 +318,7 @@ async def chat_with_tools(
             tool_choice="auto",
             temperature=0.0,
             model_override=model,
+            allowed_providers=_allowed_providers(),
         )
 
     # -----------------------------------------------------------------------

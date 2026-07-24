@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from api.deps import get_agency, get_conn
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["static"])
 
 
 @router.get("/routes")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def list_routes(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
@@ -42,7 +45,9 @@ async def list_routes(
 
 
 @router.get("/stops")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def list_stops(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):

@@ -36,4 +36,15 @@ EXPOSE 8000
 # edge. '*' is safe here because Railway's edge is the only network path to the
 # container — clients can't connect directly to spoof the header. (Single-quoted
 # so the shell doesn't glob the '*'.)
+#
+# CAVEAT (unverified as of 2026-07): this only holds if Railway's edge fully
+# *replaces* any client-supplied X-Forwarded-For rather than appending to it —
+# uvicorn's ProxyHeadersMiddleware with '*' trusts the leftmost entry
+# unconditionally, so an appended (not replaced) header would let an external
+# client set an arbitrary/rotating leftmost IP and defeat both the per-IP rate
+# limit and the sessions.ip/login_events.ip audit trail. Railway's own support
+# forum has contradictory answers on which it does (an employee says it strips
+# client-supplied XFF; a separate empirical report suggests otherwise) — verify
+# against the actual deployment (or Railway support) before treating this as
+# settled, especially before relying on it for anything security-load-bearing.
 CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --proxy-headers --forwarded-allow-ips='*'"]

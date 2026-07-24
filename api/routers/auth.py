@@ -57,21 +57,53 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
     rotating an OAuth client secret. Role is force-set to 'admin' every time:
     this account only exists to bootstrap/break-glass, it should never end up
     demoted by accident.
+
+    Refuses to seed over an email that already belongs to a real
+    OAuth-provisioned account (has a linked ``oauth_identities`` row) —
+    without this, an operator picking ``DEFAULT_ADMIN_USERNAME`` that
+    happens to match a live SSO user's email would silently grant that
+    user's account a password login and force-promote it to admin on
+    every restart. Promoting a pre-existing (non-OAuth) account is still
+    allowed but leaves a ``role_changed`` audit event, matching how every
+    other role change in the admin surface is audited.
     """
     if not local_admin_enabled():
         return
     username = os.environ["DEFAULT_ADMIN_USERNAME"]
     password_hash = hash_password(os.environ["DEFAULT_ADMIN_PASSWORD"])
     async with pool.acquire() as conn:
-        await conn.execute(
+        existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=$1", username)
+        if existing is not None:
+            has_oauth = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM oauth_identities WHERE user_id=$1)", existing["user_id"]
+            )
+            if has_oauth:
+                _log.error(
+                    "DEFAULT_ADMIN_USERNAME=%r matches an existing OAuth-linked account "
+                    "(user_id=%s) — refusing to seed the break-glass local-admin over a "
+                    "real SSO user. Choose a DEFAULT_ADMIN_USERNAME that isn't a live user's email.",
+                    username,
+                    existing["user_id"],
+                )
+                return
+        row = await conn.fetchrow(
             """
             INSERT INTO users (email, name, role, password_hash)
             VALUES ($1, 'Local Admin', 'admin', $2)
             ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'admin'
+            RETURNING user_id
             """,
             username,
             password_hash,
         )
+        if existing is not None and existing["role"] != "admin":
+            await record_event(
+                conn,
+                user_id=row["user_id"],
+                actor_id=None,
+                kind="role_changed",
+                meta={"old": existing["role"], "new": "admin", "reason": "break_glass_seed"},
+            )
 
 
 _signer = URLSafeTimedSerializer(

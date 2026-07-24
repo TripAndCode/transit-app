@@ -81,6 +81,41 @@ async def test_seed_never_demotes_the_break_glass_account(local_client, aconn):
 
 
 @pytest.mark.asyncio
+async def test_seed_refuses_to_take_over_an_oauth_linked_account(local_client, aconn):
+    """DEFAULT_ADMIN_USERNAME matching a real OAuth-provisioned user's email
+    must not silently grant that account a password login + admin role."""
+    row = await aconn.fetchrow(
+        "INSERT INTO users (email, name, role) VALUES ('root@local', 'Real SSO User', 'user') RETURNING user_id"
+    )
+    await aconn.execute(
+        "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link) "
+        "VALUES ('google', 'sub-123', $1, 'root@local')",
+        row["user_id"],
+    )
+    await _seed(local_client)
+    after = await aconn.fetchrow("SELECT role, password_hash FROM users WHERE email='root@local'")
+    assert after["role"] == "user"
+    assert after["password_hash"] is None
+
+
+@pytest.mark.asyncio
+async def test_seed_audits_promoting_a_pre_existing_non_oauth_account(local_client, aconn):
+    """Seeding over an existing (non-OAuth) account that wasn't already
+    admin must leave an audit trail of the role change."""
+    row = await aconn.fetchrow(
+        "INSERT INTO users (email, name, role) VALUES ('root@local', 'Pre-existing', 'user') RETURNING user_id"
+    )
+    await _seed(local_client)
+    role = await aconn.fetchval("SELECT role FROM users WHERE user_id=$1", row["user_id"])
+    assert role == "admin"
+    event = await aconn.fetchrow(
+        "SELECT kind, meta FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1", row["user_id"]
+    )
+    assert event is not None
+    assert event["kind"] == "role_changed"
+
+
+@pytest.mark.asyncio
 async def test_login_with_correct_credentials_sets_session_cookie(local_client, aconn):
     await _seed(local_client)
     resp = await local_client.post(

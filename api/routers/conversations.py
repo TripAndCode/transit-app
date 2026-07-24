@@ -117,7 +117,7 @@ async def get_conversation(
 ):
     """Return one conversation with its messages; 404 unless the caller owns it."""
     try:
-        return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         # Mask non-owned threads as 404 (don't reveal existence)
         raise HTTPException(status_code=404, detail="not found") from None
@@ -137,7 +137,9 @@ async def update_conversation(
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     try:
-        return await _conv.update_conversation(conn, conversation_id, user_id=user.user_id, **fields)
+        return await _conv.update_conversation(
+            conn, conversation_id, user_id=user.user_id, agency_id=agency_id, **fields
+        )
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -154,7 +156,7 @@ async def delete_conversation(
     """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
     try:
-        await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id)
+        await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
     return {"ok": True}
@@ -169,7 +171,7 @@ async def list_messages(
 ):
     """Return all messages of a conversation the caller owns."""
     try:
-        return await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
+        return await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -219,7 +221,7 @@ async def append_message_endpoint(
     # ownership check and the message inserts can't produce a 500 (the FK
     # cascade would otherwise tear out the rows we're trying to write).
     try:
-        conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -435,12 +437,12 @@ async def followup_endpoint(
 
     # Ownership check (also confirms the conversation exists).
     try:
-        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
     # Fetch the context message (must belong to this conversation).
-    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
+    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     ctx_msg = next(
         (m for m in messages if m["message_id"] == body.context_message_id),
         None,

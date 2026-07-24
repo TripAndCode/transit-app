@@ -53,7 +53,7 @@ async def test_create_and_get_conversation(pool_with_users):
     assert conv["title"] == "Test"
     assert conv["user_id"] == u1
     async with pool.acquire() as c:
-        fetched = await get_conversation(c, conv["conversation_id"], user_id=u1)
+        fetched = await get_conversation(c, conv["conversation_id"], user_id=u1, agency_id=agency)
     assert fetched["conversation_id"] == conv["conversation_id"]
 
 
@@ -63,7 +63,21 @@ async def test_get_conversation_other_user_raises(pool_with_users):
     async with pool.acquire() as c:
         conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
         with pytest.raises(PermissionDenied):
-            await get_conversation(c, conv["conversation_id"], user_id=u2)
+            await get_conversation(c, conv["conversation_id"], user_id=u2, agency_id=agency)
+
+
+@pytest.mark.asyncio
+async def test_get_conversation_wrong_agency_raises(pool_with_users):
+    """Same owner, wrong agency_id must still raise PermissionDenied - the
+    ownership check must verify agency_id, not just user_id."""
+    pool, agency, u1, _u2 = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        other_agency = await c.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other') RETURNING agency_id"
+        )
+        with pytest.raises(PermissionDenied):
+            await get_conversation(c, conv["conversation_id"], user_id=u1, agency_id=other_agency["agency_id"])
 
 
 @pytest.mark.asyncio
@@ -82,12 +96,14 @@ async def test_update_conversation_owner_only(pool_with_users):
     pool, agency, u1, u2 = pool_with_users
     async with pool.acquire() as c:
         conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
-        await update_conversation(c, conv["conversation_id"], user_id=u1, title="renamed", pinned=True)
-        refreshed = await get_conversation(c, conv["conversation_id"], user_id=u1)
+        await update_conversation(
+            c, conv["conversation_id"], user_id=u1, agency_id=agency, title="renamed", pinned=True
+        )
+        refreshed = await get_conversation(c, conv["conversation_id"], user_id=u1, agency_id=agency)
         assert refreshed["title"] == "renamed" and refreshed["pinned"] is True
 
         with pytest.raises(PermissionDenied):
-            await update_conversation(c, conv["conversation_id"], user_id=u2, title="hijacked")
+            await update_conversation(c, conv["conversation_id"], user_id=u2, agency_id=agency, title="hijacked")
 
 
 @pytest.mark.asyncio
@@ -106,7 +122,7 @@ async def test_delete_conversation_cascades_messages(pool_with_users):
             result=None,
             rendered_summary="路線一覧",
         )
-        await delete_conversation(c, conv["conversation_id"], user_id=u1)
+        await delete_conversation(c, conv["conversation_id"], user_id=u1, agency_id=agency)
     async with pool.acquire() as c:
         msgs = await c.fetch(
             "SELECT COUNT(*) AS n FROM ask_conversation_messages WHERE conversation_id=$1", conv["conversation_id"]
@@ -141,7 +157,7 @@ async def test_append_and_list_messages(pool_with_users):
             result={"kind": "table"},
             rendered_summary="遅延ランキングTOP10: ...",
         )
-        msgs = await list_messages(c, conv["conversation_id"], user_id=u1)
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
     assert [m["role"] for m in msgs] == ["user", "assistant"]
     assert msgs[1]["tool"] == "top_n"
     assert msgs[1]["args"] == {"metric": "avg_delay", "n": 10}

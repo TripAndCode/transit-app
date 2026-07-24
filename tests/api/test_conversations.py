@@ -95,6 +95,23 @@ async def test_get_others_conversation_is_404(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_get_own_conversation_under_wrong_agency_path_is_404(conv_app):
+    """A conversation owned by the caller but created under a different
+    agency must 404 when accessed via another agency's URL path - the
+    ownership check must verify agency_id, not just user_id."""
+    app, agency, uid, pool = conv_app
+    async with pool.acquire() as conn:
+        other_agency = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other') RETURNING agency_id"
+        )
+    async with _authed_client(app, uid) as c:
+        r = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = r.json()["conversation_id"]
+        r2 = await c.get(f"/api/{other_agency['agency_id']}/conversations/{conv_id}")
+        assert r2.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_patch_and_delete(conv_app):
     app, agency, uid, _ = conv_app
     async with _authed_client(app, uid) as c:

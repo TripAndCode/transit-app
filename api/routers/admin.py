@@ -7,9 +7,11 @@ Mutating routes (PATCH, DELETE) carry two structural guards:
   out of the admin surface.
 - **last-admin guard**: a transition that would leave zero active
   (non-suspended) admins is rejected. The count + UPDATE are wrapped in
-  ``async with conn.transaction():`` with a ``SELECT ... FOR UPDATE`` on
-  the target row so two parallel demotes can't both observe "one other
-  admin exists" and race past the guard.
+  ``async with conn.transaction():`` with a ``SELECT ... FOR UPDATE`` that
+  locks the target row *and* every other active-admin row (in a fixed
+  ``user_id`` order) so two parallel demotes of two different admins
+  can't each independently observe "one other admin exists" and race
+  past the guard.
 
 Soft-delete preserves the audit trail: rows in ``login_events`` survive
 (FK is ``ON DELETE SET NULL``), but the user's PII is anonymized
@@ -158,17 +160,35 @@ class UserPatch(BaseModel):
     suspended: bool | None = None
 
 
-async def _count_other_active_admins(conn: asyncpg.Connection, uid: int) -> int:
-    """Count admins that are active (non-suspended) and not ``uid``.
+async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int):
+    """Lock ``uid``'s row plus every active-admin row in one statement,
+    always in ``user_id`` order.
 
-    Used by the last-admin guard: the caller is about to change ``uid`` in
-    a way that may strip the admin role / suspend it; if no OTHER active
-    admin exists, the change would lock everyone out, so reject.
+    Locking only the target row (the previous approach) lets two
+    transactions demoting two *different* admins each read the other's
+    row as still-active before either commits, so both pass the guard and
+    together leave zero admins. Locking the whole active-admin set makes
+    concurrent admin-mutating transactions contend for the same rows and
+    serialize; the fixed ``ORDER BY user_id`` keeps that contention from
+    forming a lock-order deadlock (two transactions each locking their own
+    target first, then trying to also lock the other's row).
+
+    Returns ``(target_row_or_None, count_of_other_active_admins)``.
     """
-    return await conn.fetchval(
-        "SELECT count(*) FROM users WHERE role='admin' AND suspended_at IS NULL AND user_id != $1",
+    rows = await conn.fetch(
+        """
+        SELECT user_id, role, suspended_at FROM users
+        WHERE user_id = $1 OR (role='admin' AND suspended_at IS NULL)
+        ORDER BY user_id
+        FOR UPDATE
+        """,
         uid,
     )
+    target = next((r for r in rows if r["user_id"] == uid), None)
+    other_active_admins = sum(
+        1 for r in rows if r["user_id"] != uid and r["role"] == "admin" and r["suspended_at"] is None
+    )
+    return target, other_active_admins
 
 
 @router.patch("/users/{uid}", response_model=UserRow)
@@ -195,10 +215,7 @@ async def patch_user(
         raise HTTPException(400, "invalid role")
 
     async with conn.transaction():
-        row = await conn.fetchrow(
-            "SELECT role, suspended_at FROM users WHERE user_id=$1 FOR UPDATE",
-            uid,
-        )
+        row, other_active_admins = await _lock_target_and_active_admins(conn, uid)
         if not row:
             raise HTTPException(404, "user not found")
         old_role = row["role"]
@@ -209,9 +226,8 @@ async def patch_user(
         # last-admin guard: trip if this admin is demoted OR newly suspended
         becoming_non_admin = old_role == "admin" and new_role != "admin"
         becoming_suspended = old_role == "admin" and (not old_suspended) and new_suspended
-        if becoming_non_admin or becoming_suspended:
-            if await _count_other_active_admins(conn, uid) == 0:
-                raise HTTPException(400, "would leave no admins")
+        if (becoming_non_admin or becoming_suspended) and other_active_admins == 0:
+            raise HTTPException(400, "would leave no admins")
 
         await conn.execute(
             "UPDATE users SET role=$1, suspended_at=$2, updated_at=now() WHERE user_id=$3",
@@ -254,15 +270,11 @@ async def delete_user(
     if uid == admin.user_id:
         raise HTTPException(400, "cannot modify self")
     async with conn.transaction():
-        row = await conn.fetchrow(
-            "SELECT role, suspended_at FROM users WHERE user_id=$1 FOR UPDATE",
-            uid,
-        )
+        row, other_active_admins = await _lock_target_and_active_admins(conn, uid)
         if not row:
             raise HTTPException(404, "user not found")
-        if row["role"] == "admin" and row["suspended_at"] is None:
-            if await _count_other_active_admins(conn, uid) == 0:
-                raise HTTPException(400, "would leave no admins")
+        if row["role"] == "admin" and row["suspended_at"] is None and other_active_admins == 0:
+            raise HTTPException(400, "would leave no admins")
         await conn.execute(
             """
             UPDATE users

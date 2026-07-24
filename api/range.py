@@ -12,10 +12,26 @@ ranges wider than 365 days to avoid runaway scans.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import Query
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+
+def jst_today() -> date:
+    """Today's date in Asia/Tokyo.
+
+    Every agg_*/analyze query is bucketed against the JST civil calendar
+    (api/main.py pins the DB session to the same zone). Using the
+    server's local date here caused a real ~20%-of-rows mis-bucketing bug
+    in analyze() before (UTC-vs-JST) - this avoids the same class of bug
+    for the request-side default date-range window.
+    """
+    return datetime.now(_JST).date()
+
 
 DowFilter = Literal["all", "weekday", "weekend"]
 TimeBand = Literal[
@@ -78,7 +94,7 @@ def get_range_ctx(
     :data:`MAX_RANGE_DAYS` are clamped at the start (newer end stays as given)
     so the most recent data is preserved.
     """
-    today = date.today()
+    today = jst_today()
     to_date = parse_iso_date(to) or today
     from_date = parse_iso_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
 

@@ -143,6 +143,14 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
 
 
 @pytest.mark.asyncio
+async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aagency_id):
+    """get_agency() must reject soft-deleted agencies like every other
+    agency lookup in the codebase, not just the admin list endpoint."""
+    await aconn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id=$1", aagency_id)
+    r = await client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07")
+    assert r.status_code == 404
+
+
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
     """An agency with no `updates` rows in range returns a zero-filled
     OverviewSummary, not a 404 or 500."""
