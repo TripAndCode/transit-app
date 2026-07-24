@@ -26,3 +26,11 @@ def test_empty_string_means_no_restriction(monkeypatch):
 def test_configured_value_restricts_to_named_providers(monkeypatch):
     monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "cerebras, openai")
     assert chat_module._allowed_providers() == {"cerebras", "openai"}
+
+
+def test_comma_only_value_means_no_restriction_not_empty_set(monkeypatch):
+    """A value like "," or " , " passes the not-raw guard but splits into
+    zero real names - must fall back to "no restriction", not an empty
+    set that would zero out the whole provider ladder on a misconfig."""
+    monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", " , ")
+    assert chat_module._allowed_providers() is None

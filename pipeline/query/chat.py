@@ -76,7 +76,8 @@ def _allowed_providers() -> set[str] | None:
     raw = os.environ.get("ASK_CHAT_ALLOWED_PROVIDERS", "").strip()
     if not raw:
         return None
-    return {n.strip().lower() for n in raw.split(",") if n.strip()}
+    names = {n.strip().lower() for n in raw.split(",") if n.strip()}
+    return names or None
 
 
 _BUILD_SENTINEL = "__build__"

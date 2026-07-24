@@ -72,9 +72,13 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
     username = os.environ["DEFAULT_ADMIN_USERNAME"]
     password_hash = hash_password(os.environ["DEFAULT_ADMIN_PASSWORD"])
     async with pool.acquire() as conn, conn.transaction():
-        # FOR UPDATE + a single transaction closes the window a concurrent
-        # OAuth login could otherwise use to create/link this email between
-        # the guard's read and the INSERT below.
+        # FOR UPDATE closes the promote-existing-row race (a concurrent
+        # writer can't change this row's oauth/role state between the read
+        # and the INSERT below). It can't lock a row that doesn't exist yet
+        # though — the row-absent (first-boot) case is instead safe only
+        # because this runs during api/main.py's lifespan startup, before
+        # the app begins serving OAuth callbacks (single uvicorn process,
+        # no --workers).
         existing = await conn.fetchrow("SELECT user_id, role FROM users WHERE email=$1 FOR UPDATE", username)
         if existing is not None:
             has_oauth = await conn.fetchval(
