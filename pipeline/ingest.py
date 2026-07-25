@@ -214,17 +214,20 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
-                        ts = _ts(d, pb_name)
-                        fobj = tf.extractfile(member)
-                        if fobj is None:  # non-file member (dir/special)
-                            continue
                         # _savepoint isolates one bad member from every good
                         # member already inserted since the last commit
-                        # boundary in this tarball. The outer try/except
-                        # still covers genuinely tar-wide failures (a corrupt
-                        # archive tarfile.open can't even read).
+                        # boundary in this tarball — extractfile() itself can
+                        # raise on a corrupt member header/index, not just
+                        # parse_feed, so it must be inside the savepoint too.
+                        # The outer try/except still covers genuinely
+                        # tar-wide failures (a corrupt archive tarfile.open
+                        # can't even read).
                         try:
                             with _savepoint(cur, "tar_member"):
+                                ts = _ts(d, pb_name)
+                                fobj = tf.extractfile(member)
+                                if fobj is None:  # non-file member (dir/special)
+                                    continue
                                 raw = fobj.read()
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                                 n_inserted += _insert_updates(cur, agency_id, rows)

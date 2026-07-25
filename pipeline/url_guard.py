@@ -228,6 +228,14 @@ def safe_urlopen(
                 raise FeedURLError(f"redirect from {_redact_url(current)} ({exc.code}) has no Location header") from exc
             current = urljoin(current, location)
             new_parts = urlsplit(current)
+            if exc.code in (301, 302, 303):
+                # Per RFC 9110 §15.4, only 307/308 preserve method+body on
+                # redirect; 301/302/303 downgrade a non-GET request to GET
+                # and drop the body — otherwise a future non-GET caller
+                # redirected via 303 would silently re-send its body/method
+                # to a location that never asked for it.
+                method = "GET"
+                data = None
             if new_parts.hostname != original_host or (original_scheme == "https" and new_parts.scheme == "http"):
                 # Don't forward credentials to a host the caller never
                 # intended them for, or send them in cleartext over a

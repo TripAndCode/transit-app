@@ -189,8 +189,13 @@ def cmd_refresh_static(args):
         if result is None:
             logger.info("No change.")
     else:
-        n = refresh_all(conn, dest)
+        n, failed = refresh_all(conn, dest)
+        conn.close()
+        if failed:
+            logger.error(f"refresh-static: {len(failed)} agencies failed: {failed}")
+            sys.exit(1)
         logger.info(f"Refreshed {n} agencies.")
+        return
     conn.close()
 
 

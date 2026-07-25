@@ -147,6 +147,42 @@ def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_c
     assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
 
 
+def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_members_insert(
+    pg_conn, agency_id, tmp_path
+):
+    """tarfile.extractfile() can raise on a corrupt member (bad header/index)
+    even when tarfile.open() and getmembers() succeeded. That must isolate
+    like any other per-member failure, not escape the savepoint and roll
+    back every good member already inserted earlier in this tarball."""
+    ok_data, bad_data = b"\x00", b"\x01"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, data in (("20260401/a_ok.pb", ok_data), ("20260401/z_bad.pb", bad_data)):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    tgz_path = tmp_path / "20260401.tar.gz"
+    tgz_path.write_bytes(buf.getvalue())
+
+    real_extractfile = tarfile.TarFile.extractfile
+
+    def flaky_extractfile(self, member):
+        if member.name.endswith("z_bad.pb"):
+            raise tarfile.ReadError("corrupt member")
+        return real_extractfile(self, member)
+
+    with (
+        patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[_FAKE_ROW]),
+        patch.object(tarfile.TarFile, "extractfile", flaky_extractfile),
+    ):
+        ingest(str(tmp_path), agency_id, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's extractfile failure
+
+
 def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
     """Running ingest twice on the same folder inserts 0 rows the second time."""
     fake_row = (

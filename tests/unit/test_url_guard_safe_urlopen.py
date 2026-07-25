@@ -196,6 +196,26 @@ def test_strips_authorization_on_same_host_https_to_http_downgrade(monkeypatch):
     assert "Authorization" not in seen_headers[1]
 
 
+def test_downgrades_to_get_and_drops_body_on_302_redirect(monkeypatch):
+    """Per RFC 9110, a 301/302/303 redirect should downgrade a non-GET
+    request to GET and drop its body - only 307/308 preserve method+body.
+    A future POST caller redirected via 302 must not silently re-POST its
+    body to the new location."""
+    seen = []
+
+    def fake_open(req, timeout=None):
+        seen.append((req.get_method(), req.data))
+        if req.full_url == "http://8.8.8.8/start":
+            raise _http_error(req.full_url, 302, "http://8.8.8.8/next")
+        return _FakeResponse(b"ok")
+
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    req = urllib.request.Request("http://8.8.8.8/start", data=b"payload", method="POST")
+    with safe_urlopen(req) as resp:
+        assert resp.read() == b"ok"
+    assert seen == [("POST", b"payload"), ("GET", None)]
+
+
 def test_preserves_request_body_across_redirect(monkeypatch):
     """A future POST-with-body Request must not silently lose its body on
     a redirect hop - only headers/method were preserved before this fix."""

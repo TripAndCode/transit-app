@@ -159,6 +159,25 @@ def test_aomori_scrape_fetches_resolved_zip(tmp_path):
     assert "gtfs-aomoricitybus-202605.zip" in history
 
 
+def test_aomori_scrape_persisted_history_redacts_scraped_zip_url_query_string(tmp_path):
+    """zip_url is scraped out of index_url's own HTML, not admin-set - a
+    compromised/spoofed index page could serve an href carrying an API key
+    in the query string or userinfo, and that must not land unredacted in
+    the persisted fetch_history.csv, mirroring direct_url.py's manifest
+    redaction of static_url/latest_url."""
+    html = (
+        b'<html><a href="https://user:SECRET123@8.8.8.8/downloads/'
+        b'gtfs-aomoricitybus-202605.zip">x</a></html>'
+    )
+    zip_body = b"PK\x03\x04ZIPBODY"
+    with patch.object(_opener, "open", side_effect=[_mock_response(html), _mock_response(zip_body)]):
+        result = aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+    assert result is not None
+    history = (tmp_path / "1" / "fetch_history.csv").read_text()
+    assert "SECRET123" not in history
+    assert "gtfs-aomoricitybus-202605.zip" in history
+
+
 def test_aomori_scrape_rejects_unsafe_index_url(tmp_path):
     """index_url itself must be SSRF-validated too, not just the scraped
     zip_url - symmetric with direct_url.py's coverage of both fetch legs.

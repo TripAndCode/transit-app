@@ -40,12 +40,14 @@ def refresh_static(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pat
     return zip_path
 
 
-def refresh_all(conn, dest_dir: pathlib.Path) -> int:
+def refresh_all(conn, dest_dir: pathlib.Path) -> tuple[int, list[int]]:
     """Refresh static for every agency that has both static_url and static_strategy.
 
-    One agency's failure (network error, a rejected static_url, a corrupt
-    zip) does not abort the rest — matching cmd_analyze_all's per-agency
-    isolation. refresh_static()/load_static() have no internal
+    Run-all-then-report, matching cmd_analyze_all/cmd_ingest_live: one
+    agency's failure (network error, a rejected static_url, a corrupt zip)
+    does not abort the rest, and every failure is collected and returned so
+    the caller can exit nonzero instead of reporting a partial run as a full
+    success. refresh_static()/load_static() have no internal
     rollback-on-error of their own, so the connection is rolled back here
     before continuing to the next agency.
     """
@@ -58,6 +60,7 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> int:
         )
         ids = [r[0] for r in cur.fetchall()]
     n_loaded = 0
+    failed = []
     for aid in ids:
         try:
             if refresh_static(aid, conn, dest_dir):
@@ -65,4 +68,5 @@ def refresh_all(conn, dest_dir: pathlib.Path) -> int:
         except Exception:
             logger.exception(f"[static_fetcher] refresh failed for agency {aid}")
             conn.rollback()
-    return n_loaded
+            failed.append(aid)
+    return n_loaded, failed

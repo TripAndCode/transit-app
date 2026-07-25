@@ -96,7 +96,11 @@ def fetch(
     if not history_path.exists():
         history_path.write_text("timestamp,zip_url,sha256,bytes,file_path\n")
     with history_path.open("a") as f:
-        f.write(f"{datetime.now().isoformat()},{zip_url},{sha},{len(data)},{final}\n")
+        # zip_url is scraped from index_url's own HTML, not admin-set, so a
+        # compromised/spoofed index page could embed credentials in its
+        # userinfo or query string — redact before persisting, matching
+        # direct_url.py's manifest redaction of static_url/latest_url.
+        f.write(f"{datetime.now().isoformat()},{_redact_url(zip_url)},{sha},{len(data)},{final}\n")
 
     logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final

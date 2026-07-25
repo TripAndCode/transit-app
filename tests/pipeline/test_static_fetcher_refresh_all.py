@@ -52,10 +52,11 @@ def test_refresh_all_continues_past_one_agencys_failure(pg_conn, tmp_path):
         return None
 
     with patch("pipeline.static_fetcher.refresh_static", side_effect=fake_refresh_static) as fake:
-        n = refresh_all(pg_conn, tmp_path)
+        n, failed = refresh_all(pg_conn, tmp_path)
 
     assert [c.args[0] for c in fake.call_args_list] == ids
     assert n == 0  # both successful calls returned None (no change)
+    assert failed == [ids[1]]
     # Connection must still be usable after the fix's rollback - the fixture's
     # own TRUNCATE teardown will raise if it isn't.
     with pg_conn.cursor() as cur:
