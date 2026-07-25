@@ -147,9 +147,7 @@ def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_c
     assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
 
 
-def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_members_insert(
-    pg_conn, agency_id, tmp_path
-):
+def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_members_insert(pg_conn, agency_id, tmp_path):
     """tarfile.extractfile() can raise on a corrupt member (bad header/index)
     even when tarfile.open() and getmembers() succeeded. That must isolate
     like any other per-member failure, not escape the savepoint and roll

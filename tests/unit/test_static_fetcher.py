@@ -165,10 +165,7 @@ def test_aomori_scrape_persisted_history_redacts_scraped_zip_url_query_string(tm
     in the query string or userinfo, and that must not land unredacted in
     the persisted fetch_history.csv, mirroring direct_url.py's manifest
     redaction of static_url/latest_url."""
-    html = (
-        b'<html><a href="https://user:SECRET123@8.8.8.8/downloads/'
-        b'gtfs-aomoricitybus-202605.zip">x</a></html>'
-    )
+    html = b'<html><a href="https://user:SECRET123@8.8.8.8/downloads/gtfs-aomoricitybus-202605.zip">x</a></html>'
     zip_body = b"PK\x03\x04ZIPBODY"
     with patch.object(_opener, "open", side_effect=[_mock_response(html), _mock_response(zip_body)]):
         result = aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
