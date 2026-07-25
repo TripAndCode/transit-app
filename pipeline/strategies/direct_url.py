@@ -13,10 +13,13 @@ import hashlib
 import json
 import logging
 import pathlib
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
+
+from pipeline.url_guard import safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     if manifest_entry.get("etag"):
         req.add_header("If-None-Match", manifest_entry["etag"])
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             data = resp.read()
             with dest.open("wb") as f:
                 f.write(data)

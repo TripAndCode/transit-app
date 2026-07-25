@@ -9,7 +9,6 @@ import logging
 import pathlib
 import re
 import tarfile
-import urllib.request
 from datetime import datetime, timezone
 
 import psycopg2.extras
@@ -22,7 +21,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import validate_feed_url
+from pipeline.url_guard import safe_urlopen, validate_feed_url
 
 logger = logging.getLogger(__name__)
 
@@ -198,9 +197,14 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
-                rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
-                n_inserted += _insert_updates(cur, agency_id, rows)
-                done.add(f"{d}/{path.name}")
+                try:
+                    rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
+                    n_inserted += _insert_updates(cur, agency_id, rows)
+                    done.add(f"{d}/{path.name}")
+                except Exception as e:
+                    logger.error(f"  [ERROR] {path.name}: {e}")
+                    n_errors += 1
+                    conn.rollback()
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
@@ -232,7 +236,7 @@ def ingest_live(agency_id: int, conn) -> int:
     strategy = get_ingest_strategy(strategy_name)
 
     logger.info(f"Fetching live feed from {feed_url} (strategy={strategy_name})")
-    with urllib.request.urlopen(feed_url, timeout=30) as resp:
+    with safe_urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 
     captured_at = datetime.now(timezone.utc).isoformat()

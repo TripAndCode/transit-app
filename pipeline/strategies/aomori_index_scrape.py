@@ -9,10 +9,12 @@ import hashlib
 import logging
 import pathlib
 import re
+import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime
 from typing import Optional
+
+from pipeline.url_guard import safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ def fetch(
     agency_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        with urllib.request.urlopen(index_url, timeout=30) as resp:
+        with safe_urlopen(index_url, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except urllib.error.URLError as e:
         logger.warning(f"[aomori_index_scrape] failed to fetch index {index_url}: {e}")
@@ -68,7 +70,7 @@ def fetch(
     day = datetime.now().strftime("%Y%m%d")
     final = agency_dir / f"gtfs_static_{day}.zip"
     try:
-        with urllib.request.urlopen(zip_url, timeout=60) as resp:
+        with safe_urlopen(zip_url, timeout=60) as resp:
             data = resp.read()
     except urllib.error.URLError as e:
         logger.warning(f"[aomori_index_scrape] failed to fetch zip {zip_url}: {e}")

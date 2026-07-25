@@ -121,6 +121,14 @@ def build_digest(conn, target_day: date) -> DigestData:
         samples_sum = 0
         base_w = 0.0
         base_samples = 0
+        # Today's delay weighted over ONLY the routes that also have a
+        # baseline (same population/samples as base_w/base_samples) — kept
+        # separate from delay_w/samples_sum (the full-population headline
+        # avg_min) so delta_min compares the same route set on both sides.
+        # Without this, a route with no baseline at all could swing the
+        # headline delta even though every route WITH a real historical
+        # baseline showed zero drift.
+        matched_delay_w = 0.0
         for e in route_entries:
             avg_delay_sec = e["avg_delay_sec"]
             samples = e["samples"]
@@ -137,6 +145,7 @@ def build_digest(conn, target_day: date) -> DigestData:
             if base_avg_sec is not None:
                 base_w += base_avg_sec * samples
                 base_samples += samples
+                matched_delay_w += avg_delay_sec * samples
             if bucket in ("anomaly", "watch"):
                 movers.append(
                     Mover(
@@ -152,7 +161,10 @@ def build_digest(conn, target_day: date) -> DigestData:
 
         avg_min = round((delay_w / samples_sum) / 60, 1) if samples_sum else None
         base_min = round((base_w / base_samples) / 60, 1) if base_samples else None
-        delta_min = round(avg_min - base_min, 1) if (avg_min is not None and base_min is not None) else None
+        matched_avg_min = round((matched_delay_w / base_samples) / 60, 1) if base_samples else None
+        delta_min = (
+            round(matched_avg_min - base_min, 1) if (matched_avg_min is not None and base_min is not None) else None
+        )
 
         sections.append(
             AgencySection(

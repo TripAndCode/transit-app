@@ -1,0 +1,67 @@
+"""cmd_ingest_live's all-agencies branch must isolate per-agency failures,
+matching cmd_analyze_all's "run-all-then-report" design (see its docstring):
+one agency raising (network timeout, a rejected feed_url, a malformed regex)
+must not abort every agency scheduled after it in the same run.
+
+DB-free: psycopg2 connection + cursor are mocked, matching
+tests/pipeline/test_ingest_live.py's style.
+"""
+
+from argparse import Namespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+import gtfs_pipeline
+
+
+def _mock_conn_with_agency_ids(ids):
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(i,) for i in ids]
+    return conn
+
+
+def test_ingest_live_all_agencies_continues_past_one_failure():
+    conn = _mock_conn_with_agency_ids([1, 2, 3])
+
+    def fake_ingest_live(aid, c):
+        if aid == 2:
+            raise ValueError("boom")
+        return 1
+
+    with patch.object(gtfs_pipeline, "_get_conn", return_value=conn):
+        with patch("pipeline.ingest.ingest_live", side_effect=fake_ingest_live) as mock_ingest:
+            with pytest.raises(SystemExit):
+                gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))
+
+    # All three agencies were attempted, not just up to the failing one.
+    assert [c.args[0] for c in mock_ingest.call_args_list] == [1, 2, 3]
+
+
+def test_ingest_live_all_agencies_rolls_back_after_a_failure():
+    """The connection must be rolled back after a mid-agency failure, or the
+    next agency's first query fails too (psycopg2 aborts the whole
+    transaction until a rollback, since ingest_live doesn't do its own)."""
+    conn = _mock_conn_with_agency_ids([1, 2])
+
+    def fake_ingest_live(aid, c):
+        if aid == 1:
+            raise ValueError("boom")
+        return 1
+
+    with patch.object(gtfs_pipeline, "_get_conn", return_value=conn):
+        with patch("pipeline.ingest.ingest_live", side_effect=fake_ingest_live):
+            with pytest.raises(SystemExit):
+                gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))
+
+    conn.rollback.assert_called_once()
+
+
+def test_ingest_live_all_agencies_succeeds_when_none_fail():
+    conn = _mock_conn_with_agency_ids([1, 2])
+
+    with patch.object(gtfs_pipeline, "_get_conn", return_value=conn):
+        with patch("pipeline.ingest.ingest_live", return_value=1) as mock_ingest:
+            gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))  # must NOT raise
+
+    assert mock_ingest.call_count == 2

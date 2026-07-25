@@ -4,6 +4,17 @@ from unittest.mock import patch
 
 from pipeline.ingest import ingest, parse_trip_id
 
+_FAKE_ROW = (
+    "20260401/ok.pb",
+    "2026-04-01T11:37:00",
+    "平日_11時37分_系統44372",
+    "平日",
+    "11:37",
+    "44372",
+    1,
+    120,
+)
+
 
 def test_parse_trip_id_weekday():
     result = parse_trip_id("平日_11時37分_系統44372")
@@ -56,6 +67,30 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
     assert rows[0][0] == "44372"
     assert rows[0][1] == 120
     assert rows[0][2] == agency_id
+
+
+def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, agency_id, tmp_path):
+    """One malformed loose .pb file must not abort ingestion of the rest -
+    matching the tarball loop right above it in ingest(), which already
+    isolates per-tarball failures via try/except+rollback+continue."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    (day_dir / "bad.pb").write_bytes(b"\x00")
+    (day_dir / "ok.pb").write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        if file_name.endswith("bad.pb"):
+            raise ValueError("boom")
+        return [_FAKE_ROW]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        count = ingest(str(tmp_path), agency_id, pg_conn)
+
+    assert count == 1  # the good file's row still landed
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["44372"]
 
 
 def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):

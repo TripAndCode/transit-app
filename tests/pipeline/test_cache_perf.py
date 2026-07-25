@@ -122,3 +122,26 @@ def test_inflight_exception_propagates_to_all_waiters_and_not_cached():
 
     asyncio.run(run())
     assert calls["n"] == 2
+
+
+def test_keyable_rejects_unhashable_args_instead_of_collapsing_them():
+    """_keyable() previously collapsed any unhashable arg (list, dict) to a
+    fixed token keyed only on its class name, discarding the actual value -
+    two different requests with different unhashable values of the same
+    type would silently collide on one cache entry. It must instead fail
+    loud, forcing a future caller to add explicit key handling rather than
+    risk cross-request cache collisions."""
+    with pytest.raises(TypeError, match="not hashable"):
+        cache._keyable(["a", "list", "is", "unhashable"])
+    with pytest.raises(TypeError, match="not hashable"):
+        cache._keyable({"a": "dict too"})
+
+
+def test_keyable_still_handles_connection_like_and_plain_hashable_args():
+    class Connection:
+        pass
+
+    assert cache._keyable(Connection()) == "<conn:Connection>"
+    assert cache._keyable(42) == 42
+    assert cache._keyable("s") == "s"
+    assert cache._keyable((1, 2)) == (1, 2)

@@ -29,10 +29,10 @@ def test_ingest_live_rejects_unsafe_feed_url():
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
         ("file:///etc/passwd",),
     ]
-    with patch("pipeline.ingest.urllib.request.urlopen") as mock_urlopen:
+    with patch("pipeline.ingest.safe_urlopen") as mock_safe_urlopen:
         with pytest.raises(FeedURLError):
             ingest_live(1, mock_conn)
-    mock_urlopen.assert_not_called()
+    mock_safe_urlopen.assert_not_called()
 
 
 def test_ingest_live_fetches_and_ingests(tmp_path):
@@ -64,10 +64,10 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
         0,  # dep_delay
     )
 
-    with patch("pipeline.ingest.urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+    with patch("pipeline.ingest.safe_urlopen", return_value=mock_resp) as mock_safe_urlopen:
         with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_strategy_row]):
             with patch("pipeline.ingest.psycopg2.extras.execute_batch"):
                 result = ingest_live(1, mock_conn)
 
-    mock_urlopen.assert_called_once_with("https://8.8.8.8/feed.pb", timeout=30)
+    mock_safe_urlopen.assert_called_once_with("https://8.8.8.8/feed.pb", timeout=30)
     assert result == 1
