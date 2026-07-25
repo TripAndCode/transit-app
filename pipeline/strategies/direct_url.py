@@ -19,7 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
-from pipeline.url_guard import FeedURLError, safe_urlopen
+from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,10 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     except urllib.error.HTTPError as e:
         if e.code == 304:
             return None, None
-        logger.warning(f"[direct_url] HTTP {e.code} for {url}: {e.reason}")
+        logger.warning(f"[direct_url] HTTP {e.code} for {_redact_url(url)}: {e.reason}")
         return None, None
     except urllib.error.URLError as e:
-        logger.warning(f"[direct_url] network error for {url}: {e}")
+        logger.warning(f"[direct_url] network error for {_redact_url(url)}: {e}")
         return None, None
     except FeedURLError as e:
         # SSRF guard rejection (invalid scheme/host, or a redirect into a
@@ -64,7 +64,7 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
         # louder than a network blip since it's security-relevant, but still
         # degrades to (None, None) rather than aborting fetch()'s other
         # variant (current_data.zip vs latest.zip) or the caller's whole run.
-        logger.error(f"[direct_url] SSRF guard rejected {url}: {e}")
+        logger.error(f"[direct_url] SSRF guard rejected {_redact_url(url)}: {e}")
         return None, None
 
 

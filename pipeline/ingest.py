@@ -21,7 +21,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import safe_urlopen
+from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +178,26 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                         fobj = tf.extractfile(member)
                         if fobj is None:  # non-file member (dir/special)
                             continue
-                        raw = fobj.read()
-                        rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
-                        n_inserted += _insert_updates(cur, agency_id, rows)
-                        done.add(f"{d}/{pb_name}")
+                        # SAVEPOINT, not the outer conn.rollback(): this loop
+                        # only commits every 300 members, so a bad member
+                        # would otherwise also discard every good member
+                        # already inserted since the last commit boundary in
+                        # this tarball (same bug class as the loose-.pb loop
+                        # below). The outer try/except still covers genuinely
+                        # tar-wide failures (a corrupt archive tarfile.open
+                        # can't even read).
+                        cur.execute("SAVEPOINT tar_member")
+                        try:
+                            raw = fobj.read()
+                            rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
+                            n_inserted += _insert_updates(cur, agency_id, rows)
+                            done.add(f"{d}/{pb_name}")
+                            cur.execute("RELEASE SAVEPOINT tar_member")
+                        except Exception as e:
+                            logger.error(f"  [ERROR] {pb_name}: {e}")
+                            n_errors += 1
+                            cur.execute("ROLLBACK TO SAVEPOINT tar_member")
+                            cur.execute("RELEASE SAVEPOINT tar_member")
                         if j % 300 == 0 and j > 0:
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
@@ -210,7 +226,17 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
+                    # ROLLBACK TO SAVEPOINT undoes the failed insert but does NOT
+                    # destroy the savepoint itself — re-issuing the same-named
+                    # SAVEPOINT next iteration stacks a new one on top rather than
+                    # replacing it. Across many consecutive failures within one
+                    # commit window that accumulates subtransactions past
+                    # Postgres's 64-entry PGPROC cache, overflowing it and
+                    # forcing pg_subtrans lookups for every other backend's
+                    # visibility checks against this transaction. RELEASE after
+                    # the rollback keeps the subtransaction count flat.
                     cur.execute("ROLLBACK TO SAVEPOINT pb_file")
+                    cur.execute("RELEASE SAVEPOINT pb_file")
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
@@ -237,7 +263,7 @@ def ingest_live(agency_id: int, conn) -> int:
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
-    logger.info(f"Fetching live feed from {feed_url} (strategy={strategy_name})")
+    logger.info(f"Fetching live feed from {_redact_url(feed_url)} (strategy={strategy_name})")
     with safe_urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 

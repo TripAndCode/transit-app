@@ -69,6 +69,35 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
     assert rows[0][2] == agency_id
 
 
+def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(pg_conn, agency_id, tmp_path):
+    """One malformed member inside a tarball must only roll back ITS OWN
+    insert, not every good member already inserted earlier in the same
+    tarball since the last 300-member commit boundary - the identical bug
+    class fixed for the loose-.pb loop, reproduced at tarball-member grain."""
+    ok_data, bad_data = b"\x00", b"\x01"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, data in (("20260401/a_ok.pb", ok_data), ("20260401/z_bad.pb", bad_data)):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    tgz_path = tmp_path / "20260401.tar.gz"
+    tgz_path.write_bytes(buf.getvalue())
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        if file_name.endswith("z_bad.pb"):
+            raise ValueError("boom")
+        return [_FAKE_ROW]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        ingest(str(tmp_path), agency_id, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
+
+
 def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, agency_id, tmp_path):
     """One malformed loose .pb file must not abort ingestion of the rest -
     matching the tarball loop right above it in ingest(), which already

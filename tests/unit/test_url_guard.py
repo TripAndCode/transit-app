@@ -6,7 +6,7 @@ without a real DNS query — the suite stays hermetic and network-free.
 
 import pytest
 
-from pipeline.url_guard import FeedURLError, validate_feed_url
+from pipeline.url_guard import FeedURLError, _ip_blocked, _redact_url, validate_feed_url
 
 
 def test_rejects_file_scheme():
@@ -53,3 +53,31 @@ def test_allows_public_ipv4():
 
 def test_allows_public_https():
     validate_feed_url("https://8.8.8.8/gtfs-rt.pb")
+
+
+def test_blocked_host_error_message_redacts_credentials_and_query_string():
+    """GTFS/GTFS-RT feeds (ODPT and similar JP providers) routinely carry an
+    API key in the query string or userinfo. That must never land in a log
+    line or exception message verbatim - org policy prohibits reproducing
+    credentials in output, and a FeedURLError message is exactly the kind
+    of string that ends up in application logs."""
+    with pytest.raises(FeedURLError) as exc_info:
+        validate_feed_url("http://169.254.169.254/latest/meta-data/?acl:consumerKey=SECRET123")
+    assert "SECRET123" not in str(exc_info.value)
+    assert "consumerKey" not in str(exc_info.value)
+
+
+def test_redact_url_strips_query_and_userinfo():
+    assert _redact_url("http://user:pass@example.com/feed?apikey=SECRET") == "http://example.com/feed"
+    assert _redact_url("https://8.8.8.8:8443/gtfs-rt.pb?key=abc") == "https://8.8.8.8:8443/gtfs-rt.pb"
+
+
+def test_ip_blocked_rejects_ipv4_mapped_loopback():
+    """An IPv6 host with an IPv4-mapped address (::ffff:127.0.0.1) must be
+    blocked exactly like the plain IPv4 form - a redirect Location could
+    steer at this form specifically to slip past a naive is_private check."""
+    assert _ip_blocked("::ffff:127.0.0.1") is True
+
+
+def test_ip_blocked_rejects_ipv4_mapped_metadata_endpoint():
+    assert _ip_blocked("::ffff:169.254.169.254") is True

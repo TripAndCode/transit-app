@@ -113,6 +113,15 @@ def test_direct_url_rejects_unsafe_static_url(tmp_path):
     assert result is None
 
 
+def test_direct_url_ssrf_rejection_log_does_not_leak_query_string(tmp_path, caplog):
+    """static_url routinely carries an API key in the query string (ODPT and
+    similar JP GTFS providers) - a rejected fetch must not write it to the
+    log at ERROR level."""
+    result = direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/?acl:consumerKey=SECRET123", tmp_path)
+    assert result is None
+    assert "SECRET123" not in caplog.text
+
+
 # ── aomori_index_scrape ───────────────────────────────────────────────────────
 
 
@@ -137,6 +146,13 @@ def test_aomori_scrape_fetches_resolved_zip(tmp_path):
     assert result.read_bytes() == zip_body
     history = (tmp_path / "1" / "fetch_history.csv").read_text()
     assert "gtfs-aomoricitybus-202605.zip" in history
+
+
+def test_aomori_scrape_rejects_unsafe_index_url(tmp_path):
+    """index_url itself must be SSRF-validated too, not just the scraped
+    zip_url - symmetric with direct_url.py's coverage of both fetch legs.
+    No opener mock: the rejection must happen before any fetch is attempted."""
+    assert aomori_index_scrape.fetch(1, "http://169.254.169.254/latest/meta-data/", tmp_path) is None
 
 
 def test_aomori_scrape_no_href_returns_none(tmp_path):

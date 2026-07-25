@@ -33,11 +33,37 @@ class FeedURLError(ValueError):
     """Raised when a ``feed_url`` is unsafe to fetch."""
 
 
+def _redact_url(url: str) -> str:
+    """Strip userinfo and query string from ``url`` for safe logging.
+
+    GTFS/GTFS-RT feeds (ODPT and similar providers) routinely carry an API
+    key in the query string or a ``user:pass@`` userinfo segment. Every
+    place this module puts a URL into an exception message or log line goes
+    through here first, so a rejected/oversized/over-redirected fetch never
+    writes a credential to the application log.
+    """
+    parts = urlsplit(url)
+    netloc = parts.hostname or ""
+    if parts.port:
+        netloc += f":{parts.port}"
+    return f"{parts.scheme}://{netloc}{parts.path}" if parts.scheme else netloc + parts.path
+
+
 def _ip_blocked(ip: str) -> bool:
     """True if ``ip`` falls in a range we must never fetch from — loopback,
     private (RFC 1918 / ULA), link-local (incl. metadata ``169.254.169.254``),
-    reserved, multicast, or unspecified."""
+    reserved, multicast, or unspecified.
+
+    Unwraps an IPv4-mapped IPv6 address (``::ffff:127.0.0.1``) to its IPv4
+    form first: on some Python versions the mapped form's ``is_private``/
+    ``is_loopback`` properties don't reflect the wrapped address, which
+    would let a redirect ``Location`` steer at an internal host through
+    that specific encoding.
+    """
     addr = ipaddress.ip_address(ip)
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
     return (
         addr.is_loopback
         or addr.is_private
@@ -113,8 +139,12 @@ class _CappedResponse:
         self.headers = headers
         self.status = status
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amt: int | None = None) -> bytes:
+        if amt is None:
+            data, self._body = self._body, b""
+            return data
+        data, self._body = self._body[:amt], self._body[amt:]
+        return data
 
     def getcode(self) -> int:
         return self.status
@@ -149,17 +179,18 @@ def safe_urlopen(
     existing callers that catch it keep working.
     """
     if isinstance(url_or_request, urllib.request.Request):
-        base_headers = dict(url_or_request.header_items())
+        headers = dict(url_or_request.header_items())
         method = url_or_request.get_method()
         current = url_or_request.full_url
     else:
-        base_headers = {}
+        headers = {}
         method = None
         current = url_or_request
+    original_host = urlsplit(current).hostname
 
     for _ in range(_MAX_REDIRECTS + 1):
         validate_feed_url(current)
-        req = urllib.request.Request(current, headers=base_headers, method=method)
+        req = urllib.request.Request(current, headers=headers, method=method)
         try:
             resp = _opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as exc:
@@ -167,13 +198,21 @@ def safe_urlopen(
                 raise
             location = exc.headers.get("Location") if exc.headers else None
             if not location:
-                raise FeedURLError(f"redirect from {current} ({exc.code}) has no Location header") from exc
+                raise FeedURLError(f"redirect from {_redact_url(current)} ({exc.code}) has no Location header") from exc
             current = urljoin(current, location)
+            if urlsplit(current).hostname != original_host:
+                # Cross-host redirect: don't forward credentials to a host
+                # the caller never intended them for (standard hardened-
+                # client behavior). No current caller sets either header —
+                # direct_url.py's conditional-GET uses If-Modified-Since/
+                # If-None-Match only — so this is defense-in-depth for
+                # whichever future caller adds one.
+                headers = {k: v for k, v in headers.items() if k.lower() not in ("authorization", "cookie")}
             continue
         with resp:
             body = resp.read(max_bytes + 1)
             if len(body) > max_bytes:
-                raise FeedURLError(f"response from {current} exceeded the {max_bytes}-byte cap")
+                raise FeedURLError(f"response from {_redact_url(current)} exceeded the {max_bytes}-byte cap")
             status = resp.status if hasattr(resp, "status") else resp.getcode()
             return _CappedResponse(body, resp.headers, status)
-    raise FeedURLError(f"too many redirects fetching {url_or_request}")
+    raise FeedURLError(f"too many redirects fetching {_redact_url(current)}")
