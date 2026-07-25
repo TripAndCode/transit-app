@@ -87,7 +87,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_opener = urllib.request.build_opener(_NoRedirect)
+def _build_opener() -> urllib.request.OpenerDirector:
+    """Build the opener used by :func:`safe_urlopen`.
+
+    Passes an explicit empty ``ProxyHandler({})`` rather than relying on
+    ``build_opener``'s implicit default, which constructs a ``ProxyHandler``
+    that reads ``http_proxy``/``https_proxy`` from the environment. If the
+    ingest process ever runs with those set, every fetch would silently
+    route through that proxy — which does its own DNS resolution and
+    connection — making :func:`validate_feed_url`'s IP check meaningless
+    (it would validate an address nothing actually connects to).
+    """
+    return urllib.request.build_opener(_NoRedirect, urllib.request.ProxyHandler({}))
+
+
+_opener = _build_opener()
 
 
 class _CappedResponse:

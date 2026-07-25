@@ -93,6 +93,31 @@ def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, agency_id, t
     assert [r[0] for r in rows] == ["44372"]
 
 
+def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_conn, agency_id, tmp_path):
+    """A file that fails must only roll back ITS OWN work, not every good
+    file already inserted earlier in the same (not-yet-committed) batch.
+    a_ok.pb sorts before z_bad.pb, so the good insert happens first and,
+    with a bare conn.rollback() on the later failure, would be wiped too -
+    isolation must use a per-file SAVEPOINT, not the whole transaction."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    (day_dir / "a_ok.pb").write_bytes(b"\x00")
+    (day_dir / "z_bad.pb").write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        if file_name.endswith("z_bad.pb"):
+            raise ValueError("boom")
+        return [_FAKE_ROW]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        ingest(str(tmp_path), agency_id, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
+
+
 def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
     """Running ingest twice on the same folder inserts 0 rows the second time."""
     fake_row = (

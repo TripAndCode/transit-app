@@ -66,7 +66,7 @@ def test_revalidates_and_follows_redirect_to_a_public_host(monkeypatch):
     assert calls == ["http://8.8.8.8/start", "http://8.8.4.4/next"]
 
 
-def test_blocks_redirect_into_an_internal_host():
+def test_blocks_redirect_into_an_internal_host(monkeypatch):
     """The original URL passes validation; the redirect target must be
     re-validated too, or this is exactly the bypass the fix exists for."""
 
@@ -75,12 +75,9 @@ def test_blocks_redirect_into_an_internal_host():
             raise _http_error(req.full_url, 302, "http://169.254.169.254/latest/meta-data/")
         raise AssertionError("must never follow a redirect into a blocked host")
 
-    url_guard._opener.open = fake_open
-    try:
-        with pytest.raises(FeedURLError, match="blocked"):
-            safe_urlopen("http://8.8.8.8/start")
-    finally:
-        del url_guard._opener.open
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    with pytest.raises(FeedURLError, match="blocked"):
+        safe_urlopen("http://8.8.8.8/start")
 
 
 def test_propagates_non_redirect_http_errors_unchanged(monkeypatch):
@@ -102,16 +99,28 @@ def test_caps_response_body_size(monkeypatch):
         safe_urlopen("http://8.8.8.8/feed", max_bytes=500)
 
 
-def test_too_many_redirects_raises():
+def test_too_many_redirects_raises(monkeypatch):
     def fake_open(req, timeout=None):
         raise _http_error(req.full_url, 302, "http://8.8.8.8/loop")
 
-    url_guard._opener.open = fake_open
-    try:
-        with pytest.raises(FeedURLError, match="redirect"):
-            safe_urlopen("http://8.8.8.8/loop")
-    finally:
-        del url_guard._opener.open
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    with pytest.raises(FeedURLError, match="redirect"):
+        safe_urlopen("http://8.8.8.8/loop")
+
+
+def test_opener_ignores_environment_proxy_vars(monkeypatch):
+    """A defense-in-depth SSRF guard is pointless if the process's
+    http_proxy/https_proxy env vars silently reroute every fetch through a
+    proxy that does its own DNS resolution/connection - the IP validation
+    would then check nothing about the address actually dialed. Calls the
+    actual production _build_opener() (not a hand-rolled equivalent) under
+    monkeypatched env vars, so this fails if the real construction ever
+    reverts to the implicit default (which DOES pick up env vars)."""
+    monkeypatch.setenv("http_proxy", "http://evil-proxy:1234")
+    monkeypatch.setenv("https_proxy", "http://evil-proxy:1234")
+    fresh = url_guard._build_opener()
+    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("http", []))
+    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("https", []))
 
 
 def test_preserves_request_headers_across_redirect(monkeypatch):

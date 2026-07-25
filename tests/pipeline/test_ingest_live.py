@@ -22,17 +22,21 @@ def test_ingest_live_raises_when_agency_not_found():
 
 
 def test_ingest_live_rejects_unsafe_feed_url():
-    """A non-http(s) / internal feed_url is rejected before any fetch (SSRF guard)."""
+    """A non-http(s) / internal feed_url is rejected (SSRF guard) - the
+    validation itself lives inside safe_urlopen (see
+    tests/unit/test_url_guard_safe_urlopen.py); this only proves
+    ingest_live surfaces that rejection rather than swallowing it."""
     from pipeline.url_guard import FeedURLError
 
     mock_conn = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
-        ("file:///etc/passwd",),
+        ("file:///etc/passwd",),  # feed_url SELECT
+        (None,),  # ingest_strategy SELECT -> falls back to aomori_regex
     ]
-    with patch("pipeline.ingest.safe_urlopen") as mock_safe_urlopen:
+    with patch("pipeline.ingest.safe_urlopen", side_effect=FeedURLError("blocked")) as mock_safe_urlopen:
         with pytest.raises(FeedURLError):
             ingest_live(1, mock_conn)
-    mock_safe_urlopen.assert_not_called()
+    mock_safe_urlopen.assert_called_once()
 
 
 def test_ingest_live_fetches_and_ingests(tmp_path):

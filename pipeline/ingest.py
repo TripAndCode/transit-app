@@ -21,7 +21,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import safe_urlopen, validate_feed_url
+from pipeline.url_guard import safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -197,14 +197,20 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
+                # SAVEPOINT, not conn.rollback(): this loop only commits every
+                # 500 files, so a bare rollback on one bad file would also
+                # discard every good file already inserted since the last
+                # commit boundary in the same open transaction.
+                cur.execute("SAVEPOINT pb_file")
                 try:
                     rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
                     n_inserted += _insert_updates(cur, agency_id, rows)
                     done.add(f"{d}/{path.name}")
+                    cur.execute("RELEASE SAVEPOINT pb_file")
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
-                    conn.rollback()
+                    cur.execute("ROLLBACK TO SAVEPOINT pb_file")
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
@@ -227,10 +233,6 @@ def ingest_live(agency_id: int, conn) -> int:
     if row is None or not row[0]:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
-
-    # Defense-in-depth: feed_url is admin-set, but block non-http(s) schemes
-    # (urllib opens file://) and internal/metadata hosts before fetching it.
-    validate_feed_url(feed_url)
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)

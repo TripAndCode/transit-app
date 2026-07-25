@@ -19,7 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
-from pipeline.url_guard import safe_urlopen
+from pipeline.url_guard import FeedURLError, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,14 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
         return None, None
     except urllib.error.URLError as e:
         logger.warning(f"[direct_url] network error for {url}: {e}")
+        return None, None
+    except FeedURLError as e:
+        # SSRF guard rejection (invalid scheme/host, or a redirect into a
+        # blocked host) — not a URLError, so it needs its own clause. Logged
+        # louder than a network blip since it's security-relevant, but still
+        # degrades to (None, None) rather than aborting fetch()'s other
+        # variant (current_data.zip vs latest.zip) or the caller's whole run.
+        logger.error(f"[direct_url] SSRF guard rejected {url}: {e}")
         return None, None
 
 

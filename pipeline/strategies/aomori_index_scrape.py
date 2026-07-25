@@ -14,7 +14,7 @@ import urllib.parse
 from datetime import datetime
 from typing import Optional
 
-from pipeline.url_guard import safe_urlopen
+from pipeline.url_guard import FeedURLError, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,13 @@ def fetch(
     except urllib.error.URLError as e:
         logger.warning(f"[aomori_index_scrape] failed to fetch index {index_url}: {e}")
         return None
+    except FeedURLError as e:
+        # SSRF guard rejection (invalid scheme/host, or a redirect into a
+        # blocked host) — not a URLError, so it needs its own clause. Logged
+        # louder than a network blip since it's security-relevant, but still
+        # degrades to a no-op rather than aborting the caller's whole run.
+        logger.error(f"[aomori_index_scrape] SSRF guard rejected index {index_url}: {e}")
+        return None
 
     m = _HREF_RE.search(html)
     if not m:
@@ -74,6 +81,9 @@ def fetch(
             data = resp.read()
     except urllib.error.URLError as e:
         logger.warning(f"[aomori_index_scrape] failed to fetch zip {zip_url}: {e}")
+        return None
+    except FeedURLError as e:
+        logger.error(f"[aomori_index_scrape] SSRF guard rejected scraped zip_url {zip_url}: {e}")
         return None
 
     if data[:2] != b"PK":

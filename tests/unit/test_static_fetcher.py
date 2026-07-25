@@ -13,8 +13,6 @@ import json
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
-import pytest
-
 from pipeline.strategies import aomori_index_scrape, direct_url
 from pipeline.url_guard import FeedURLError, _opener
 
@@ -96,12 +94,23 @@ def test_direct_url_network_failure_returns_none(tmp_path):
     assert result is None
 
 
+def test_direct_url_ssrf_rejection_degrades_gracefully(tmp_path):
+    """FeedURLError (e.g. a redirect into a blocked host, or the size cap)
+    must degrade like a network failure - log and return None - not
+    propagate and abort the whole agency's static refresh. FeedURLError is
+    a ValueError, not a URLError, so it needs its own except clause."""
+    with patch("pipeline.strategies.direct_url.safe_urlopen", side_effect=FeedURLError("blocked")):
+        result = direct_url.fetch(8, "https://8.8.8.8/static/8/current_data.zip", tmp_path)
+    assert result is None
+
+
 def test_direct_url_rejects_unsafe_static_url(tmp_path):
     """static_url must be SSRF-validated exactly like feed_url is - previously
     it wasn't validated at all. No opener mock here: a real blocked-host
-    rejection must happen before any fetch is attempted."""
-    with pytest.raises(FeedURLError, match="blocked"):
-        direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/", tmp_path)
+    rejection must happen before any fetch is attempted, and (like a
+    network failure) degrades to a no-op rather than raising out of fetch()."""
+    result = direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/", tmp_path)
+    assert result is None
 
 
 # ── aomori_index_scrape ───────────────────────────────────────────────────────
@@ -153,8 +162,9 @@ def test_aomori_scrape_non_zip_body_returns_none(tmp_path):
 def test_aomori_scrape_rejects_zip_url_scraped_to_a_blocked_host(tmp_path):
     """The zip_url isn't admin-configured - it's scraped out of index_url's
     own HTML - so it must be validated exactly like any other fetch target.
-    Previously it wasn't validated at all, not even the scheme."""
+    Previously it wasn't validated at all, not even the scheme. Degrades
+    gracefully (like a network failure) rather than raising out of fetch(),
+    matching the sibling except clauses in the same function."""
     html = b'<html><a href="http://169.254.169.254/latest/meta-data/gtfs-aomoricitybus.zip">x</a></html>'
     with patch.object(_opener, "open", return_value=_mock_response(html)):
-        with pytest.raises(FeedURLError, match="blocked"):
-            aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path)
+        assert aomori_index_scrape.fetch(1, "https://8.8.8.8/opendata/index.html", tmp_path) is None
