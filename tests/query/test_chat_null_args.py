@@ -114,7 +114,9 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -149,7 +151,9 @@ async def test_history_injected_into_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(self, *, messages, tools, tool_choice, temperature, model_override):
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 

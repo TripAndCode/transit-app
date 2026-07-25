@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timezone
 
 import asyncpg
 import httpx
@@ -95,6 +96,23 @@ async def test_get_others_conversation_is_404(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_get_own_conversation_under_wrong_agency_path_is_404(conv_app):
+    """A conversation owned by the caller but created under a different
+    agency must 404 when accessed via another agency's URL path - the
+    ownership check must verify agency_id, not just user_id."""
+    app, agency, uid, pool = conv_app
+    async with pool.acquire() as conn:
+        other_agency = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other') RETURNING agency_id"
+        )
+    async with _authed_client(app, uid) as c:
+        r = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = r.json()["conversation_id"]
+        r2 = await c.get(f"/api/{other_agency['agency_id']}/conversations/{conv_id}")
+        assert r2.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_patch_and_delete(conv_app):
     app, agency, uid, _ = conv_app
     async with _authed_client(app, uid) as c:
@@ -166,6 +184,49 @@ async def test_append_message_tool_args_path(conv_app):
         ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
         assert ml.status_code == 200
         assert len(ml.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatch):
+    """When a conversation's filter_ctx has no explicit dates, the default
+    30-day window built for tool dispatch must anchor on the JST civil
+    calendar (jst_today()), not the server's local/UTC date - the same
+    class of bug fixed elsewhere via api.range.jst_today()."""
+    import api.range as range_mod
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
+
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+
+    captured = {}
+
+    async def _fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja"):
+        captured["ctx"] = ctx
+        from pipeline.query.results import ToolResult
+
+        return ToolResult(kind="kv", summary="ok")
+
+    monkeypatch.setattr(conv_router, "dispatch", _fake_dispatch)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+
+    assert captured["ctx"].to_date == date(2026, 1, 2)
 
 
 @pytest.mark.asyncio

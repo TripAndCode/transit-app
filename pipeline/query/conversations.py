@@ -46,15 +46,17 @@ async def create_conversation(
     return _row_to_conv(row)
 
 
-async def get_conversation(conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None) -> dict[str, Any]:
+async def get_conversation(
+    conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None, agency_id: int
+) -> dict[str, Any]:
     row = await conn.fetchrow(
         f"SELECT {_CONV_COLS} FROM ask_conversations WHERE conversation_id = $1",
         conversation_id,
     )
     if row is None:
         raise LookupError(f"conversation {conversation_id} not found")
-    if row["user_id"] != user_id:
-        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id}")
+    if row["user_id"] != user_id or row["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
     return _row_to_conv(row)
 
 
@@ -77,14 +79,16 @@ async def list_conversations(
 
 
 async def update_conversation(
-    conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None, **fields: Any
+    conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None, agency_id: int, **fields: Any
 ) -> dict[str, Any]:
     """Update title / pinned / filter_ctx. Raises PermissionDenied on owner mismatch."""
-    existing = await conn.fetchrow("SELECT user_id FROM ask_conversations WHERE conversation_id = $1", conversation_id)
+    existing = await conn.fetchrow(
+        "SELECT user_id, agency_id FROM ask_conversations WHERE conversation_id = $1", conversation_id
+    )
     if existing is None:
         raise LookupError(f"conversation {conversation_id} not found")
-    if existing["user_id"] != user_id:
-        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id}")
+    if existing["user_id"] != user_id or existing["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
 
     sets: list[str] = []
     params: list[Any] = []
@@ -98,7 +102,7 @@ async def update_conversation(
         params.append(json.dumps(fields["filter_ctx"]))
         sets.append(f"filter_ctx = ${len(params)}::jsonb")
     if not sets:
-        return await get_conversation(conn, conversation_id, user_id=user_id)
+        return await get_conversation(conn, conversation_id, user_id=user_id, agency_id=agency_id)
     sets.append("updated_at = now()")
     params.append(conversation_id)
     row = await conn.fetchrow(
@@ -108,12 +112,16 @@ async def update_conversation(
     return _row_to_conv(row)
 
 
-async def delete_conversation(conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None) -> None:
-    existing = await conn.fetchrow("SELECT user_id FROM ask_conversations WHERE conversation_id = $1", conversation_id)
+async def delete_conversation(
+    conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None, agency_id: int
+) -> None:
+    existing = await conn.fetchrow(
+        "SELECT user_id, agency_id FROM ask_conversations WHERE conversation_id = $1", conversation_id
+    )
     if existing is None:
         raise LookupError(f"conversation {conversation_id} not found")
-    if existing["user_id"] != user_id:
-        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id}")
+    if existing["user_id"] != user_id or existing["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
     await conn.execute("DELETE FROM ask_conversations WHERE conversation_id = $1", conversation_id)
 
 
@@ -158,12 +166,16 @@ async def append_message(
     return d
 
 
-async def list_messages(conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None) -> list[dict[str, Any]]:
-    owner = await conn.fetchval("SELECT user_id FROM ask_conversations WHERE conversation_id = $1", conversation_id)
-    if owner is None:
+async def list_messages(
+    conn: asyncpg.Connection, conversation_id: Any, *, user_id: int | None, agency_id: int
+) -> list[dict[str, Any]]:
+    owner_row = await conn.fetchrow(
+        "SELECT user_id, agency_id FROM ask_conversations WHERE conversation_id = $1", conversation_id
+    )
+    if owner_row is None:
         raise LookupError(f"conversation {conversation_id} not found")
-    if owner != user_id:
-        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id}")
+    if owner_row["user_id"] != user_id or owner_row["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
     rows = await conn.fetch(
         """
         SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,

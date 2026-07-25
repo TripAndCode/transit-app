@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from api.deps import get_agency, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx
+from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
@@ -117,7 +117,7 @@ async def get_conversation(
 ):
     """Return one conversation with its messages; 404 unless the caller owns it."""
     try:
-        return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         # Mask non-owned threads as 404 (don't reveal existence)
         raise HTTPException(status_code=404, detail="not found") from None
@@ -137,7 +137,9 @@ async def update_conversation(
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     try:
-        return await _conv.update_conversation(conn, conversation_id, user_id=user.user_id, **fields)
+        return await _conv.update_conversation(
+            conn, conversation_id, user_id=user.user_id, agency_id=agency_id, **fields
+        )
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -154,7 +156,7 @@ async def delete_conversation(
     """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
     try:
-        await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id)
+        await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
     return {"ok": True}
@@ -169,7 +171,7 @@ async def list_messages(
 ):
     """Return all messages of a conversation the caller owns."""
     try:
-        return await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
+        return await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -219,7 +221,7 @@ async def append_message_endpoint(
     # ownership check and the message inserts can't produce a 500 (the FK
     # cascade would otherwise tear out the rows we're trying to write).
     try:
-        conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
@@ -245,9 +247,11 @@ async def append_message_endpoint(
 
     # Build a RangeCtx from the conversation's filter_ctx
     fc = conv["filter_ctx"] or {}
-    today = date.today()
+    today = jst_today()
     ctx_obj = RangeCtx(
-        from_date=date.fromisoformat(fc["from_date"]) if fc.get("from_date") else today - timedelta(days=29),
+        from_date=date.fromisoformat(fc["from_date"])
+        if fc.get("from_date")
+        else today - timedelta(days=DEFAULT_RANGE_DAYS - 1),
         to_date=date.fromisoformat(fc["to_date"]) if fc.get("to_date") else today,
         dow=fc.get("dow", "all"),
         time_band=fc.get("time_band", "all"),
@@ -435,12 +439,12 @@ async def followup_endpoint(
 
     # Ownership check (also confirms the conversation exists).
     try:
-        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id)
+        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
 
     # Fetch the context message (must belong to this conversation).
-    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id)
+    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
     ctx_msg = next(
         (m for m in messages if m["message_id"] == body.context_message_id),
         None,

@@ -13,7 +13,7 @@ user's chosen window without having to mention it in the prompt.
 import asyncio
 import logging
 import os as _os
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -21,7 +21,16 @@ from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import DEFAULT_RANGE_DAYS, MAX_RANGE_DAYS, DowFilter, RangeCtx, ServiceType, TimeBand, parse_iso_date
+from api.range import (
+    DEFAULT_RANGE_DAYS,
+    MAX_RANGE_DAYS,
+    DowFilter,
+    RangeCtx,
+    ServiceType,
+    TimeBand,
+    jst_today,
+    parse_iso_date,
+)
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import chat_with_tools
@@ -85,7 +94,7 @@ class AskResponse(BaseModel):
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
     """Build a clamped RangeCtx from the request body, defaulting invalid enums to 'all'."""
-    today = date.today()
+    today = jst_today()
     if body_ctx is None:
         return RangeCtx(from_date=today - timedelta(days=DEFAULT_RANGE_DAYS - 1), to_date=today)
 

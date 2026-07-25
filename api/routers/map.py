@@ -19,9 +19,10 @@ the same filter.
 
 import json
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from api.deps import get_agency, get_conn
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter, get_range_ctx
 from api.triage import classify_route
 
@@ -29,7 +30,9 @@ router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
 
 @router.get("/delays/live")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_delays(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     limit: int = Query(default=200, le=500),
@@ -66,7 +69,9 @@ async def live_delays(
 
 
 @router.get("/route-shape")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_shape(
+    request: Request,
     route: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
@@ -240,7 +245,9 @@ async def route_shape(
 
 
 @router.get("/today/route-summary")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def today_route_summary(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
 ):
@@ -357,7 +364,9 @@ async def today_route_summary(
 
 
 @router.get("/today/route/{route_code}/trips")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_trips(
+    request: Request,
     route_code: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
@@ -435,7 +444,9 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dic
 
 
 @router.get("/today/route/{route_code}/stop-profile")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_stop_profile(
+    request: Request,
     route_code: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
@@ -558,7 +569,9 @@ def _heatmap_features(rows) -> dict:
 
 
 @router.get("/delays/heatmap")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def delay_heatmap(
+    request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),

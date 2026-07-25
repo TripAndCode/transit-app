@@ -31,7 +31,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType
+from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -409,7 +409,7 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     if days_back is None and not raw_from and not raw_to:
         return ctx
 
-    today = date.today()
+    today = jst_today()
 
     def _parse(s: Any) -> date | None:
         if not isinstance(s, str):

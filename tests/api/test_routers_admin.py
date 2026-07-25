@@ -2,6 +2,7 @@
 the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonymization.
 """
 
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -105,6 +106,49 @@ async def test_admin_last_admin_guard(admin_client, aconn):
         headers={"Origin": "http://test"},
     )
     assert r2.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_last_admin_guard_survives_concurrent_demotes(admin_client, aconn):
+    """Two admins concurrently demoting *each other* must never both
+    succeed — the last-admin guard's count-then-update must be atomic
+    against another in-flight demote, not just against edits to the same
+    row. Runs each interleaving several times since it's a real race:
+    a single pass could get lucky even against the buggy TOCTOU code."""
+    for _ in range(8):
+        # A demotion that correctly loses the race is *supposed* to leave its
+        # admin in place - without this reset, that legitimate survivor
+        # carries into the next iteration as a 3rd admin, which would let
+        # both concurrent demotes succeed for a completely different, valid
+        # reason (a bystander admin still active) and defeat this test.
+        await aconn.execute("DELETE FROM users")
+        sid_a, uid_a, _ = await _seed(aconn, role="admin")
+        sid_b, uid_b, _ = await _seed(aconn, role="admin")
+
+        r_a, r_b = await asyncio.gather(
+            admin_client.patch(
+                f"/api/admin/users/{uid_b}",
+                json={"role": "user"},
+                cookies={"sid": sid_a},
+                headers={"Origin": "http://test"},
+            ),
+            admin_client.patch(
+                f"/api/admin/users/{uid_a}",
+                json={"role": "user"},
+                cookies={"sid": sid_b},
+                headers={"Origin": "http://test"},
+            ),
+        )
+        # At most one of the two concurrent demotions may succeed - the other
+        # must be rejected by the last-admin guard once it's an admin's turn
+        # to observe the other's already-committed change.
+        successes = [r for r in (r_a, r_b) if r.status_code == 200]
+        assert len(successes) <= 1, (r_a.status_code, r_b.status_code)
+
+        remaining_admins = await aconn.fetchval(
+            "SELECT count(*) FROM users WHERE role='admin' AND suspended_at IS NULL"
+        )
+        assert remaining_admins >= 1, "last-admin guard raced: zero active admins remain"
 
 
 @pytest.mark.asyncio

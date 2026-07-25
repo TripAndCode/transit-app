@@ -53,7 +53,15 @@ class CancelGETOnDisconnectMiddleware:
                 if message["type"] == "http.disconnect":
                     return
 
-        app_task = asyncio.ensure_future(self.app(scope, app_receive, send))
+        response_started = False
+
+        async def app_send(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        app_task = asyncio.ensure_future(self.app(scope, app_receive, app_send))
         watch_task = asyncio.ensure_future(watch_disconnect())
         try:
             await asyncio.wait({app_task, watch_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -62,6 +70,19 @@ class CancelGETOnDisconnectMiddleware:
                 app_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await app_task
+                # In production this middleware nests inside Locale/APIKey/
+                # Session (all BaseHTTPMiddleware) — their call_next requires
+                # the wrapped app to eventually send http.response.start, or
+                # Starlette raises RuntimeError: No response returned. on
+                # every legitimate disconnect-cancel. The client is already
+                # gone, so this send is a no-op over the wire; it exists
+                # only to satisfy that contract. Skipped when the handler had
+                # already started a response before cancellation (e.g. a
+                # future streaming GET mid-body) — sending a second
+                # http.response.start would be an ASGI protocol violation.
+                if not response_started:
+                    await send({"type": "http.response.start", "status": 499, "headers": []})
+                    await send({"type": "http.response.body", "body": b""})
             else:
                 # Normal completion — re-raise handler exceptions, if any.
                 await app_task

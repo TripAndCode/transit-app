@@ -5,7 +5,15 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.middleware.ratelimit import limiter
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+
+
+@pytest.fixture(autouse=True)
+def _reset_limiter():
+    limiter.reset()
+    yield
 
 
 @pytest.fixture
@@ -53,6 +61,22 @@ async def test_live_delays_unknown_agency(map_client):
     client, _ = map_client
     resp = await client.get("/api/99999/delays/live")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_live_delays_is_rate_limited_after_repeated_requests(map_client):
+    """map.py's endpoints must be throttled like every other public read
+    router (overview/network/reports/ask) — unauthenticated callers can
+    otherwise hit the heaviest live-scan endpoints without limit. Doesn't
+    assert the exact configured threshold, only that the protection exists."""
+    client, agency_id = map_client
+    statuses = []
+    for _ in range(65):
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+        statuses.append(resp.status_code)
+        if resp.status_code == 429:
+            break
+    assert 429 in statuses, f"never throttled after 65 requests: {statuses}"
 
 
 @pytest.mark.asyncio
