@@ -9,7 +9,9 @@ import logging
 import pathlib
 import re
 import tarfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from typing import Iterator
 
 import psycopg2.extras
 
@@ -40,6 +42,44 @@ def _insert_updates(cur, agency_id: int, rows: list[tuple]) -> int:
     pg_rows = [(agency_id, *r) for r in rows]
     psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
     return len(pg_rows)
+
+
+@contextmanager
+def _savepoint(cur, name: str) -> Iterator[None]:
+    """Run a block as a Postgres SAVEPOINT, isolating its failure from the
+    surrounding (uncommitted) transaction: on success the savepoint is
+    released; on an exception its writes are rolled back, then it's
+    released too, and the exception re-raised for the caller's own
+    try/except to log and count.
+
+    Used to isolate one bad tarball member / loose ``.pb`` file from every
+    other member/file already inserted since the last periodic
+    ``conn.commit()`` — a bare ``conn.rollback()`` on one bad item would
+    discard ALL of them, not just the failing one.
+
+    RELEASE is issued on both paths because ``ROLLBACK TO SAVEPOINT``
+    undoes the writes but does not destroy the savepoint itself; without
+    it, the next iteration's same-named ``SAVEPOINT`` would stack on top
+    of the still-live one instead of replacing it. That stacking is what
+    RELEASE actually prevents — it does *not*, by itself, keep Postgres's
+    64-entry per-backend subtransaction cache from filling up on a long
+    run of *successful* items in one commit window (each successful
+    SAVEPOINT still holds a slot until the next top-level commit). This
+    pipeline's read endpoints serve from precomputed ``agg_*`` tables, not
+    live scans of ``updates`` (see CLAUDE.md), so the resulting
+    pg_subtrans-lookup overhead on concurrent readers is low-impact here;
+    lowering the commit cadence below 64 items would close that specific
+    gap but cost more frequent fsyncs, so it's accepted as-is rather than
+    tuned for a cost with no observed impact.
+    """
+    cur.execute(f"SAVEPOINT {name}")
+    try:
+        yield
+    except Exception:
+        cur.execute(f"ROLLBACK TO SAVEPOINT {name}")
+        raise
+    finally:
+        cur.execute(f"RELEASE SAVEPOINT {name}")
 
 
 def _resolve_strategy_name(agency_id: int, conn) -> str:
@@ -178,26 +218,20 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                         fobj = tf.extractfile(member)
                         if fobj is None:  # non-file member (dir/special)
                             continue
-                        # SAVEPOINT, not the outer conn.rollback(): this loop
-                        # only commits every 300 members, so a bad member
-                        # would otherwise also discard every good member
-                        # already inserted since the last commit boundary in
-                        # this tarball (same bug class as the loose-.pb loop
-                        # below). The outer try/except still covers genuinely
-                        # tar-wide failures (a corrupt archive tarfile.open
-                        # can't even read).
-                        cur.execute("SAVEPOINT tar_member")
+                        # _savepoint isolates one bad member from every good
+                        # member already inserted since the last commit
+                        # boundary in this tarball. The outer try/except
+                        # still covers genuinely tar-wide failures (a corrupt
+                        # archive tarfile.open can't even read).
                         try:
-                            raw = fobj.read()
-                            rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
-                            n_inserted += _insert_updates(cur, agency_id, rows)
-                            done.add(f"{d}/{pb_name}")
-                            cur.execute("RELEASE SAVEPOINT tar_member")
+                            with _savepoint(cur, "tar_member"):
+                                raw = fobj.read()
+                                rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
+                                n_inserted += _insert_updates(cur, agency_id, rows)
+                                done.add(f"{d}/{pb_name}")
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
-                            cur.execute("ROLLBACK TO SAVEPOINT tar_member")
-                            cur.execute("RELEASE SAVEPOINT tar_member")
                         if j % 300 == 0 and j > 0:
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
@@ -213,30 +247,17 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
-                # SAVEPOINT, not conn.rollback(): this loop only commits every
-                # 500 files, so a bare rollback on one bad file would also
-                # discard every good file already inserted since the last
-                # commit boundary in the same open transaction.
-                cur.execute("SAVEPOINT pb_file")
+                # _savepoint isolates one bad file from every good file
+                # already inserted since the last commit boundary in this
+                # batch (see _savepoint's docstring for why RELEASE matters).
                 try:
-                    rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
-                    n_inserted += _insert_updates(cur, agency_id, rows)
-                    done.add(f"{d}/{path.name}")
-                    cur.execute("RELEASE SAVEPOINT pb_file")
+                    with _savepoint(cur, "pb_file"):
+                        rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
+                        n_inserted += _insert_updates(cur, agency_id, rows)
+                        done.add(f"{d}/{path.name}")
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
-                    # ROLLBACK TO SAVEPOINT undoes the failed insert but does NOT
-                    # destroy the savepoint itself — re-issuing the same-named
-                    # SAVEPOINT next iteration stacks a new one on top rather than
-                    # replacing it. Across many consecutive failures within one
-                    # commit window that accumulates subtransactions past
-                    # Postgres's 64-entry PGPROC cache, overflowing it and
-                    # forcing pg_subtrans lookups for every other backend's
-                    # visibility checks against this transaction. RELEASE after
-                    # the rollback keeps the subtransaction count flat.
-                    cur.execute("ROLLBACK TO SAVEPOINT pb_file")
-                    cur.execute("RELEASE SAVEPOINT pb_file")
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")

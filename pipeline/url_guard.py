@@ -49,21 +49,45 @@ def _redact_url(url: str) -> str:
     return f"{parts.scheme}://{netloc}{parts.path}" if parts.scheme else netloc + parts.path
 
 
+_SIXTOFOUR_NET = ipaddress.ip_network("2002::/16")
+_NAT64_NET = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _unwrap_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
+    """Unwrap an IPv6 encoding of an IPv4 address to its plain ``IPv4Address``.
+
+    ``ipaddress``'s own ``is_private``/``is_loopback``/etc. only reliably
+    reflect an IPv4-mapped address (``::ffff:a.b.c.d``) on Python versions
+    with the CVE-2024-4032 fix (3.12.4+ / 3.11.9+ — this project pins
+    ``>=3.11``, so an older patch release is a real possibility). 6to4
+    (``2002::/16``) and NAT64 (``64:ff9b::/96``) both embed a full IPv4
+    address in their low bits too, and are never unwrapped by those
+    properties on *any* version — confirmed empirically: on this project's
+    pinned 3.12.2, ``2002:7f00:1::`` (encoding 127.0.0.1) reports
+    ``is_private=False``. A redirect ``Location`` using one of these
+    encodings would otherwise slip a blocked address past every check
+    below, on the exact path (per-hop redirect validation) that receives
+    server-supplied, not admin-set, targets.
+    """
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        return mapped
+    if isinstance(addr, ipaddress.IPv6Address):
+        packed = addr.packed
+        if addr in _SIXTOFOUR_NET:
+            return ipaddress.IPv4Address(packed[2:6])
+        if addr in _NAT64_NET:
+            return ipaddress.IPv4Address(packed[12:16])
+    return addr
+
+
 def _ip_blocked(ip: str) -> bool:
     """True if ``ip`` falls in a range we must never fetch from — loopback,
     private (RFC 1918 / ULA), link-local (incl. metadata ``169.254.169.254``),
-    reserved, multicast, or unspecified.
-
-    Unwraps an IPv4-mapped IPv6 address (``::ffff:127.0.0.1``) to its IPv4
-    form first: on some Python versions the mapped form's ``is_private``/
-    ``is_loopback`` properties don't reflect the wrapped address, which
-    would let a redirect ``Location`` steer at an internal host through
-    that specific encoding.
+    reserved, multicast, or unspecified. See :func:`_unwrap_ipv4` for why the
+    address is unwrapped before these properties are checked.
     """
-    addr = ipaddress.ip_address(ip)
-    mapped = getattr(addr, "ipv4_mapped", None)
-    if mapped is not None:
-        addr = mapped
+    addr = _unwrap_ipv4(ipaddress.ip_address(ip))
     return (
         addr.is_loopback
         or addr.is_private
@@ -181,16 +205,19 @@ def safe_urlopen(
     if isinstance(url_or_request, urllib.request.Request):
         headers = dict(url_or_request.header_items())
         method = url_or_request.get_method()
+        data = url_or_request.data
         current = url_or_request.full_url
     else:
         headers = {}
         method = None
+        data = None
         current = url_or_request
     original_host = urlsplit(current).hostname
+    original_scheme = urlsplit(current).scheme
 
     for _ in range(_MAX_REDIRECTS + 1):
         validate_feed_url(current)
-        req = urllib.request.Request(current, headers=headers, method=method)
+        req = urllib.request.Request(current, data=data, headers=headers, method=method)
         try:
             resp = _opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as exc:
@@ -200,10 +227,12 @@ def safe_urlopen(
             if not location:
                 raise FeedURLError(f"redirect from {_redact_url(current)} ({exc.code}) has no Location header") from exc
             current = urljoin(current, location)
-            if urlsplit(current).hostname != original_host:
-                # Cross-host redirect: don't forward credentials to a host
-                # the caller never intended them for (standard hardened-
-                # client behavior). No current caller sets either header —
+            new_parts = urlsplit(current)
+            if new_parts.hostname != original_host or (original_scheme == "https" and new_parts.scheme == "http"):
+                # Don't forward credentials to a host the caller never
+                # intended them for, or send them in cleartext over a
+                # same-host HTTPS→HTTP downgrade (standard hardened-client
+                # behavior). No current caller sets either header —
                 # direct_url.py's conditional-GET uses If-Modified-Since/
                 # If-None-Match only — so this is defense-in-depth for
                 # whichever future caller adds one.

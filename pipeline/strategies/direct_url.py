@@ -123,13 +123,17 @@ def fetch(
         tmp.unlink(missing_ok=True)
 
     manifest["current"] = {
-        "url": static_url,
+        # Redacted: static_url routinely carries an API key in the query
+        # string (ODPT and similar JP GTFS providers). The manifest only
+        # needs this for logging/identity, not re-fetching — re-fetch
+        # always reads the live static_url from the DB.
+        "url": _redact_url(static_url),
         "last_modified": cur_lm or manifest.get("current", {}).get("last_modified"),
         "etag": cur_et or manifest.get("current", {}).get("etag"),
         "sha256": cur_sha,
     }
     manifest["latest"] = {
-        "url": latest_url,
+        "url": _redact_url(latest_url),
         "last_modified": lat_lm or manifest.get("latest", {}).get("last_modified"),
         "etag": lat_et or manifest.get("latest", {}).get("etag"),
         "sha256": lat_sha,

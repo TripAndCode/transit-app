@@ -52,6 +52,17 @@ def test_direct_url_persists_new_zip(tmp_path):
     assert manifest["current"]["last_modified"] == "lm1"
 
 
+def test_direct_url_persisted_manifest_redacts_query_string(tmp_path):
+    """static_url routinely carries an API key in the query string (ODPT and
+    similar JP GTFS providers) - the persisted manifest must not write it
+    to disk in cleartext, even though it's a local file, not a log stream."""
+    body = b"PK\x03\x04data"
+    with patch.object(_opener, "open", side_effect=[_mock_response(body), _mock_response(body)]):
+        direct_url.fetch(8, "https://8.8.8.8/static/8/current_data.zip?key=SECRET123", tmp_path)
+    manifest = json.loads((tmp_path / "8" / "_manifest.json").read_text())
+    assert "SECRET123" not in json.dumps(manifest)
+
+
 def test_direct_url_prefers_latest_when_diff(tmp_path):
     body_current = b"PK\x03\x04current_data"
     body_latest = b"PK\x03\x04latest_data"

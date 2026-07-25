@@ -81,3 +81,31 @@ def test_ip_blocked_rejects_ipv4_mapped_loopback():
 
 def test_ip_blocked_rejects_ipv4_mapped_metadata_endpoint():
     assert _ip_blocked("::ffff:169.254.169.254") is True
+
+
+def test_ip_blocked_rejects_6to4_encoded_loopback():
+    """2002::/16 (6to4) embeds a full IPv4 address in its low bits, but
+    ipaddress's is_private/is_loopback don't unwrap it on this project's
+    pinned Python (3.12.2) - confirmed empirically: 2002:7f00:1:: (= 127.0.0.1)
+    reports is_private=False, is_loopback=False on this interpreter. A
+    redirect Location using this encoding would otherwise slip past every
+    check in _ip_blocked."""
+    assert _ip_blocked("2002:7f00:1::") is True  # embeds 127.0.0.1
+
+
+def test_ip_blocked_rejects_6to4_encoded_metadata_endpoint():
+    assert _ip_blocked("2002:a9fe:a9fe::") is True  # embeds 169.254.169.254
+
+
+def test_ip_blocked_rejects_nat64_encoded_private_address():
+    """64:ff9b::/96 (NAT64) also embeds an IPv4 address; happens to be
+    caught today via is_reserved on this interpreter, but that's
+    incidental to is_reserved's own range definition, not a deliberate
+    unwrap - pin the behavior explicitly rather than relying on it."""
+    assert _ip_blocked("64:ff9b::a00:1") is True  # embeds 10.0.0.1
+
+
+def test_ip_blocked_allows_6to4_encoded_public_address():
+    """A 6to4 address embedding a genuinely public IPv4 must still pass -
+    the unwrap must not become a blanket reject of the whole 2002::/16 range."""
+    assert _ip_blocked("2002:0808:0808::") is False  # embeds 8.8.8.8

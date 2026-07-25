@@ -108,6 +108,17 @@ def test_too_many_redirects_raises(monkeypatch):
         safe_urlopen("http://8.8.8.8/loop")
 
 
+def test_build_opener_installs_no_redirect_handler():
+    """_NoRedirect is the linchpin of the whole SSRF fix - it's what makes
+    the real opener raise HTTPError on a 3xx instead of silently
+    auto-following it (unvalidated) to a new host. Every other redirect
+    test here mocks _opener.open directly, which bypasses this entirely
+    and would stay green even if _NoRedirect were dropped from
+    _build_opener - so it needs its own direct assertion."""
+    opener = url_guard._build_opener()
+    assert any(isinstance(h, url_guard._NoRedirect) for h in opener.handlers)
+
+
 def test_opener_ignores_environment_proxy_vars(monkeypatch):
     """A defense-in-depth SSRF guard is pointless if the process's
     http_proxy/https_proxy env vars silently reroute every fetch through a
@@ -140,3 +151,64 @@ def test_preserves_request_headers_across_redirect(monkeypatch):
     with safe_urlopen(req) as resp:
         assert resp.read() == b"ok"
     assert all(h.get("If-none-match") == "abc123" for h in seen_headers)
+
+
+def test_strips_authorization_and_cookie_on_cross_host_redirect(monkeypatch):
+    """A future caller might add Authorization/Cookie to a feed Request -
+    those must NOT be forwarded to a different host reached via redirect,
+    or a malicious feed server could 302 to its own host and harvest them."""
+    seen_headers = []
+
+    def fake_open(req, timeout=None):
+        seen_headers.append(dict(req.header_items()))
+        if req.full_url == "http://8.8.8.8/start":
+            raise _http_error(req.full_url, 302, "http://8.8.4.4/next")
+        return _FakeResponse(b"ok")
+
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    req = urllib.request.Request("http://8.8.8.8/start")
+    req.add_header("Authorization", "Bearer secret")
+    req.add_header("Cookie", "session=secret")
+    with safe_urlopen(req) as resp:
+        assert resp.read() == b"ok"
+    assert seen_headers[0].get("Authorization") == "Bearer secret"  # first (same-host) hop keeps it
+    assert "Authorization" not in seen_headers[1]  # cross-host hop must not see it
+    assert "Cookie" not in seen_headers[1]
+
+
+def test_strips_authorization_on_same_host_https_to_http_downgrade(monkeypatch):
+    """A same-host redirect that drops from https to http must also strip
+    credential headers - forwarding them would send a bearer token/cookie
+    in cleartext even though the host itself didn't change."""
+    seen_headers = []
+
+    def fake_open(req, timeout=None):
+        seen_headers.append(dict(req.header_items()))
+        if req.full_url == "https://8.8.8.8/start":
+            raise _http_error(req.full_url, 302, "http://8.8.8.8/next")
+        return _FakeResponse(b"ok")
+
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    req = urllib.request.Request("https://8.8.8.8/start")
+    req.add_header("Authorization", "Bearer secret")
+    with safe_urlopen(req) as resp:
+        assert resp.read() == b"ok"
+    assert "Authorization" not in seen_headers[1]
+
+
+def test_preserves_request_body_across_redirect(monkeypatch):
+    """A future POST-with-body Request must not silently lose its body on
+    a redirect hop - only headers/method were preserved before this fix."""
+    seen_bodies = []
+
+    def fake_open(req, timeout=None):
+        seen_bodies.append(req.data)
+        if req.full_url == "http://8.8.8.8/start":
+            raise _http_error(req.full_url, 307, "http://8.8.8.8/next")  # 307 preserves body/method
+        return _FakeResponse(b"ok")
+
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    req = urllib.request.Request("http://8.8.8.8/start", data=b"payload", method="POST")
+    with safe_urlopen(req) as resp:
+        assert resp.read() == b"ok"
+    assert seen_bodies == [b"payload", b"payload"]
