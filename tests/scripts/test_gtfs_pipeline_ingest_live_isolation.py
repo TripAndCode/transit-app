@@ -65,3 +65,19 @@ def test_ingest_live_all_agencies_succeeds_when_none_fail():
             gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))  # must NOT raise
 
     assert mock_ingest.call_count == 2
+
+
+def test_ingest_live_all_agencies_logs_success_summary_when_none_fail(caplog):
+    """Matches cmd_analyze_all's/cmd_refresh_static's all-succeeded summary
+    line - a clean scheduled run should confirm success, not emit only
+    per-agency progress lines and nothing at the end."""
+    import logging
+
+    conn = _mock_conn_with_agency_ids([1, 2])
+
+    with patch.object(gtfs_pipeline, "_get_conn", return_value=conn):
+        with patch("pipeline.ingest.ingest_live", return_value=1):
+            with caplog.at_level(logging.INFO):
+                gtfs_pipeline.cmd_ingest_live(Namespace(agency_id=None))
+
+    assert "all 2 agencies" in caplog.text

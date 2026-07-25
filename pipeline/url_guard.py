@@ -82,20 +82,23 @@ def _unwrap_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
 
 
 def _ip_blocked(ip: str) -> bool:
-    """True if ``ip`` falls in a range we must never fetch from — loopback,
-    private (RFC 1918 / ULA), link-local (incl. metadata ``169.254.169.254``),
-    reserved, multicast, or unspecified. See :func:`_unwrap_ipv4` for why the
-    address is unwrapped before these properties are checked.
+    """True if ``ip`` is anything but globally-routable public address space.
+
+    Fail-closed allowlist (``not is_global``) rather than an enumerated
+    denylist of ``is_loopback``/``is_private``/etc.: the denylist form missed
+    Carrier-Grade NAT (``100.64.0.0/10``, RFC 6598) — confirmed empirically,
+    none of those six properties catch it — which is common internal
+    addressing in cloud/container networks and a live SSRF target on the
+    redirect path (server-supplied, not admin-set). ``is_global`` already
+    accounts for loopback/private/link-local/reserved/multicast/unspecified
+    plus any future special-use range, so this closes that class of gap
+    instead of requiring the list to be kept in sync by hand. See
+    :func:`_unwrap_ipv4` for why the address is unwrapped before this check —
+    ``is_global`` has the same IPv6-embedded-IPv4 blind spot the individual
+    properties did.
     """
     addr = _unwrap_ipv4(ipaddress.ip_address(ip))
-    return (
-        addr.is_loopback
-        or addr.is_private
-        or addr.is_link_local
-        or addr.is_reserved
-        or addr.is_multicast
-        or addr.is_unspecified
-    )
+    return not addr.is_global
 
 
 def validate_feed_url(url: str) -> None:
@@ -233,9 +236,12 @@ def safe_urlopen(
                 # redirect; 301/302/303 downgrade a non-GET request to GET
                 # and drop the body — otherwise a future non-GET caller
                 # redirected via 303 would silently re-send its body/method
-                # to a location that never asked for it.
+                # to a location that never asked for it. Entity headers
+                # describing that body must go with it, or the GET declares
+                # a body (Content-Length) it no longer sends.
                 method = "GET"
                 data = None
+                headers = {k: v for k, v in headers.items() if k.lower() not in ("content-type", "content-length")}
             if new_parts.hostname != original_host or (original_scheme == "https" and new_parts.scheme == "http"):
                 # Don't forward credentials to a host the caller never
                 # intended them for, or send them in cleartext over a

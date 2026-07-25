@@ -211,9 +211,32 @@ def test_downgrades_to_get_and_drops_body_on_302_redirect(monkeypatch):
 
     monkeypatch.setattr(url_guard._opener, "open", fake_open)
     req = urllib.request.Request("http://8.8.8.8/start", data=b"payload", method="POST")
+    req.add_header("Content-Type", "application/json")
     with safe_urlopen(req) as resp:
         assert resp.read() == b"ok"
     assert seen == [("POST", b"payload"), ("GET", None)]
+
+
+def test_drops_entity_headers_alongside_body_on_302_redirect(monkeypatch):
+    """Dropping the body but leaving Content-Type/Content-Length behind would
+    produce a malformed GET (declared body length, no body) - entity
+    headers must go with the body they describe."""
+    seen_headers = []
+
+    def fake_open(req, timeout=None):
+        seen_headers.append(dict(req.header_items()))
+        if req.full_url == "http://8.8.8.8/start":
+            raise _http_error(req.full_url, 302, "http://8.8.8.8/next")
+        return _FakeResponse(b"ok")
+
+    monkeypatch.setattr(url_guard._opener, "open", fake_open)
+    req = urllib.request.Request("http://8.8.8.8/start", data=b"payload", method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Content-Length", "7")
+    with safe_urlopen(req) as resp:
+        assert resp.read() == b"ok"
+    assert "Content-type" not in seen_headers[1]
+    assert "Content-length" not in seen_headers[1]
 
 
 def test_preserves_request_body_across_redirect(monkeypatch):

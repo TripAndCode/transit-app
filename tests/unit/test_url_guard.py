@@ -105,6 +105,16 @@ def test_ip_blocked_rejects_nat64_encoded_private_address():
     assert _ip_blocked("64:ff9b::a00:1") is True  # embeds 10.0.0.1
 
 
+def test_ip_blocked_rejects_carrier_grade_nat():
+    """100.64.0.0/10 (RFC 6598 CGNAT) is routable internal address space -
+    common in cloud/container/ISP networks - but none of is_loopback/
+    is_private/is_link_local/is_reserved/is_multicast/is_unspecified catch
+    it (confirmed empirically on this interpreter), so the enumerated
+    denylist let it straight through. A redirect Location pointed at this
+    range would reach an internal host unblocked."""
+    assert _ip_blocked("100.64.0.1") is True
+
+
 def test_ip_blocked_allows_6to4_encoded_public_address():
     """A 6to4 address embedding a genuinely public IPv4 must still pass -
     the unwrap must not become a blanket reject of the whole 2002::/16 range."""

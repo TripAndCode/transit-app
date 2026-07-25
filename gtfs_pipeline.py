@@ -189,10 +189,10 @@ def cmd_refresh_static(args):
         if result is None:
             logger.info("No change.")
     else:
-        n, failed = refresh_all(conn, dest)
+        n, total, failed = refresh_all(conn, dest)
         conn.close()
         if failed:
-            logger.error(f"refresh-static: {len(failed)} agencies failed: {failed}")
+            logger.error(f"refresh-static: {len(failed)} of {total} agencies failed: {failed}")
             sys.exit(1)
         logger.info(f"Refreshed {n} agencies.")
         return
@@ -337,6 +337,7 @@ def cmd_ingest_live(args):
     if failed:
         logger.error(f"ingest-live: {len(failed)} of {len(agency_ids)} agencies failed: {failed}")
         sys.exit(1)
+    logger.info(f"ingest-live: all {len(agency_ids)} agencies ingested.")
 
 
 def cmd_migrate(args):
