@@ -484,13 +484,19 @@ def analyze(agency_id: int, conn) -> None:
         # reports/route-summary surfaces, which read the same deduped set.
         if has_static:
             # Same expr in SELECT and GROUP BY — one call keeps them in sync.
+            # Built UNTYPED like agg_route_stop_daily below: NULL service_type is
+            # kept as a '' sentinel (COALESCE), not filtered out, so a stop whose
+            # traffic is entirely NULL-service still shows on the default (no
+            # route filter) heatmap instead of silently reading as zero activity.
+            # COALESCE repeated in GROUP BY so the grouped column binds the
+            # sentinel, not the raw NULL.
             band_case = time_band_case_sql("d.scheduled_time")
             sql = f"""
-                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
+                WITH deduped AS (SELECT * FROM _analyze_deduped)
                 INSERT INTO agg_stop_daily
                     (agency_id, stop_id, date, service_type, time_band, delay_sum, samples)
                 SELECT
-                    %(agency_id)s, sst.stop_id, d.date, d.service_type,
+                    %(agency_id)s, sst.stop_id, d.date, COALESCE(d.service_type, ''),
                     {band_case} AS time_band,
                     SUM(d.dep_delay)::bigint, COUNT(*)
                 FROM deduped d
@@ -498,7 +504,7 @@ def analyze(agency_id: int, conn) -> None:
                   ON sst.agency_id = %(agency_id)s
                  AND sst.trip_id = d.trip_id
                  AND sst.stop_sequence = d.stop_sequence
-                GROUP BY sst.stop_id, d.date, d.service_type, {band_case}
+                GROUP BY sst.stop_id, d.date, COALESCE(d.service_type, ''), {band_case}
             """
             with conn.cursor() as cur:
                 cur.execute(sql, p)

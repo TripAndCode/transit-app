@@ -403,8 +403,12 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id):
         assert cur.fetchone()[0] == "R1"
 
 
-def test_agg_stop_daily_skips_null_service_type(pg_conn, agency_id):
-    """NULL service_type rows (agency-9 case) must not abort the agg build."""
+def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id):
+    """NULL service_type rows (agency-9 case) must not abort the agg build,
+    and — matching agg_route_stop_daily's '' sentinel treatment — must not be
+    silently dropped either: a stop whose traffic is entirely NULL-service
+    would otherwise read as zero activity on the default (no route filter)
+    heatmap while still showing up on the route-filtered view."""
     from datetime import time
 
     from pipeline.analyze import analyze
@@ -423,10 +427,9 @@ def test_agg_stop_daily_skips_null_service_type(pg_conn, agency_id):
     with pg_conn.cursor() as cur:
         cur.execute("SELECT service_type, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
         rows = cur.fetchall()
-    # only the non-null service_type group survives (NULL one is dropped); the three
-    # 平日 polls dedup to a single observation
-    assert all(st is not None for st, _ in rows)
-    assert sum(s for _, s in rows) == 1
+    by_svc = dict(rows)
+    assert by_svc["平日"] == 1  # 3 polls of one event dedup to latest
+    assert by_svc[""] == 1  # NULL service KEPT as '' sentinel, not dropped
 
 
 def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):

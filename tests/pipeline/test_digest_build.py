@@ -196,6 +196,33 @@ def test_null_service_route_gets_route_grain_baseline(pg_conn, agency_id):
     assert matching[0].baseline_avg_min == 3.0
 
 
+def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):
+    """delta_min must compare today's avg against the baseline using the SAME
+    route population on both sides. Previously today's avg was weighted over
+    ALL routes (including ones with no baseline at all) while the baseline
+    side only counted routes that have one - a route with no baseline and a
+    large delay could swing the headline delta even though the only route
+    with a real historical baseline showed zero drift."""
+    with pg_conn.cursor() as cur:
+        # Route A: today == baseline (no real change).
+        _insert_daily(cur, agency_id, "A", "平日", 300, 100)  # 5.0 min
+        _insert_stats(cur, agency_id, "A", "平日", 5.0, 8.0)
+        # Route B: no baseline row at all (under any service_type), big delay today.
+        _insert_daily(cur, agency_id, "B", "平日", 900, 100)  # 15.0 min
+        cur.execute(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, 100, 0)",
+            (agency_id, DAY),
+        )
+    pg_conn.commit()
+
+    data = build_digest(pg_conn, DAY)
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+
+    assert section.avg_delay_min == 10.0  # unchanged: still the full-population headline
+    assert section.baseline_avg_min == 5.0
+    assert section.delta_min == 0.0  # NOT +5.0 - route A (the only one with a baseline) shows no drift
+
+
 def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):
     import gtfs_pipeline
 

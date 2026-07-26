@@ -744,6 +744,16 @@ async def dispatch(
     }
     tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
 
+    # Validated against the allowlist BEFORE any perf label is created from
+    # it — tool_name can be arbitrary client-supplied text (see
+    # api/routers/conversations.py's builder-direct dispatch path), and
+    # perf._stats is an unbounded, never-evicted process-global dict keyed by
+    # label. Checking after entering perf.timed_block would let repeated
+    # bogus tool names grow it without limit.
+    handler = _HANDLERS.get(tool_name)
+    if handler is None:
+        return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
+
     async with perf.timed_block(f"ask.tool.{tool_name}"):
         # Card templates use "route_code" as the arg name (matches the param
         # definition), but all handlers read "route".  Normalise before dispatch.
@@ -753,10 +763,6 @@ async def dispatch(
             raw_rc = arguments["route_code"]
             arguments = {k: v for k, v in arguments.items() if k != "route_code"}
             arguments = {"route": raw_rc, **arguments}
-
-        handler = _HANDLERS.get(tool_name)
-        if handler is None:
-            return ToolResult(kind="empty", summary=_summary("unsupported_tool", lang=locale, name=tool_name))
 
         from pipeline.query.schema_linker import resolve_route
 

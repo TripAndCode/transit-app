@@ -9,10 +9,12 @@ import hashlib
 import logging
 import pathlib
 import re
+import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime
 from typing import Optional
+
+from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +55,17 @@ def fetch(
     agency_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        with urllib.request.urlopen(index_url, timeout=30) as resp:
+        with safe_urlopen(index_url, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except urllib.error.URLError as e:
-        logger.warning(f"[aomori_index_scrape] failed to fetch index {index_url}: {e}")
+        logger.warning(f"[aomori_index_scrape] failed to fetch index {_redact_url(index_url)}: {e}")
+        return None
+    except FeedURLError as e:
+        # SSRF guard rejection (invalid scheme/host, or a redirect into a
+        # blocked host) — not a URLError, so it needs its own clause. Logged
+        # louder than a network blip since it's security-relevant, but still
+        # degrades to a no-op rather than aborting the caller's whole run.
+        logger.error(f"[aomori_index_scrape] SSRF guard rejected index {_redact_url(index_url)}: {e}")
         return None
 
     m = _HREF_RE.search(html)
@@ -68,10 +77,13 @@ def fetch(
     day = datetime.now().strftime("%Y%m%d")
     final = agency_dir / f"gtfs_static_{day}.zip"
     try:
-        with urllib.request.urlopen(zip_url, timeout=60) as resp:
+        with safe_urlopen(zip_url, timeout=60) as resp:
             data = resp.read()
     except urllib.error.URLError as e:
-        logger.warning(f"[aomori_index_scrape] failed to fetch zip {zip_url}: {e}")
+        logger.warning(f"[aomori_index_scrape] failed to fetch zip {_redact_url(zip_url)}: {e}")
+        return None
+    except FeedURLError as e:
+        logger.error(f"[aomori_index_scrape] SSRF guard rejected scraped zip_url {_redact_url(zip_url)}: {e}")
         return None
 
     if data[:2] != b"PK":
@@ -84,7 +96,11 @@ def fetch(
     if not history_path.exists():
         history_path.write_text("timestamp,zip_url,sha256,bytes,file_path\n")
     with history_path.open("a") as f:
-        f.write(f"{datetime.now().isoformat()},{zip_url},{sha},{len(data)},{final}\n")
+        # zip_url is scraped from index_url's own HTML, not admin-set, so a
+        # compromised/spoofed index page could embed credentials in its
+        # userinfo or query string — redact before persisting, matching
+        # direct_url.py's manifest redaction of static_url/latest_url.
+        f.write(f"{datetime.now().isoformat()},{_redact_url(zip_url)},{sha},{len(data)},{final}\n")
 
     logger.info(f"[aomori_index_scrape] agency={agency_id} persisted {final.name} (sha256={sha[:12]})")
     return final

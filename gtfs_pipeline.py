@@ -189,8 +189,13 @@ def cmd_refresh_static(args):
         if result is None:
             logger.info("No change.")
     else:
-        n = refresh_all(conn, dest)
+        n, total, failed = refresh_all(conn, dest)
+        conn.close()
+        if failed:
+            logger.error(f"refresh-static: {len(failed)} of {total} agencies failed: {failed}")
+            sys.exit(1)
         logger.info(f"Refreshed {n} agencies.")
+        return
     conn.close()
 
 
@@ -294,24 +299,45 @@ def cmd_digest(args):
 
 
 def cmd_ingest_live(args):
-    """Fetch and ingest the live GTFS-RT feed for one or all agencies."""
+    """Fetch and ingest the live GTFS-RT feed for one or all agencies.
+
+    All-agencies branch: run-all-then-report, matching cmd_analyze_all — one
+    agency raising (network timeout, a rejected feed_url, a malformed
+    trip_id_pattern regex) does not abort the others, so a single scheduled
+    run surfaces every failure instead of silently skipping every agency
+    after the first one that errors. ingest_live() has no internal
+    rollback-on-error of its own (unlike analyze()), so the connection is
+    rolled back here before continuing to the next agency.
+    """
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
     if args.agency_id is not None:
         ingest_live(int(args.agency_id), conn)
-    else:
-        with conn.cursor() as cur:
-            cur.execute(ACTIVE_AGENCY_IDS_SQL)
-            agency_ids = [r[0] for r in cur.fetchall()]
-        if not agency_ids:
-            logger.info("No agencies found.")
-            conn.close()
-            return
-        for aid in agency_ids:
+        conn.close()
+        return
+
+    with conn.cursor() as cur:
+        cur.execute(ACTIVE_AGENCY_IDS_SQL)
+        agency_ids = [r[0] for r in cur.fetchall()]
+    if not agency_ids:
+        logger.info("No agencies found.")
+        conn.close()
+        return
+    failed = []
+    for aid in agency_ids:
+        try:
             logger.info(f"--- Ingesting agency_id={aid} ---")
             ingest_live(aid, conn)
+        except Exception:
+            logger.exception(f"ingest-live failed for agency {aid}")
+            conn.rollback()
+            failed.append(aid)
     conn.close()
+    if failed:
+        logger.error(f"ingest-live: {len(failed)} of {len(agency_ids)} agencies failed: {failed}")
+        sys.exit(1)
+    logger.info(f"ingest-live: all {len(agency_ids)} agencies ingested.")
 
 
 def cmd_migrate(args):

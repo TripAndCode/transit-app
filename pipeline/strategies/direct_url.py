@@ -13,10 +13,13 @@ import hashlib
 import json
 import logging
 import pathlib
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
+
+from pipeline.url_guard import FeedURLError, _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     if manifest_entry.get("etag"):
         req.add_header("If-None-Match", manifest_entry["etag"])
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with safe_urlopen(req, timeout=30) as resp:
             data = resp.read()
             with dest.open("wb") as f:
                 f.write(data)
@@ -50,10 +53,18 @@ def _cond_get(url: str, manifest_entry: dict, dest: pathlib.Path) -> tuple[Optio
     except urllib.error.HTTPError as e:
         if e.code == 304:
             return None, None
-        logger.warning(f"[direct_url] HTTP {e.code} for {url}: {e.reason}")
+        logger.warning(f"[direct_url] HTTP {e.code} for {_redact_url(url)}: {e.reason}")
         return None, None
     except urllib.error.URLError as e:
-        logger.warning(f"[direct_url] network error for {url}: {e}")
+        logger.warning(f"[direct_url] network error for {_redact_url(url)}: {e}")
+        return None, None
+    except FeedURLError as e:
+        # SSRF guard rejection (invalid scheme/host, or a redirect into a
+        # blocked host) — not a URLError, so it needs its own clause. Logged
+        # louder than a network blip since it's security-relevant, but still
+        # degrades to (None, None) rather than aborting fetch()'s other
+        # variant (current_data.zip vs latest.zip) or the caller's whole run.
+        logger.error(f"[direct_url] SSRF guard rejected {_redact_url(url)}: {e}")
         return None, None
 
 
@@ -112,13 +123,17 @@ def fetch(
         tmp.unlink(missing_ok=True)
 
     manifest["current"] = {
-        "url": static_url,
+        # Redacted: static_url routinely carries an API key in the query
+        # string (ODPT and similar JP GTFS providers). The manifest only
+        # needs this for logging/identity, not re-fetching — re-fetch
+        # always reads the live static_url from the DB.
+        "url": _redact_url(static_url),
         "last_modified": cur_lm or manifest.get("current", {}).get("last_modified"),
         "etag": cur_et or manifest.get("current", {}).get("etag"),
         "sha256": cur_sha,
     }
     manifest["latest"] = {
-        "url": latest_url,
+        "url": _redact_url(latest_url),
         "last_modified": lat_lm or manifest.get("latest", {}).get("last_modified"),
         "etag": lat_et or manifest.get("latest", {}).get("etag"),
         "sha256": lat_sha,

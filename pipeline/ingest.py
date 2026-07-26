@@ -9,8 +9,9 @@ import logging
 import pathlib
 import re
 import tarfile
-import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from typing import Iterator
 
 import psycopg2.extras
 
@@ -22,7 +23,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import validate_feed_url
+from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,44 @@ def _insert_updates(cur, agency_id: int, rows: list[tuple]) -> int:
     pg_rows = [(agency_id, *r) for r in rows]
     psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
     return len(pg_rows)
+
+
+@contextmanager
+def _savepoint(cur, name: str) -> Iterator[None]:
+    """Run a block as a Postgres SAVEPOINT, isolating its failure from the
+    surrounding (uncommitted) transaction: on success the savepoint is
+    released; on an exception its writes are rolled back, then it's
+    released too, and the exception re-raised for the caller's own
+    try/except to log and count.
+
+    Used to isolate one bad tarball member / loose ``.pb`` file from every
+    other member/file already inserted since the last periodic
+    ``conn.commit()`` — a bare ``conn.rollback()`` on one bad item would
+    discard ALL of them, not just the failing one.
+
+    RELEASE is issued on both paths because ``ROLLBACK TO SAVEPOINT``
+    undoes the writes but does not destroy the savepoint itself; without
+    it, the next iteration's same-named ``SAVEPOINT`` would stack on top
+    of the still-live one instead of replacing it. That stacking is what
+    RELEASE actually prevents — it does *not*, by itself, keep Postgres's
+    64-entry per-backend subtransaction cache from filling up on a long
+    run of *successful* items in one commit window (each successful
+    SAVEPOINT still holds a slot until the next top-level commit). This
+    pipeline's read endpoints serve from precomputed ``agg_*`` tables, not
+    live scans of ``updates`` (see CLAUDE.md), so the resulting
+    pg_subtrans-lookup overhead on concurrent readers is low-impact here;
+    lowering the commit cadence below 64 items would close that specific
+    gap but cost more frequent fsyncs, so it's accepted as-is rather than
+    tuned for a cost with no observed impact.
+    """
+    cur.execute(f"SAVEPOINT {name}")
+    try:
+        yield
+    except Exception:
+        cur.execute(f"ROLLBACK TO SAVEPOINT {name}")
+        raise
+    finally:
+        cur.execute(f"RELEASE SAVEPOINT {name}")
 
 
 def _resolve_strategy_name(agency_id: int, conn) -> str:
@@ -175,14 +214,27 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
-                        ts = _ts(d, pb_name)
-                        fobj = tf.extractfile(member)
-                        if fobj is None:  # non-file member (dir/special)
-                            continue
-                        raw = fobj.read()
-                        rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
-                        n_inserted += _insert_updates(cur, agency_id, rows)
-                        done.add(f"{d}/{pb_name}")
+                        # _savepoint isolates one bad member from every good
+                        # member already inserted since the last commit
+                        # boundary in this tarball — extractfile() itself can
+                        # raise on a corrupt member header/index, not just
+                        # parse_feed, so it must be inside the savepoint too.
+                        # The outer try/except still covers genuinely
+                        # tar-wide failures (a corrupt archive tarfile.open
+                        # can't even read).
+                        try:
+                            with _savepoint(cur, "tar_member"):
+                                ts = _ts(d, pb_name)
+                                fobj = tf.extractfile(member)
+                                if fobj is None:  # non-file member (dir/special)
+                                    continue
+                                raw = fobj.read()
+                                rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
+                                n_inserted += _insert_updates(cur, agency_id, rows)
+                                done.add(f"{d}/{pb_name}")
+                        except Exception as e:
+                            logger.error(f"  [ERROR] {pb_name}: {e}")
+                            n_errors += 1
                         if j % 300 == 0 and j > 0:
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
@@ -198,9 +250,17 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
-                rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
-                n_inserted += _insert_updates(cur, agency_id, rows)
-                done.add(f"{d}/{path.name}")
+                # _savepoint isolates one bad file from every good file
+                # already inserted since the last commit boundary in this
+                # batch (see _savepoint's docstring for why RELEASE matters).
+                try:
+                    with _savepoint(cur, "pb_file"):
+                        rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
+                        n_inserted += _insert_updates(cur, agency_id, rows)
+                        done.add(f"{d}/{path.name}")
+                except Exception as e:
+                    logger.error(f"  [ERROR] {path.name}: {e}")
+                    n_errors += 1
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
@@ -224,15 +284,11 @@ def ingest_live(agency_id: int, conn) -> int:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
 
-    # Defense-in-depth: feed_url is admin-set, but block non-http(s) schemes
-    # (urllib opens file://) and internal/metadata hosts before fetching it.
-    validate_feed_url(feed_url)
-
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
-    logger.info(f"Fetching live feed from {feed_url} (strategy={strategy_name})")
-    with urllib.request.urlopen(feed_url, timeout=30) as resp:
+    logger.info(f"Fetching live feed from {_redact_url(feed_url)} (strategy={strategy_name})")
+    with safe_urlopen(feed_url, timeout=30) as resp:
         raw = resp.read()
 
     captured_at = datetime.now(timezone.utc).isoformat()

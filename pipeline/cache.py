@@ -142,6 +142,13 @@ def _keyable(obj: Any) -> Any:
     """Asyncpg connection-like objects are POOLED and per-request — they hash
     by identity, which would make every request a cache miss. Replace them
     with a class-name token so the cache key reflects only the semantic args.
+
+    Any other unhashable argument (list, dict, ...) raises rather than being
+    collapsed to a class-name-only token: two different requests passing
+    different unhashable values of the same type would otherwise collide on
+    the same cache key and one would silently receive the other's cached
+    result. Add explicit handling here (e.g. tuple(a_list),
+    frozenset(a_dict.items())) if a future cached function needs one.
     """
     cls = type(obj).__name__
     if cls in {"Connection", "PoolConnectionProxy", "Pool"}:
@@ -150,4 +157,9 @@ def _keyable(obj: Any) -> Any:
         hash(obj)
         return obj
     except TypeError:
-        return f"<unhashable:{cls}>"
+        raise TypeError(
+            f"async_lru_cache: argument of type {cls!r} is not hashable and has no "
+            "explicit cache-key handling in pipeline.cache._keyable() — add one instead "
+            "of caching under a key that would collapse every distinct value of this "
+            "type together."
+        ) from None
