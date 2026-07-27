@@ -140,4 +140,15 @@ describe("NetworkTab", () => {
     );
     expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
   });
+
+  it("sets both range date inputs' lang attribute to the active UI language", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const inputs = document.querySelectorAll("input[type='date']");
+    expect(inputs.length).toBe(2);
+    inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
+  });
 });

@@ -21,7 +21,15 @@ function sanitizeNext(value: string | null): string {
   try {
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin) return "/";
-    return url.pathname + url.search + url.hash;
+    const path = url.pathname + url.search + url.hash;
+    // The URL constructor doesn't collapse a leading "//" in the pathname
+    // (e.g. a same-origin "/.//evil.example" resolves with pathname
+    // "//evil.example"), so a value that passes the origin check above can
+    // still come back protocol-relative — which window.location.assign()
+    // would then read as an off-site redirect, same as the "//" input this
+    // function already rejects.
+    if (path.startsWith("//")) return "/";
+    return path;
   } catch {
     return "/";
   }

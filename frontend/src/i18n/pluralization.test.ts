@@ -24,4 +24,19 @@ describe("English pluralization", () => {
     expect(i18n.t("overview.concentration_rest", { count: 1, rest: 5 })).toBe("Remaining 1 route: 5%");
     expect(i18n.t("overview.concentration_rest", { count: 2, rest: 5 })).toBe("Remaining 2 routes: 5%");
   });
+
+  it("admin.ops.agencies_stale uses the singular noun for count=1", () => {
+    expect(i18n.t("admin.ops.agencies_stale", { count: 1 })).toBe("1 agency with stale aggregates");
+    expect(i18n.t("admin.ops.agencies_stale", { count: 2 })).toBe("2 agencies with stale aggregates");
+  });
+
+  it("reports.raw_rows uses the singular noun for count=1", () => {
+    expect(i18n.t("reports.raw_rows", { count: 1 })).toBe("Raw (1 row)");
+    expect(i18n.t("reports.raw_rows", { count: 2 })).toBe("Raw (2 rows)");
+  });
+
+  it("live.drill.stop_outlier uses the singular noun for count=1", () => {
+    expect(i18n.t("live.drill.stop_outlier", { count: 1, delta: 3 })).toBe("3min more than 1 other route's avg");
+    expect(i18n.t("live.drill.stop_outlier", { count: 2, delta: 3 })).toBe("3min more than 2 other routes' avg");
+  });
 });

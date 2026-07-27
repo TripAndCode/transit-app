@@ -167,6 +167,24 @@ describe("LoginPage", () => {
     await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
   });
 
+  it("falls back to / instead of navigating to a same-origin URL whose pathname itself starts with //", async () => {
+    // new URL(value, origin).pathname does not collapse a leading "//" - a
+    // same-origin value like "/.//evil.example" passes the origin check but
+    // window.location.assign() then reads its returned path as
+    // protocol-relative and navigates off-site anyway.
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=%2F.%2F%2Fevil.example%2Fphish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
   it("shows an inline error and does not redirect on 401", async () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: true };
     mockApiPost.mockRejectedValue(new ApiError(401, JSON.stringify({ error: "invalid_credentials" })));
