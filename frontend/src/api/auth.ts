@@ -22,12 +22,18 @@ export function useSession() {
   return useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
 }
 
-/** Mutation that posts /api/auth/logout and invalidates the cached session. */
+/** Mutation that posts /api/auth/logout and clears every cached query.
+ *
+ * Clears the whole cache, not just ["me"] — every session-scoped query
+ * (admin users/agencies/ops, conversations, ...) must stop showing stale
+ * data once the session is gone, regardless of whether the caller also does
+ * a full page reload (AccountPage does; a future caller might not).
+ */
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiPost<void>("/api/auth/logout", {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: () => qc.clear(),
   });
 }
 

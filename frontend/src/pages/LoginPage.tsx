@@ -7,6 +7,17 @@ import { useConfig } from "../api/config";
 import { ApiError, apiPost } from "../api/client";
 import "./LoginPage.css";
 
+// `next` comes straight from the URL query string, so it's attacker-suppliable
+// (e.g. a crafted login link). window.location.assign(next) executes a
+// `javascript:` URI in this origin, and an absolute/protocol-relative value
+// is an open redirect off-site right after a successful login — only a
+// same-origin relative path is safe to navigate to.
+function sanitizeNext(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  if (value.includes(":")) return "/";
+  return value;
+}
+
 const ERROR_KEYS: Record<string, string> = {
   state: "account.login.error.state",
   unverified_email: "account.login.error.unverified_email",
@@ -18,7 +29,7 @@ const ERROR_KEYS: Record<string, string> = {
 export function LoginPage() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
-  const next = params.get("next") || "/";
+  const next = sanitizeNext(params.get("next"));
   const error = params.get("error");
   const [pending, setPending] = useState<"google" | "github" | null>(null);
   const { data: config } = useConfig();

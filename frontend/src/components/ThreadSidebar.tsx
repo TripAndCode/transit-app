@@ -3,29 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { relativeTime } from "../utils/relativeTime";
+import { isToday, isYesterday } from "../utils/threadDateBuckets";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function isToday(iso: string): boolean {
-  const d = new Date(iso);
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
-function isYesterday(iso: string): boolean {
-  const d = new Date(iso);
-  const yest = new Date();
-  yest.setDate(yest.getDate() - 1);
-  return (
-    d.getFullYear() === yest.getFullYear() &&
-    d.getMonth() === yest.getMonth() &&
-    d.getDate() === yest.getDate()
-  );
-}
 
 function isThisWeek(iso: string): boolean {
   const d = new Date(iso).getTime();

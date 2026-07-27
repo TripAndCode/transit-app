@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import i18n from "../i18n";
 import { PeakHourModal } from "./PeakHourModal";
 import type { PeakHourBreakdown } from "../api/types";
 
@@ -43,5 +44,21 @@ describe("PeakHourModal", () => {
   it("shows spinner when loading", () => {
     render(<PeakHourModal data={null} loading={true} onClose={() => {}} />);
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  describe("title grammar in Japanese", () => {
+    beforeAll(async () => await i18n.changeLanguage("ja"));
+    afterAll(async () => await i18n.changeLanguage("en"));
+
+    it("does not render the broken '全曜' when dow is null (the ribbon's every-hour-click path)", () => {
+      const allDays: PeakHourBreakdown = { hour: 10, dow: null, routes: mockBreakdown.routes };
+      render(<PeakHourModal data={allDays} loading={false} onClose={() => {}} />);
+      expect(screen.queryByText(/全曜/)).toBeNull();
+    });
+
+    it("renders a specific day's title correctly", () => {
+      render(<PeakHourModal data={mockBreakdown} loading={false} onClose={() => {}} />);
+      expect(screen.getByText(/金曜 8時台/)).toBeInTheDocument();
+    });
   });
 });

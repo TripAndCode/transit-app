@@ -200,11 +200,12 @@
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
   },
   "peakHourModal": {
-    "title": "{{dow}} {{hour}}:00 — delayed routes",
-    "allDow": "All days",
+    "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
+    "title_all": "All days {{hour}}:00 — delayed routes",
     "noData": "Not enough data for this time slot",
     "avgMin": "+{{value}}min",
-    "routeCount": "{{count}} routes"
+    "routeCount_one": "{{count}} route",
+    "routeCount_other": "{{count}} routes"
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -351,7 +352,8 @@
       "label": "Route",
       "count_suffix": "{{count}} routes",
       "search_placeholder": "Search (name / code)",
-      "variant_count": "({{count}} routes)",
+      "variant_count_one": "({{count}} route)",
+      "variant_count_other": "({{count}} routes)",
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes."

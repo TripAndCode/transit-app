@@ -200,11 +200,12 @@
     "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
   },
   "peakHourModal": {
-    "title": "{{dow}}曜 {{hour}}時台 — 遅延路線",
-    "allDow": "全",
+    "title_dow": "{{dow}}曜 {{hour}}時台 — 遅延路線",
+    "title_all": "毎日 {{hour}}時台 — 遅延路線",
     "noData": "この時間帯に十分なデータがありません",
     "avgMin": "+{{value}}分",
-    "routeCount": "{{count}}路線"
+    "routeCount_one": "{{count}}路線",
+    "routeCount_other": "{{count}}路線"
   },
   "header": {
     "app_title": "遅延ダッシュボード",
@@ -351,7 +352,8 @@
       "label": "路線",
       "count_suffix": "{{count}}路線",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count": "({{count}}路線)",
+      "variant_count_one": "({{count}}路線)",
+      "variant_count_other": "({{count}}路線)",
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
