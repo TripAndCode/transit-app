@@ -131,7 +131,7 @@ export function NetworkTab() {
           </div>
         )}
         <div style={coverageStyle}>
-          {a.data_to == null ? t("network.no_data_in_range") : `${a.data_from} – ${a.data_to}`}
+          {a.data_to == null ? t("network.no_data_in_range") : `${a.data_from} ${t("common.range_separator")} ${a.data_to}`}
         </div>
       </div>
     );

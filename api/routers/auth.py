@@ -18,6 +18,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urljoin, urlsplit
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -137,14 +138,33 @@ def _require_sso_configured() -> None:
 def sanitize_next(value: str | None) -> str:
     """Return a safe relative path for post-login redirect, defending against
     open-redirect attacks. Only same-origin absolute paths are kept.
+
+    This value ends up verbatim in a redirect ``Location`` header, which the
+    browser resolves with the same WHATWG URL algorithm used for any other
+    navigation — so a plain ``startswith("//")``/``"://" in value`` check
+    (the prior implementation) misses two real bypasses: a leading backslash
+    (``/\\evil.com``), which browsers normalize to a forward slash for
+    http(s) origins, and a same-origin-looking path that collapses to a
+    protocol-relative one after RFC 3986 dot-segment removal (``/.//evil.com``
+    → ``//evil.com``). Resolving against a fixed placeholder origin via
+    ``urljoin`` applies that same dot-segment normalization before the
+    decision is made, and the explicit backslash check covers the one
+    normalization ``urljoin`` doesn't perform that a browser does.
     """
-    if not value:
+    if not value or "\\" in value:
         return "/"
-    if value.startswith("//") or "://" in value:
+    resolved = urljoin("http://sanitize.invalid/", value)
+    parts = urlsplit(resolved)
+    if parts.netloc != "sanitize.invalid":
         return "/"
-    if not value.startswith("/"):
+    path = parts.path
+    if path.startswith("//"):
         return "/"
-    return value
+    if parts.query:
+        path += f"?{parts.query}"
+    if parts.fragment:
+        path += f"#{parts.fragment}"
+    return path
 
 
 @router.get("/{provider}/login")

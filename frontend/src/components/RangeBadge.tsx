@@ -21,8 +21,11 @@ function lastOfMonth(offset: number): string {
 function localizedDate(iso: string, language: string): string {
   // yyyy-mm-dd → yyyy/mm/dd (Japan-conventional written form) only for ja;
   // every other locale keeps the ISO dash form used elsewhere in the app
-  // (NetworkTab, AdminOpsPage), so switching languages doesn't show two
-  // different date conventions for the same kind of value.
+  // (NetworkTab, AdminOpsPage), so English never shows the ja slash form.
+  // Note: utils/rangeLabel.ts (ThreadSidebar/FilterContextBar's Ask filter
+  // summary) renders a custom range's digits as raw ISO regardless of
+  // locale — so a ja viewer sees "2026/06/01" here but "2026-06-01 〜
+  // 2026-07-15" there. Known, not (yet) unified across those two surfaces.
   return language.startsWith("ja") ? iso.replaceAll("-", "/") : iso;
 }
 

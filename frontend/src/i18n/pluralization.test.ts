@@ -39,4 +39,13 @@ describe("English pluralization", () => {
     expect(i18n.t("live.drill.stop_outlier", { count: 1, delta: 3 })).toBe("3min more than 1 other route's avg");
     expect(i18n.t("live.drill.stop_outlier", { count: 2, delta: 3 })).toBe("3min more than 2 other routes' avg");
   });
+
+  it("app.feed_health.banner uses the singular noun for count=1", () => {
+    expect(i18n.t("app.feed_health.banner", { count: 1 })).toBe(
+      "Feed health: 1 implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
+    );
+    expect(i18n.t("app.feed_health.banner", { count: 2 })).toBe(
+      "Feed health: 2 implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+    );
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -19,6 +19,7 @@ function renderBar(value: FilterCtx) {
 }
 
 describe("FilterContextBar", () => {
+  beforeEach(async () => await i18n.changeLanguage("en"));
   afterEach(async () => {
     await i18n.changeLanguage("en");
   });
