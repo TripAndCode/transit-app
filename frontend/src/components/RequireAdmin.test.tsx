@@ -30,9 +30,13 @@ function renderGuarded() {
 describe("RequireAdmin", () => {
   it("renders a loading placeholder instead of blank while the session is resolving", () => {
     mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
-    renderGuarded();
+    const { container } = renderGuarded();
     expect(screen.queryByText("admin content")).toBeNull();
     expect(screen.queryByText("login page")).toBeNull();
+    // Negative assertions alone would still pass if this regressed to
+    // `return null` (the exact "R5 P1" blank-flash bug RequireAdmin's own
+    // comment guards against) — assert the placeholder actually renders.
+    expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
   });
 
   it("redirects an unauthenticated visitor to /login", () => {

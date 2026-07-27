@@ -26,7 +26,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (days === 6 || days === 7) parts.push(t("filters.range.last_7d"));
     else if (days >= 28 && days <= 31) parts.push(t("filters.range.last_30d"));
     else if (days >= 85 && days <= 92) parts.push(t("filters.range.last_90d"));
-    else parts.push(`${fc.from_date} 〜 ${fc.to_date}`);
+    else parts.push(`${fc.from_date} ${t("common.range_separator")} ${fc.to_date}`);
   }
 
   // Day-of-week

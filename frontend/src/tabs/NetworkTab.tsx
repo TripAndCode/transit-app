@@ -46,7 +46,7 @@ const youBadgeStyle: React.CSSProperties = {
 };
 
 export function NetworkTab() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { agencyId } = useParams();
   const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useRangeContext();
@@ -168,11 +168,11 @@ export function NetworkTab() {
       <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "var(--text-secondary)" }}>
         <label>
           {t("network.from")}{" "}
-          <input type="date" value={ctx.from} max={ctx.to} onChange={(e) => update({ from: e.target.value })} />
+          <input type="date" lang={i18n.language} value={ctx.from} max={ctx.to} onChange={(e) => update({ from: e.target.value })} />
         </label>
         <label>
           {t("network.to")}{" "}
-          <input type="date" value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
+          <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
         </label>
       </div>
 

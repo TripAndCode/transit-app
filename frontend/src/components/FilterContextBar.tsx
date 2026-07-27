@@ -31,7 +31,7 @@ function filterSummary(
     if (days === 6 || days === 7) parts.push(t("filters.range.last_7d"));
     else if (days >= 28 && days <= 31) parts.push(t("filters.range.last_30d"));
     else if (days >= 85 && days <= 92) parts.push(t("filters.range.last_90d"));
-    else parts.push(`${fc.from_date} 〜 ${fc.to_date}`);
+    else parts.push(`${fc.from_date} ${t("common.range_separator")} ${fc.to_date}`);
   } else {
     // No explicit range — treat as "last 30 days" default
     parts.push(t("filters.range.last_30d"));
@@ -124,7 +124,7 @@ const dateInputStyle: CSSProperties = {
 // ─── component ────────────────────────────────────────────────────────────────
 
 export function FilterContextBar({ value, onChange, pending }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
@@ -224,15 +224,17 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <input
             type="date"
+            lang={i18n.language}
             value={draft.from_date ?? defaultFrom}
             max={draft.to_date ?? defaultTo}
             onChange={(e) => setDraft((d) => ({ ...d, from_date: e.target.value }))}
             disabled={pending}
             style={dateInputStyle}
           />
-          <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>〜</span>
+          <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>{t("common.range_separator")}</span>
           <input
             type="date"
+            lang={i18n.language}
             value={draft.to_date ?? defaultTo}
             min={draft.from_date ?? defaultFrom}
             onChange={(e) => setDraft((d) => ({ ...d, to_date: e.target.value }))}

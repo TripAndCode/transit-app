@@ -11,11 +11,20 @@ import "./LoginPage.css";
 // (e.g. a crafted login link). window.location.assign(next) executes a
 // `javascript:` URI in this origin, and an absolute/protocol-relative value
 // is an open redirect off-site right after a successful login — only a
-// same-origin relative path is safe to navigate to.
+// same-origin relative path is safe to navigate to. Resolving through the
+// URL constructor (rather than pattern-matching prefixes) is load-bearing:
+// browsers normalize a leading backslash to a forward slash for http(s)
+// origins, so a string check for "//" alone still lets "/\evil.example"
+// through as a same-origin-looking string that actually resolves off-site.
 function sanitizeNext(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-  if (value.includes(":")) return "/";
-  return value;
+  if (!value) return "/";
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "/";
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return "/";
+  }
 }
 
 const ERROR_KEYS: Record<string, string> = {
