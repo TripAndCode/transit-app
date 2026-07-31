@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../api/admin";
@@ -5,32 +6,68 @@ import { formatApiError } from "../api/client";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./admin/adminControls";
 
 const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
 
 /** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
 export function AdminUsersPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
-  const role = searchParams.get("role") ?? "";
-  const suspended = searchParams.get("suspended") ?? "";
-  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+  const rawRole = searchParams.get("role") ?? "";
+  const role = rawRole === "user" || rawRole === "admin" ? rawRole : "";
+  const rawSuspended = searchParams.get("suspended") ?? "";
+  const suspended = rawSuspended === "true" || rawSuspended === "false" ? rawSuspended : "";
+  const rawPage = Math.max(1, Math.floor(Number(searchParams.get("page") ?? "1")) || 1);
 
-  const { data, isLoading, error } = useAdminUsers({
+  // The search box is debounced locally so the URL/query key (and therefore
+  // the backend ILIKE scan) doesn't change on every keystroke — see qInput below.
+  const [qInput, setQInput] = useState(q);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (qInput) next.set("q", qInput);
+        else next.delete("q");
+        next.delete("page");
+        return next;
+      }, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [qInput, setSearchParams]);
+
+  const { data, isLoading, isFetching, isPlaceholderData, error } = useAdminUsers({
     q,
     role,
     suspended,
     limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
+    offset: (rawPage - 1) * PAGE_SIZE,
   });
   const patch = usePatchUser();
   const del = useDeleteUser();
 
-  function setFilter(key: "q" | "role" | "suspended", value: string) {
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(rawPage, totalPages);
+
+  // A stale/shared ?page= beyond the current result set (filters changed,
+  // rows disappeared) self-heals to the last real page instead of stranding
+  // the admin on a blank table with no visible way back.
+  useEffect(() => {
+    if (data && rawPage > totalPages) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("page", String(totalPages));
+        return next;
+      }, { replace: true });
+    }
+  }, [data, rawPage, totalPages, setSearchParams]);
+
+  function setFilter(key: "role" | "suspended", value: string) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("page");
-    setSearchParams(next, key === "q" ? { replace: true } : undefined);
+    setSearchParams(next);
   }
 
   function setPage(nextPage: number) {
@@ -39,8 +76,26 @@ export function AdminUsersPage() {
     setSearchParams(next);
   }
 
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  function isRowMutating(uid: number) {
+    return (patch.isPending && patch.variables?.uid === uid) || (del.isPending && del.variables === uid);
+  }
+
+  function handleRoleChange(uid: number, email: string, nextRole: string) {
+    if (nextRole === "admin" && !confirm(t("admin.users.confirm_promote", { email }))) return;
+    del.reset();
+    patch.mutate({ uid, body: { role: nextRole } });
+  }
+
+  function handleSuspendToggle(uid: number, suspendedAt: string | null) {
+    del.reset();
+    patch.mutate({ uid, body: { suspended: !suspendedAt } });
+  }
+
+  function handleDelete(uid: number, email: string) {
+    if (!confirm(t("admin.users.confirm_delete", { email }))) return;
+    patch.reset();
+    del.mutate(uid);
+  }
 
   return (
     <div style={{ padding: 24 }}>
@@ -48,20 +103,20 @@ export function AdminUsersPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminSearchInput
           placeholder={t("admin.users.search_placeholder")}
-          value={q}
-          onChange={(e) => setFilter("q", e.target.value)}
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
         />
         <select
-          aria-label={t("admin.users.filter.role_all")}
+          aria-label={t("admin.users.filter.role_label")}
           value={role}
           onChange={(e) => setFilter("role", e.target.value)}
         >
           <option value="">{t("admin.users.filter.role_all")}</option>
-          <option value="user">{t("admin.users.filter.role_user")}</option>
-          <option value="admin">{t("admin.users.filter.role_admin")}</option>
+          <option value="user">{t("account.role.user")}</option>
+          <option value="admin">{t("account.role.admin")}</option>
         </select>
         <select
-          aria-label={t("admin.users.filter.status_all")}
+          aria-label={t("admin.users.filter.status_label")}
           value={suspended}
           onChange={(e) => setFilter("suspended", e.target.value)}
         >
@@ -71,8 +126,8 @@ export function AdminUsersPage() {
         </select>
       </div>
       {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
-      {isLoading && <div>{t("common.loading")}</div>}
-      <table className="admin-table">
+      {(isLoading || isFetching) && <div>{t("common.loading")}</div>}
+      <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
         <thead>
           <tr>
             <th>{t("admin.users.col.email")}</th>
@@ -94,16 +149,19 @@ export function AdminUsersPage() {
             <tr key={u.user_id}>
               <td>
                 <AdminAvatar label={u.name || u.email} />
-                <Link to={`/admin/users/${u.user_id}`}>{u.email}</Link>
+                <Link to={`/admin/users/${u.user_id}`} state={{ listSearch: searchParams.toString() }}>
+                  {u.email}
+                </Link>
               </td>
               <td>{u.name ?? "-"}</td>
               <td>
                 <select
                   value={u.role}
-                  onChange={(e) => patch.mutate({ uid: u.user_id, body: { role: e.target.value } })}
+                  disabled={isRowMutating(u.user_id)}
+                  onChange={(e) => handleRoleChange(u.user_id, u.email, e.target.value)}
                 >
-                  <option value="user">{t("admin.users.filter.role_user")}</option>
-                  <option value="admin">{t("admin.users.filter.role_admin")}</option>
+                  <option value="user">{t("account.role.user")}</option>
+                  <option value="admin">{t("account.role.admin")}</option>
                 </select>
               </td>
               <td>
@@ -114,18 +172,16 @@ export function AdminUsersPage() {
               <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                 <AdminButton
                   variant="secondary"
-                  onClick={() => patch.mutate({ uid: u.user_id, body: { suspended: !u.suspended_at } })}
+                  disabled={isRowMutating(u.user_id)}
+                  onClick={() => handleSuspendToggle(u.user_id, u.suspended_at)}
                   style={{ marginRight: 8 }}
                 >
                   {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
                 </AdminButton>
                 <AdminButton
                   variant="danger"
-                  onClick={() => {
-                    if (confirm(t("admin.users.confirm_delete", { email: u.email }))) {
-                      del.mutate(u.user_id);
-                    }
-                  }}
+                  disabled={isRowMutating(u.user_id)}
+                  onClick={() => handleDelete(u.user_id, u.email)}
                 >
                   {t("admin.users.action.delete")}
                 </AdminButton>
@@ -144,7 +200,7 @@ export function AdminUsersPage() {
         <div style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
           {t("admin.users.total", { count: total })}
         </div>
-        {totalPages > 1 && (
+        {(totalPages > 1 || rawPage > 1) && (
           <div style={{ display: "flex", gap: 4 }}>
             <AdminButton variant="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               {t("admin.users.pagination.prev")}
@@ -163,22 +219,21 @@ export function AdminUsersPage() {
                 </AdminButton>
                 {/* Left ellipsis if needed */}
                 {page > 3 && (
-                  <span style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
+                  <span aria-hidden="true" style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
                 )}
-                {/* Window around current page */}
-                {Array.from(
-                  { length: Math.min(3, totalPages - 2) },
-                  (_, i) => Math.max(2, Math.min(page - 1 + i, totalPages - 1))
-                )
-                  .filter((n, i, arr) => i === 0 || n !== arr[i - 1])
-                  .map((n) => (
-                    <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
-                      {n}
-                    </AdminButton>
-                  ))}
+                {/* Fixed 3-wide window around current page, slid (not clamped
+                    per-element) so it never collapses at the edges. */}
+                {(() => {
+                  const start = Math.min(Math.max(2, page - 1), totalPages - 3);
+                  return [start, start + 1, start + 2];
+                })().map((n) => (
+                  <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
+                    {n}
+                  </AdminButton>
+                ))}
                 {/* Right ellipsis if needed */}
                 {page < totalPages - 2 && (
-                  <span style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
+                  <span aria-hidden="true" style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
                 )}
                 {/* Last page */}
                 <AdminButton

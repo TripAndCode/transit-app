@@ -31,6 +31,7 @@ export function useAdminUsers(params: {
     queryKey: ["adminUsers", params],
     queryFn: ({ signal }) => apiGet<AdminUserList>(`/api/admin/users?${qs}`, { signal }),
     placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 
@@ -48,9 +49,12 @@ export function usePatchUser() {
   return useMutation({
     mutationFn: ({ uid, body }: { uid: number; body: { role?: string; suspended?: boolean } }) =>
       patchUser(uid, body),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
-      qc.invalidateQueries({ queryKey: ["adminUser", String(variables.uid)] });
+      // Prefix match — at most one detail query is ever mounted, so this is
+      // cheap, and it doesn't depend on the detail page's uid key staying a
+      // string (unlike reconstructing ["adminUser", String(uid)] here).
+      qc.invalidateQueries({ queryKey: ["adminUser"] });
     },
   });
 }
@@ -60,9 +64,9 @@ export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (uid: number) => deleteUser(uid),
-    onSuccess: (_data, uid) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
-      qc.invalidateQueries({ queryKey: ["adminUser", String(uid)] });
+      qc.invalidateQueries({ queryKey: ["adminUser"] });
     },
   });
 }

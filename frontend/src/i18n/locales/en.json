@@ -890,9 +890,9 @@
       },
       "filter": {
         "role_all": "All roles",
-        "role_user": "User",
-        "role_admin": "Admin",
-        "status_all": "All statuses"
+        "role_label": "Role",
+        "status_all": "All statuses",
+        "status_label": "Status"
       },
       "action": {
         "resume": "Resume",
@@ -900,6 +900,7 @@
         "delete": "Delete"
       },
       "confirm_delete": "Delete {{email}}? (anonymized, irreversible)",
+      "confirm_promote": "Grant admin access to {{email}}?",
       "total": "Total: {{count}}",
       "empty": "No users found.",
       "pagination": {
@@ -915,7 +916,8 @@
       "email_at_link": "Email at link time: {{email}}",
       "recent_events": "Recent events",
       "back_to_users": "Back to users",
-      "actions_title": "Actions"
+      "actions_title": "Actions",
+      "self_hint": "You can't modify your own account here."
     },
     "nav": {
       "label": "Admin navigation",

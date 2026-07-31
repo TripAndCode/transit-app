@@ -890,9 +890,9 @@
       },
       "filter": {
         "role_all": "全ロール",
-        "role_user": "ユーザー",
-        "role_admin": "管理者",
-        "status_all": "全ステータス"
+        "role_label": "ロール",
+        "status_all": "全ステータス",
+        "status_label": "状態"
       },
       "action": {
         "resume": "再開",
@@ -900,6 +900,7 @@
         "delete": "削除"
       },
       "confirm_delete": "{{email}} を削除しますか？(匿名化、復元不可)",
+      "confirm_promote": "{{email}} に管理者権限を付与しますか？",
       "total": "合計 {{count}} 件",
       "empty": "ユーザーが見つかりません。",
       "pagination": {
@@ -915,7 +916,8 @@
       "email_at_link": "連携時メール: {{email}}",
       "recent_events": "最近のイベント",
       "back_to_users": "ユーザー一覧に戻る",
-      "actions_title": "操作"
+      "actions_title": "操作",
+      "self_hint": "自分自身のアカウントはここでは変更できません。"
     },
     "nav": {
       "label": "管理ナビゲーション",

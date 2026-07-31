@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -68,25 +68,24 @@ describe("AdminUsersPage", () => {
 
   it("shows a colored Active chip for a user with no suspended_at", () => {
     wrap();
-    const chips = screen.getAllByText("Active");
-    const chip = chips.find(el => el.tagName === "SPAN" && el.style.background);
-    expect(chip?.style.color).toBe("var(--accent)");
-    expect(chip?.style.background).toBe("var(--accent-soft)");
+    const chip = within(screen.getByRole("table")).getByText("Active");
+    expect(chip.style.color).toBe("var(--accent)");
+    expect(chip.style.background).toBe("var(--accent-soft)");
   });
 
   it("shows a colored Suspended chip for a user with suspended_at set", () => {
     wrap();
-    const chips = screen.getAllByText("Suspended");
-    const chip = chips.find(el => el.tagName === "SPAN" && el.style.background);
-    expect(chip?.style.color).toBe("var(--color-warning, #C99A2E)");
-    expect(chip?.style.background).toBe("var(--surface-2)");
+    const chip = within(screen.getByRole("table")).getByText("Suspended");
+    expect(chip.style.color).toBe("var(--color-warning, #C99A2E)");
+    expect(chip.style.background).toBe("var(--surface-2)");
   });
 
   it("renders every row with exactly one status chip (no bare em-dash for active users)", () => {
     wrap();
-    expect(screen.queryByText("—")).toBeNull();
-    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Suspended").length).toBeGreaterThan(0);
+    const table = within(screen.getByRole("table"));
+    expect(table.queryByText("—")).toBeNull();
+    expect(table.getAllByText("Active")).toHaveLength(1);
+    expect(table.getAllByText("Suspended")).toHaveLength(1);
   });
 
   it("links each email to its user detail page", () => {
@@ -118,10 +117,36 @@ describe("AdminUsersPage", () => {
   it("resets the page URL param to 1 when the role filter changes", async () => {
     const user = userEvent.setup();
     wrap(["/admin/users?page=3"]);
-    await user.selectOptions(screen.getByLabelText("All roles"), "admin");
+    await user.selectOptions(screen.getByLabelText("Role"), "admin");
     expect(useAdminUsersMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ role: "admin", offset: 0 })
     );
+  });
+
+  it("self-heals an out-of-range page back to the last valid page", async () => {
+    useAdminUsersMock.mockReturnValue({
+      data: { users: twoUsers().data.users, total: 120 },
+      isLoading: false,
+      error: null,
+    });
+    wrap(["/admin/users?page=99"]);
+    // totalPages = ceil(120 / 50) = 3, so page 99 should self-correct to
+    // page 3 (offset 100) instead of leaving the admin on a dead-end blank page.
+    await vi.waitFor(() =>
+      expect(useAdminUsersMock).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 100 }))
+    );
+  });
+
+  it("keeps a 3-wide numbered window at page 1 instead of collapsing to one button", () => {
+    useAdminUsersMock.mockReturnValue({
+      data: { users: twoUsers().data.users, total: 500 },
+      isLoading: false,
+      error: null,
+    });
+    wrap();
+    // totalPages = 10, page = 1 — window should be [2,3,4], not just [2].
+    expect(screen.getByRole("button", { name: "3" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "4" })).toBeTruthy();
   });
 
   it("renders numbered page buttons and disables Prev on page 1", () => {

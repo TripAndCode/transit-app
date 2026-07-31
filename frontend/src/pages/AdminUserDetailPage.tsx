@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiGet, formatApiError } from "../api/client";
 import { usePatchUser, useDeleteUser } from "../api/admin";
+import { useSession } from "../api/auth";
 import { AdminButton } from "./admin/adminControls";
 
 type Detail = {
@@ -27,27 +28,61 @@ type Detail = {
 export function AdminUserDetailPage() {
   const { t, i18n } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const listSearch = (location.state as { listSearch?: string } | null)?.listSearch;
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
     queryFn: ({ signal }) => apiGet<Detail>(`/api/admin/users/${uid}`, { signal }),
   });
+  const { data: me } = useSession();
   const patch = usePatchUser();
   const del = useDeleteUser();
 
   if (isLoading) return <div style={{ padding: 24 }}>{t("common.loading")}</div>;
-  if (error || !data) {
+  if (!data) {
     return (
       <div style={{ padding: 24 }}>
         {t("admin.user_detail.error", { msg: formatApiError(error) })}
       </div>
     );
   }
+
+  const isSelf = me?.user_id === data.user_id;
+  const isMutating = patch.isPending || del.isPending;
+
+  function handleRoleChange(nextRole: string) {
+    if (nextRole === "admin" && !confirm(t("admin.users.confirm_promote", { email: data!.email }))) return;
+    del.reset();
+    patch.mutate({ uid: data!.user_id, body: { role: nextRole } });
+  }
+
+  function handleSuspendToggle() {
+    del.reset();
+    patch.mutate({ uid: data!.user_id, body: { suspended: !data!.suspended_at } });
+  }
+
+  function handleDelete() {
+    if (!confirm(t("admin.users.confirm_delete", { email: data!.email }))) return;
+    patch.reset();
+    del.mutate(data!.user_id, { onSuccess: () => navigate("/admin/users") });
+  }
+
   return (
     <div style={{ padding: 24, maxWidth: 920 }}>
-      <Link to="/admin/users" style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
+      <Link
+        to={{ pathname: "/admin/users", search: listSearch ? `?${listSearch}` : "" }}
+        style={{ fontSize: 13, color: "var(--text-tertiary)" }}
+      >
         ← {t("admin.user_detail.back_to_users")}
       </Link>
       <h1 style={{ fontSize: 22, margin: "12px 0 16px" }}>{data.email}</h1>
+      {error && (
+        <div role="alert" style={{ marginBottom: 16, padding: 8, background: "var(--surface-2)",
+                                    borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
+          {t("admin.user_detail.error", { msg: formatApiError(error) })}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
         <div style={{ flex: 2, minWidth: 280 }}>
           <div style={{ marginBottom: 24 }}>
@@ -89,6 +124,11 @@ export function AdminUserDetailPage() {
                         color: "var(--text-secondary)", marginBottom: 10 }}>
             {t("admin.user_detail.actions_title")}
           </div>
+          {isSelf && (
+            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 10 }}>
+              {t("admin.user_detail.self_hint")}
+            </div>
+          )}
           <label htmlFor="detail-role" style={{ display: "block", marginBottom: 10 }}>
             <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
               {t("account.role_label")}
@@ -97,27 +137,26 @@ export function AdminUserDetailPage() {
               id="detail-role"
               value={data.role}
               style={{ width: "100%" }}
-              onChange={(e) => patch.mutate({ uid: data.user_id, body: { role: e.target.value } })}
+              disabled={isSelf || isMutating}
+              onChange={(e) => handleRoleChange(e.target.value)}
             >
-              <option value="user">{t("admin.users.filter.role_user")}</option>
-              <option value="admin">{t("admin.users.filter.role_admin")}</option>
+              <option value="user">{t("account.role.user")}</option>
+              <option value="admin">{t("account.role.admin")}</option>
             </select>
           </label>
           <AdminButton
             variant="secondary"
             style={{ width: "100%", marginBottom: 8, justifyContent: "center" }}
-            onClick={() => patch.mutate({ uid: data.user_id, body: { suspended: !data.suspended_at } })}
+            disabled={isSelf || isMutating}
+            onClick={handleSuspendToggle}
           >
             {data.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
           </AdminButton>
           <AdminButton
             variant="danger"
             style={{ width: "100%", justifyContent: "center" }}
-            onClick={() => {
-              if (confirm(t("admin.users.confirm_delete", { email: data.email }))) {
-                del.mutate(data.user_id);
-              }
-            }}
+            disabled={isSelf || isMutating}
+            onClick={handleDelete}
           >
             {t("admin.users.action.delete")}
           </AdminButton>
