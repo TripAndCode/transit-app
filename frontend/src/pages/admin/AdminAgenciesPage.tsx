@@ -9,7 +9,7 @@ import {
   useRestoreAgency,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
-import { AdminButton, StatusChip } from "./adminControls";
+import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -182,6 +182,11 @@ export function AdminAgenciesPage() {
   const del = useDeleteAgency();
   const restore = useRestoreAgency();
 
+  const [search, setSearch] = useState("");
+  const filtered = agencies?.filter((a) =>
+    a.agency_name.toLowerCase().includes(search.trim().toLowerCase())
+  );
+
   // null = closed; undefined = new; AdminAgency = editing
   const [editing, setEditing] = useState<AdminAgency | undefined | null>(null);
 
@@ -207,18 +212,25 @@ export function AdminAgenciesPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.agencies.title")}</h1>
-        <AdminButton
-          variant="primary"
-          onClick={() => {
-            create.reset();
-            patch.reset();
-            setEditing(undefined);
-          }}
-        >
-          {t("admin.agencies.add_button")}
-        </AdminButton>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <AdminSearchInput
+            placeholder={t("admin.agencies.search_placeholder")}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <AdminButton
+            variant="primary"
+            onClick={() => {
+              create.reset();
+              patch.reset();
+              setEditing(undefined);
+            }}
+          >
+            {t("admin.agencies.add_button")}
+          </AdminButton>
+        </div>
       </div>
 
       {error && <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{formatApiError(error)}</div>}
@@ -235,7 +247,14 @@ export function AdminAgenciesPage() {
           </tr>
         </thead>
         <tbody>
-          {agencies?.map((a) => (
+          {filtered && filtered.length === 0 && (
+            <tr>
+              <td colSpan={5} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
+                {t("admin.agencies.empty")}
+              </td>
+            </tr>
+          )}
+          {filtered?.map((a) => (
             <tr key={a.agency_id} style={{ opacity: a.deleted_at ? 0.5 : 1 }}>
               <td style={{ fontWeight: 500 }}>{a.agency_name}</td>
               <td style={{ fontSize: 12, color: "var(--text-tertiary)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

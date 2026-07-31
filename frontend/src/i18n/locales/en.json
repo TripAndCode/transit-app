@@ -946,6 +946,8 @@
     "agencies": {
       "title": "Agencies",
       "add_button": "Add agency",
+      "search_placeholder": "Search by name",
+      "empty": "No agencies found.",
       "col_name": "Name",
       "col_feed_url": "Feed URL",
       "col_strategy": "Strategy",
