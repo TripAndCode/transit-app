@@ -30,13 +30,13 @@ export function AdminUsersPage() {
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("page");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, key === "q" ? { replace: true } : undefined);
   }
 
   function setPage(nextPage: number) {
     const next = new URLSearchParams(searchParams);
     next.set("page", String(nextPage));
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   }
 
   const total = data?.total ?? 0;
@@ -102,8 +102,8 @@ export function AdminUsersPage() {
                   value={u.role}
                   onChange={(e) => patch.mutate({ uid: u.user_id, body: { role: e.target.value } })}
                 >
-                  <option value="user">user</option>
-                  <option value="admin">admin</option>
+                  <option value="user">{t("admin.users.filter.role_user")}</option>
+                  <option value="admin">{t("admin.users.filter.role_admin")}</option>
                 </select>
               </td>
               <td>

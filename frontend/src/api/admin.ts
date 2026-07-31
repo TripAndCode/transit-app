@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
 type AdminUser = {
@@ -30,6 +30,7 @@ export function useAdminUsers(params: {
   return useQuery({
     queryKey: ["adminUsers", params],
     queryFn: ({ signal }) => apiGet<AdminUserList>(`/api/admin/users?${qs}`, { signal }),
+    placeholderData: keepPreviousData,
   });
 }
 
