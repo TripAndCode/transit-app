@@ -913,7 +913,9 @@
       "status_label": "状態",
       "created_label": "作成",
       "email_at_link": "連携時メール: {{email}}",
-      "recent_events": "最近のイベント"
+      "recent_events": "最近のイベント",
+      "back_to_users": "ユーザー一覧に戻る",
+      "actions_title": "操作"
     },
     "nav": {
       "label": "管理ナビゲーション",

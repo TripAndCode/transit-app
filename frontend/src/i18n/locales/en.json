@@ -913,7 +913,9 @@
       "status_label": "Status",
       "created_label": "Created",
       "email_at_link": "Email at link time: {{email}}",
-      "recent_events": "Recent events"
+      "recent_events": "Recent events",
+      "back_to_users": "Back to users",
+      "actions_title": "Actions"
     },
     "nav": {
       "label": "Admin navigation",

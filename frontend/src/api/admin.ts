@@ -41,22 +41,28 @@ async function deleteUser(uid: number) {
   await apiDelete(`/api/admin/users/${uid}`);
 }
 
-/** Mutation: PATCH a user's role/suspended flag; invalidates the user list on success. */
+/** Mutation: PATCH a user's role/suspended flag; invalidates the user list and detail queries on success. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ uid, body }: { uid: number; body: { role?: string; suspended?: boolean } }) =>
       patchUser(uid, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
+      qc.invalidateQueries({ queryKey: ["adminUser", String(variables.uid)] });
+    },
   });
 }
 
-/** Mutation: soft-delete a user; invalidates the user list on success. */
+/** Mutation: soft-delete a user; invalidates the user list and detail queries on success. */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (uid: number) => deleteUser(uid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+    onSuccess: (_data, uid) => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
+      qc.invalidateQueries({ queryKey: ["adminUser", String(uid)] });
+    },
   });
 }
 
