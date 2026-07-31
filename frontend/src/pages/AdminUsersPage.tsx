@@ -30,13 +30,13 @@ export function AdminUsersPage() {
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("page");
-    setSearchParams(next);
+    setSearchParams(next, { replace: true });
   }
 
   function setPage(nextPage: number) {
     const next = new URLSearchParams(searchParams);
     next.set("page", String(nextPage));
-    setSearchParams(next);
+    setSearchParams(next, { replace: true });
   }
 
   const total = data?.total ?? 0;
@@ -149,11 +149,46 @@ export function AdminUsersPage() {
             <AdminButton variant="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               {t("admin.users.pagination.prev")}
             </AdminButton>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-              <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
-                {n}
-              </AdminButton>
-            ))}
+            {totalPages <= 7 ? (
+              Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
+                  {n}
+                </AdminButton>
+              ))
+            ) : (
+              <>
+                {/* First page */}
+                <AdminButton variant={page === 1 ? "primary" : "secondary"} onClick={() => setPage(1)}>
+                  1
+                </AdminButton>
+                {/* Left ellipsis if needed */}
+                {page > 3 && (
+                  <span style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
+                )}
+                {/* Window around current page */}
+                {Array.from(
+                  { length: Math.min(3, totalPages - 2) },
+                  (_, i) => Math.max(2, Math.min(page - 1 + i, totalPages - 1))
+                )
+                  .filter((n, i, arr) => i === 0 || n !== arr[i - 1])
+                  .map((n) => (
+                    <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
+                      {n}
+                    </AdminButton>
+                  ))}
+                {/* Right ellipsis if needed */}
+                {page < totalPages - 2 && (
+                  <span style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
+                )}
+                {/* Last page */}
+                <AdminButton
+                  variant={page === totalPages ? "primary" : "secondary"}
+                  onClick={() => setPage(totalPages)}
+                >
+                  {totalPages}
+                </AdminButton>
+              </>
+            )}
             <AdminButton variant="secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
               {t("admin.users.pagination.next")}
             </AdminButton>

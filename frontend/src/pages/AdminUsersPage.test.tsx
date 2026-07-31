@@ -135,4 +135,20 @@ describe("AdminUsersPage", () => {
     expect(screen.getByRole("button", { name: "3" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", true);
   });
+
+  it("windows pagination buttons with ellipsis when totalPages > 7", () => {
+    useAdminUsersMock.mockReturnValue({
+      data: { users: twoUsers().data.users, total: 500 },
+      isLoading: false,
+      error: null,
+    });
+    wrap(["/admin/users?page=5"]);
+    // totalPages = ceil(500 / 50) = 10, page = 5
+    expect(screen.getByRole("button", { name: "1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "10" })).toBeTruthy();
+    // Ellipsis should appear
+    expect(screen.getAllByText("…").length).toBeGreaterThan(0);
+    // Far-out page (9) should not render as button when windowing around 5
+    expect(screen.queryByRole("button", { name: "9" })).toBeNull();
+  });
 });
