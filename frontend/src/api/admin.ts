@@ -59,14 +59,17 @@ export function usePatchUser() {
   });
 }
 
-/** Mutation: soft-delete a user; invalidates the user list and detail queries on success. */
+/** Mutation: soft-delete a user; invalidates the user list and evicts the detail query on success. */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (uid: number) => deleteUser(uid),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
-      qc.invalidateQueries({ queryKey: ["adminUser"] });
+      // Evict rather than invalidate: the caller navigates away from the
+      // detail page on delete, so refetching the just-deleted row first
+      // would only be a wasted request.
+      qc.removeQueries({ queryKey: ["adminUser"] });
     },
   });
 }

@@ -115,7 +115,43 @@ describe("AdminUserDetailPage", () => {
     await screen.findByText("a@b.com");
     await user.click(screen.getByRole("button", { name: "Delete" }));
     expect(apiDeleteMock).toHaveBeenCalledWith("/api/admin/users/1");
-    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/admin/users"));
+    await vi.waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith({ pathname: "/admin/users", search: "" }, { replace: true })
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("preserves the originating list's filters/page through a delete's navigate-away", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter
+            initialEntries={[
+              { pathname: "/admin/users/1", state: { listSearch: "role=admin&page=2" } },
+            ]}
+          >
+            <Routes>
+              <Route path="/admin/users/:uid" element={<AdminUserDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </I18nextProvider>
+    );
+    await screen.findByText("a@b.com");
+    expect(screen.getByRole("link", { name: /back to users/i })).toHaveAttribute(
+      "href",
+      "/admin/users?role=admin&page=2"
+    );
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await vi.waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith(
+        { pathname: "/admin/users", search: "?role=admin&page=2" },
+        { replace: true }
+      )
+    );
     confirmSpy.mockRestore();
   });
 

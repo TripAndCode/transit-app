@@ -890,9 +890,7 @@
       },
       "filter": {
         "role_all": "全ロール",
-        "role_label": "ロール",
-        "status_all": "全ステータス",
-        "status_label": "状態"
+        "status_all": "すべての状態"
       },
       "action": {
         "resume": "再開",

@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../api/admin";
+import { useSession } from "../api/auth";
 import { formatApiError } from "../api/client";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./admin/adminControls";
+import { pageItems } from "./admin/pageItems";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -17,25 +19,33 @@ export function AdminUsersPage() {
   const role = rawRole === "user" || rawRole === "admin" ? rawRole : "";
   const rawSuspended = searchParams.get("suspended") ?? "";
   const suspended = rawSuspended === "true" || rawSuspended === "false" ? rawSuspended : "";
-  const rawPage = Math.max(1, Math.floor(Number(searchParams.get("page") ?? "1")) || 1);
+  const pageParam = Number(searchParams.get("page") ?? "1");
+  const rawPage = Number.isFinite(pageParam) ? Math.max(1, Math.floor(pageParam)) : 1;
+
+  const { data: me } = useSession();
 
   // The search box is debounced locally so the URL/query key (and therefore
-  // the backend ILIKE scan) doesn't change on every keystroke — see qInput below.
+  // the backend ILIKE scan) doesn't change on every keystroke. Skipping when
+  // the trimmed input already matches the committed `q` is what keeps this
+  // effect from re-arming (and clobbering `page`) on every unrelated URL
+  // change — `setSearchParams`'s identity changes on any searchParams update.
   const [qInput, setQInput] = useState(q);
   useEffect(() => {
+    const trimmed = qInput.trim();
+    if (trimmed === q) return;
     const id = setTimeout(() => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        if (qInput) next.set("q", qInput);
+        if (trimmed) next.set("q", trimmed);
         else next.delete("q");
         next.delete("page");
         return next;
       }, { replace: true });
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(id);
-  }, [qInput, setSearchParams]);
+  }, [qInput, q, setSearchParams]);
 
-  const { data, isLoading, isFetching, isPlaceholderData, error } = useAdminUsers({
+  const { data, isLoading, isPlaceholderData, error } = useAdminUsers({
     q,
     role,
     suspended,
@@ -76,8 +86,13 @@ export function AdminUsersPage() {
     setSearchParams(next);
   }
 
-  function isRowMutating(uid: number) {
-    return (patch.isPending && patch.variables?.uid === uid) || (del.isPending && del.variables === uid);
+  function isRowLocked(uid: number) {
+    return (
+      isPlaceholderData ||
+      uid === me?.user_id ||
+      (patch.isPending && patch.variables?.uid === uid) ||
+      (del.isPending && del.variables === uid)
+    );
   }
 
   function handleRoleChange(uid: number, email: string, nextRole: string) {
@@ -107,7 +122,7 @@ export function AdminUsersPage() {
           onChange={(e) => setQInput(e.target.value)}
         />
         <select
-          aria-label={t("admin.users.filter.role_label")}
+          aria-label={t("account.role_label")}
           value={role}
           onChange={(e) => setFilter("role", e.target.value)}
         >
@@ -116,7 +131,7 @@ export function AdminUsersPage() {
           <option value="admin">{t("account.role.admin")}</option>
         </select>
         <select
-          aria-label={t("admin.users.filter.status_label")}
+          aria-label={t("admin.users.col.status")}
           value={suspended}
           onChange={(e) => setFilter("suspended", e.target.value)}
         >
@@ -126,7 +141,7 @@ export function AdminUsersPage() {
         </select>
       </div>
       {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
-      {(isLoading || isFetching) && <div>{t("common.loading")}</div>}
+      {isLoading && <div>{t("common.loading")}</div>}
       <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
         <thead>
           <tr>
@@ -157,7 +172,7 @@ export function AdminUsersPage() {
               <td>
                 <select
                   value={u.role}
-                  disabled={isRowMutating(u.user_id)}
+                  disabled={isRowLocked(u.user_id)}
                   onChange={(e) => handleRoleChange(u.user_id, u.email, e.target.value)}
                 >
                   <option value="user">{t("account.role.user")}</option>
@@ -172,7 +187,7 @@ export function AdminUsersPage() {
               <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                 <AdminButton
                   variant="secondary"
-                  disabled={isRowMutating(u.user_id)}
+                  disabled={isRowLocked(u.user_id)}
                   onClick={() => handleSuspendToggle(u.user_id, u.suspended_at)}
                   style={{ marginRight: 8 }}
                 >
@@ -180,7 +195,7 @@ export function AdminUsersPage() {
                 </AdminButton>
                 <AdminButton
                   variant="danger"
-                  disabled={isRowMutating(u.user_id)}
+                  disabled={isRowLocked(u.user_id)}
                   onClick={() => handleDelete(u.user_id, u.email)}
                 >
                   {t("admin.users.action.delete")}
@@ -205,44 +220,16 @@ export function AdminUsersPage() {
             <AdminButton variant="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               {t("admin.users.pagination.prev")}
             </AdminButton>
-            {totalPages <= 7 ? (
-              Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
-                  {n}
+            {pageItems(page, totalPages).map((item, i) =>
+              item === "ellipsis" ? (
+                <span key={`ellipsis-${i}`} aria-hidden="true" style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>
+                  …
+                </span>
+              ) : (
+                <AdminButton key={item} variant={item === page ? "primary" : "secondary"} onClick={() => setPage(item)}>
+                  {item}
                 </AdminButton>
-              ))
-            ) : (
-              <>
-                {/* First page */}
-                <AdminButton variant={page === 1 ? "primary" : "secondary"} onClick={() => setPage(1)}>
-                  1
-                </AdminButton>
-                {/* Left ellipsis if needed */}
-                {page > 3 && (
-                  <span aria-hidden="true" style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
-                )}
-                {/* Fixed 3-wide window around current page, slid (not clamped
-                    per-element) so it never collapses at the edges. */}
-                {(() => {
-                  const start = Math.min(Math.max(2, page - 1), totalPages - 3);
-                  return [start, start + 1, start + 2];
-                })().map((n) => (
-                  <AdminButton key={n} variant={n === page ? "primary" : "secondary"} onClick={() => setPage(n)}>
-                    {n}
-                  </AdminButton>
-                ))}
-                {/* Right ellipsis if needed */}
-                {page < totalPages - 2 && (
-                  <span aria-hidden="true" style={{ padding: "0 4px", color: "var(--text-tertiary)" }}>…</span>
-                )}
-                {/* Last page */}
-                <AdminButton
-                  variant={page === totalPages ? "primary" : "secondary"}
-                  onClick={() => setPage(totalPages)}
-                >
-                  {totalPages}
-                </AdminButton>
-              </>
+              )
             )}
             <AdminButton variant="secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
               {t("admin.users.pagination.next")}

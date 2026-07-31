@@ -890,9 +890,7 @@
       },
       "filter": {
         "role_all": "All roles",
-        "role_label": "Role",
-        "status_all": "All statuses",
-        "status_label": "Status"
+        "status_all": "All statuses"
       },
       "action": {
         "resume": "Resume",

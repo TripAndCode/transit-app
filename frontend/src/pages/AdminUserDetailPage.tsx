@@ -31,6 +31,7 @@ export function AdminUserDetailPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const listSearch = (location.state as { listSearch?: string } | null)?.listSearch;
+  const backToUsers = { pathname: "/admin/users", search: listSearch ? `?${listSearch}` : "" };
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
     queryFn: ({ signal }) => apiGet<Detail>(`/api/admin/users/${uid}`, { signal }),
@@ -39,11 +40,25 @@ export function AdminUserDetailPage() {
   const patch = usePatchUser();
   const del = useDeleteUser();
 
-  if (isLoading) return <div style={{ padding: 24 }}>{t("common.loading")}</div>;
+  const backLink = (
+    <Link to={backToUsers} style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
+      ← {t("admin.user_detail.back_to_users")}
+    </Link>
+  );
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: 24 }}>
+        {backLink}
+        <div style={{ marginTop: 12 }}>{t("common.loading")}</div>
+      </div>
+    );
+  }
   if (!data) {
     return (
       <div style={{ padding: 24 }}>
-        {t("admin.user_detail.error", { msg: formatApiError(error) })}
+        {backLink}
+        <div style={{ marginTop: 12 }}>{t("admin.user_detail.error", { msg: formatApiError(error) })}</div>
       </div>
     );
   }
@@ -65,17 +80,12 @@ export function AdminUserDetailPage() {
   function handleDelete() {
     if (!confirm(t("admin.users.confirm_delete", { email: data!.email }))) return;
     patch.reset();
-    del.mutate(data!.user_id, { onSuccess: () => navigate("/admin/users") });
+    del.mutate(data!.user_id, { onSuccess: () => navigate(backToUsers, { replace: true }) });
   }
 
   return (
     <div style={{ padding: 24, maxWidth: 920 }}>
-      <Link
-        to={{ pathname: "/admin/users", search: listSearch ? `?${listSearch}` : "" }}
-        style={{ fontSize: 13, color: "var(--text-tertiary)" }}
-      >
-        ← {t("admin.user_detail.back_to_users")}
-      </Link>
+      {backLink}
       <h1 style={{ fontSize: 22, margin: "12px 0 16px" }}>{data.email}</h1>
       {error && (
         <div role="alert" style={{ marginBottom: 16, padding: 8, background: "var(--surface-2)",
