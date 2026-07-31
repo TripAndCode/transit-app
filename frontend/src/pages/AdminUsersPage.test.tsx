@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -8,9 +9,16 @@ import { AdminUsersPage } from "./AdminUsersPage";
 
 const patchMutate = vi.fn();
 const delMutate = vi.fn();
+const useAdminUsersMock = vi.fn();
 
 vi.mock("../api/admin", () => ({
-  useAdminUsers: () => ({
+  useAdminUsers: (params: unknown) => useAdminUsersMock(params),
+  usePatchUser: () => ({ mutate: patchMutate, error: null }),
+  useDeleteUser: () => ({ mutate: delMutate, error: null }),
+}));
+
+function twoUsers() {
+  return {
     data: {
       users: [
         {
@@ -36,17 +44,15 @@ vi.mock("../api/admin", () => ({
     },
     isLoading: false,
     error: null,
-  }),
-  usePatchUser: () => ({ mutate: patchMutate, error: null }),
-  useDeleteUser: () => ({ mutate: delMutate, error: null }),
-}));
+  };
+}
 
-function wrap() {
+function wrap(initialEntries = ["/admin/users"]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>
           <AdminUsersPage />
         </MemoryRouter>
       </QueryClientProvider>
@@ -55,30 +61,78 @@ function wrap() {
 }
 
 describe("AdminUsersPage", () => {
+  beforeEach(() => {
+    useAdminUsersMock.mockReset();
+    useAdminUsersMock.mockReturnValue(twoUsers());
+  });
+
   it("shows a colored Active chip for a user with no suspended_at", () => {
     wrap();
-    const chip = screen.getByText("Active");
-    expect(chip.style.color).toBe("var(--accent)");
-    expect(chip.style.background).toBe("var(--accent-soft)");
+    const chips = screen.getAllByText("Active");
+    const chip = chips.find(el => el.tagName === "SPAN" && el.style.background);
+    expect(chip?.style.color).toBe("var(--accent)");
+    expect(chip?.style.background).toBe("var(--accent-soft)");
   });
 
   it("shows a colored Suspended chip for a user with suspended_at set", () => {
     wrap();
-    const chip = screen.getByText("Suspended");
-    expect(chip.style.color).toBe("var(--color-warning, #C99A2E)");
-    expect(chip.style.background).toBe("var(--surface-2)");
+    const chips = screen.getAllByText("Suspended");
+    const chip = chips.find(el => el.tagName === "SPAN" && el.style.background);
+    expect(chip?.style.color).toBe("var(--color-warning, #C99A2E)");
+    expect(chip?.style.background).toBe("var(--surface-2)");
   });
 
   it("renders every row with exactly one status chip (no bare em-dash for active users)", () => {
     wrap();
     expect(screen.queryByText("—")).toBeNull();
-    expect(screen.getByText("Active")).toBeTruthy();
-    expect(screen.getByText("Suspended")).toBeTruthy();
+    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Suspended").length).toBeGreaterThan(0);
   });
 
   it("links each email to its user detail page", () => {
     wrap();
     const link = screen.getByRole("link", { name: "active@example.com" });
     expect(link).toHaveAttribute("href", "/admin/users/1");
+  });
+
+  it("passes limit=50 and offset computed from the page URL param", () => {
+    wrap(["/admin/users?page=3"]);
+    expect(useAdminUsersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50, offset: 100 })
+    );
+  });
+
+  it("passes role and suspended filter values from their URL params", () => {
+    wrap(["/admin/users?role=admin&suspended=true"]);
+    expect(useAdminUsersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "admin", suspended: "true" })
+    );
+  });
+
+  it("shows an empty-state row when there are zero users", () => {
+    useAdminUsersMock.mockReturnValue({ data: { users: [], total: 0 }, isLoading: false, error: null });
+    wrap();
+    expect(screen.getByText("No users found.")).toBeTruthy();
+  });
+
+  it("resets the page URL param to 1 when the role filter changes", async () => {
+    const user = userEvent.setup();
+    wrap(["/admin/users?page=3"]);
+    await user.selectOptions(screen.getByLabelText("All roles"), "admin");
+    expect(useAdminUsersMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ role: "admin", offset: 0 })
+    );
+  });
+
+  it("renders numbered page buttons and disables Prev on page 1", () => {
+    useAdminUsersMock.mockReturnValue({
+      data: { users: twoUsers().data.users, total: 120 },
+      isLoading: false,
+      error: null,
+    });
+    wrap();
+    expect(screen.getByRole("button", { name: "2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "3" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", true);
   });
 });

@@ -13,12 +13,20 @@ type AdminUser = {
 
 type AdminUserList = { users: AdminUser[]; total: number };
 
-/** Paginated/filterable admin user list (q, role, suspended). */
-export function useAdminUsers(params: { q?: string; role?: string; suspended?: string }) {
+/** Paginated/filterable admin user list (q, role, suspended, limit/offset). */
+export function useAdminUsers(params: {
+  q?: string;
+  role?: string;
+  suspended?: string;
+  limit?: number;
+  offset?: number;
+}) {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.role) qs.set("role", params.role);
   if (params.suspended) qs.set("suspended", params.suspended);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
   return useQuery({
     queryKey: ["adminUsers", params],
     queryFn: ({ signal }) => apiGet<AdminUserList>(`/api/admin/users?${qs}`, { signal }),

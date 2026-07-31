@@ -888,13 +888,24 @@
         "suspended": "停止中",
         "active": "アクティブ"
       },
+      "filter": {
+        "role_all": "全ロール",
+        "role_user": "ユーザー",
+        "role_admin": "管理者",
+        "status_all": "全ステータス"
+      },
       "action": {
         "resume": "再開",
         "suspend": "停止",
         "delete": "削除"
       },
       "confirm_delete": "{{email}} を削除しますか？(匿名化、復元不可)",
-      "total": "合計 {{count}} 件"
+      "total": "合計 {{count}} 件",
+      "empty": "ユーザーが見つかりません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      }
     },
     "user_detail": {
       "error": "エラー: {{msg}}",
