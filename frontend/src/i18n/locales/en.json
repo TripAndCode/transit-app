@@ -95,7 +95,8 @@
       "dismiss_aria": "Dismiss"
     },
     "feed_health": {
-      "banner": "Feed health: {{count}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+      "banner_one": "Feed health: {{count}} implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
+      "banner_other": "Feed health: {{count}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
       "dismiss_aria": "Dismiss"
     },
     "loading": {
@@ -115,8 +116,10 @@
     "streak_worse": "worse {{count}} weeks in a row",
     "streak_better": "better {{count}} weeks in a row",
     "section_concentration": "Delay concentration",
-    "concentration_legend": "Top {{count}} routes carry {{pct}}% of the delay.",
-    "concentration_rest": "Remaining {{count}} routes: {{rest}}%",
+    "concentration_legend_one": "Top {{count}} route carries {{pct}}% of the delay.",
+    "concentration_legend_other": "Top {{count}} routes carry {{pct}}% of the delay.",
+    "concentration_rest_one": "Remaining {{count}} route: {{rest}}%",
+    "concentration_rest_other": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
     "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
     "section_service_split": "By service day",
@@ -200,11 +203,12 @@
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
   },
   "peakHourModal": {
-    "title": "{{dow}} {{hour}}:00 — delayed routes",
-    "allDow": "All days",
+    "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
+    "title_all": "All days {{hour}}:00 — delayed routes",
     "noData": "Not enough data for this time slot",
     "avgMin": "+{{value}}min",
-    "routeCount": "{{count}} routes"
+    "routeCount_one": "{{count}} route",
+    "routeCount_other": "{{count}} routes"
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -351,7 +355,8 @@
       "label": "Route",
       "count_suffix": "{{count}} routes",
       "search_placeholder": "Search (name / code)",
-      "variant_count": "({{count}} routes)",
+      "variant_count_one": "({{count}} route)",
+      "variant_count_other": "({{count}} routes)",
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes."
@@ -771,7 +776,8 @@
       "trip_label_no_headsign": "{{time}}",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "Stop #{{seq}}",
-      "stop_outlier": "{{delta}}min more than {{count}} other routes' avg",
+      "stop_outlier_one": "{{delta}}min more than {{count}} other route's avg",
+      "stop_outlier_other": "{{delta}}min more than {{count}} other routes' avg",
       "close": "Close",
       "empty": "No trip data for this route"
     },
@@ -787,7 +793,8 @@
     "list_title": "Reports",
     "select_prompt": "Select a report",
     "range_suffix": "Range: {{from}} – {{to}}",
-    "raw_rows": "Raw ({{count}} rows)",
+    "raw_rows_one": "Raw ({{count}} row)",
+    "raw_rows_other": "Raw ({{count}} rows)",
     "type": {
       "ranking": "Delay ranking",
       "ranking_best": "On-time ranking",
@@ -929,7 +936,8 @@
       "migrations_behind": "Schema behind by {{count}}",
       "migrations_unknown": "Migration status unavailable",
       "agencies_all_fresh": "All agencies fresh",
-      "agencies_stale": "{{count}} agencies with stale aggregates",
+      "agencies_stale_one": "{{count}} agency with stale aggregates",
+      "agencies_stale_other": "{{count}} agencies with stale aggregates",
       "agencies_unknown": "Agency freshness unavailable",
       "load_error": "Couldn't load ops health — showing what's available.",
       "col_agency": "Agency",

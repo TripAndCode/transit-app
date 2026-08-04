@@ -91,6 +91,100 @@ describe("LoginPage", () => {
     await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/agencies/1/map"));
   });
 
+  it("falls back to / instead of navigating to a javascript: URI in next", async () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=javascript:alert(document.cookie)");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
+  it("falls back to / instead of navigating to an absolute off-site next", async () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=https://evil.example/phish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
+  it("falls back to / instead of navigating to a protocol-relative off-site next", async () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=//evil.example/phish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
+  it("falls back to / instead of navigating to a backslash-authority off-site next", async () => {
+    // Browsers normalize a leading backslash to a forward slash for http(s)
+    // origins (WHATWG URL spec), so "/\evil.example" resolves to
+    // "//evil.example" — a bypass of a naive "doesn't start with //" check.
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=%2F%5Cevil.example%2Fphish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
+  it("falls back to / instead of navigating to a tab-obscured off-site next", async () => {
+    // The URL parser strips ASCII tab/newline before resolving, so a naive
+    // string check on the raw value can miss "/\t/evil.example" collapsing
+    // to protocol-relative "//evil.example".
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=%2F%09%2Fevil.example%2Fphish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
+  it("falls back to / instead of navigating to a same-origin URL whose pathname itself starts with //", async () => {
+    // new URL(value, origin).pathname does not collapse a leading "//" - a
+    // same-origin value like "/.//evil.example" passes the origin check but
+    // window.location.assign() then reads its returned path as
+    // protocol-relative and navigates off-site anyway.
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    mockApiPost.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderLogin("/login?next=%2F.%2F%2Fevil.example%2Fphish");
+
+    await user.type(screen.getByLabelText("Username"), "root@local");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalled());
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/"));
+  });
+
   it("shows an inline error and does not redirect on 401", async () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: true };
     mockApiPost.mockRejectedValue(new ApiError(401, JSON.stringify({ error: "invalid_credentials" })));

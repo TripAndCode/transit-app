@@ -18,9 +18,15 @@ function lastOfMonth(offset: number): string {
   return toJstISO(new Date(Date.UTC(year, month + offset, 0)));
 }
 
-function jpDate(iso: string): string {
-  // yyyy-mm-dd → yyyy/mm/dd (Japan-conventional written form).
-  return iso.replaceAll("-", "/");
+function localizedDate(iso: string, language: string): string {
+  // yyyy-mm-dd → yyyy/mm/dd (Japan-conventional written form) only for ja;
+  // every other locale keeps the ISO dash form used elsewhere in the app
+  // (NetworkTab, AdminOpsPage), so English never shows the ja slash form.
+  // Note: utils/rangeLabel.ts (ThreadSidebar/FilterContextBar's Ask filter
+  // summary) renders a custom range's digits as raw ISO regardless of
+  // locale — so a ja viewer sees "2026/06/01" here but "2026-06-01 〜
+  // 2026-07-15" there. Known, not (yet) unified across those two surfaces.
+  return language.startsWith("ja") ? iso.replaceAll("-", "/") : iso;
 }
 
 function isDefault(ctx: RangeCtx): boolean {
@@ -28,7 +34,7 @@ function isDefault(ctx: RangeCtx): boolean {
 }
 
 export function RangeBadge() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [ctx, setCtx] = useRangeContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -49,7 +55,7 @@ export function RangeBadge() {
     for (const p of presets) {
       if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
     }
-    return `${jpDate(ctx.from)} ${t("common.range_separator")} ${jpDate(ctx.to)}`;
+    return `${localizedDate(ctx.from, i18n.language)} ${t("common.range_separator")} ${localizedDate(ctx.to, i18n.language)}`;
   }
 
   useEffect(() => {
@@ -141,7 +147,7 @@ export function RangeBadge() {
           <div style={{ display: "flex", gap: 6, padding: "0 8px 8px", alignItems: "center" }}>
             <input
               type="date"
-              lang="ja"
+              lang={i18n.language}
               value={ctx.from}
               max={ctx.to}
               onChange={(e) => setCtx({ from: e.target.value })}
@@ -150,7 +156,7 @@ export function RangeBadge() {
             <span style={{ color: "var(--text-tertiary)" }}>{t("common.range_separator")}</span>
             <input
               type="date"
-              lang="ja"
+              lang={i18n.language}
               value={ctx.to}
               min={ctx.from}
               onChange={(e) => setCtx({ to: e.target.value })}
