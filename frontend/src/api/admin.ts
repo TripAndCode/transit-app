@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
 type AdminUser = {
@@ -13,15 +13,25 @@ type AdminUser = {
 
 type AdminUserList = { users: AdminUser[]; total: number };
 
-/** Paginated/filterable admin user list (q, role, suspended). */
-export function useAdminUsers(params: { q?: string; role?: string; suspended?: string }) {
+/** Paginated/filterable admin user list (q, role, suspended, limit/offset). */
+export function useAdminUsers(params: {
+  q?: string;
+  role?: string;
+  suspended?: string;
+  limit?: number;
+  offset?: number;
+}) {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.role) qs.set("role", params.role);
   if (params.suspended) qs.set("suspended", params.suspended);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
   return useQuery({
     queryKey: ["adminUsers", params],
     queryFn: ({ signal }) => apiGet<AdminUserList>(`/api/admin/users?${qs}`, { signal }),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 
@@ -33,22 +43,34 @@ async function deleteUser(uid: number) {
   await apiDelete(`/api/admin/users/${uid}`);
 }
 
-/** Mutation: PATCH a user's role/suspended flag; invalidates the user list on success. */
+/** Mutation: PATCH a user's role/suspended flag; invalidates the user list and detail queries on success. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ uid, body }: { uid: number; body: { role?: string; suspended?: boolean } }) =>
       patchUser(uid, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
+      // Prefix match — at most one detail query is ever mounted, so this is
+      // cheap, and it doesn't depend on the detail page's uid key staying a
+      // string (unlike reconstructing ["adminUser", String(uid)] here).
+      qc.invalidateQueries({ queryKey: ["adminUser"] });
+    },
   });
 }
 
-/** Mutation: soft-delete a user; invalidates the user list on success. */
+/** Mutation: soft-delete a user; invalidates the user list and evicts the detail query on success. */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (uid: number) => deleteUser(uid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
+      // Evict rather than invalidate: the caller navigates away from the
+      // detail page on delete, so refetching the just-deleted row first
+      // would only be a wasted request.
+      qc.removeQueries({ queryKey: ["adminUser"] });
+    },
   });
 }
 

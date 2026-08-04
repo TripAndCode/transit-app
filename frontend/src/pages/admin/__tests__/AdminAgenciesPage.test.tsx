@@ -154,4 +154,19 @@ describe("AdminAgenciesPage", () => {
     wrap(<AdminAgenciesPage />);
     expect(screen.getByRole("button", { name: /delete/i })).toHaveProperty("disabled", false);
   });
+
+  it("filters rows by agency name via the search input", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.type(screen.getByPlaceholderText("Search by name"), "Deleted");
+    expect(screen.queryByText("Aomori Bus")).toBeNull();
+    expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("shows an empty-state row when the search matches nothing", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.type(screen.getByPlaceholderText("Search by name"), "nonexistent-agency");
+    expect(screen.getByText("No agencies found.")).toBeTruthy();
+  });
 });

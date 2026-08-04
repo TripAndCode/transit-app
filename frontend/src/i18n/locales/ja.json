@@ -895,13 +895,23 @@
         "suspended": "停止中",
         "active": "アクティブ"
       },
+      "filter": {
+        "role_all": "全ロール",
+        "status_all": "すべての状態"
+      },
       "action": {
         "resume": "再開",
         "suspend": "停止",
         "delete": "削除"
       },
       "confirm_delete": "{{email}} を削除しますか？(匿名化、復元不可)",
-      "total": "合計 {{count}} 件"
+      "confirm_promote": "{{email}} に管理者権限を付与しますか？",
+      "total": "合計 {{count}} 件",
+      "empty": "ユーザーが見つかりません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      }
     },
     "user_detail": {
       "error": "エラー: {{msg}}",
@@ -909,7 +919,10 @@
       "status_label": "状態",
       "created_label": "作成",
       "email_at_link": "連携時メール: {{email}}",
-      "recent_events": "最近のイベント"
+      "recent_events": "最近のイベント",
+      "back_to_users": "ユーザー一覧に戻る",
+      "actions_title": "操作",
+      "self_hint": "自分自身のアカウントはここでは変更できません。"
     },
     "nav": {
       "label": "管理ナビゲーション",
@@ -943,6 +956,8 @@
     "agencies": {
       "title": "事業者管理",
       "add_button": "事業者を追加",
+      "search_placeholder": "事業者名で検索",
+      "empty": "該当する事業者がありません。",
       "col_name": "事業者名",
       "col_feed_url": "フィードURL",
       "col_strategy": "取得方式",
