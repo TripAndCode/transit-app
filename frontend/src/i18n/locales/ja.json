@@ -95,7 +95,8 @@
       "dismiss_aria": "閉じる"
     },
     "feed_health": {
-      "banner": "フィード健全性: 直近7日間で異常な遅延データ {{count}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
+      "banner_one": "フィード健全性: 直近7日間で異常な遅延データ {{count}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
+      "banner_other": "フィード健全性: 直近7日間で異常な遅延データ {{count}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
       "dismiss_aria": "閉じる"
     },
     "loading": {
@@ -115,8 +116,10 @@
     "streak_worse": "{{count}}週連続悪化",
     "streak_better": "{{count}}週連続改善",
     "section_concentration": "遅延の集中度",
-    "concentration_legend": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
-    "concentration_rest": "残り {{count}} 路線で {{rest}}%",
+    "concentration_legend_one": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
+    "concentration_legend_other": "上位{{count}}路線が遅延全体の {{pct}}% を占めています。",
+    "concentration_rest_one": "残り {{count}} 路線で {{rest}}%",
+    "concentration_rest_other": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
     "peak_hour_callout": "ピークは {{hour}}時〜{{next_hour}}時です (平均 {{avg}} 分)。",
     "section_service_split": "サービス日別",
@@ -200,11 +203,12 @@
     "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
   },
   "peakHourModal": {
-    "title": "{{dow}}曜 {{hour}}時台 — 遅延路線",
-    "allDow": "全",
+    "title_dow": "{{dow}}曜 {{hour}}時台 — 遅延路線",
+    "title_all": "毎日 {{hour}}時台 — 遅延路線",
     "noData": "この時間帯に十分なデータがありません",
     "avgMin": "+{{value}}分",
-    "routeCount": "{{count}}路線"
+    "routeCount_one": "{{count}}路線",
+    "routeCount_other": "{{count}}路線"
   },
   "header": {
     "app_title": "遅延ダッシュボード",
@@ -351,7 +355,8 @@
       "label": "路線",
       "count_suffix": "{{count}}路線",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count": "({{count}}路線)",
+      "variant_count_one": "({{count}}路線)",
+      "variant_count_other": "({{count}}路線)",
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
@@ -771,7 +776,8 @@
       "trip_label_no_headsign": "{{time}}発",
       "stop_label": "#{{seq}} {{name}}",
       "stop_label_no_name": "停留所 #{{seq}}",
-      "stop_outlier": "他{{count}}路線の平均より{{delta}}分多い",
+      "stop_outlier_one": "他{{count}}路線の平均より{{delta}}分多い",
+      "stop_outlier_other": "他{{count}}路線の平均より{{delta}}分多い",
       "close": "閉じる",
       "empty": "この路線の便データがありません"
     },
@@ -787,7 +793,8 @@
     "list_title": "レポート一覧",
     "select_prompt": "レポートを選択してください",
     "range_suffix": "期間: {{from}} 〜 {{to}}",
-    "raw_rows": "生データ（{{count}}件）",
+    "raw_rows_one": "生データ（{{count}}件）",
+    "raw_rows_other": "生データ（{{count}}件）",
     "type": {
       "ranking": "遅延ランキング",
       "ranking_best": "定時運行ランキング",
@@ -916,7 +923,8 @@
       "migrations_behind": "スキーマが {{count}} 件遅れています",
       "migrations_unknown": "マイグレーション状態を取得できません",
       "agencies_all_fresh": "全事業者: 集計最新",
-      "agencies_stale": "{{count}} 事業者: 集計遅れあり",
+      "agencies_stale_one": "{{count}} 事業者: 集計遅れあり",
+      "agencies_stale_other": "{{count}} 事業者: 集計遅れあり",
       "agencies_unknown": "事業者の集計状態を取得できません",
       "load_error": "運用状況の取得に失敗しました。取得できた分のみ表示しています。",
       "col_agency": "事業者",

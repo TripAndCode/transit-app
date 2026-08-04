@@ -24,8 +24,9 @@ vi.mock("../api/auth", () => ({
   useLogout: () => ({ mutate: mockMutate, ...mockLogoutState }),
 }));
 
+const mockApiGet = vi.fn().mockResolvedValue([]);
 vi.mock("../api/client", () => ({
-  apiGet: vi.fn().mockResolvedValue([]),
+  apiGet: (...args: unknown[]) => mockApiGet(...args),
 }));
 
 function renderAccount() {
@@ -63,5 +64,17 @@ describe("AccountPage logout", () => {
   it("shows no error message when the mutation hasn't failed", () => {
     renderAccount();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("formats the session's last-seen timestamp in the active UI language, not a hardcoded ja-JP", async () => {
+    mockApiGet.mockResolvedValue([
+      { sid_prefix: "abc123", user_agent: "Chrome", ip: "1.2.3.4", created_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-02T03:04:00Z" },
+    ]);
+    const localeSpy = vi.spyOn(Date.prototype, "toLocaleString");
+    await i18n.changeLanguage("en");
+    renderAccount();
+    await screen.findByText("Chrome");
+    expect(localeSpy).toHaveBeenCalledWith("en");
+    localeSpy.mockRestore();
   });
 });

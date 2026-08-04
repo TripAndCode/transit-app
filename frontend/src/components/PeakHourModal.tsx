@@ -30,14 +30,12 @@ export function PeakHourModal({
       ? Math.max(...data.routes.map((r) => r.avg_min))
       : 1;
 
-  const dowLabel =
-    data?.dow != null
-      ? t(`forecast.dow_${WEEK[data.dow - 1]}`)
-      : t("peakHourModal.allDow");
-
-  const title = data
-    ? t("peakHourModal.title", { dow: dowLabel, hour: data.hour })
-    : "";
+  const title =
+    data == null
+      ? ""
+      : data.dow != null
+        ? t("peakHourModal.title_dow", { dow: t(`forecast.dow_${WEEK[data.dow - 1]}`), hour: data.hour })
+        : t("peakHourModal.title_all", { hour: data.hour });
 
   return (
     <>

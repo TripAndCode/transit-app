@@ -7,6 +7,34 @@ import { useConfig } from "../api/config";
 import { ApiError, apiPost } from "../api/client";
 import "./LoginPage.css";
 
+// `next` comes straight from the URL query string, so it's attacker-suppliable
+// (e.g. a crafted login link). window.location.assign(next) executes a
+// `javascript:` URI in this origin, and an absolute/protocol-relative value
+// is an open redirect off-site right after a successful login — only a
+// same-origin relative path is safe to navigate to. Resolving through the
+// URL constructor (rather than pattern-matching prefixes) is load-bearing:
+// browsers normalize a leading backslash to a forward slash for http(s)
+// origins, so a string check for "//" alone still lets "/\evil.example"
+// through as a same-origin-looking string that actually resolves off-site.
+function sanitizeNext(value: string | null): string {
+  if (!value) return "/";
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "/";
+    const path = url.pathname + url.search + url.hash;
+    // The URL constructor doesn't collapse a leading "//" in the pathname
+    // (e.g. a same-origin "/.//evil.example" resolves with pathname
+    // "//evil.example"), so a value that passes the origin check above can
+    // still come back protocol-relative — which window.location.assign()
+    // would then read as an off-site redirect, same as the "//" input this
+    // function already rejects.
+    if (path.startsWith("//")) return "/";
+    return path;
+  } catch {
+    return "/";
+  }
+}
+
 const ERROR_KEYS: Record<string, string> = {
   state: "account.login.error.state",
   unverified_email: "account.login.error.unverified_email",
@@ -18,7 +46,7 @@ const ERROR_KEYS: Record<string, string> = {
 export function LoginPage() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
-  const next = params.get("next") || "/";
+  const next = sanitizeNext(params.get("next"));
   const error = params.get("error");
   const [pending, setPending] = useState<"google" | "github" | null>(null);
   const { data: config } = useConfig();

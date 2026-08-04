@@ -2,30 +2,11 @@ import { useState, useRef, useEffect, useCallback, type CSSProperties, type RefO
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
+import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
+import { isToday, isYesterday } from "../utils/threadDateBuckets";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function isToday(iso: string): boolean {
-  const d = new Date(iso);
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
-function isYesterday(iso: string): boolean {
-  const d = new Date(iso);
-  const yest = new Date();
-  yest.setDate(yest.getDate() - 1);
-  return (
-    d.getFullYear() === yest.getFullYear() &&
-    d.getMonth() === yest.getMonth() &&
-    d.getDate() === yest.getDate()
-  );
-}
 
 function isThisWeek(iso: string): boolean {
   const d = new Date(iso).getTime();
@@ -38,16 +19,8 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
   const parts: string[] = [];
 
   // Date range
-  if (fc.from_date && fc.to_date) {
-    // Try to humanise common ranges
-    const from = new Date(fc.from_date);
-    const to = new Date(fc.to_date);
-    const days = Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
-    if (days === 6 || days === 7) parts.push(t("filters.range.last_7d"));
-    else if (days >= 28 && days <= 31) parts.push(t("filters.range.last_30d"));
-    else if (days >= 85 && days <= 92) parts.push(t("filters.range.last_90d"));
-    else parts.push(`${fc.from_date} 〜 ${fc.to_date}`);
-  }
+  const range = rangeLabel(fc, t);
+  if (range) parts.push(range);
 
   // Day-of-week
   if (fc.dow && fc.dow !== "all") {

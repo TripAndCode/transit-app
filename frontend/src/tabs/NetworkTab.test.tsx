@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import type { NetworkAgencyRow } from "../api/types";
 
@@ -25,6 +26,8 @@ function renderTab(agencyId = "1") {
 }
 
 describe("NetworkTab", () => {
+  beforeEach(async () => await i18n.changeLanguage("en"));
+
   it("renders agency cards in given order with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
@@ -139,5 +142,29 @@ describe("NetworkTab", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
+  });
+
+  it("renders the coverage-range separator via the locale-aware key, not a hardcoded en-dash", async () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07",
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden", data_from: "2026-04-01", data_to: "2026-04-02" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    await i18n.changeLanguage("ja");
+    renderTab();
+    expect(screen.getByText("2026-04-01 〜 2026-04-02")).toBeInTheDocument();
+  });
+
+  it("sets both range date inputs' lang attribute to the active UI language", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const inputs = document.querySelectorAll("input[type='date']");
+    expect(inputs.length).toBe(2);
+    inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
   });
 });

@@ -14,7 +14,7 @@ type SessionRow = {
 
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data: session, isLoading } = useSession();
   const { data: sessions } = useQuery({
     queryKey: ["mySessions"],
@@ -46,7 +46,7 @@ export function AccountPage() {
                                             borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
             <div>{s.user_agent ?? "(unknown UA)"}</div>
             <div style={{ color: "var(--text-tertiary)" }}>
-              {t("account.session_last_seen", { when: new Date(s.last_seen_at).toLocaleString("ja-JP") })}
+              {t("account.session_last_seen", { when: new Date(s.last_seen_at).toLocaleString(i18n.language) })}
             </div>
           </div>
         ))}

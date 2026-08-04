@@ -23,7 +23,7 @@ type Detail = {
 
 /** Admin: detail view for a single user with identities and recent audit events. */
 export function AdminUserDetailPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
@@ -48,7 +48,7 @@ export function AdminUserDetailPage() {
           {data.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
         </div>
         <div>
-          {t("admin.user_detail.created_label")}: {new Date(data.created_at).toLocaleString("ja-JP")}
+          {t("admin.user_detail.created_label")}: {new Date(data.created_at).toLocaleString(i18n.language)}
         </div>
       </div>
       <section style={{ marginBottom: 24 }}>
@@ -68,7 +68,7 @@ export function AdminUserDetailPage() {
                                           borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
             <div>{e.kind} {e.provider ? `(${e.provider})` : ""}</div>
             <div style={{ color: "var(--text-tertiary)" }}>
-              {new Date(e.created_at).toLocaleString("ja-JP")}
+              {new Date(e.created_at).toLocaleString(i18n.language)}
             </div>
             {e.meta && <pre style={{ margin: "4px 0", fontSize: 12 }}>{JSON.stringify(e.meta)}</pre>}
           </div>
