@@ -80,6 +80,55 @@ def build_dedup_inner_sql(
     )
 
 
+def build_dedup_ch_sql(
+    *,
+    extra_where: str = "",
+    include_captured_at: bool = False,
+) -> str:
+    """ClickHouse-dialect equivalent of build_dedup_inner_sql.
+
+    ClickHouse has no `DISTINCT ON`; the equivalent is `ORDER BY ...
+    LIMIT 1 BY (...)`, which additionally requires flipping the sort
+    direction relative to the Postgres version (DISTINCT ON keeps the
+    FIRST row per its ORDER BY; LIMIT 1 BY also keeps the first row of
+    its preceding ORDER BY — same semantics, different clause shape).
+
+    `id DESC` (a Postgres surrogate key, not carried into the ClickHouse
+    schema) is replaced by `file_name DESC` as the deterministic tiebreak
+    when two rows share the same captured_at second — file names are
+    unique per poll and sort consistently within a day, which is all the
+    original tiebreak needed.
+
+    `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
+    every Postgres connection that ever touched `updates` pins
+    `SET TIME ZONE 'Asia/Tokyo'` (see api/main.py::_init_connection's
+    docstring), so `captured_at::date` throughout this codebase has
+    always meant the JST calendar day, not the UTC one. The ClickHouse
+    column is UTC (`DateTime64(0, 'UTC')`); using bare `toDate()` here
+    would silently misbucket every row whose captured_at falls in
+    UTC 15:00-23:59 (JST 00:00-08:59 the next day) — reproducing the
+    exact UTC/JST aggregate-mis-bucketing bug this project already hit
+    once (see the design doc's Risks section). `toDate(value, timezone)`
+    is a real ClickHouse signature — it converts to a calendar date in
+    the given timezone regardless of the column's stored timezone.
+
+    Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
+    than a Python-formatted literal, for clickhouse-connect's server-side
+    parameter binding.
+    """
+    extra = f" AND ({extra_where})" if extra_where else ""
+    captured = ", captured_at" if include_captured_at else ""
+    return (
+        "SELECT route_code, service_type, scheduled_time, trip_id, "
+        f"toDate(captured_at, 'Asia/Tokyo') AS date, stop_sequence, dep_delay{captured} "
+        "FROM updates "
+        "WHERE dep_delay IS NOT NULL AND agency_id = {agency_id:UInt16} "
+        f"AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        "ORDER BY captured_at DESC, file_name DESC "
+        "LIMIT 1 BY route_code, service_type, scheduled_time, trip_id, toDate(captured_at, 'Asia/Tokyo'), stop_sequence"
+    )
+
+
 # Psycopg2 binding used by pipeline/analyze.py.
 _DEDUP_INNER = build_dedup_inner_sql()
 
