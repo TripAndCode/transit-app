@@ -19,10 +19,33 @@ services:
       timeout: 5s
       retries: 10
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3
+    container_name: transit-ch
+    environment:
+      CLICKHOUSE_USER: transit
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
+      CLICKHOUSE_DB: transit
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - transit_chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 # This compose file is for LOCAL DEVELOPMENT only — it brings up the
-# PostGIS+pgvector database (`make db`) that `make serve` connects to.
-# Production runs on Railway (app + a separate DB service built from the
+# PostGIS+pgvector database (`make db`) and ClickHouse that `make serve` connects to.
+# Production runs on Railway (app + separate DB services built from the
 # same `db/Dockerfile`), push-to-deploy — see docs/deploy-railway.md.
 
 volumes:
   transit_pgdata:
+  transit_chdata:

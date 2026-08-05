@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
 
 # Default target — first-run setup.
 all: bootstrap
@@ -100,10 +100,16 @@ serve:
 db:
 	docker compose up -d --build
 	docker compose exec db sh -c 'until pg_isready -U transit -d transit; do sleep 1; done'
+	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
 
 db-down:
 	docker compose down
+
+ch-test:
+	docker run -d --rm --name transit-test-ch \
+	  -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
+	  -p 8124:8123 clickhouse/clickhouse-server:26.3
 
 migrate:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
