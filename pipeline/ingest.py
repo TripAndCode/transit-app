@@ -26,6 +26,15 @@ from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
+# Flush a ClickHouse insert after accumulating this many rows across files —
+# large enough that per-insert overhead (~100ms fixed cost, confirmed
+# empirically: 50x20-row inserts = 4.98s total vs. 1x1000-row insert = 0.10s)
+# is amortized across thousands of rows instead of dozens, small enough to
+# keep a single flush's memory footprint and latency modest even for a dense
+# agency's file. See Task 8.9 — one-insert-per-source-file previously made a
+# real agency-1 backfill run 7h36m wall-clock for 14m52s of actual CPU work.
+_BATCH_ROWS = 20_000
+
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
 # derive captured_at when the filename alone doesn't carry the date.
 _DATE_DIR_RE = re.compile(r"\d{8}")
@@ -179,6 +188,44 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
+    # Rows accumulate here across BOTH the tarball loop and the loose-.pb
+    # loop below (shared, not reset between them) and are flushed to
+    # ClickHouse in one INSERT per _BATCH_ROWS-sized batch instead of one
+    # per source file (Task 8.9 — see _BATCH_ROWS docstring above for why).
+    #
+    # Crash-safety invariant, preserved from the old per-file code just at
+    # batch grain: a file's rows are only ever marked `done` in the exact
+    # same operation that successfully inserted them. If insert_updates
+    # raises, NONE of this batch's files are added to `done` — all of them
+    # are retried on the next ingest() run. Trade-off: on a batch-insert
+    # failure, n_errors increments by the whole batch's file count, not just
+    # the specific bad file (if any) — acceptable because a batch failure is
+    # almost always systemic (e.g. a dropped connection), not a bad file,
+    # since every file in the batch already parsed successfully before being
+    # buffered.
+    pending_rows: list[tuple] = []
+    pending_files: list[str] = []
+
+    def _flush() -> None:
+        nonlocal n_inserted, n_errors
+        # Guard on pending_FILES, not pending_rows: a source file can
+        # legitimately parse to zero rows (e.g. no trip_id in this feed
+        # matches the agency's pattern), so an all-zero-row leftover batch
+        # must still run through insert_updates ([] is a harmless no-op
+        # returning 0 — see pipeline/clickhouse.py) and get its files
+        # marked `done`, not be silently abandoned because pending_rows
+        # alone happened to be empty.
+        if not pending_files:
+            return
+        try:
+            n_inserted += insert_updates(ch_client, agency_id, pending_rows)
+            done.update(pending_files)
+        except Exception as e:
+            logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
+            n_errors += len(pending_files)
+        pending_rows.clear()
+        pending_files.clear()
+
     tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
     pb_loose = sorted(root.rglob("*.pb"))
     logger.info(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb (strategy={strategy_name})")
@@ -212,11 +259,11 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         #
                         # The ClickHouse insert is deliberately OUTSIDE the
                         # savepoint: it no longer touches Postgres, so a Postgres
-                        # SAVEPOINT protects nothing for that step. It gets its
-                        # own try/except below — on failure the file is NOT added
-                        # to `done`, so it's retried on the next ingest() run
-                        # (mirrors this loop's pre-existing behavior: a file only
-                        # ever joined `done` after a successful insert).
+                        # SAVEPOINT protects nothing for that step. The parsed
+                        # rows are buffered into pending_rows/pending_files and
+                        # only actually inserted (and marked `done`) by _flush(),
+                        # in batches, per Task 8.9 — see _flush()'s docstring
+                        # above for the crash-safety invariant this preserves.
                         try:
                             with _savepoint(cur, "tar_member"):
                                 ts = _ts(d, pb_name)
@@ -229,12 +276,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
                             continue
-                        try:
-                            n_inserted += insert_updates(ch_client, agency_id, rows)
-                            done.add(f"{d}/{pb_name}")
-                        except Exception as e:
-                            logger.error(f"  [ERROR] inserting {pb_name}: {e}")
-                            n_errors += 1
+                        pending_rows.extend(rows)
+                        pending_files.append(f"{d}/{pb_name}")
+                        if len(pending_rows) >= _BATCH_ROWS:
+                            _flush()
                         if j % 300 == 0 and j > 0:
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
@@ -254,9 +299,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 # every good file already inserted since the last commit
                 # boundary in this batch (see _savepoint's docstring for why
                 # RELEASE matters). The ClickHouse insert is outside the
-                # savepoint (see the tarball loop above for why) with its own
-                # try/except: on failure the file is NOT added to `done`, so
-                # it's retried on the next ingest() run.
+                # savepoint (see the tarball loop above for why); rows are
+                # buffered into pending_rows/pending_files and only actually
+                # inserted (and marked `done`) by _flush(), in batches shared
+                # with the tarball loop above (Task 8.9).
                 try:
                     with _savepoint(cur, "pb_file"):
                         rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
@@ -264,16 +310,19 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
                     continue
-                try:
-                    n_inserted += insert_updates(ch_client, agency_id, rows)
-                    done.add(f"{d}/{path.name}")
-                except Exception as e:
-                    logger.error(f"  [ERROR] inserting {path.name}: {e}")
-                    n_errors += 1
+                pending_rows.extend(rows)
+                pending_files.append(f"{d}/{path.name}")
+                if len(pending_rows) >= _BATCH_ROWS:
+                    _flush()
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
         conn.commit()
+
+    # Flush whatever's left in the buffer — without this, up to
+    # _BATCH_ROWS - 1 rows from the tail of a run would never be persisted
+    # or marked `done` at all.
+    _flush()
 
     if n_errors:
         logger.warning(f"Skipped {n_errors} files with parse errors")

@@ -2,6 +2,7 @@ import io
 import tarfile
 from unittest.mock import patch
 
+from pipeline.clickhouse import insert_updates
 from pipeline.ingest import ingest, parse_trip_id
 
 _FAKE_ROW = (
@@ -275,3 +276,85 @@ def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
         "SELECT dep_delay FROM updates WHERE agency_id = {agency_id:UInt16}", parameters={"agency_id": aid_b}
     )
     assert result_b.result_rows[0][0] == 90
+
+
+def test_ingest_batches_clickhouse_inserts_across_files(pg_conn, ch_client, agency_id, tmp_path):
+    """Task 8.9: ingest() must not call insert_updates once per source file -
+    that fixed ~100ms-per-call overhead is what turned a real agency-1
+    backfill into 7h36m wall-clock for 15m of actual CPU work. With 10 loose
+    .pb files of 5 rows each (50 rows total, well under _BATCH_ROWS),
+    insert_updates should be called once - at ingest()'s trailing flush -
+    not 10 times, while every row still lands and the total inserted count
+    matches the total row count across all files (no rows lost to batching)."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    n_files = 10
+    rows_per_file = 5
+    for i in range(n_files):
+        (day_dir / f"file_{i:02d}.pb").write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        return [
+            (file_name, "2026-04-01T11:37:00", f"trip_{file_name}_{k}", "平日", "11:37", "44372", k, 60)
+            for k in range(rows_per_file)
+        ]
+
+    call_row_counts = []
+
+    def counting_insert(client, aid, rows):
+        # _flush() clears its `pending_rows` list right after this call
+        # returns, and Mock.call_args stores a reference (not a copy) of
+        # that same list object - so snapshotting len(rows) HERE, before the
+        # caller can mutate it, is required to see each call's true size.
+        call_row_counts.append(len(rows))
+        return insert_updates(client, aid, rows)
+
+    with (
+        patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed),
+        patch("pipeline.ingest.insert_updates", side_effect=counting_insert) as mock_insert,
+    ):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert count == n_files * rows_per_file
+    assert mock_insert.call_count == 1  # NOT one call per file
+    assert sum(call_row_counts) == n_files * rows_per_file  # no rows lost to batching
+
+    result = ch_client.query(
+        "SELECT count() FROM updates WHERE agency_id = {agency_id:UInt16}", parameters={"agency_id": agency_id}
+    )
+    assert result.result_rows[0][0] == n_files * rows_per_file
+
+
+def test_ingest_flush_failure_leaves_all_batch_files_undone_for_retry(pg_conn, ch_client, agency_id, tmp_path):
+    """The crash-safety property batching must preserve: a file's rows are
+    only ever marked `done` in the same operation that successfully inserted
+    them - now at batch granularity. If the flush's insert_updates call
+    raises, NONE of the batch's files may be marked done, or their rows
+    would be silently lost forever on a crash-and-retry. Simulate one
+    failing flush (e.g. a dropped ClickHouse connection): confirm zero rows
+    landed and zero were counted; then re-run ingest() (this time
+    succeeding) and confirm every file's rows land exactly once - proving
+    the whole failed batch was retried, not skipped nor double-inserted."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    n_files = 3
+    for i in range(n_files):
+        (day_dir / f"file_{i}.pb").write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        return [(file_name, "2026-04-01T11:37:00", f"trip_{file_name}", "平日", "11:37", "44372", 1, 60)]
+
+    with (
+        patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed),
+        patch("pipeline.ingest.insert_updates", side_effect=RuntimeError("connection dropped")),
+    ):
+        first_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert first_count == 0
+    assert _ch_route_codes(ch_client, agency_id) == []
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        second_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert second_count == n_files
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"] * n_files
