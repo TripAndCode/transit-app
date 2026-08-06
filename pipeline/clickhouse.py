@@ -53,10 +53,10 @@ def distinct_file_names(client, agency_id: int) -> set[str]:
 
 def max_captured_at(client, agency_id: int) -> datetime | None:
     result = client.query(
-        "SELECT MAX(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
         parameters={"agency_id": agency_id},
     )
     value = result.result_rows[0][0]
-    if value is None or value == datetime(1970, 1, 1, 0, 0, 0):
+    if value is None:
         return None
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
