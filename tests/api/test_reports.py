@@ -33,17 +33,24 @@ async def reports_app(apply_schema):
     await pool.close()
 
 
-def _run_analyze(agency_id):
-    """Build the agg_* tables (incl. agg_route_daily_dist) from seeded updates."""
+def _run_analyze(agency_id, ch_client):
+    """Build the agg_* tables (incl. agg_route_daily_dist) from seeded updates.
+
+    analyze()'s dedup materialization now reads ClickHouse (Task 6); this
+    file's fixtures seed Postgres `updates` directly (pre-dating that
+    migration), so mirror the same rows into ClickHouse first — see
+    tests.conftest.mirror_updates_to_ch."""
     import os
 
     import psycopg2
 
     from pipeline.analyze import analyze
+    from tests.conftest import mirror_updates_to_ch
 
+    mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
-        analyze(agency_id, conn)
+        analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:
         conn.close()
@@ -109,7 +116,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day, delays):
 
 
 @pytest.mark.asyncio
-async def test_reports_get_ranking_reads_agg(reports_client):
+async def test_reports_get_ranking_reads_agg(reports_client, ch_client):
     """ranking now reads agg_route_daily_dist; seed updates → analyze → render.
 
     HAVING COUNT(*) > 20, so seed 25 rows for route 44 across distinct trips.
@@ -117,7 +124,7 @@ async def test_reports_get_ranking_reads_agg(reports_client):
     client, agency_id, pool = reports_client
     day = "2026-05-01"
     await _seed_route(pool, agency_id, "44", "平日", day, [300] * 25)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
     assert resp.status_code == 200
     data = resp.json()
@@ -126,14 +133,14 @@ async def test_reports_get_ranking_reads_agg(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_ranking_agg_values_exact_avg_and_approx_pct(reports_client):
+async def test_ranking_agg_values_exact_avg_and_approx_pct(reports_client, ch_client):
     """avg/samples are exact from the aggregate; p50/p90 interpolate from the
     histogram (within one bucket of the true value)."""
     client, agency_id, pool = reports_client
     day = "2026-05-02"
     # 30 samples, all 120s late: avg = 2.0 min exactly; percentiles ~2 min.
     await _seed_route(pool, agency_id, "R1", "平日", day, [120] * 30)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     rows = await compute_ranking_rows(client, agency_id, day)
     r = next(x for x in rows if x[0] == "R1")
     # (route, service, avg_min, p50_min, p90_min, samples)
@@ -146,13 +153,13 @@ async def test_ranking_agg_values_exact_avg_and_approx_pct(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_on_time_and_worst_5min_exact_from_agg(reports_client):
+async def test_on_time_and_worst_5min_exact_from_agg(reports_client, ch_client):
     """on_time_pct and late5_count are exact (thresholds baked at analyze time)."""
     client, agency_id, pool = reports_client
     day = "2026-05-03"
     # 30 samples: 18 on-time (<=60s), 12 very late (>300s = worst_5min).
     await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 18 + [600] * 12)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
 
     ot = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
     r = next(x for x in ot if x[0] == "R2")
@@ -164,13 +171,13 @@ async def test_on_time_and_worst_5min_exact_from_agg(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_ranking_null_service_route_surfaces(reports_client):
+async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
     """NULL service_type routes must still rank (the '' sentinel maps back to
     None), matching the old live query which never filtered them."""
     client, agency_id, pool = reports_client
     day = "2026-05-04"
     await _seed_route(pool, agency_id, "R_NULL", None, day, [200] * 25)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     rows = await compute_ranking_rows(client, agency_id, day)
     r = next(x for x in rows if x[0] == "R_NULL")
     assert r[1] is None  # '' sentinel -> None
@@ -195,12 +202,12 @@ async def test_reports_get_empty_aggregates_renders_no_data(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_dow_weekend_reads_agg(reports_client):
+async def test_reports_dow_weekend_reads_agg(reports_client, ch_client):
     """dow_weekend reads agg_daily_trend (weekend dates only). 2026-05-23 is a
     Saturday; >10 samples to clear the HAVING."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "R_WE", "土日祝", "2026-05-23", [300] * 15)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
@@ -210,13 +217,13 @@ async def test_reports_dow_weekend_reads_agg(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_compare_ranking_reads_agg(reports_client):
+async def test_reports_compare_ranking_reads_agg(reports_client, ch_client):
     """compare_ranking reads agg_daily_trend: weekday (Tue 05-19) vs weekend
     (Sat 05-23) per-route avg + delta."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "R_CMP", "平日", "2026-05-19", [120] * 15)  # 2.0 min weekday
     await _seed_route(pool, agency_id, "R_CMP", "土日祝", "2026-05-23", [360] * 15)  # 6.0 min weekend
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     resp = await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
@@ -227,12 +234,12 @@ async def test_reports_compare_ranking_reads_agg(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_trend_reads_agg(reports_client):
+async def test_reports_trend_reads_agg(reports_client, ch_client):
     """trend reads agg_daily_trend (daily series) + agg_hour_daily (hourly cells)."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "R_TR", "平日", "2026-05-19", [180] * 12)
     await _seed_route(pool, agency_id, "R_TR", "平日", "2026-05-20", [240] * 12)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     resp = await client.get(f"/api/{agency_id}/reports/trend?from=2026-05-18&to=2026-05-24")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
@@ -252,13 +259,13 @@ async def test_reports_trend_reads_agg(reports_client):
 
 
 @pytest.mark.asyncio
-async def test_reports_dow_keeps_null_service_routes(reports_client):
+async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     """NULL-service routes (広島's unmatched rows) must still appear in dow —
     agg_daily_trend keeps them via the '' sentinel, mapped back to None. Guards
     the regression where the typed-dedup agg dropped whole routes."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "R_NULL", None, "2026-05-23", [300] * 15)
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
     assert resp.status_code == 200
     r = next((x for x in resp.json()["rows"] if x[0] == "R_NULL"), None)

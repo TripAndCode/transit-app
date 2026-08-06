@@ -1,10 +1,13 @@
 import os
 from urllib.parse import urlsplit, urlunsplit
 
+import clickhouse_connect
 import psycopg2
 import psycopg2.errors
 import pytest
 from psycopg2 import sql
+
+from db.clickhouse.bootstrap import apply_schema as _apply_ch_schema
 
 
 def _redirect_to_test_db() -> None:
@@ -148,6 +151,85 @@ def agency_id(pg_conn):
         aid = cur.fetchone()[0]
     pg_conn.commit()
     return aid
+
+
+def _ch_test_client():
+    return clickhouse_connect.get_client(
+        host="localhost",
+        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
+        username="transit",
+        password="transit",
+        database="transit_test",
+    )
+
+
+@pytest.fixture
+def ch_client():
+    """ClickHouse client against the throwaway `make ch-test` instance.
+
+    Hoisted here (from tests/pipeline/conftest.py, Task 5) because Task 6
+    (analyze()'s dedup materialization) needs it from tests/api/ and
+    tests/query/ too, not just tests/pipeline/ — a root conftest fixture is
+    visible to every subdirectory. Drop + reapply the schema before each test
+    for isolation, since ClickHouse has no transactional rollback to lean on
+    like the pg_conn fixture does. The skip (rather than a file-level
+    pytestmark) lives here so pure, DB-free tests elsewhere in the suite still
+    run without `make ch-test` — only tests that actually request this
+    fixture are gated behind RUN_CH_INTEGRATION.
+    """
+    if os.environ.get("RUN_CH_INTEGRATION") != "1":
+        pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    _apply_ch_schema(client)
+    yield client
+    client.close()
+
+
+def mirror_updates_to_ch(ch_client, agency_id) -> None:
+    """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
+
+    Task 6 moved analyze()'s dedup materialization to read from ClickHouse
+    instead of Postgres. Many fixtures across this suite pre-date that
+    migration and still seed Postgres `updates` directly (often via asyncpg,
+    in ways that would be invasive to rewrite one-for-one into ClickHouse
+    inserts). Rather than duplicate every such seed, mirror whatever Postgres
+    already has for this agency into ClickHouse right before calling
+    analyze() — analyze()'s three still-Postgres-reading blocks
+    (agg_feed_health, agg_stop_routes, agg_meta's max_updates_captured_at;
+    see pipeline/analyze.py) keep reading the original Postgres rows
+    unchanged, so both sources agree on the same fixture data.
+    """
+    from pipeline.clickhouse import insert_updates
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT file_name, captured_at, trip_id, service_type, scheduled_time, "
+                "route_code, stop_sequence, dep_delay FROM updates WHERE agency_id = %s",
+                (agency_id,),
+            )
+            pg_rows = cur.fetchall()
+    finally:
+        conn.close()
+    if not pg_rows:
+        return
+    ch_rows = []
+    for file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay in pg_rows:
+        ch_rows.append(
+            (
+                file_name,
+                captured_at,
+                trip_id,
+                service_type,
+                scheduled_time.strftime("%H:%M:%S") if scheduled_time is not None else None,
+                route_code,
+                stop_sequence,
+                dep_delay,
+            )
+        )
+    insert_updates(ch_client, agency_id, ch_rows)
 
 
 @pytest.fixture

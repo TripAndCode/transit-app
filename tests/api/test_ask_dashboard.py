@@ -13,17 +13,24 @@ from httpx import ASGITransport
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-def _run_analyze(agency_id):
+def _run_analyze(agency_id, ch_client):
     """Build the agg_* tables from seeded updates. The dashboard endpoints read
     precomputed aggregates (agg_daily_trend, agg_route_hour) — not live `updates`
-    — so the fixture must analyze after seeding or every query returns empty."""
+    — so the fixture must analyze after seeding or every query returns empty.
+
+    analyze()'s dedup materialization now reads ClickHouse (Task 6); this
+    fixture seeds Postgres `updates` directly (pre-dating that migration), so
+    mirror the same rows into ClickHouse first — see
+    tests.conftest.mirror_updates_to_ch."""
     import psycopg2
 
     from pipeline.analyze import analyze
+    from tests.conftest import mirror_updates_to_ch
 
+    mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(DATABASE_URL)
     try:
-        analyze(agency_id, conn)
+        analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:
         conn.close()
@@ -47,7 +54,7 @@ async def _purge(c, agency_ids):
 
 
 @pytest.fixture
-async def dash_app(apply_schema):
+async def dash_app(apply_schema, ch_client):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -87,7 +94,7 @@ async def dash_app(apply_schema):
                         ts,
                     )
     # Build the aggregates the dashboard endpoints read from the seeded updates.
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     app.state.pool = pool
     yield app, agency_id, pool
     async with pool.acquire() as c:

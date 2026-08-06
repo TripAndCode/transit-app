@@ -79,7 +79,7 @@ def _run_ingest_and_analyze() -> None:
             except Exception:
                 _log.exception("cron: ingest_live failed for agency %s", aid)
             try:
-                analyze(aid, conn)
+                analyze(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
 

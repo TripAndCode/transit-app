@@ -14,19 +14,31 @@ class _FakeChClient:
     about ClickHouse itself — stubbing this out keeps them independent of
     `make ch-test` while the freshness-specific tests further down use the
     real `ch_client` fixture.
+
+    `_run_ingest_and_analyze` now feeds this same stub to BOTH
+    `check_agg_freshness` (a `maxOrNull(captured_at)` scalar query, one row
+    shaped `(None,)`) and `analyze()`'s dedup materialization (Task 6's
+    `build_dedup_ch_sql`, an 8-column row-set query) since both go through
+    one `ch_client`. Returning `[(None,)]` unconditionally would make
+    analyze()'s bulk-load try to insert a 1-column row into an 8-column temp
+    table and crash, so dispatch on the SQL text: the scalar query gets its
+    one-row/one-col shape, everything else (the dedup query) gets no rows —
+    consistent with "no live ClickHouse rows for this fake agency" either way.
     """
 
-    def query(self, *_args, **_kwargs):
+    def query(self, sql, *_args, **_kwargs):
         class _Result:
-            result_rows = [(None,)]
+            result_rows: list = [(None,)] if "maxOrNull" in sql else []
 
         return _Result()
 
 
 def _seed_two_days(pg_conn, agency_id):
     """Insert mid-day rows across two completed civil days (well before today)
-    into Postgres `updates` — the source analyze() reads to build
-    agg_route_daily (unmigrated this task; see pipeline/analyze.py).
+    into Postgres `updates` — still needed alongside `_seed_two_days_ch`
+    because analyze()'s agg_feed_health/agg_stop_routes/agg_meta builders
+    (see pipeline/analyze.py) read raw Postgres `updates` directly and were
+    not touched by the Task 6 dedup-materialization migration.
 
     Mid-day (11:37) keeps the JST/UTC civil date identical so the test is
     independent of the test connection's session timezone.
@@ -82,7 +94,7 @@ def _seed_two_days_ch(ch_client, agency_id):
 def test_fresh_after_analyze(pg_conn, ch_client, agency_id):
     _seed_two_days(pg_conn, agency_id)
     _seed_two_days_ch(ch_client, agency_id)
-    analyze(agency_id, pg_conn)
+    analyze(agency_id, pg_conn, ch_client)
     stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
     assert stale == []
 
@@ -90,7 +102,7 @@ def test_fresh_after_analyze(pg_conn, ch_client, agency_id):
 def test_stale_when_latest_agg_day_missing(pg_conn, ch_client, agency_id):
     _seed_two_days(pg_conn, agency_id)
     _seed_two_days_ch(ch_client, agency_id)
-    analyze(agency_id, pg_conn)
+    analyze(agency_id, pg_conn, ch_client)
     # Drop the newest agg day → aggs now cover only 2026-04-01 while live has 04-02.
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -131,8 +143,8 @@ def test_multi_agency_only_stale_returned(pg_conn, ch_client, agency_id):
     _seed_two_days_ch(ch_client, agency_id)
     _seed_two_days(pg_conn, second_id)
     _seed_two_days_ch(ch_client, second_id)
-    analyze(agency_id, pg_conn)
-    analyze(second_id, pg_conn)
+    analyze(agency_id, pg_conn, ch_client)
+    analyze(second_id, pg_conn, ch_client)
 
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -187,9 +199,9 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
     assert stale[0].live_max_completed_day == date(2026, 1, 2)  # JST date, not the UTC 2026-01-01
 
 
-def test_analyze_writes_agg_meta(pg_conn, agency_id):
+def test_analyze_writes_agg_meta(pg_conn, agency_id, ch_client):
     _seed_two_days(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT analyzed_at, max_updates_captured_at FROM agg_meta WHERE agency_id = %s",

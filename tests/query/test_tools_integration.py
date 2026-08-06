@@ -10,20 +10,27 @@ from pipeline.query.tools import dispatch
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-def _analyze_sync(agency_id):
+def _analyze_sync(agency_id, ch_client):
     """Build the agg_* tables (JST-pinned, like the real pipeline) so the
-    aggregate-backed tool paths have data."""
+    aggregate-backed tool paths have data.
+
+    analyze()'s dedup materialization now reads ClickHouse (Task 6); the
+    fixture below seeds Postgres `updates` directly (pre-dating that
+    migration), so mirror the same rows into ClickHouse first — see
+    tests.conftest.mirror_updates_to_ch."""
     import psycopg2
 
     from pipeline.analyze import analyze
+    from tests.conftest import mirror_updates_to_ch
 
+    mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute("SET TIME ZONE 'Asia/Tokyo'")
     conn.autocommit = False
     try:
-        analyze(agency_id, conn)
+        analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:
         conn.close()
@@ -134,7 +141,7 @@ async def test_dispatch_capabilities(conn_routes):
 
 
 @pytest.fixture
-async def conn_two_routes_obs(apply_schema):
+async def conn_two_routes_obs(apply_schema, ch_client):
     """Two routes, only route A has observations — used to assert that the
     time_series tool applies the route filter from args."""
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -173,7 +180,7 @@ async def conn_two_routes_obs(apply_schema):
             ],
         )
     # time_series → compute_trend_series reads agg_daily_trend; build it.
-    _analyze_sync(agency_id)
+    _analyze_sync(agency_id, ch_client)
     yield pool, agency_id
     async with pool.acquire() as c:
         await c.execute("TRUNCATE agencies CASCADE")

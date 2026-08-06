@@ -204,10 +204,12 @@ def cmd_refresh_static(args):
 def cmd_analyze(args):
     """Run the analysis pass for one agency."""
     from pipeline.analyze import analyze
+    from pipeline.clickhouse import get_client
 
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
-    analyze(agency_id, conn)
+    ch_client = get_client()
+    analyze(agency_id, conn, ch_client)
     conn.close()
 
 
@@ -219,8 +221,10 @@ def cmd_analyze_all(args):
     loop as the canonical full rebuild.
     """
     from pipeline.analyze import analyze
+    from pipeline.clickhouse import get_client
 
     conn = _get_conn()
+    ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
         agency_ids = [r[0] for r in cur.fetchall()]
@@ -232,7 +236,7 @@ def cmd_analyze_all(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- analyze agency_id={aid} ---")
-            analyze(aid, conn)
+            analyze(aid, conn, ch_client)
         except Exception:
             logger.exception(f"analyze failed for agency {aid}")
             failed.append(aid)

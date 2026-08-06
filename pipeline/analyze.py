@@ -27,7 +27,7 @@ import logging
 import psycopg2.extras
 
 from api.range import time_band_case_sql
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_inner_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
 from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
@@ -47,14 +47,19 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 
 # The deduped fact slice is materialised ONCE per agency into a TEMP TABLE (see
 # analyze()), because the dedup is the expensive full-partition scan+sort and
-# every aggregate needs it. _DEDUP_TS is the SUPERSET every builder reads from:
+# every aggregate needs it. It is the SUPERSET every builder reads from:
 # UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス — which the
 # reports + route-summary surface), plus raw captured_at (agg_route_daily needs a
 # per-day last_seen_at). The service_type-keyed aggregates (route_stats/hour/dow)
 # filter `service_type IS NOT NULL` over the materialised set — equivalent to a
 # typed dedup because service_type is part of the dedup key. NULL service is
 # coalesced to '' where it must fit a NOT NULL column; the endpoints map it back.
-_DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
+#
+# As of the ClickHouse migration, the dedup itself runs in ClickHouse
+# (build_dedup_ch_sql, the `updates` fact table's new home) and the result is
+# bulk-loaded into this same-shaped Postgres TEMP TABLE — every builder below
+# is untouched, since it only ever read the materialised temp table, never
+# `updates` directly.
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -101,13 +106,18 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
         psycopg2.extras.execute_batch(cur, sql, rows)
 
 
-def analyze(agency_id: int, conn) -> None:
+def analyze(agency_id: int, conn, ch_client) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
     Wipes this agency's agg_* rows, then INSERTs the freshly
     computed set, all in one transaction. A crash mid-run rolls back to
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
+
+    *ch_client* is the ClickHouse client used to fetch the deduped fact
+    slice (the `updates` fact table now lives in ClickHouse); every
+    aggregate builder below still reads the Postgres TEMP TABLE it's
+    loaded into, unchanged.
     """
     p = {"agency_id": agency_id, "max_delay": MAX_PLAUSIBLE_DELAY_SEC}
     # Resolved BEFORE the txn opens: _static_loaded calls conn.rollback() in
@@ -122,15 +132,35 @@ def analyze(agency_id: int, conn) -> None:
                 cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
 
         # ── Materialise the deduped fact slice ONCE ──────────────────────
-        # The dedup is a full-partition seq-scan + sort; previously every
-        # aggregate re-derived it (9 scans/agency). Build it once into a TEMP
-        # table and have all builders read from it. ON COMMIT DROP ties its
-        # lifetime to this txn (safe for the per-agency analyze loop on one
-        # connection); ANALYZE gives the planner stats for the downstream
-        # GROUP BYs.
+        # The dedup is a full-partition scan + sort; previously every
+        # aggregate re-derived it (9 scans/agency) against Postgres. `updates`
+        # now lives in ClickHouse, so the dedup runs there instead and the
+        # result is bulk-loaded into the same-shaped Postgres TEMP TABLE every
+        # builder below reads from — unchanged from before this migration.
+        # ON COMMIT DROP ties the temp table's lifetime to this txn (safe for
+        # the per-agency analyze loop on one connection); ANALYZE gives the
+        # planner stats for the downstream GROUP BYs.
+        ch_sql = build_dedup_ch_sql(include_captured_at=True)
+        ch_result = ch_client.query(ch_sql, parameters={"agency_id": agency_id})
+        # Column order must match build_dedup_ch_sql's SELECT list exactly:
+        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, captured_at
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
-            cur.execute(f"CREATE TEMP TABLE _analyze_deduped ON COMMIT DROP AS ({_DEDUP_TS})", p)
+            cur.execute(
+                """
+                CREATE TEMP TABLE _analyze_deduped (
+                    route_code text, service_type text, scheduled_time time,
+                    trip_id text, date date, stop_sequence int, dep_delay int,
+                    captured_at timestamptz
+                ) ON COMMIT DROP
+                """
+            )
+            if ch_result.result_rows:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO _analyze_deduped VALUES %s",
+                    ch_result.result_rows,
+                )
             cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────

@@ -561,23 +561,29 @@ async def _seed_heatmap(pool, agency_id):
             )
 
 
-def _run_analyze(agency_id):
+def _run_analyze(agency_id, ch_client):
+    """analyze()'s dedup materialization now reads ClickHouse (Task 6); every
+    test in this file seeds Postgres `updates` directly (pre-dating that
+    migration), so mirror the same rows into ClickHouse first — see
+    tests.conftest.mirror_updates_to_ch."""
     import os
 
     import psycopg2
 
     from pipeline.analyze import analyze
+    from tests.conftest import mirror_updates_to_ch
 
+    mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
-        analyze(agency_id, conn)
+        analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:
         conn.close()
 
 
 @pytest.mark.asyncio
-async def test_heatmap_agg_path_averages_deduped_observations(map_app):
+async def test_heatmap_agg_path_averages_deduped_observations(map_app, ch_client):
     """No route filter -> aggregate path, averaging DEDUPED observations.
 
     Three DISTINCT trips (T1/T2/T3) serve stop s1 once each, delays [60, 90, 121]:
@@ -615,7 +621,7 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
                 time(8, 10),
                 d,
             )
-    _run_analyze(agency_id)  # populate agg_stop_daily + agg_stop_routes
+    _run_analyze(agency_id, ch_client)  # populate agg_stop_daily + agg_stop_routes
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/delays/heatmap")
     assert resp.status_code == 200
@@ -628,7 +634,7 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_builds_agg_route_daily(map_app):
+async def test_analyze_builds_agg_route_daily(map_app, ch_client):
     """analyze() populates agg_route_daily from raw updates, and route-summary
     reads it end-to-end (no raw scan)."""
     from datetime import datetime, time, timezone
@@ -650,7 +656,7 @@ async def test_analyze_builds_agg_route_daily(map_app):
                 seq,
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R1'", agency_id)
     assert row is not None
@@ -675,7 +681,7 @@ async def test_analyze_builds_agg_route_daily(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_keeps_null_service_routes(map_app):
+async def test_route_summary_keeps_null_service_routes(map_app, ch_client):
     """NULL service_type routes (no typed baseline) must still surface in triage —
     the old raw endpoint never filtered them, so the agg path must not either."""
     from datetime import datetime, time, timezone
@@ -691,7 +697,7 @@ async def test_route_summary_keeps_null_service_routes(map_app):
             datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
             time(10, 0),
         )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -704,7 +710,7 @@ async def test_route_summary_keeps_null_service_routes(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
+async def test_analyze_agg_route_daily_uses_sql_rounding(map_app, ch_client):
     """avg_delay_sec rounds half-away-from-zero (SQL ROUND), not Python banker's
     rounding — guards the builder's rounding if anyone reimplements it in Python."""
     from datetime import datetime, time, timezone
@@ -725,7 +731,7 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
                 seq,
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with pool.acquire() as conn:
         avg = await conn.fetchval(
             "SELECT avg_delay_sec FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_RND'",
@@ -735,7 +741,7 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_collapses_null_and_empty_service_type(map_app):
+async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client):
     """A route with both a NULL and a genuine '' service_type on one day must
     collapse to ONE agg row, not abort analyze on a duplicate PK. The builder
     projects COALESCE(service_type,'') (NULL and '' both -> ''), so the GROUP BY
@@ -760,7 +766,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
                 time(10, 0),
                 d,
             )
-    _run_analyze(agency_id)  # must not raise UniqueViolation
+    _run_analyze(agency_id, ch_client)  # must not raise UniqueViolation
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_DUP'",
@@ -774,7 +780,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_exposes_feed_health(map_app):
+async def test_route_summary_exposes_feed_health(map_app, ch_client):
     """route-summary surfaces the per-day clamp/raw counts from agg_feed_health
     for the latest analyzed date (powers FeedHealthBanner)."""
     from datetime import datetime, time, timezone
@@ -798,7 +804,7 @@ async def test_route_summary_exposes_feed_health(map_app):
                 time(8, 10),
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -808,7 +814,7 @@ async def test_route_summary_exposes_feed_health(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_feed_health_uses_7day_window(map_app):
+async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client):
     """Feed-health sums the last 7 days, so a spike on an EARLIER day still shows
     even when the latest analyzed day is clean (frozen feeds recur across days)."""
     from datetime import datetime, time, timezone
@@ -837,7 +843,7 @@ async def test_route_summary_feed_health_uses_7day_window(map_app):
             datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
             time(8, 10),
         )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -847,7 +853,7 @@ async def test_route_summary_feed_health_uses_7day_window(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_returns_only_latest_date(map_app):
+async def test_route_summary_returns_only_latest_date(map_app, ch_client):
     """route-summary serves MAX(date) only: a route present on an older day but
     not the latest must not leak into the response, and `date` is the latest."""
     from datetime import datetime, time, timezone
@@ -867,7 +873,7 @@ async def test_route_summary_returns_only_latest_date(map_app):
                 time(10, 0),
                 route,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -878,7 +884,7 @@ async def test_route_summary_returns_only_latest_date(map_app):
 
 
 @pytest.mark.asyncio
-async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
+async def test_heatmap_route_filter_reads_agg_not_raw(map_app, ch_client):
     """Route filter -> agg_route_stop_daily, NOT raw updates. Without analyze the
     agg is empty -> 0 features (proving the source switched off the live path);
     after analyze, one dot whose 3 same-event polls dedup to a single observation
@@ -890,7 +896,7 @@ async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
         assert resp.status_code == 200
         assert resp.json()["features"] == []  # not live: raw updates ignored
 
-        _run_analyze(agency_id)
+        _run_analyze(agency_id, ch_client)
         resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1")
     assert resp.status_code == 200
     feats = resp.json()["features"]
