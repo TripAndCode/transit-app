@@ -147,6 +147,46 @@ def test_multi_agency_only_stale_returned(pg_conn, ch_client, agency_id):
     assert stale[0].agency_id == second_id
 
 
+def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agency_id):
+    """Direct regression coverage for the JST/UTC boundary in
+    check_agg_freshness's live-side cutoff (same bug class as
+    tests/unit/test_db_dedup_ch.py::test_dedup_ch_buckets_by_jst_day_not_utc_day
+    proved for the dedup query - and the same class of bug project memory
+    "analyze conn must pin JST" hit for real: a UTC-pinned connection
+    mis-bucketed ~20% of rows relative to the JST-pinned API).
+
+    2026-01-01T16:30:00Z is 2026-01-02 01:30 JST - a different calendar day
+    in each timezone. agg_route_daily is seeded at exactly the UTC date
+    (2026-01-01); if check_agg_freshness's cutoff ever regressed from
+    `latest.astimezone(_JST).date()` back to a bare UTC `.date()`, live_max
+    would equal agg_max (both 2026-01-01) and the agency would NOT be
+    flagged stale. The JST-correct answer is one day ahead of the seeded
+    agg (2026-01-02), so this only passes with the JST conversion intact.
+    """
+    from pipeline.clickhouse import insert_updates
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("boundary.pb", "2026-01-01T16:30:00Z", "T1", "平日", "01:30", "44372", 1, 60)],
+    )
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+            "VALUES (%s, %s, %s, '平日', 60, 120, 1, 1, %s)",
+            (agency_id, date(2026, 1, 1), "44372", "2026-01-01T16:30:00+00:00"),
+        )
+    pg_conn.commit()
+
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(stale) == 1
+    assert stale[0].agency_id == agency_id
+    assert stale[0].agg_max_day == date(2026, 1, 1)
+    assert stale[0].live_max_completed_day == date(2026, 1, 2)  # JST date, not the UTC 2026-01-01
+
+
 def test_analyze_writes_agg_meta(pg_conn, agency_id):
     _seed_two_days(pg_conn, agency_id)
     analyze(agency_id, pg_conn)
