@@ -113,6 +113,52 @@ async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_asy
     assert order.index(a) < order.index(b) < order.index(cc)
 
 
+async def test_compute_network_summary_falls_back_to_latest_completed_day_when_today_has_rows(
+    net_pool, ch_client, ch_async_client
+):
+    """Regression: an agency ingesting continuously (a completed day AFTER
+    its agg's newest day, PLUS a row from right now) must still be flagged
+    stale — is_stale must not silently flip to False just because the
+    unconditional MAX(captured_at) happens to land on today (the normal,
+    healthy, continuously-ingesting case in production).
+
+    A prior version computed MAX(captured_at) over the whole table and only
+    accepted it in Python if it was already before today's JST midnight —
+    so it never fell back to the latest prior completed day when today also
+    had rows, defeating staleness detection under normal conditions.
+    """
+    pool, a, _b, _cc = net_pool
+    # agg only knows about 2026-04-01 ...
+    await _seed(pool, a, dist=[("2026-04-01", 100, 6000, 50)])
+    async with pool.acquire() as c:
+        # ... but live `updates` has a LATER completed day (04-03) the agg
+        # hasn't caught up to yet, plus a row from right now (still-ingesting).
+        await c.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'f1.pb',$2,'T1','平日',$3,'R1',1,60)",
+            a,
+            datetime(2026, 4, 3, 2, 37, tzinfo=timezone.utc),
+            time(11, 37),
+        )
+        await c.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'f_now.pb',now(),'T2','平日',$2,'R1',1,60)",
+            a,
+            time(11, 37),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, a)
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["is_stale"] is True  # agg (04-01) lags the true latest completed day (04-03)
+
+
 async def test_compute_network_summary_excludes_deleted_agency(net_pool, ch_async_client):
     pool, a, b, cc = net_pool
     async with pool.acquire() as conn:

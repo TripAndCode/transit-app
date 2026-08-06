@@ -79,6 +79,50 @@ async def test_aggregate_freshness_no_updates_gives_null_data_to(health_pool, ch
 
 
 @pytest.mark.asyncio
+async def test_aggregate_freshness_falls_back_to_latest_completed_day_when_today_has_rows(
+    health_pool, ch_client, ch_async_client
+):
+    """Regression: an agency ingesting continuously (rows from a completed
+    past day AND from right now, no agg_route_daily seeded) must report the
+    latest COMPLETED day as data_to and be flagged stale — not silently
+    "heal" to data_to=None/is_stale=False just because the unconditional
+    MAX(captured_at) happens to land on today (the normal, healthy,
+    continuously-ingesting case in production).
+
+    A prior version of aggregate_freshness computed MAX(captured_at) over
+    the whole table and only accepted it in Python if it was already before
+    today's JST midnight — which meant it NEVER fell back to the latest
+    prior completed day when today also had rows, defeating staleness
+    detection under totally normal operating conditions.
+    """
+    async with health_pool.acquire() as conn:
+        a = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('Ingesting', 'http://ingesting') RETURNING agency_id"
+        )
+        aid = a["agency_id"]
+        await _insert_update(conn, aid, "2026-04-01")  # a completed day, well in the past
+        # Simulate "still ingesting today": a row captured right now.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, 'f_now.pb', now(), 'trip_now', '平日', $2, 'R1', 1, 60)",
+            aid,
+            time(11, 37),
+        )
+
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, aid)
+
+        result = await aggregate_freshness(conn, ch_async_client)
+
+    row = next(r for r in result if r.agency_id == aid)
+    assert row.data_to == "2026-04-01"  # latest COMPLETED day, not None
+    assert row.is_stale is True  # no agg_route_daily row at all → stale
+    assert row.agg_behind_days == 1
+
+
+@pytest.mark.asyncio
 async def test_aggregate_freshness_excludes_deleted_agency(health_pool, ch_client, ch_async_client):
     async with health_pool.acquire() as conn:
         active = await conn.fetchrow(

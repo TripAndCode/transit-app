@@ -61,13 +61,21 @@ _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY a
 # ClickHouse has no LATERAL join; the per-agency MAX(captured_at) is cheap
 # with agency_id as the leading ORDER BY column, so a plain GROUP BY over
 # every agency (not just active ones — filtered in Python below against the
-# already-fetched `agencies` rows) is the equivalent. The JST-cutoff ("only a
-# COMPLETED day counts") logic that used to live in the LATERAL's WHERE also
-# moves to Python, mirroring check_agg_freshness's Task-5 move of the same
-# logic (pipeline/freshness.py).
+# already-fetched `agencies` rows) is the equivalent. The "only a COMPLETED
+# day counts" cutoff MUST be a WHERE filter applied BEFORE the MAX/GROUP BY —
+# NOT a Python-side accept/reject of an unconditional MAX(captured_at) — an
+# earlier version of this query computed MAX(captured_at) over the whole
+# table and only accepted it if it was already < today's JST midnight,
+# which silently produced `None` (never "the latest prior completed day")
+# for any agency ingesting today too — i.e. every actively-ingesting agency,
+# the normal healthy case. Filtering the rows first means the query's result
+# already IS the latest completed day's max, with no further Python check
+# needed. The cutoff itself is still computed in Python (JST midnight,
+# converted to UTC) since ClickHouse's `captured_at` is stored as UTC.
 _LIVE_MAX_CH_SQL = """
     SELECT agency_id, MAX(captured_at) AS mx
     FROM updates
+    WHERE captured_at < {today_jst_midnight_utc:DateTime64}
     GROUP BY agency_id
 """
 
@@ -97,15 +105,17 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
 
-    live_max_ch_result = await ch.query(_LIVE_MAX_CH_SQL)
+    live_max_ch_result = await ch.query(
+        _LIVE_MAX_CH_SQL,
+        parameters={"today_jst_midnight_utc": today_jst_midnight_utc},
+    )
     active_ids = {a["agency_id"] for a in agencies}
     live_max: dict[int, date] = {}
     for aid, mx in live_max_ch_result.result_rows:
         if aid not in active_ids or mx is None:
             continue
         mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
-        if mx_utc < today_jst_midnight_utc:
-            live_max[aid] = mx_utc.astimezone(_JST).date()
+        live_max[aid] = mx_utc.astimezone(_JST).date()
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

@@ -36,11 +36,21 @@ _FEED_SQL = """
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
-# Only a COMPLETED civil day counts (today's partial day is excluded) — the
-# JST cutoff is computed in Python against ClickHouse's UTC-stored
-# `captured_at`, mirroring pipeline/freshness.py::check_agg_freshness
-# (Task 5) rather than pushing the cutoff into a ClickHouse SQL expression.
-_LIVE_MAX_ONE_CH_SQL = "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}"
+# Only a COMPLETED civil day counts (today's partial day is excluded). The
+# cutoff MUST be a WHERE filter applied BEFORE maxOrNull — NOT a Python-side
+# accept/reject of an unconditional maxOrNull(captured_at) — an earlier
+# version of this query computed the max over the whole table and only
+# accepted it if it was already < today's JST midnight, which silently
+# produced `None` (never "the latest prior completed day") for any agency
+# ingesting today too — i.e. every actively-ingesting agency, the normal
+# healthy case. Filtering the rows first means the query's result already IS
+# the latest completed day's max, with no further Python check needed. The
+# cutoff itself is still computed in Python (JST midnight, converted to UTC)
+# since ClickHouse's `captured_at` is stored as UTC.
+_LIVE_MAX_ONE_CH_SQL = (
+    "SELECT maxOrNull(captured_at) FROM updates "
+    "WHERE agency_id = {agency_id:UInt16} AND captured_at < {today_jst_midnight_utc:DateTime64}"
+)
 
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
@@ -59,13 +69,16 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     live_max: dict[int, "date | None"] = {}
     for a in agencies:
         aid = a["agency_id"]
-        result = await ch.query(_LIVE_MAX_ONE_CH_SQL, parameters={"agency_id": aid})
+        result = await ch.query(
+            _LIVE_MAX_ONE_CH_SQL,
+            parameters={"agency_id": aid, "today_jst_midnight_utc": today_jst_midnight_utc},
+        )
         mx = result.result_rows[0][0]
         if mx is None:
             live_max[aid] = None
             continue
         mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
-        live_max[aid] = mx_utc.astimezone(_JST).date() if mx_utc < today_jst_midnight_utc else None
+        live_max[aid] = mx_utc.astimezone(_JST).date()
 
     rows: list[dict[str, Any]] = []
     for a in agencies:
