@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
-from api.deps import get_agency, get_conn, get_current_user, get_current_user_optional, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
 from api.security import csrf_guard
@@ -206,6 +206,7 @@ async def append_message_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     locale: str = Depends(get_locale),
 ):
     """Dispatch a {tool, args} question and persist user + assistant rows atomically."""
@@ -291,7 +292,7 @@ async def append_message_endpoint(
                 agency_id,
                 question=user_summary,
             )
-            result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
+            result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
         except Exception as exc:
             rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
             assistant_msg = await _conv.append_message(

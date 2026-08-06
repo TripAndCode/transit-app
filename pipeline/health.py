@@ -6,7 +6,8 @@ the CLI keeps using the sync versions; the API calls these.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
@@ -57,21 +58,17 @@ class AgencyFreshness:
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id"
 
-# LATERAL per agency (not a bare GROUP BY over all of `updates`) so each probe
-# is an agency_id-equality + MAX — an index-backed backward scan on
-# idx_updates_agency_at — instead of a full scan/aggregate of the whole
-# fact table. Only active agencies are probed (WHERE deleted_at IS NULL).
-_LIVE_MAX_SQL = """
-    SELECT a.agency_id, (m.mx AT TIME ZONE 'Asia/Tokyo')::date AS d
-    FROM agencies a
-    CROSS JOIN LATERAL (
-        SELECT MAX(u.captured_at) AS mx
-        FROM updates u
-        WHERE u.agency_id = a.agency_id
-          AND u.captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
-                              AT TIME ZONE 'Asia/Tokyo'
-    ) m
-    WHERE a.deleted_at IS NULL
+# ClickHouse has no LATERAL join; the per-agency MAX(captured_at) is cheap
+# with agency_id as the leading ORDER BY column, so a plain GROUP BY over
+# every agency (not just active ones — filtered in Python below against the
+# already-fetched `agencies` rows) is the equivalent. The JST-cutoff ("only a
+# COMPLETED day counts") logic that used to live in the LATERAL's WHERE also
+# moves to Python, mirroring check_agg_freshness's Task-5 move of the same
+# logic (pipeline/freshness.py).
+_LIVE_MAX_CH_SQL = """
+    SELECT agency_id, MAX(captured_at) AS mx
+    FROM updates
+    GROUP BY agency_id
 """
 
 _FEED_HEALTH_SQL = """
@@ -81,12 +78,17 @@ _FEED_HEALTH_SQL = """
     GROUP BY agency_id
 """
 
+_JST = ZoneInfo("Asia/Tokyo")
 
-async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]:
-    """Per-agency freshness using agg_meta, agg_route_daily, and updates."""
+
+async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
+    """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
     )
@@ -94,8 +96,16 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
     meta = {r["agency_id"]: r["analyzed_at"] for r in meta_rows}
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
-    live_max_rows = await conn.fetch(_LIVE_MAX_SQL)
-    live_max = {r["agency_id"]: r["d"] for r in live_max_rows}
+
+    live_max_ch_result = await ch.query(_LIVE_MAX_CH_SQL)
+    active_ids = {a["agency_id"] for a in agencies}
+    live_max: dict[int, date] = {}
+    for aid, mx in live_max_ch_result.result_rows:
+        if aid not in active_ids or mx is None:
+            continue
+        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
+        if mx_utc < today_jst_midnight_utc:
+            live_max[aid] = mx_utc.astimezone(_JST).date()
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

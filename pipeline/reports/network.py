@@ -10,11 +10,14 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 _PERF_SQL = """
     SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd, SUM(on_time_count) AS ot,
@@ -33,17 +36,15 @@ _FEED_SQL = """
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
-_LIVE_MAX_ONE_SQL = """
-    SELECT (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date AS d
-    FROM updates
-    WHERE agency_id = $1
-      AND captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
-                        AT TIME ZONE 'Asia/Tokyo'
-"""
+# Only a COMPLETED civil day counts (today's partial day is excluded) — the
+# JST cutoff is computed in Python against ClickHouse's UTC-stored
+# `captured_at`, mirroring pipeline/freshness.py::check_agg_freshness
+# (Task 5) rather than pushing the cutoff into a ClickHouse SQL expression.
+_LIVE_MAX_ONE_CH_SQL = "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}"
 
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
-async def compute_network_summary(conn, from_date: date, to_date: date) -> list[dict[str, Any]]:
+async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
     """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first."""
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
@@ -52,10 +53,19 @@ async def compute_network_summary(conn, from_date: date, to_date: date) -> list[
     feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
     agg_max = {r["agency_id"]: r["d"] for r in await conn.fetch(_AGG_MAX_SQL)}
 
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
     live_max: dict[int, "date | None"] = {}
     for a in agencies:
-        row = await conn.fetchrow(_LIVE_MAX_ONE_SQL, a["agency_id"])
-        live_max[a["agency_id"]] = row["d"] if row else None
+        aid = a["agency_id"]
+        result = await ch.query(_LIVE_MAX_ONE_CH_SQL, parameters={"agency_id": aid})
+        mx = result.result_rows[0][0]
+        if mx is None:
+            live_max[aid] = None
+            continue
+        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
+        live_max[aid] = mx_utc.astimezone(_JST).date() if mx_utc < today_jst_midnight_utc else None
 
     rows: list[dict[str, Any]] = []
     for a in agencies:

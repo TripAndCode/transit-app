@@ -44,7 +44,7 @@ async def _insert_update(conn, agency_id, day, seq=1):
 
 
 @pytest.mark.asyncio
-async def test_aggregate_freshness_data_to_matches_latest_completed_day(health_pool):
+async def test_aggregate_freshness_data_to_matches_latest_completed_day(health_pool, ch_client, ch_async_client):
     async with health_pool.acquire() as conn:
         a = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('A', 'http://a') RETURNING agency_id"
@@ -53,21 +53,25 @@ async def test_aggregate_freshness_data_to_matches_latest_completed_day(health_p
         await _insert_update(conn, aid, "2026-04-01")
         await _insert_update(conn, aid, "2026-04-03")  # latest completed day
 
-        result = await aggregate_freshness(conn)
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, aid)
+
+        result = await aggregate_freshness(conn, ch_async_client)
 
     row = next(r for r in result if r.agency_id == aid)
     assert row.data_to == "2026-04-03"
 
 
 @pytest.mark.asyncio
-async def test_aggregate_freshness_no_updates_gives_null_data_to(health_pool):
+async def test_aggregate_freshness_no_updates_gives_null_data_to(health_pool, ch_async_client):
     async with health_pool.acquire() as conn:
         a = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('NoData', 'http://nodata') RETURNING agency_id"
         )
         aid = a["agency_id"]
 
-        result = await aggregate_freshness(conn)
+        result = await aggregate_freshness(conn, ch_async_client)
 
     row = next(r for r in result if r.agency_id == aid)
     assert row.data_to is None
@@ -75,7 +79,7 @@ async def test_aggregate_freshness_no_updates_gives_null_data_to(health_pool):
 
 
 @pytest.mark.asyncio
-async def test_aggregate_freshness_excludes_deleted_agency(health_pool):
+async def test_aggregate_freshness_excludes_deleted_agency(health_pool, ch_client, ch_async_client):
     async with health_pool.acquire() as conn:
         active = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('Active', 'http://active') RETURNING agency_id"
@@ -86,7 +90,11 @@ async def test_aggregate_freshness_excludes_deleted_agency(health_pool):
         )
         await _insert_update(conn, deleted["agency_id"], "2026-04-01")
 
-        result = await aggregate_freshness(conn)
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, deleted["agency_id"])
+
+        result = await aggregate_freshness(conn, ch_async_client)
 
     ids = [r.agency_id for r in result]
     assert active["agency_id"] in ids

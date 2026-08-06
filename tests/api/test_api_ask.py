@@ -16,6 +16,11 @@ async def ask_app(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # `ask()` now declares ch=Depends(get_ch) alongside conn (Task 8); every
+    # test in this file mocks chat_with_tools/dispatch so the real client is
+    # never touched, but FastAPI still resolves the dependency, so something
+    # must be present at app.state.ch_client — None is fine here.
+    app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "Test Agency",
@@ -45,7 +50,9 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
 
-    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None):
+    async def mock_chat(
+        question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None, ch=None
+    ):
         return {
             "answer": "テスト回答",
             "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
@@ -153,7 +160,9 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
 
     captured = {}
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         captured["rag_examples"] = rag_examples
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
@@ -175,7 +184,9 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     client, agency_id = ask_client
     captured = {}
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         captured["history"] = history
         return {
             "answer": "stub",
@@ -232,7 +243,9 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
     async def no_decision(*a, **k):

@@ -19,7 +19,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
     DEFAULT_RANGE_DAYS,
@@ -128,6 +128,7 @@ async def ask(
     body: AskRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     locale: str = Depends(get_locale),
 ):
     """Answer a natural-language question via tool-use.
@@ -190,7 +191,7 @@ async def ask(
     cache_outcome: str | None = None
 
     if decision is not None:
-        result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
+        result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale, ch=ch)
         stage = decision.stage
         tool_name = decision.tool
         success = result.kind != "empty"
@@ -218,6 +219,7 @@ async def ask(
             locale=locale,
             rag_examples=examples,
             history=history,
+            ch=ch,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")

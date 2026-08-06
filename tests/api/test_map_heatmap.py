@@ -82,11 +82,12 @@ async def test_heatmap_p90_null_when_no_data(hmap_client):
 
 
 @pytest.fixture
-async def stop_profile_client(apply_schema):
+async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    app.state.ch_client = ch_async_client
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "StopCohortAgency",
@@ -183,6 +184,10 @@ async def stop_profile_client(apply_schema):
         60,
         1,
     )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aid)
+
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
     async with pool.acquire() as conn:

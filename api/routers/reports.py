@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.query.formatter import format_result, format_trend_text
@@ -307,6 +307,7 @@ async def get_report(
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ):
@@ -331,7 +332,7 @@ async def get_report(
         rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
-        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n)
+        rows = await compute_compare_ranking(agency_id, ctx, conn, ch, limit=n)
         intent = {"query_type": "compare_ranking", "limit": n}
     elif report_type == "dow_weekend":
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n)

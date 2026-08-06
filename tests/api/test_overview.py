@@ -927,9 +927,12 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_includes_late5_pct(client, aconn, aagency_id):
+async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_async_client):
     from datetime import date
 
+    from api.main import app
+
+    app.state.ch_client = ch_async_client
     d = date.today()
     await _seed_agg_route_daily(aconn, aagency_id, d, "K31", "平日", 360, 100)
     await _seed_agg_route_stats(aconn, aagency_id, "K31", "平日", 6.0, 8.0, 23.5, 100)
@@ -942,9 +945,12 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency_id):
+async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency_id, ch_async_client):
     from datetime import date
 
+    from api.main import app
+
+    app.state.ch_client = ch_async_client
     d = date.today()
     await _seed_agg_route_daily(aconn, aagency_id, d, "K99", "平日", 120, 5)
     # No agg_route_stats row → late5_pct must be None

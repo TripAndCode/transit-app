@@ -47,9 +47,28 @@ async def map_client(map_app):
         yield client, agency_id
 
 
+@pytest.fixture
+async def map_app_ch(map_app, ch_async_client):
+    """`map_app` with `app.state.ch_client` wired to a real async ClickHouse
+    client (Task 8: /delays/live, /route-shape, /today/route-summary,
+    /today/route/*/trips and /today/route/*/stop-profile now read live
+    `updates` from ClickHouse instead of Postgres). Tests using this fixture
+    require `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
+    app, agency_id = map_app
+    app.state.ch_client = ch_async_client
+    yield app, agency_id
+
+
+@pytest.fixture
+async def map_client_ch(map_app_ch):
+    app, agency_id = map_app_ch
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client, agency_id
+
+
 @pytest.mark.asyncio
-async def test_live_delays_empty(map_client):
-    client, agency_id = map_client
+async def test_live_delays_empty(map_client_ch):
+    client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/delays/live")
     assert resp.status_code == 200
     payload = resp.json()
@@ -57,19 +76,19 @@ async def test_live_delays_empty(map_client):
 
 
 @pytest.mark.asyncio
-async def test_live_delays_unknown_agency(map_client):
-    client, _ = map_client
+async def test_live_delays_unknown_agency(map_client_ch):
+    client, _ = map_client_ch
     resp = await client.get("/api/99999/delays/live")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_live_delays_is_rate_limited_after_repeated_requests(map_client):
+async def test_live_delays_is_rate_limited_after_repeated_requests(map_client_ch):
     """map.py's endpoints must be throttled like every other public read
     router (overview/network/reports/ask) — unauthenticated callers can
     otherwise hit the heaviest live-scan endpoints without limit. Doesn't
     assert the exact configured threshold, only that the protection exists."""
-    client, agency_id = map_client
+    client, agency_id = map_client_ch
     statuses = []
     for _ in range(65):
         resp = await client.get(f"/api/{agency_id}/delays/live")
@@ -216,10 +235,10 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
+async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_client):
     """When static_trips.shape_id resolves to a static_shapes row, the
     endpoint returns a GeoJSON LineString."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
         await conn.execute(
@@ -254,6 +273,9 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
             "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(140.75, 40.83)]), 4326))",
             agency_id,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
@@ -270,14 +292,20 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
     assert 39.0 < lat < 42.0
 
 
-async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None):
+async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
+    ch_client: optional sync ClickHouse client — when given, the raw rows
+    seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
+    (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile
+    drilldowns and route-summary's freshness header now read live `updates`
+    from ClickHouse (Task 8), not Postgres.
 
-    Seeds raw `updates` (for the trips/stop-profile drilldowns, which still read
-    them) AND the precomputed `agg_route_daily` row the route-summary endpoint now
-    reads — computed here from day_rows rather than via a full analyze(), so the
-    hand-set baseline in agg_route_stats isn't clobbered. analyze()'s own builder
+    Seeds raw `updates` (for the trips/stop-profile drilldowns, which read
+    them from ClickHouse when `ch_client` is given) AND the precomputed
+    `agg_route_daily` row the route-summary endpoint now reads — computed
+    here from day_rows rather than via a full analyze(), so the hand-set
+    baseline in agg_route_stats isn't clobbered. analyze()'s own builder
     is covered separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
@@ -331,11 +359,15 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
                 p90_min,
                 samples,
             )
+    if ch_client is not None:
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, agency_id)
 
 
 @pytest.mark.asyncio
-async def test_route_summary_buckets_and_deviation(map_app):
-    app, agency_id = map_app
+async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Anomaly: today avg 420s, baseline avg 120s (2min) p90 360s (6min), 40 samples
     await _seed_route(
@@ -345,6 +377,7 @@ async def test_route_summary_buckets_and_deviation(map_app):
         "平日",
         [(f"t{i}", 1, 420, "10:00") for i in range(40)],
         baseline=(2.0, 6.0, 500),
+        ch_client=ch_client,
     )
     # No baseline route
     await _seed_route(
@@ -354,6 +387,7 @@ async def test_route_summary_buckets_and_deviation(map_app):
         "平日",
         [(f"n{i}", 1, 300, "11:00") for i in range(40)],
         baseline=None,
+        ch_client=ch_client,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -376,14 +410,22 @@ async def test_route_summary_buckets_and_deviation(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_null_service_uses_route_grain_baseline(map_app):
+async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, ch_client):
     """A NULL-service daily row (stored as '') has no per-(route,service_type)
     baseline, but the route has typed history — it should fall back to the
     route-grain baseline instead of being stuck as no_baseline (Hiroshima case)."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Today's row is NULL-service ('') and clearly anomalous (420s vs 360s p90).
-    await _seed_route(pool, agency_id, "R_NULLSVC", "", [(f"x{i}", 1, 420, "10:00") for i in range(40)], baseline=None)
+    await _seed_route(
+        pool,
+        agency_id,
+        "R_NULLSVC",
+        "",
+        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
+        baseline=None,
+        ch_client=ch_client,
+    )
     # The route DOES have a typed (平日) baseline in agg_route_stats.
     async with pool.acquire() as conn:
         await conn.execute(
@@ -400,8 +442,8 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_low_confidence_caps_anomaly(map_app):
-    app, agency_id = map_app
+async def test_route_summary_low_confidence_caps_anomaly(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Would be anomaly (avg 420 > p90 360) but only 5 obs -> watch + low_confidence
     await _seed_route(
@@ -411,6 +453,7 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app):
         "平日",
         [(f"thin{i}", 1, 420, "10:00") for i in range(5)],
         baseline=(2.0, 6.0, 500),
+        ch_client=ch_client,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -420,8 +463,8 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_trips_drilldown(map_app):
-    app, agency_id = map_app
+async def test_route_trips_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # trip A: two stops, delays 600 & 540 -> avg 570; trip B: one stop, 120
     await _seed_route(
@@ -430,6 +473,7 @@ async def test_route_trips_drilldown(map_app):
         "R_DRILL",
         "平日",
         [("A", 1, 600, "08:40"), ("A", 2, 540, "08:40"), ("B", 1, 120, "12:05")],
+        ch_client=ch_client,
     )
     async with pool.acquire() as conn:
         await conn.execute(
@@ -448,16 +492,16 @@ async def test_route_trips_drilldown(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_trips_empty_when_no_data(map_client):
-    client, agency_id = map_client
+async def test_route_trips_empty_when_no_data(map_client_ch):
+    client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
     assert resp.status_code == 200
     assert resp.json() == {"date": None, "trips": []}
 
 
 @pytest.mark.asyncio
-async def test_route_stop_profile_drilldown(map_app):
-    app, agency_id = map_app
+async def test_route_stop_profile_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # seq 1: delays 60 & 120 -> avg 90; seq 2: 600 -> avg 600 (bottleneck)
     await _seed_route(
@@ -466,6 +510,7 @@ async def test_route_stop_profile_drilldown(map_app):
         "R_PROF",
         "平日",
         [("A", 1, 60, "08:40"), ("B", 1, 120, "09:00"), ("A", 2, 600, "08:40")],
+        ch_client=ch_client,
     )
     async with pool.acquire() as conn:
         await conn.execute(
@@ -491,10 +536,10 @@ async def test_route_stop_profile_drilldown(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
+async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_ch, ch_client):
     """If trips have a shape_id but static_shapes has no matching row,
     geometry is null and stops are still populated."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
         # Same setup as the positive test, but DO NOT insert into static_shapes
@@ -521,6 +566,9 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
             "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
             agency_id,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
@@ -634,12 +682,13 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app, ch_client
 
 
 @pytest.mark.asyncio
-async def test_analyze_builds_agg_route_daily(map_app, ch_client):
+async def test_analyze_builds_agg_route_daily(map_app, ch_client, ch_async_client):
     """analyze() populates agg_route_daily from raw updates, and route-summary
     reads it end-to-end (no raw scan)."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # route R1, 平日, 06-09: trip A stops 1&2 (60,120s), trip B stop 1 (600s)
@@ -681,12 +730,13 @@ async def test_analyze_builds_agg_route_daily(map_app, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_keeps_null_service_routes(map_app, ch_client):
+async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_async_client):
     """NULL service_type routes (no typed baseline) must still surface in triage —
     the old raw endpoint never filtered them, so the agg path must not either."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         await conn.execute(
@@ -710,12 +760,13 @@ async def test_route_summary_keeps_null_service_routes(map_app, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_analyze_agg_route_daily_uses_sql_rounding(map_app, ch_client):
+async def test_analyze_agg_route_daily_uses_sql_rounding(map_app, ch_client, ch_async_client):
     """avg_delay_sec rounds half-away-from-zero (SQL ROUND), not Python banker's
     rounding — guards the builder's rounding if anyone reimplements it in Python."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         for i, (trip, seq, d) in enumerate([("Z", 1, 2), ("Z", 2, 3)]):  # avg 2.5
@@ -741,7 +792,7 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client):
+async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client, ch_async_client):
     """A route with both a NULL and a genuine '' service_type on one day must
     collapse to ONE agg row, not abort analyze on a duplicate PK. The builder
     projects COALESCE(service_type,'') (NULL and '' both -> ''), so the GROUP BY
@@ -751,6 +802,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client)
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         for trip, svc, d in [("T1", None, 100), ("T2", "", 200)]:
@@ -780,7 +832,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client)
 
 
 @pytest.mark.asyncio
-async def test_route_summary_exposes_feed_health(map_app, ch_client):
+async def test_route_summary_exposes_feed_health(map_app, ch_client, ch_async_client):
     """route-summary surfaces the per-day clamp/raw counts from agg_feed_health
     for the latest analyzed date (powers FeedHealthBanner)."""
     from datetime import datetime, time, timezone
@@ -788,6 +840,7 @@ async def test_route_summary_exposes_feed_health(map_app, ch_client):
     from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # one normal + one implausible spike on the same date → analyze builds
@@ -814,7 +867,7 @@ async def test_route_summary_exposes_feed_health(map_app, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client):
+async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client, ch_async_client):
     """Feed-health sums the last 7 days, so a spike on an EARLIER day still shows
     even when the latest analyzed day is clean (frozen feeds recur across days)."""
     from datetime import datetime, time, timezone
@@ -822,6 +875,7 @@ async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client):
     from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # spike on 06-07 (clamped out of agg_route_daily) ...
@@ -853,12 +907,13 @@ async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_returns_only_latest_date(map_app, ch_client):
+async def test_route_summary_returns_only_latest_date(map_app, ch_client, ch_async_client):
     """route-summary serves MAX(date) only: a route present on an older day but
     not the latest must not leak into the response, and `date` is the latest."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # R_OLD only on 06-08; R_NEW only on 06-09 (the latest)

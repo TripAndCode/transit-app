@@ -18,15 +18,43 @@ the same filter.
 """
 
 import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from api.deps import get_agency, get_conn
+from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter, get_range_ctx
+from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
 from api.triage import classify_route
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Attach UTC tzinfo to a ClickHouse-returned naive datetime.
+
+    ClickHouse's `updates.captured_at` is `DateTime64(0, 'UTC')`, but
+    clickhouse-connect returns naive `datetime` objects for it (unlike
+    asyncpg, which always returned a tz-aware value for the old
+    `timestamptz` column). Every value that flows into a JSON response must
+    be normalized here so `.isoformat()` keeps emitting the `+00:00`
+    suffix — dropping it would silently change the wire format (and risks
+    JS `new Date(...)` on the frontend misreading the string as local time).
+    """
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=timezone.utc)
+
+
+def _round_half_up_int(x: float) -> int:
+    """Round to the nearest int, half away from zero — matches Postgres's
+    ``ROUND(x::numeric, 0)``, not Python's banker's-rounding ``round()``
+    (see the repo's existing ``pipeline/reports/rankings.py::_avg_min`` for
+    the same care applied to a different call site)."""
+    return int(Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 @router.get("/delays/live")
@@ -34,37 +62,41 @@ router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    ch=Depends(get_ch),
     limit: int = Query(default=200, le=500),
 ):
     """Rows from the most recent observation date with a freshness header."""
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1",
-        agency_id,
+    latest_result = await ch.query(
+        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        parameters={"agency_id": agency_id},
     )
-    latest_ts = latest["ts"] if latest else None
+    latest_ts = _as_utc(latest_result.result_rows[0][0])
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
-    rows = await conn.fetch(
+    rows_result = await ch.query(
         """
-        SELECT DISTINCT ON (trip_id)
-            trip_id, route_code, service_type, scheduled_time,
-            dep_delay, captured_at
+        SELECT trip_id, route_code, service_type, scheduled_time, dep_delay, captured_at
         FROM updates
-        WHERE agency_id=$1
+        WHERE agency_id = {agency_id:UInt16}
           AND dep_delay IS NOT NULL
-          AND captured_at::date = $2::date
+          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
         ORDER BY trip_id, captured_at DESC
-        LIMIT $3
+        LIMIT 1 BY trip_id
+        LIMIT {limit:UInt32}
         """,
-        agency_id,
-        latest_ts,
-        limit,
+        parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
     )
+    cols = rows_result.column_names
+    ts_idx = cols.index("captured_at")
+    out_rows = []
+    for r in rows_result.result_rows:
+        row = dict(zip(cols, r, strict=True))
+        row["captured_at"] = _as_utc(r[ts_idx])
+        out_rows.append(row)
     return {
         "latest_captured_at": latest_ts.isoformat(),
-        "rows": [dict(r) for r in rows],
+        "rows": out_rows,
     }
 
 
@@ -75,6 +107,7 @@ async def route_shape(
     route: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
 ):
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
@@ -98,25 +131,36 @@ async def route_shape(
     # also pins the stops query below so the polyline and circles share
     # one variant — without this pin, multi-shape routes (e.g. Hiroshima
     # express bus with several variants) showed stops off the line.
-    shape_row = await conn.fetchrow(
-        """
-        SELECT t.shape_id, COUNT(*) AS n
-        FROM static_trips t
-        JOIN updates u
-          ON u.agency_id = t.agency_id
-         AND u.trip_id = t.trip_id
-        WHERE t.agency_id = $1
-          AND u.route_code = $2
-          AND t.shape_id IS NOT NULL
-          AND t.shape_id <> ''
-        GROUP BY t.shape_id
-        ORDER BY n DESC
-        LIMIT 1
-        """,
-        agency_id,
-        route,
+    #
+    # `updates` now lives in ClickHouse, so this can no longer be a single
+    # cross-database JOIN: fetch per-trip observation counts from ClickHouse
+    # first, then join that trip_id set against Postgres `static_trips` and
+    # sum the counts per shape_id in Python. Sum-of-per-trip-counts grouped
+    # by shape equals the original single-JOIN COUNT(*) grouped by shape
+    # (GROUP BY commutes over this partition), so this is exact, not
+    # approximate.
+    trip_counts_result = await ch.query(
+        "SELECT trip_id, count() AS n FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "GROUP BY trip_id",
+        parameters={"agency_id": agency_id, "route": str(route)},
     )
-    chosen_shape_id = shape_row["shape_id"] if shape_row else None
+    trip_counts: dict[str, int] = {tid: n for tid, n in trip_counts_result.result_rows}
+
+    chosen_shape_id = None
+    if trip_counts:
+        shape_link_rows = await conn.fetch(
+            "SELECT trip_id, shape_id FROM static_trips "
+            "WHERE agency_id = $1 AND trip_id = ANY($2) "
+            "  AND shape_id IS NOT NULL AND shape_id <> ''",
+            agency_id,
+            list(trip_counts.keys()),
+        )
+        shape_counts: dict[str, int] = defaultdict(int)
+        for r in shape_link_rows:
+            shape_counts[r["shape_id"]] += trip_counts.get(r["trip_id"], 0)
+        if shape_counts:
+            chosen_shape_id = max(shape_counts, key=lambda sid: shape_counts[sid])
 
     geometry = None
     if chosen_shape_id is not None:
@@ -133,50 +177,103 @@ async def route_shape(
     # When a shape is chosen, restrict to trips on that shape so the stops
     # rendered align with the polyline; falls back to all-trips when the
     # route has no shape data at all.
-    where_frag, params, next_param = build_updates_filter(ctx, next_param=3)
+    ch_where_frag, ch_params = build_updates_filter_ch(ctx)
+    shape_trip_ids: list[str] | None = None
     if chosen_shape_id is not None:
-        shape_filter = (
-            f" AND trip_id IN (SELECT trip_id FROM static_trips "
-            f"                  WHERE agency_id = $1 AND shape_id = ${next_param})"
+        shape_trip_rows = await conn.fetch(
+            "SELECT trip_id FROM static_trips WHERE agency_id = $1 AND shape_id = $2",
+            agency_id,
+            chosen_shape_id,
         )
-        params = [*params, chosen_shape_id]
+        shape_trip_ids = [r["trip_id"] for r in shape_trip_rows]
+        ch_shape_filter = " AND trip_id IN {shape_trip_ids:Array(String)}"
+        ch_params = {**ch_params, "shape_trip_ids": shape_trip_ids}
     else:
-        shape_filter = ""
-    rows = await conn.fetch(
+        ch_shape_filter = ""
+
+    dedup_result = await ch.query(
         f"""
-        WITH dedup AS (
-            SELECT DISTINCT ON (trip_id, stop_sequence)
-                trip_id, stop_sequence, dep_delay
-            FROM updates
-            WHERE agency_id=$1 AND route_code=$2
-              AND dep_delay IS NOT NULL
-              AND {where_frag}
-              {shape_filter}
-            ORDER BY trip_id, stop_sequence, captured_at DESC
-        )
-        SELECT
-            d.stop_sequence,
-            COALESCE(MAX(ss.stop_name), d.stop_sequence::text || '番停留所') AS stop_name,
-            MAX(ss.stop_id)       AS stop_id,
-            MAX(ss.stop_code)     AS stop_code,
-            MAX(ss.platform_code) AS platform_code,
-            ROUND(AVG(d.dep_delay) / 60.0::numeric, 2) AS avg_min,
-            COUNT(*) AS samples,
-            AVG(ST_X(ss.geom)) AS lon,
-            AVG(ST_Y(ss.geom)) AS lat
-        FROM dedup d
-        LEFT JOIN static_stop_times sst
-          ON d.trip_id = sst.trip_id AND d.stop_sequence = sst.stop_sequence
-          AND sst.agency_id = $1
-        LEFT JOIN static_stops ss
-          ON sst.stop_id = ss.stop_id AND ss.agency_id = $1
-        GROUP BY d.stop_sequence
-        ORDER BY d.stop_sequence
+        SELECT trip_id, stop_sequence, dep_delay
+        FROM updates
+        WHERE agency_id = {{agency_id:UInt16}} AND route_code = {{route:String}}
+          AND dep_delay IS NOT NULL
+          AND {ch_where_frag}
+          {ch_shape_filter}
+        ORDER BY captured_at DESC, file_name DESC
+        LIMIT 1 BY trip_id, stop_sequence
         """,
-        agency_id,
-        route,
-        *params,
+        parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
+    dedup_rows: list[tuple[str, int, int]] = list(dedup_result.result_rows)
+
+    # If a shape was chosen but no observed trip actually falls on it (e.g.
+    # the ctx window excludes every trip that produced the shape_id vote
+    # above), the shape filter would otherwise silently return everything —
+    # ClickHouse's `IN {empty array}` matches zero rows, which is the
+    # correct (not the buggy) behavior here, so no extra guard is needed.
+    static_join_rows: list = []
+    if dedup_rows:
+        dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
+        static_join_rows = await conn.fetch(
+            "SELECT sst.trip_id, sst.stop_sequence, ss.stop_id, ss.stop_name, "
+            "       ss.stop_code, ss.platform_code, ST_X(ss.geom) AS lon, ST_Y(ss.geom) AS lat "
+            "FROM static_stop_times sst "
+            "LEFT JOIN static_stops ss ON sst.stop_id = ss.stop_id AND ss.agency_id = $1 "
+            "WHERE sst.agency_id = $1 AND sst.trip_id = ANY($2)",
+            agency_id,
+            dedup_trip_ids,
+        )
+    static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
+
+    def _round2(x) -> float:
+        return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    def _new_seq_agg() -> dict:
+        return {
+            "delays": [],
+            "stop_names": [],
+            "stop_ids": [],
+            "stop_codes": [],
+            "platform_codes": [],
+            "lons": [],
+            "lats": [],
+        }
+
+    per_seq: dict[int, dict] = defaultdict(_new_seq_agg)
+    for trip_id, stop_sequence, dep_delay in dedup_rows:
+        a = per_seq[stop_sequence]
+        a["delays"].append(dep_delay)
+        info = static_by_pair.get((trip_id, stop_sequence))
+        if info is not None:
+            if info["stop_name"] is not None:
+                a["stop_names"].append(info["stop_name"])
+            if info["stop_id"] is not None:
+                a["stop_ids"].append(info["stop_id"])
+            if info["stop_code"] is not None:
+                a["stop_codes"].append(info["stop_code"])
+            if info["platform_code"] is not None:
+                a["platform_codes"].append(info["platform_code"])
+            if info["lon"] is not None:
+                a["lons"].append(float(info["lon"]))
+            if info["lat"] is not None:
+                a["lats"].append(float(info["lat"]))
+
+    rows = []
+    for stop_sequence in sorted(per_seq):
+        a = per_seq[stop_sequence]
+        rows.append(
+            {
+                "stop_sequence": stop_sequence,
+                "stop_name": max(a["stop_names"]) if a["stop_names"] else f"{stop_sequence}番停留所",
+                "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
+                "stop_code": max(a["stop_codes"]) if a["stop_codes"] else None,
+                "platform_code": max(a["platform_codes"]) if a["platform_codes"] else None,
+                "avg_min": _round2(sum(a["delays"]) / len(a["delays"]) / 60.0) if a["delays"] else None,
+                "samples": len(a["delays"]),
+                "lon": sum(a["lons"]) / len(a["lons"]) if a["lons"] else None,
+                "lat": sum(a["lats"]) / len(a["lats"]) if a["lats"] else None,
+            }
+        )
     observed_seqs = {r["stop_sequence"] for r in rows}
 
     # Unobserved stops on the chosen shape: every (stop_sequence, stop)
@@ -250,6 +347,7 @@ async def today_route_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
 ):
     """Per-route triage summary for the most recent analyzed date.
 
@@ -310,11 +408,12 @@ async def today_route_summary(
     )
 
     # Freshness header reflects INGEST recency (what DataStalenessBanner means),
-    # not analyze recency — a cheap index-only MAX, independent of the agg.
-    latest_ts = await conn.fetchval(
-        "SELECT MAX(captured_at) FROM updates WHERE agency_id=$1",
-        agency_id,
+    # not analyze recency — a cheap MAX, independent of the agg.
+    latest_result = await ch.query(
+        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        parameters={"agency_id": agency_id},
     )
+    latest_ts = _as_utc(latest_result.result_rows[0][0])
 
     # Feed-health over the last 7 analyzed days (not just the latest): frozen/stale
     # feeds recur across days, so a single clean latest day must not hide a feed
@@ -370,6 +469,7 @@ async def route_trips(
     route_code: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
 ):
     """Per-trip delay for one route on the latest observation date.
 
@@ -377,54 +477,63 @@ async def route_trips(
     (from static_trips), and the trip's average dep_delay across its stops.
     Sorted worst-first — answers "which buses were late". Read-only.
     """
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
-        agency_id,
-        route_code,
+    latest_result = await ch.query(
+        "SELECT maxOrNull(captured_at) FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}",
+        parameters={"agency_id": agency_id, "route": route_code},
     )
-    latest_ts = latest["ts"] if latest else None
+    latest_ts = _as_utc(latest_result.result_rows[0][0])
     if latest_ts is None:
         return {"date": None, "trips": []}
 
-    rows = await conn.fetch(
+    dedup_result = await ch.query(
         """
-        WITH dedup AS (
-            SELECT DISTINCT ON (trip_id, stop_sequence)
-                trip_id, scheduled_time, dep_delay
-            FROM updates
-            WHERE agency_id=$1 AND route_code=$2
-              AND dep_delay IS NOT NULL
-              AND captured_at::date = $3::date
-            ORDER BY trip_id, stop_sequence, captured_at DESC
-        )
-        SELECT
-            d.trip_id,
-            to_char(MIN(d.scheduled_time), 'HH24:MI') AS scheduled_time,
-            MAX(t.trip_headsign) AS headsign,
-            ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
-            COUNT(*) AS samples
-        FROM dedup d
-        LEFT JOIN static_trips t
-          ON t.agency_id = $1 AND t.trip_id = d.trip_id
-        GROUP BY d.trip_id
-        ORDER BY avg_delay_sec DESC NULLS LAST
+        SELECT trip_id, stop_sequence, scheduled_time, dep_delay
+        FROM updates
+        WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}
+          AND dep_delay IS NOT NULL
+          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+        ORDER BY captured_at DESC, file_name DESC
+        LIMIT 1 BY trip_id, stop_sequence
         """,
-        agency_id,
-        route_code,
-        latest_ts,
+        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )
+    per_trip: dict[str, dict] = defaultdict(lambda: {"scheduled_times": [], "delays": []})
+    for trip_id, _stop_sequence, scheduled_time, dep_delay in dedup_result.result_rows:
+        t = per_trip[trip_id]
+        if scheduled_time is not None:
+            t["scheduled_times"].append(scheduled_time)
+        t["delays"].append(dep_delay)
+
+    trip_ids = list(per_trip.keys())
+    headsigns: dict[str, str | None] = {}
+    if trip_ids:
+        headsign_rows = await conn.fetch(
+            "SELECT trip_id, trip_headsign FROM static_trips WHERE agency_id = $1 AND trip_id = ANY($2)",
+            agency_id,
+            trip_ids,
+        )
+        for r in headsign_rows:
+            headsigns[r["trip_id"]] = r["trip_headsign"]
+
+    trips: list[dict[str, Any]] = []
+    for trip_id, t in per_trip.items():
+        delays = t["delays"]
+        avg_delay_sec = _round_half_up_int(sum(delays) / len(delays)) if delays else None
+        sched = min(t["scheduled_times"]) if t["scheduled_times"] else None
+        trips.append(
+            {
+                "trip_id": trip_id,
+                "scheduled_time": sched[:5] if sched else None,
+                "headsign": headsigns.get(trip_id),
+                "avg_delay_sec": avg_delay_sec,
+                "samples": len(delays),
+            }
+        )
+    trips.sort(key=lambda t: (t["avg_delay_sec"] is None, -(t["avg_delay_sec"] or 0)))
     return {
         "date": latest_ts.date().isoformat(),
-        "trips": [
-            {
-                "trip_id": r["trip_id"],
-                "scheduled_time": r["scheduled_time"],
-                "headsign": r["headsign"],
-                "avg_delay_sec": r["avg_delay_sec"],
-                "samples": r["samples"],
-            }
-            for r in rows
-        ],
+        "trips": trips,
     }
 
 
@@ -450,6 +559,7 @@ async def route_stop_profile(
     route_code: str,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
 ):
     """Average delay per stop_sequence along one route on the latest date.
 
@@ -457,44 +567,63 @@ async def route_stop_profile(
     ordered by sequence — answers "where on the route does delay build". The
     name is best-effort (MAX over the sequence's mapped stop). Read-only.
     """
-    latest = await conn.fetchrow(
-        "SELECT MAX(captured_at) AS ts FROM updates WHERE agency_id=$1 AND route_code=$2",
-        agency_id,
-        route_code,
+    latest_result = await ch.query(
+        "SELECT maxOrNull(captured_at) FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}",
+        parameters={"agency_id": agency_id, "route": route_code},
     )
-    latest_ts = latest["ts"] if latest else None
+    latest_ts = _as_utc(latest_result.result_rows[0][0])
     if latest_ts is None:
         return {"date": None, "stops": []}
 
-    rows = await conn.fetch(
+    dedup_result = await ch.query(
         """
-        WITH dedup AS (
-            SELECT DISTINCT ON (trip_id, stop_sequence)
-                trip_id, stop_sequence, dep_delay
-            FROM updates
-            WHERE agency_id=$1 AND route_code=$2
-              AND dep_delay IS NOT NULL
-              AND captured_at::date = $3::date
-            ORDER BY trip_id, stop_sequence, captured_at DESC
-        )
-        SELECT
-            d.stop_sequence,
-            MAX(sst.stop_id) AS stop_id,
-            MAX(ss.stop_name) AS stop_name,
-            ROUND(AVG(d.dep_delay)::numeric, 0)::int AS avg_delay_sec,
-            COUNT(*) AS samples
-        FROM dedup d
-        LEFT JOIN static_stop_times sst
-          ON sst.agency_id = $1 AND sst.trip_id = d.trip_id AND sst.stop_sequence = d.stop_sequence
-        LEFT JOIN static_stops ss
-          ON ss.agency_id = $1 AND ss.stop_id = sst.stop_id
-        GROUP BY d.stop_sequence
-        ORDER BY d.stop_sequence
+        SELECT trip_id, stop_sequence, dep_delay
+        FROM updates
+        WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}
+          AND dep_delay IS NOT NULL
+          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+        ORDER BY captured_at DESC, file_name DESC
+        LIMIT 1 BY trip_id, stop_sequence
         """,
-        agency_id,
-        route_code,
-        latest_ts,
+        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )
+    dedup_rows = list(dedup_result.result_rows)
+
+    static_join_rows: list = []
+    if dedup_rows:
+        dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
+        static_join_rows = await conn.fetch(
+            "SELECT sst.trip_id, sst.stop_sequence, sst.stop_id, ss.stop_name "
+            "FROM static_stop_times sst "
+            "LEFT JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = sst.stop_id "
+            "WHERE sst.agency_id = $1 AND sst.trip_id = ANY($2)",
+            agency_id,
+            dedup_trip_ids,
+        )
+    static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
+
+    per_seq: dict[int, dict] = defaultdict(lambda: {"delays": [], "stop_ids": [], "stop_names": []})
+    for trip_id, stop_sequence, dep_delay in dedup_rows:
+        a = per_seq[stop_sequence]
+        a["delays"].append(dep_delay)
+        info = static_by_pair.get((trip_id, stop_sequence))
+        if info is not None:
+            if info["stop_id"] is not None:
+                a["stop_ids"].append(info["stop_id"])
+            if info["stop_name"] is not None:
+                a["stop_names"].append(info["stop_name"])
+
+    rows: list[dict[str, Any]] = [
+        {
+            "stop_sequence": seq,
+            "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
+            "stop_name": max(a["stop_names"]) if a["stop_names"] else None,
+            "avg_delay_sec": _round_half_up_int(sum(a["delays"]) / len(a["delays"])) if a["delays"] else None,
+            "samples": len(a["delays"]),
+        }
+        for seq, a in sorted(per_seq.items())
+    ]
 
     # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
     from datetime import timedelta

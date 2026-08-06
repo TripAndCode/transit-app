@@ -66,7 +66,7 @@ async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
             )
 
 
-async def test_compute_rollups_ranking_and_freshness(net_pool):
+async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_async_client):
     pool, a, b, cc = net_pool
     await _seed(
         pool,
@@ -84,9 +84,13 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
         updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc),
     )
     # Agency C: no data in range at all.
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, a)
+    mirror_updates_to_ch(ch_client, b)
 
     async with pool.acquire() as conn:
-        rows = await compute_network_summary(conn, date(2026, 4, 1), date(2026, 4, 7))
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
 
     by = {r["agency_id"]: r for r in rows}
     assert by[a]["avg_delay_min"] == 10.0
@@ -109,13 +113,13 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert order.index(a) < order.index(b) < order.index(cc)
 
 
-async def test_compute_network_summary_excludes_deleted_agency(net_pool):
+async def test_compute_network_summary_excludes_deleted_agency(net_pool, ch_async_client):
     pool, a, b, cc = net_pool
     async with pool.acquire() as conn:
         await conn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
 
     async with pool.acquire() as conn:
-        rows = await compute_network_summary(conn, date(2026, 4, 1), date(2026, 4, 7))
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
 
     ids = [r["agency_id"] for r in rows]
     assert cc not in ids
@@ -124,22 +128,26 @@ async def test_compute_network_summary_excludes_deleted_agency(net_pool):
 
 
 @pytest.fixture
-async def net_client(net_pool):
+async def net_client(net_pool, ch_async_client):
     pool, a, b, cc = net_pool
     from api.main import app
 
     app.state.pool = pool
+    app.state.ch_client = ch_async_client
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, pool, a, b, cc
 
 
-async def test_network_summary_endpoint(net_client):
+async def test_network_summary_endpoint(net_client, ch_client):
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
     # Agency B: dist lags its completed updates day, NO feed → clamp_pct None, stale.
     await _seed(
         pool, b, dist=[("2026-04-01", 100, 12000, 100)], updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc)
     )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, b)
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert r.status_code == 200
     body = r.json()

@@ -29,11 +29,17 @@ async def _seed_admin_session(conn) -> str:
 
 
 @pytest.fixture
-async def ops_client(apply_schema):
+async def ops_client(apply_schema, ch_async_client):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # admin_ops() -> aggregate_freshness(conn, ch) now unconditionally queries
+    # ClickHouse (Task 8); without a real client the call raises and
+    # admin_ops's own try/except degrades to an empty `agencies` list, which
+    # would break test_ops_agency_freshness's assertion that a seeded agency
+    # appears in the response.
+    app.state.ch_client = ch_async_client
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE")
         admin_sid = await _seed_admin_session(conn)

@@ -10,8 +10,9 @@ Public surface:
 
 * :data:`TOOLS` — Groq-style function specs to pass as ``tools=`` on the
   chat-completions call.
-* :func:`dispatch` — execute a tool call against Postgres and return a
-  :class:`ToolResult`.
+* :func:`dispatch` — execute a tool call against Postgres (and, for the
+  handful of handlers that read the live ``updates`` table, ClickHouse) and
+  return a :class:`ToolResult`.
 * :func:`render_tool_result` — produce a locale-appropriate summary
   string the frontend can show in the assistant bubble.
 
@@ -440,7 +441,7 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     return replace(ctx, from_date=new_from, to_date=new_to)
 
 
-async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
+async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None) -> bool:
     """Is the route_code listed in the agency's static GTFS at all?
 
     This is the long-lived registry check: it asks "does the agency operate
@@ -450,6 +451,10 @@ async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
     surfaced "登録されていない" whenever the chosen window happened to be
     empty (e.g. right after a TRUNCATE). Keep registry separate from period
     data so the user sees the correct guidance.
+
+    ``ch`` defaults to ``None`` for tests that never exercise the fallback
+    (the static_routes check above already covers them); real dispatch
+    always passes the real ClickHouse client.
     """
     if not route:
         return False
@@ -466,19 +471,20 @@ async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
     # Fallback: some agencies may not have static_routes loaded yet but do
     # have observations. Treat any historical observation as proof the route
     # exists, even outside the selected window.
-    row = await conn.fetchrow(
-        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
-        agency_id,
-        str(route),
+    if ch is None:
+        return False
+    result = await ch.query(
+        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
+        parameters={"agency_id": agency_id, "route": str(route)},
     )
-    return row is not None
+    return bool(result.result_rows)
 
 
-async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id):
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
         return ToolResult(
             kind="empty",
             summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
@@ -512,7 +518,7 @@ _SERVICE_TYPE_MAP: dict[str, ServiceType] = {
 }
 
 
-async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     metric = args.get("metric", "avg_delay")
     # BUG-2 fix: card chips send "k" (matches gold eval canonical form); LLM
     # direct calls use "n" (matches the TOOLS JSON schema).  Accept both, with
@@ -561,7 +567,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     )
 
 
-async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     dimension = args.get("dimension", "dow")
     route = args.get("route")
 
@@ -570,7 +576,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50)
+        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, ch, limit=50)
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -625,7 +631,7 @@ def _weighted_avg_min(days: list[dict]) -> float | None:
     return num / den if den else None
 
 
-async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     # When the LLM scopes to a single route, push it into ctx so the
     # compute function narrows the trend to that route only. Without this
     # the dispatch shim resolves the route alias but the compute call
@@ -654,7 +660,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     )
 
 
-async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
     # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
@@ -675,7 +681,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     )
 
 
-async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
@@ -725,6 +731,7 @@ async def dispatch(
     conn,
     agency_id: int,
     locale: str = "ja",
+    ch=None,
 ) -> ToolResult:
     """Run the named tool. Unknown tool → empty ToolResult with explanation.
 
@@ -733,6 +740,12 @@ async def dispatch(
     consume. The original UI ctx is otherwise preserved (DOW / time_band /
     routes / service still apply). ``locale`` selects the language for the
     human-readable ``summary`` field on the returned :class:`ToolResult`.
+
+    ``ch`` is the ClickHouse client for handlers that read the live
+    `updates` table (Task 8) — ``route_stats``/``describe_data``'s
+    ClickHouse-backed kinds. Defaults to ``None`` so callers/tests that never
+    exercise those specific paths don't need to construct a client; real
+    request-serving callers always pass the real one.
     """
     # BUG-1 fix: card-alias tools sent by the frontend map to canonical handler
     # names. Keep aliases explicit here so the eval gold file can use the short
@@ -788,7 +801,7 @@ async def dispatch(
                     )
 
         effective_ctx = _apply_date_overrides(ctx, arguments)
-        return await handler(arguments, effective_ctx, conn, agency_id, locale)
+        return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
 
 
 # ---------------------------------------------------------------------------

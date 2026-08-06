@@ -24,6 +24,10 @@ async def conv_app(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # append_message_endpoint now declares ch=Depends(get_ch) alongside conn
+    # (Task 8); tests in this file mock dispatch so the real client is never
+    # touched, but FastAPI still resolves the dependency — None is fine here.
+    app.state.ch_client = None
 
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_conversations")
@@ -208,7 +212,7 @@ async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatc
 
     captured = {}
 
-    async def _fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja"):
+    async def _fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
         captured["ctx"] = ctx
         from pipeline.query.results import ToolResult
 

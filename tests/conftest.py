@@ -186,6 +186,30 @@ def ch_client():
     client.close()
 
 
+@pytest.fixture
+async def ch_async_client(ch_client):
+    """Async ClickHouse client for wiring into a test FastAPI app's
+    ``app.state.ch_client`` (Task 8 — the async counterpart of `ch_client`,
+    for endpoints/tool-layer functions that now read live `updates` via the
+    async `get_ch` dependency instead of Postgres).
+
+    Depends on `ch_client` (not a duplicate schema drop/apply of its own) so
+    schema setup happens exactly once and ordering is deterministic: the sync
+    fixture's DROP+CREATE always runs before this connects, and a test using
+    both `ch_client` (e.g. to call `mirror_updates_to_ch`) and this fixture
+    shares the same underlying ClickHouse instance/database.
+    """
+    client = await clickhouse_connect.get_async_client(
+        host="localhost",
+        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
+        username="transit",
+        password="transit",
+        database="transit_test",
+    )
+    yield client
+    await client.close()
+
+
 def mirror_updates_to_ch(ch_client, agency_id) -> None:
     """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
 

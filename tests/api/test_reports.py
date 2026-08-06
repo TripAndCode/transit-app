@@ -16,6 +16,13 @@ async def reports_app(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
+    # compare_ranking's time_band-filtered live-fallback) — every report type
+    # resolves the dependency regardless of whether it's used, so something
+    # must be present at app.state.ch_client. None of this file's tests pass
+    # a time_band filter (all exercise the agg-table fast path), so None is
+    # a safe default here.
+    app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "Reports Test Agency",

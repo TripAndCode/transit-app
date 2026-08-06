@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, build_updates_filter
+from api.range import RangeCtx, build_updates_filter, build_updates_filter_ch
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import percentile_from_hist
@@ -343,6 +344,7 @@ async def compute_compare_ranking(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch,
     limit: int = 100,
 ) -> list[tuple]:
     """Per-route weekday-vs-weekend delay difference, sorted by absolute delta.
@@ -351,7 +353,7 @@ async def compute_compare_ranking(
     but preserves ``routes`` so route-restricted comparisons work.
     """
     if ctx.time_band != "all":
-        return await _compare_ranking_live(agency_id, ctx, conn, limit)
+        return await _compare_ranking_live(agency_id, ctx, ch, limit)
 
     # Both DOW sides from one agg_daily_trend pass (dow split via FILTER), summed
     # across service/date per route. dow='all' so _agg_filter emits no DOW clause.
@@ -393,7 +395,36 @@ async def compute_compare_ranking(
     return [tuple(r) for r in rows]
 
 
-async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, conn, limit: int) -> list[tuple]:
+async def _route_avg_by_dow_ch(agency_id: int, day_ctx: RangeCtx, ch) -> dict[str, tuple[float, int]]:
+    """Per-route (avg_min, n) from ClickHouse `updates`, deduped on a narrower
+    key than `build_dedup_ch_sql` (no service_type/scheduled_time — the
+    weekday-vs-weekend rollup doesn't need them; assumes (trip_id, date)
+    determines service_type in clean data, same assumption the original
+    Postgres wd_dedup/we_dedup CTEs made). Routes with <=10 deduped
+    observations are dropped, mirroring the original SQL's HAVING COUNT(*) > 10.
+    """
+    where_frag, params = build_updates_filter_ch(day_ctx)
+    result = await ch.query(
+        f"""
+        SELECT route_code, dep_delay
+        FROM updates
+        WHERE agency_id = {{agency_id:UInt16}} AND dep_delay IS NOT NULL AND {where_frag}
+        ORDER BY captured_at DESC, file_name DESC
+        LIMIT 1 BY route_code, trip_id, toDate(captured_at, 'Asia/Tokyo'), stop_sequence
+        """,
+        parameters={"agency_id": agency_id, **params},
+    )
+    delays_by_route: dict[str, list[int]] = defaultdict(list)
+    for route_code, dep_delay in result.result_rows:
+        delays_by_route[route_code].append(dep_delay)
+    return {
+        route_code: (sum(delays) / len(delays) / 60.0, len(delays))
+        for route_code, delays in delays_by_route.items()
+        if len(delays) > 10
+    }
+
+
+async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -> list[tuple]:
     """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
     weekday_ctx = RangeCtx(
         from_date=ctx.from_date,
@@ -411,51 +442,30 @@ async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, conn, limit: int)
         service="all",
         routes=ctx.routes,
     )
-    wd_where, wd_params, n_after_wd = build_updates_filter(weekday_ctx, next_param=2)
-    we_where, we_params, n = build_updates_filter(weekend_ctx, next_param=n_after_wd)
-    sql = (
-        # Narrower dedup key than _dedup_cte (no service_type/scheduled_time):
-        # the weekday-vs-weekend rollup doesn't need them. Assumes
-        # (trip_id, date) determines service_type in clean data.
-        "WITH wd_dedup AS (\n"
-        "    SELECT DISTINCT ON (route_code, trip_id,\n"
-        "                        captured_at::date, stop_sequence)\n"
-        "           route_code, trip_id,\n"
-        "           captured_at::date AS date, stop_sequence, dep_delay\n"
-        "    FROM updates\n"
-        f"    WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {wd_where}\n"
-        "    ORDER BY route_code, trip_id, captured_at::date,\n"
-        "             stop_sequence, captured_at DESC, id DESC\n"
-        "),\n"
-        "we_dedup AS (\n"
-        "    SELECT DISTINCT ON (route_code, trip_id,\n"
-        "                        captured_at::date, stop_sequence)\n"
-        "           route_code, trip_id,\n"
-        "           captured_at::date AS date, stop_sequence, dep_delay\n"
-        "    FROM updates\n"
-        f"    WHERE agency_id = $1 AND dep_delay IS NOT NULL AND {we_where}\n"
-        "    ORDER BY route_code, trip_id, captured_at::date,\n"
-        "             stop_sequence, captured_at DESC, id DESC\n"
-        "),\n"
-        "wd_avg AS (\n"
-        "    SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n\n"
-        "    FROM wd_dedup GROUP BY route_code HAVING COUNT(*) > 10\n"
-        "),\n"
-        "we_avg AS (\n"
-        "    SELECT route_code, AVG(dep_delay)/60.0 AS avg_min, COUNT(*) AS n\n"
-        "    FROM we_dedup GROUP BY route_code HAVING COUNT(*) > 10\n"
-        ")\n"
-        "SELECT wd.route_code,\n"
-        "       ROUND(wd.avg_min::numeric, 2) AS heijitsu,\n"
-        "       ROUND(we.avg_min::numeric, 2) AS kyujitsu,\n"
-        "       ROUND(ABS(wd.avg_min - we.avg_min)::numeric, 2) AS abs_delta,\n"
-        "       ROUND((we.avg_min - wd.avg_min)::numeric, 2) AS signed_delta\n"
-        "FROM wd_avg wd JOIN we_avg we ON wd.route_code = we.route_code\n"
-        "ORDER BY ABS(wd.avg_min - we.avg_min) DESC\n"
-        f"LIMIT ${n}"
-    )
-    rows = await conn.fetch(sql, agency_id, *wd_params, *we_params, limit)
-    return [tuple(r) for r in rows]
+    wd_avg = await _route_avg_by_dow_ch(agency_id, weekday_ctx, ch)
+    we_avg = await _route_avg_by_dow_ch(agency_id, weekend_ctx, ch)
+
+    def _round2(x: float) -> Decimal:
+        return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
+
+    out: list[tuple] = []
+    for route_code, (wd_mean, _wd_n) in wd_avg.items():
+        if route_code not in we_avg:
+            continue
+        we_mean, _we_n = we_avg[route_code]
+        out.append(
+            (
+                route_code,
+                _round2(wd_mean),
+                _round2(we_mean),
+                _round2(abs(wd_mean - we_mean)),
+                _round2(we_mean - wd_mean),
+            )
+        )
+    # Sort by the UNROUNDED delta (matches the original SQL's ORDER BY
+    # ABS(wd.avg_min - we.avg_min), computed before the display-only ROUND).
+    out.sort(key=lambda r: -abs(wd_avg[r[0]][0] - we_avg[r[0]][0]))
+    return out[:limit]
 
 
 # ---------------------------------------------------------------------------

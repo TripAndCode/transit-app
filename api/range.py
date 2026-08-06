@@ -258,6 +258,96 @@ def build_updates_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int
     return " AND ".join(parts), params, n
 
 
+def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """ClickHouse-dialect counterpart of :func:`date_range_clause` for the
+    live `updates` table (ClickHouse's own ``captured_at`` column).
+
+    Buckets by the JST civil day, not UTC — every Postgres connection that
+    ever touched `updates` pinned ``SET TIME ZONE 'Asia/Tokyo'``, so
+    `date_range_clause`'s bounds have always meant the JST calendar day.
+    ``toDate(captured_at, 'Asia/Tokyo')`` (never a bare ``toDate(captured_at)``)
+    matches the same JST-not-UTC translation already proven in
+    ``pipeline/db.py::build_dedup_ch_sql``.
+    """
+    return (
+        "toDate(captured_at, 'Asia/Tokyo') >= {ch_from_date:Date} "
+        "AND toDate(captured_at, 'Asia/Tokyo') <= {ch_to_date:Date}",
+        {"ch_from_date": ctx.from_date, "ch_to_date": ctx.to_date},
+    )
+
+
+def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """ClickHouse-dialect counterpart of :func:`dow_clause`.
+
+    ``toDayOfWeek`` on a JST-shifted ``Date`` (mode 0, the default) returns
+    1=Monday..7=Sunday — the same ISODOW numbering Postgres's
+    ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
+    """
+    if ctx.dow == "all":
+        return "1", {}
+    day_expr = "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo'))"
+    if ctx.dow == "weekday":
+        return f"{day_expr} BETWEEN 1 AND 5", {}
+    return f"{day_expr} IN (6, 7)", {}
+
+
+def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """ClickHouse-dialect counterpart of :func:`time_band_clause`.
+
+    ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
+    (GTFS ``"HH:MM:SS"`` text — see the migration design doc), not a native
+    TIME column, so the comparison is a zero-padded lexicographic string
+    range rather than a ``::time`` cast. This is exact for the same reason
+    `time_band_case_sql`'s Postgres CASE arms are: every stored string is a
+    zero-padded 24h clock time.
+    """
+    if ctx.time_band == "all":
+        return "1", {}
+    start, end = _TIME_BAND_RANGES[ctx.time_band]
+    return (
+        "(scheduled_time >= {ch_tb_start:String} AND scheduled_time < {ch_tb_end:String})",
+        {"ch_tb_start": f"{start}:00", "ch_tb_end": f"{end}:00"},
+    )
+
+
+def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """ClickHouse-dialect counterpart of :func:`build_updates_filter`.
+
+    Applies date range + DOW + time-band + service + routes filters against
+    ClickHouse's `updates` table. Returns a single AND-joined fragment plus a
+    ``{name: value}`` dict ready for ``ch.query(..., parameters=...)`` —
+    ClickHouse uses named `{name:Type}` parameters, not asyncpg's positional
+    ``$N``, so (unlike `build_updates_filter`) there's no `next_param` to
+    thread; every fragment here uses its own unique parameter names.
+    """
+    parts: list[str] = []
+    params: dict = {}
+
+    frag, p = date_range_clause_ch(ctx)
+    parts.append(frag)
+    params.update(p)
+
+    frag, p = dow_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
+
+    frag, p = time_band_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
+
+    if ctx.service != "all":
+        parts.append("service_type = {ch_service:String}")
+        params["ch_service"] = ctx.service
+
+    if ctx.routes:
+        parts.append("route_code IN {ch_routes:Array(String)}")
+        params["ch_routes"] = list(ctx.routes)
+
+    return " AND ".join(parts), params
+
+
 def time_band_case_sql(column: str) -> str:
     """SQL CASE mapping a TIME column to its `_TIME_BAND_RANGES` band key.
 
