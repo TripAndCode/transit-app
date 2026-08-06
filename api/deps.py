@@ -8,6 +8,10 @@ async def get_conn(request: Request):
         yield conn
 
 
+async def get_ch(request: Request):
+    return request.app.state.ch_client
+
+
 async def get_agency(agency_id: int, conn=Depends(get_conn)):
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id)
     if not row:
