@@ -199,6 +199,45 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
     assert stale[0].live_max_completed_day == date(2026, 1, 2)  # JST date, not the UTC 2026-01-01
 
 
+def test_check_agg_freshness_falls_back_to_latest_completed_day_when_today_has_rows(pg_conn, ch_client, agency_id):
+    """Regression: an agency ingesting continuously (a completed day from
+    several days ago PLUS a row from right now, no agg_route_daily seeded
+    at all) must be flagged stale — not silently reported fresh just because
+    the unconditional max lands on today (the normal, healthy,
+    continuously-ingesting case in production, not an edge case).
+
+    A prior version called `pipeline.clickhouse.max_captured_at` (the
+    unconditional "absolute latest, today included" helper) and only
+    accepted the result in Python if it was already before today's JST
+    midnight — so it never fell back to the latest prior completed day when
+    today also had rows, defeating staleness detection under normal
+    conditions. `is_stale`'s own docstring says an agency with a completed
+    day but no matching agg row must be stale ("Aggs empty ... but a
+    completed day exists: stale."), so this is not a hypothetical.
+    """
+    from datetime import datetime, timezone
+
+    from pipeline.clickhouse import insert_updates
+
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("old.pb", "2026-04-01T02:37:00Z", "T1", "平日", "11:37", "44372", 1, 60),
+            ("now.pb", now_iso, "T2", "平日", "11:37", "44372", 1, 60),
+        ],
+    )
+    # No agg_route_daily row seeded for this agency at all.
+
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(stale) == 1
+    assert stale[0].agency_id == agency_id
+    assert stale[0].agg_max_day is None
+    assert stale[0].live_max_completed_day == date(2026, 4, 1)  # the completed day, not None
+
+
 def test_analyze_writes_agg_meta(pg_conn, agency_id, ch_client):
     """agg_meta's max_updates_captured_at now comes from ClickHouse (Task 6
     Step 5's ch_max_captured_at swap), so this needs the ClickHouse seed too —

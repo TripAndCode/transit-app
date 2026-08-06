@@ -13,8 +13,15 @@ import clickhouse_connect
 # pipeline/strategies/*.py parse_feed docstrings) plus the schema in
 # db/clickhouse/schema.sql, minus agency_id which insert_updates prepends.
 UPDATE_COLUMNS = [
-    "agency_id", "file_name", "captured_at", "trip_id", "service_type",
-    "scheduled_time", "route_code", "stop_sequence", "dep_delay",
+    "agency_id",
+    "file_name",
+    "captured_at",
+    "trip_id",
+    "service_type",
+    "scheduled_time",
+    "route_code",
+    "stop_sequence",
+    "dep_delay",
 ]
 
 
@@ -52,9 +59,38 @@ def distinct_file_names(client, agency_id: int) -> set[str]:
 
 
 def max_captured_at(client, agency_id: int) -> datetime | None:
+    """Absolute latest `captured_at` for the agency, today included.
+
+    For "is this feed still alive at all" checks (e.g. `/delays/live`'s
+    freshness header). For "what's the latest COMPLETED day" checks, use
+    `max_captured_at_before` instead — do not add a same-day exclusion here,
+    it would silently change this function's meaning for existing callers.
+    """
     result = client.query(
         "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
         parameters={"agency_id": agency_id},
+    )
+    value = result.result_rows[0][0]
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime | None:
+    """Latest `captured_at` strictly before `before` (a tz-aware UTC cutoff).
+
+    For "what's the latest COMPLETED day" freshness checks: filtering rows
+    BEFORE taking the max means the result already IS the latest completed
+    day's max, with no further accept/reject needed by the caller — unlike
+    calling `max_captured_at` and then checking `< before` in Python, which
+    would incorrectly return "no completed day" whenever a later (e.g.
+    today's, still-ingesting) row also exists, instead of falling back to
+    the latest prior completed day.
+    """
+    result = client.query(
+        "SELECT maxOrNull(captured_at) FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64}",
+        parameters={"agency_id": agency_id, "before": before},
     )
     value = result.result_rows[0][0]
     if value is None:
