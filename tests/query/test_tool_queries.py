@@ -13,14 +13,18 @@ from pipeline.query.tool_queries import (
 
 
 @pytest.mark.asyncio
-async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id):
+async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_client, ch_async_client):
     """Three observations across two DOWs for one route. Helper should
     collapse to one row per (service_type, DOW).
 
-    Timestamps are anchored to noon UTC on a known Monday + Tuesday so the
-    ``EXTRACT(ISODOW FROM date::date)`` cast in the SQL helper resolves the
-    same DOW regardless of the Postgres session timezone (CI runs UTC; dev
-    machines may run JST).
+    Task 8.5: ``route_dow_breakdown`` always reads live ``updates`` from
+    ClickHouse now (there is no agg-table fast path for it), so this seeds
+    Postgres `updates` (for readability / consistency with other fixtures)
+    then mirrors into ClickHouse before calling the helper with a real `ch`.
+
+    Timestamps are anchored to noon UTC on a known Monday + Tuesday so
+    ``toDayOfWeek`` resolves the same DOW regardless of session timezone
+    (CI runs UTC; dev machines may run JST).
     """
     today_utc = datetime.now(timezone.utc).date()
     monday_date = today_utc - timedelta(days=today_utc.weekday() + 7)
@@ -43,8 +47,11 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id):
             cap,
             dep,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
     ctx = RangeCtx(from_date=monday_date - timedelta(days=1), to_date=today_utc + timedelta(days=1))
-    result = await route_dow_breakdown(aagency_id, ctx, aconn, route="R1")
+    result = await route_dow_breakdown(aagency_id, ctx, aconn, ch_async_client, route="R1")
     # Expect 2 rows: one for Monday (DOW=1), one for Tuesday (DOW=2).
     dows = {r[2] for r in result}
     assert dows == {1, 2}, f"expected ISODOW set {{1, 2}}, got {dows}"
@@ -53,8 +60,19 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_route_compare_service_returns_per_service_type(aconn, aagency_id):
-    """One row per service_type for one route."""
+async def test_route_dow_breakdown_returns_empty_without_ch(aconn, aagency_id):
+    """No ClickHouse client attached (``ch=None``, the default) -> empty
+    result rather than raising — the same "safe default" convention
+    ``pipeline.query.tools._is_route_registered`` already uses, needed so
+    callers/tests that only exercise routing logic don't need a real client."""
+    ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 2))
+    result = await route_dow_breakdown(aagency_id, ctx, aconn, route="R1")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_returns_per_service_type(aconn, aagency_id, ch_client, ch_async_client):
+    """One row per service_type for one route (Task 8.5: live ClickHouse path)."""
     now = datetime.now(timezone(timedelta(hours=9)))
     rows = [
         ("pb_h", now, "平日", 60),
@@ -72,9 +90,12 @@ async def test_route_compare_service_returns_per_service_type(aconn, aagency_id)
             svc,
             dep,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
     today = date.today()
     ctx = RangeCtx(from_date=today - timedelta(days=1), to_date=today + timedelta(days=1))
-    result = await route_compare_service(aagency_id, ctx, aconn, route="R2")
+    result = await route_compare_service(aagency_id, ctx, aconn, ch_async_client, route="R2")
     services = {r[0] for r in result}
     assert services == {"平日", "土日祝"}
 

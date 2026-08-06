@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.reports import compute_overview_summary
@@ -207,6 +207,7 @@ async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> OverviewSummary:
@@ -216,5 +217,5 @@ async def overview_summary(
     (today: none — strings are frontend-side. Reserved for future
     qualitative labels). See spec section "Architecture".
     """
-    payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool)
+    payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool, ch=ch)
     return OverviewSummary(**payload)

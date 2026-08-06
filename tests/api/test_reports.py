@@ -280,6 +280,97 @@ async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     assert r[1] is None  # '' sentinel mapped back to None
 
 
+async def _seed_route_at(pool, agency_id, route_code, service_type, day, sched, delays):
+    """Like `_seed_route` but with a caller-chosen `scheduled_time` (HH:MM),
+    needed to land inside/outside a specific time_band.
+
+    `sched` (with its ':' stripped) is folded into the trip_id/file_name so
+    multiple calls for the same (route_code, day) — e.g. one in-band, one
+    out-of-band — don't collide on the updates table's unique key.
+    """
+    from datetime import datetime, time
+
+    hh, mm = (int(x) for x in sched.split(":"))
+    tag = sched.replace(":", "")
+    async with pool.acquire() as conn:
+        for i, d in enumerate(delays):
+            await conn.execute(
+                "INSERT INTO updates "
+                "(agency_id, trip_id, route_code, service_type, scheduled_time, "
+                " stop_sequence, dep_delay, captured_at, file_name) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                agency_id,
+                f"{route_code}-{day}-tb-{tag}-trip-{i}",
+                route_code,
+                service_type,
+                time(hh, mm),
+                1,
+                d,
+                datetime.fromisoformat(f"{day}T10:{i // 60:02d}:{i % 60:02d}"),
+                f"test/{route_code}/{day}/tb/{tag}/{i}.pb",
+            )
+
+
+@pytest.mark.asyncio
+async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
+    """Task 8.5: a time_band filter bypasses agg_route_daily_dist and reads
+    live `updates` from ClickHouse via `_dedup_cte_ch` / `_ranking_live`.
+
+    25 samples inside the 'morning' band (05:00-09:00) clear the ranking's
+    HAVING count(*) > 20 gate; a same-route sample outside the band must be
+    excluded from both the average and the sample count.
+    """
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-10"
+    await _seed_route_at(pool, agency_id, "R_TB", "平日", day, "08:00", [300] * 25)  # 5.0 min, in-band
+    await _seed_route_at(pool, agency_id, "R_TB", "平日", day, "13:00", [6000])  # way outside the band
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "R_TB")
+    # (route, service, avg_min, p50_min, p90_min, samples)
+    assert float(r[2]) == 5.0
+    assert r[5] == 25
+    assert 2.0 <= float(r[3]) < 8.0  # p50 within the uniform-300s cluster
+    assert 2.0 <= float(r[4]) < 8.0  # p90 within the uniform-300s cluster
+
+
+@pytest.mark.asyncio
+async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
+    """Task 8.5: trend's daily series (compute_trend_series) and hourly
+    heatmap (compute_hourly_heatmap) both fall back to the ClickHouse live
+    scan under a non-default time_band; only the in-band sample counts."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-11"
+    # > 5 samples so compute_trend_series' HAVING count(*) > 5 gate clears;
+    # > 3 samples (same rows) also clears compute_hourly_heatmap's HAVING >= 3.
+    await _seed_route_at(pool, agency_id, "R_TR2", "平日", day, "06:00", [180] * 6)  # 3.0 min, morning
+    await _seed_route_at(pool, agency_id, "R_TR2", "平日", day, "20:00", [6000])  # evening — excluded
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    days = rows[0]["days"]
+    assert len(days) == 1
+    assert days[0]["date"] == day
+    assert days[0]["samples"] == 6
+    assert days[0]["avg_min"] == pytest.approx(3.0, abs=0.05)
+    hourly = rows[0]["hourly"]
+    assert any(c["hour"] == 6 and c["samples"] == 6 for c in hourly)
+    assert not any(c["hour"] == 20 for c in hourly)  # outside the morning band
+
+
 @pytest.mark.asyncio
 async def test_reports_unknown_agency_returns_404(reports_client):
     client, _, _ = reports_client

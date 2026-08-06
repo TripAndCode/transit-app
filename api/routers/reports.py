@@ -320,30 +320,30 @@ async def get_report(
     rows: list
 
     if report_type == "ranking":
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order="desc", limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="desc", limit=n)
         intent = {"query_type": "ranking", "limit": n}
     elif report_type == "ranking_best":
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order="asc", limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="asc", limit=n)
         intent = {"query_type": "ranking", "limit": n, "sort_order": "asc"}
     elif report_type == "on_time":
-        rows = await compute_on_time(agency_id, ctx, conn, limit=n)
+        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n)
         intent = {"query_type": "on_time", "limit": n}
     elif report_type == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
         rows = await compute_compare_ranking(agency_id, ctx, conn, ch, limit=n)
         intent = {"query_type": "compare_ranking", "limit": n}
     elif report_type == "dow_weekend":
-        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n)
+        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n, ch=ch)
         intent = {"query_type": "dow_ranking", "dow_group": "weekend", "limit": n}
     elif report_type == "dow_weekday":
-        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n)
+        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n, ch=ch)
         intent = {"query_type": "dow_ranking", "dow_group": "weekday", "limit": n}
     elif report_type == "trend":
         # Daily series + hour-of-day heatmap for the granular Trend tab.
-        series = await compute_trend_series(agency_id, ctx, conn)
-        hourly = await compute_hourly_heatmap(agency_id, ctx, conn)
+        series = await compute_trend_series(agency_id, ctx, conn, ch=ch)
+        hourly = await compute_hourly_heatmap(agency_id, ctx, conn, ch=ch)
         dow_band = hourly_cells_to_dow_band(hourly, locale=locale)
         days = series["days"]
         if format == "csv":

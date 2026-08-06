@@ -154,6 +154,14 @@ async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aag
 async def test_overview_endpoint_returns_empty_payload_when_no_data(client, aagency_id):
     """An agency with no `updates` rows in range returns a zero-filled
     OverviewSummary, not a 404 or 500."""
+    # overview_summary() now declares ch=Depends(get_ch) alongside conn (Task
+    # 8.5's time_band live-fallback) — resolving it needs something present
+    # at app.state.ch_client. This test's default ctx never leaves the
+    # ctx.time_band == 'all' fast path, so None is a safe default here
+    # (same pattern as tests/api/test_reports.py's reports_app fixture).
+    from api.main import app
+
+    app.state.ch_client = None
     r = await client.get(f"/api/{aagency_id}/overview/summary?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 200
     body = r.json()
@@ -512,9 +520,10 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aagency_id):
+async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aagency_id, ch_client, ch_async_client):
     """Non-default time_band bypasses agg_daily_trend and reads updates
-    directly, same fallback _concentration() already uses."""
+    directly (ClickHouse, Task 8.5), same fallback _concentration() already
+    uses."""
     base = datetime.combine(date(2026, 5, 18), time(8, 0), tzinfo=timezone.utc)
     for i, dep in enumerate([300, 360]):  # 5.0, 6.0 min -> avg 5.5
         await aconn.execute(
@@ -529,11 +538,14 @@ async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aage
             i + 1,
             dep,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
 
     from pipeline.reports import compute_overview_summary
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
     routes = out["top_delayed"]["routes"]
     assert len(routes) == 1
     assert routes[0]["route_code"] == "R_TD"
@@ -646,6 +658,11 @@ async def test_service_split_two_rows_and_sparkline_7_points(aconn, aagency_id):
 async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aagency_id):
     """End-to-end: seed data, hit the endpoint, every top-level key present
     and headline shape is well-populated."""
+    # See test_overview_endpoint_returns_empty_payload_when_no_data's comment —
+    # default ctx (time_band == 'all') never needs a real ClickHouse client.
+    from api.main import app
+
+    app.state.ch_client = None
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     for i in range(5):
         await aconn.execute(
@@ -681,11 +698,12 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
 
 
 @pytest.mark.asyncio
-async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
+async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id, ch_client, ch_async_client):
     """When ``ctx.time_band != 'all'``, the headline must read from live
-    ``updates`` so the hour-of-day filter actually applies. The four
-    seeded rows span morning / noon / evening; ``time_band='morning'``
-    must keep only the two scheduled inside 05:00-09:00."""
+    ``updates`` (ClickHouse, Task 8.5) so the hour-of-day filter actually
+    applies. The four seeded rows span morning / noon / evening;
+    ``time_band='morning'`` must keep only the two scheduled inside
+    05:00-09:00."""
     base = datetime.combine(date(2026, 5, 6), time(12, 0), tzinfo=timezone.utc)
     rows = [
         ("06:00", 600),  # morning — included (10 min)
@@ -706,6 +724,9 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
             sched,
             dep,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
 
     from pipeline.reports import compute_overview_summary
 
@@ -714,7 +735,7 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id):
         to_date=date(2026, 5, 6),
         time_band="morning",
     )
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
     # Morning-only avg = (10 + 5) / 2 = 7.5 min over 2 samples.
     assert out["headline"]["samples"] == 2
     assert out["headline"]["avg_min"] == pytest.approx(7.5, abs=0.1)
@@ -768,9 +789,10 @@ async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id):
+async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id, ch_client, ch_async_client):
     """A service filter (the agg has no service dimension) routes peak-hour to
-    the live scan, which still partitions weekday/weekend correctly."""
+    the live scan (ClickHouse, Task 8.5), which still partitions weekday/weekend
+    correctly."""
     weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
     weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
     rows = [
@@ -793,12 +815,15 @@ async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_
             i + 1,
             dep,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
 
     from pipeline.reports import compute_overview_summary
 
     # service != 'all' forces the live path (agg_hour_daily has no service column).
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), service="平日")
-    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
     pk_wd = out["peak_hour_weekday"]
     pk_we = out["peak_hour_weekend"]
     assert pk_wd is not None and pk_we is not None

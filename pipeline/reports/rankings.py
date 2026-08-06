@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, build_updates_filter, build_updates_filter_ch
+from api.range import RangeCtx, build_updates_filter_ch
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import percentile_from_hist
-from pipeline.reports.filters import _agg_filter, _dedup_cte, _dist_filter
+from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
@@ -95,6 +95,7 @@ async def compute_ranking(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
     sort_order: str = "desc",
     limit: int = 100,
 ) -> list[tuple]:
@@ -102,10 +103,10 @@ async def compute_ranking(
 
     Reads agg_route_daily_dist: avg/samples are exact; p50/p90 are interpolated
     from the merged delay histogram (approximate within one bucket — fine for
-    ranking). A time_band filter falls back to the live scan.
+    ranking). A time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all":
-        return await _ranking_live(agency_id, ctx, conn, sort_order, limit)
+        return await _ranking_live(agency_id, ctx, conn, ch, sort_order, limit)
 
     rows = await _read_dist_with_hist(agency_id, ctx, conn)
     out: list[tuple] = []
@@ -128,30 +129,34 @@ async def compute_ranking(
     return out[:limit]
 
 
-async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, sort_order: str, limit: int) -> list[tuple]:
-    """Live raw-scan ranking — fallback for time_band-filtered queries."""
-    where, params, n = build_updates_filter(ctx, next_param=2)
+async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str, limit: int) -> list[tuple]:
+    """Live raw-scan ranking — fallback for time_band-filtered queries.
+
+    p50/p90 use ClickHouse's `quantileExact` aggregate instead of the
+    Postgres version's `PERCENT_RANK() OVER (...)` window + boundary-row
+    pick — ClickHouse's window-function support doesn't cover
+    `PERCENT_RANK`, and `quantileExact` is the more idiomatic ClickHouse way
+    to get an exact per-group percentile directly, with no window/CTE
+    indirection needed. Every group here has > 20 rows (the HAVING gate),
+    so `avg`/`quantileExact` are never NULL/NaN — no empty-input guard needed.
+    """
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
-    sql = (
-        f"WITH {_dedup_cte(where)},\n"
-        "ranked AS (\n"
-        "    SELECT *, PERCENT_RANK() OVER (\n"
-        "        PARTITION BY route_code, service_type ORDER BY dep_delay\n"
-        "    ) AS pct FROM deduped\n"
-        ")\n"
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       ROUND(MIN(CASE WHEN pct >= 0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,\n"
-        "       ROUND(MIN(CASE WHEN pct >= 0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,\n"
-        "       COUNT(*) AS samples\n"
-        "FROM ranked\n"
+        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       round(quantileExact(0.5)(dep_delay) / 60.0, 2) AS p50_min,\n"
+        "       round(quantileExact(0.9)(dep_delay) / 60.0, 2) AS p90_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING COUNT(*) > 20\n"
-        f"ORDER BY avg_min {order} NULLS LAST\n"
-        f"LIMIT ${n}"
+        "HAVING count(*) > 20\n"
+        f"ORDER BY avg_min {order}\n"
+        "LIMIT {rk_limit:UInt32}",
+        parameters={"agency_id": agency_id, "rk_limit": limit, **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, *params, limit)
-    return [tuple(r) for r in rows]
+    return [tuple(r) for r in result.result_rows]
 
 
 @perf.timed("reports.on_time")
@@ -160,6 +165,7 @@ async def compute_on_time(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
     threshold_sec: int = 60,
     limit: int = 100,
     sort_order: str = "desc",
@@ -171,10 +177,10 @@ async def compute_on_time(
 
     Reads agg_route_daily_dist (exact). The on-time threshold is baked into
     ``on_time_count`` (<=60s) at analyze time, so a non-default ``threshold_sec``
-    or a time_band filter falls back to the live scan.
+    or a time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all" or threshold_sec != 60:
-        return await _on_time_live(agency_id, ctx, conn, threshold_sec, limit, sort_order)
+        return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
 
     rows = await _read_dist_scalars(agency_id, ctx, conn)
     out: list[tuple] = []
@@ -197,27 +203,31 @@ async def compute_on_time(
 
 
 async def _on_time_live(
-    agency_id: int, ctx: RangeCtx, conn, threshold_sec: int, limit: int, sort_order: str
+    agency_id: int, ctx: RangeCtx, conn, ch, threshold_sec: int, limit: int, sort_order: str
 ) -> list[tuple]:
-    """Live raw-scan on-time — fallback for time_band / custom-threshold queries."""
-    where, params, n = build_updates_filter(ctx, next_param=2)
+    """Live raw-scan on-time — fallback for time_band / custom-threshold queries.
+
+    Every group here has > 20 rows (the HAVING gate), so `avg`/`sum` are
+    never NULL/NaN — no empty-input guard needed.
+    """
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
-    sql = (
-        f"WITH {_dedup_cte(where)}\n"
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       ROUND(SUM(CASE WHEN dep_delay <= "
+        "       round(sum(CASE WHEN dep_delay <= "
         f"{threshold_sec}"
-        " THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       COUNT(*) AS samples\n"
+        " THEN 1.0 ELSE 0 END) * 100.0 / count(*), 1) AS on_time_pct,\n"
+        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING COUNT(*) > 20\n"
-        f"ORDER BY on_time_pct {order} NULLS LAST\n"
-        f"LIMIT ${n}"
+        "HAVING count(*) > 20\n"
+        f"ORDER BY on_time_pct {order}\n"
+        "LIMIT {ot_limit:UInt32}",
+        parameters={"agency_id": agency_id, "ot_limit": limit, **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, *params, limit)
-    return [tuple(r) for r in rows]
+    return [tuple(r) for r in result.result_rows]
 
 
 @perf.timed("reports.worst_5min")
@@ -226,15 +236,16 @@ async def compute_worst_5min(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
     limit: int = 100,
 ) -> list[tuple]:
     """Routes ranked by count of >5min late observations.
 
     Reads agg_route_daily_dist (``late5_count`` is exact, >300s baked in at
-    analyze time). A time_band filter falls back to the live scan.
+    analyze time). A time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all":
-        return await _worst_5min_live(agency_id, ctx, conn, limit)
+        return await _worst_5min_live(agency_id, ctx, conn, ch, limit)
 
     rows = await _read_dist_scalars(agency_id, ctx, conn)
     out: list[tuple] = []
@@ -255,23 +266,23 @@ async def compute_worst_5min(
     return out[:limit]
 
 
-async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, limit: int) -> list[tuple]:
+async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int) -> list[tuple]:
     """Live raw-scan worst-5min — fallback for time_band-filtered queries."""
-    where, params, n = build_updates_filter(ctx, next_param=2)
-    sql = (
-        f"WITH {_dedup_cte(where)}\n"
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) AS late5_count,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       COUNT(*) AS samples\n"
+        "       sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) AS late5_count,\n"
+        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING SUM(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0\n"
+        "HAVING sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0\n"
         "ORDER BY late5_count DESC\n"
-        f"LIMIT ${n}"
+        "LIMIT {w5_limit:UInt32}",
+        parameters={"agency_id": agency_id, "w5_limit": limit, **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, *params, limit)
-    return [tuple(r) for r in rows]
+    return [tuple(r) for r in result.result_rows]
 
 
 @perf.timed("reports.dow_ranking")
@@ -282,6 +293,7 @@ async def compute_dow_ranking(
     conn,
     dow_group: str,  # 'weekday' or 'weekend'
     limit: int = 100,
+    ch=None,
 ) -> list[tuple]:
     """Worst-delay routes restricted to weekday or weekend observations.
 
@@ -300,7 +312,7 @@ async def compute_dow_ranking(
     )
     label = "週末" if dow_group == "weekend" else "平日"
     if ctx.time_band != "all":
-        return await _dow_ranking_live(agency_id, overridden, conn, label, limit)
+        return await _dow_ranking_live(agency_id, overridden, conn, ch, label, limit)
 
     # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
     where, params, n = _agg_filter(overridden, next_param=2)
@@ -320,22 +332,22 @@ async def compute_dow_ranking(
     return [tuple(r) for r in rows]
 
 
-async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, label: str, limit: int) -> list[tuple]:
+async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, label: str, limit: int) -> list[tuple]:
     """Live raw-scan dow-ranking — fallback for time_band-filtered queries."""
-    where, params, n = build_updates_filter(overridden, next_param=2)
-    sql = (
-        f"WITH {_dedup_cte(where)}\n"
+    cte_sql, ch_params = _dedup_cte_ch(overridden)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
         f"SELECT route_code, service_type, '{label}' AS dow,\n"
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-        "       COUNT(*) AS samples\n"
+        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING COUNT(*) > 10\n"
-        "ORDER BY avg_min DESC NULLS LAST\n"
-        f"LIMIT ${n}"
+        "HAVING count(*) > 10\n"
+        "ORDER BY avg_min DESC\n"
+        "LIMIT {dr_limit:UInt32}",
+        parameters={"agency_id": agency_id, "dr_limit": limit, **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, *params, limit)
-    return [tuple(r) for r in rows]
+    return [tuple(r) for r in result.result_rows]
 
 
 @perf.timed("reports.compare_ranking")
@@ -479,6 +491,7 @@ async def compute_hourly_heatmap(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
 ) -> list[dict]:
     """Hour-of-day × date cells for the granular trend view.
 
@@ -489,7 +502,8 @@ async def compute_hourly_heatmap(
     """
     # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
     # a direct read. It has no service/route/hour-band dimension, so any of those
-    # filters fall back to the live dedup scan. DOW (on the date column) is fine.
+    # filters fall back to the live dedup scan (ClickHouse). DOW (on the date
+    # column) is fine.
     if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (
@@ -498,20 +512,28 @@ async def compute_hourly_heatmap(
             f"WHERE agency_id = $1 AND {where} AND samples >= 3\n"
             "ORDER BY date, hour"
         )
+        rows = await conn.fetch(sql, agency_id, *params)
     else:
-        where, params, _ = build_updates_filter(ctx, next_param=2)
-        sql = (
-            f"WITH {_dedup_cte(where)}\n"
-            "SELECT date, EXTRACT(HOUR FROM scheduled_time)::int AS hour,\n"
-            "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-            "       COUNT(*) AS samples\n"
+        # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse
+        # (not a native TIME column) — see api.range.time_band_clause_ch's
+        # docstring — so the hour is read off the first two characters
+        # rather than EXTRACT(). Every group here has >= 3 rows (the HAVING
+        # gate), so avg() is never NaN.
+        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        hour_expr = "toUInt8(substring(scheduled_time, 1, 2))"
+        result = await ch.query(
+            f"WITH {cte_sql}\n"
+            f"SELECT date, {hour_expr} AS hour,\n"
+            "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+            "       count(*) AS samples\n"
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
-            "GROUP BY date, EXTRACT(HOUR FROM scheduled_time)::int\n"
-            "HAVING COUNT(*) >= 3\n"
-            "ORDER BY date, hour"
+            f"GROUP BY date, {hour_expr}\n"
+            "HAVING count(*) >= 3\n"
+            "ORDER BY date, hour",
+            parameters={"agency_id": agency_id, **ch_params},
         )
-    rows = await conn.fetch(sql, agency_id, *params)
+        rows = _ch_rows(result)
     return [
         {
             "date": r["date"].isoformat(),
@@ -531,6 +553,7 @@ async def compute_trend_series(
     conn,
     top_offenders: int = 3,
     granularity: str = "day",
+    ch=None,
 ) -> dict:
     """Bucketed series + per-bucket worst-route attribution for the Trend chart.
 
@@ -556,22 +579,26 @@ async def compute_trend_series(
             "GROUP BY bucket, route_code, service_type\n"
             "HAVING SUM(samples) > 5"
         )
+        per_day = await conn.fetch(sql, agency_id, *params)
     else:
-        # time_band filter needs the hour-of-day, only on raw updates.
-        where, params, _ = build_updates_filter(ctx, next_param=2)
-        sql = (
-            f"WITH {_dedup_cte(where)},\n"
-            "per_bucket AS (\n"
-            f"    SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
-            "           route_code, service_type,\n"
-            "           ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,\n"
-            "           COUNT(*) AS samples\n"
-            "    FROM deduped GROUP BY bucket, route_code, service_type\n"
-            "    HAVING COUNT(*) > 5\n"
-            ")\n"
-            "SELECT * FROM per_bucket"
+        # time_band filter needs the hour-of-day, only on raw updates
+        # (ClickHouse). Every group here has > 5 rows (the HAVING gate), so
+        # avg() is never NaN.
+        _CH_BUCKET_EXPR = {"day": "date", "week": "toStartOfWeek(date, 1)", "month": "toStartOfMonth(date)"}
+        bucket_expr = _CH_BUCKET_EXPR.get(granularity, "date")
+        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        result = await ch.query(
+            f"WITH {cte_sql}\n"
+            f"SELECT {bucket_expr} AS bucket,\n"
+            "       route_code, service_type,\n"
+            "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+            "       count(*) AS samples\n"
+            "FROM deduped\n"
+            "GROUP BY bucket, route_code, service_type\n"
+            "HAVING count(*) > 5",
+            parameters={"agency_id": agency_id, **ch_params},
         )
-    per_day = await conn.fetch(sql, agency_id, *params)
+        per_day = _ch_rows(result)
 
     by_date_samples: dict = {}
     by_date_weighted: dict = {}

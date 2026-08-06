@@ -489,7 +489,7 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             kind="empty",
             summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
         )
-    rows = await route_dow_breakdown(agency_id, ctx, conn, route=str(route))
+    rows = await route_dow_breakdown(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(
             kind="empty",
@@ -534,7 +534,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
 
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order=sort_order, limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order=sort_order, limit=n)
         cols = ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"]
         label = _summary(
             "label_ranking_ontime" if best_first else "label_ranking_delay",
@@ -543,11 +543,11 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     elif metric == "on_time_rate":
         # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
         sort_order = "desc" if best_first else "asc"
-        rows = await compute_on_time(agency_id, ctx, conn, limit=n, sort_order=sort_order)
+        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
         cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
         cols = ["route_code", "service_type", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
     else:
@@ -595,7 +595,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
                 kind="empty",
                 summary=_summary("compare_service_needs_route", lang=locale),
             )
-        rows = await route_compare_service(agency_id, ctx, conn, route=str(route))
+        rows = await route_compare_service(agency_id, ctx, conn, ch, route=str(route))
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -640,7 +640,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
     # BUG-4 fix: read granularity from args (default "day") and forward it.
     granularity = args.get("granularity", "day")
-    series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity)
+    series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity, ch=ch)
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
@@ -665,7 +665,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     threshold_sec = max(0, threshold_min) * 60
     # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
     n = int(args.get("k", args.get("n", 20)))
-    rows = await compute_on_time(agency_id, ctx, conn, threshold_sec=threshold_sec, limit=n)
+    rows = await compute_on_time(agency_id, ctx, conn, ch=ch, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
     return ToolResult(
