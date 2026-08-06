@@ -158,11 +158,13 @@ def cmd_seed_agencies(args):
 
 def cmd_ingest(args):
     """Run the archive ingest pipeline for one agency."""
+    from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest
 
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
-    ingest(args.folder, agency_id, conn)
+    ch_client = get_client()
+    ingest(args.folder, agency_id, conn, ch_client)
     conn.close()
 
 
@@ -246,13 +248,15 @@ def cmd_check_aggs(args):
 
     Exits nonzero if any agency is stale — the post-merge / monitoring guard.
     """
+    from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
 
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
         agency_ids = [r[0] for r in cur.fetchall()]
-    stale = check_agg_freshness(conn, agency_ids)
+    ch_client = get_client()
+    stale = check_agg_freshness(conn, ch_client, agency_ids)
     conn.close()
     if stale:
         for s in stale:
@@ -309,11 +313,13 @@ def cmd_ingest_live(args):
     rollback-on-error of its own (unlike analyze()), so the connection is
     rolled back here before continuing to the next agency.
     """
+    from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
+    ch_client = get_client()
     if args.agency_id is not None:
-        ingest_live(int(args.agency_id), conn)
+        ingest_live(int(args.agency_id), conn, ch_client)
         conn.close()
         return
 
@@ -328,7 +334,7 @@ def cmd_ingest_live(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- Ingesting agency_id={aid} ---")
-            ingest_live(aid, conn)
+            ingest_live(aid, conn, ch_client)
         except Exception:
             logger.exception(f"ingest-live failed for agency {aid}")
             conn.rollback()

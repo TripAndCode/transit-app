@@ -10,7 +10,7 @@ def test_ingest_live_raises_when_no_feed_url():
     # feed_url SELECT returns empty string; ValueError is raised before strategy lookup
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [("",)]
     with pytest.raises(ValueError, match="No feed_url"):
-        ingest_live(1, mock_conn)
+        ingest_live(1, mock_conn, MagicMock())
 
 
 def test_ingest_live_raises_when_agency_not_found():
@@ -18,7 +18,7 @@ def test_ingest_live_raises_when_agency_not_found():
     # First fetchone: agency not found → None triggers ValueError before strategy lookup
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.return_value = None
     with pytest.raises(ValueError, match="No feed_url"):
-        ingest_live(999, mock_conn)
+        ingest_live(999, mock_conn, MagicMock())
 
 
 def test_ingest_live_rejects_unsafe_feed_url():
@@ -35,7 +35,7 @@ def test_ingest_live_rejects_unsafe_feed_url():
     ]
     with patch("pipeline.ingest.safe_urlopen", side_effect=FeedURLError("blocked")) as mock_safe_urlopen:
         with pytest.raises(FeedURLError):
-            ingest_live(1, mock_conn)
+            ingest_live(1, mock_conn, MagicMock())
     mock_safe_urlopen.assert_called_once()
 
 
@@ -70,8 +70,8 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
 
     with patch("pipeline.ingest.safe_urlopen", return_value=mock_resp) as mock_safe_urlopen:
         with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_strategy_row]):
-            with patch("pipeline.ingest.psycopg2.extras.execute_batch"):
-                result = ingest_live(1, mock_conn)
+            with patch("pipeline.ingest.insert_updates", return_value=1):
+                result = ingest_live(1, mock_conn, MagicMock())
 
     mock_safe_urlopen.assert_called_once_with("https://8.8.8.8/feed.pb", timeout=30)
     assert result == 1

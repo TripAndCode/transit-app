@@ -14,6 +14,7 @@ Adds feed-health (agg_feed_health) and freshness (check_agg_freshness).
 from datetime import date
 
 from api.triage import classify_route
+from pipeline.clickhouse import get_client
 from pipeline.digest.models import AgencySection, DigestData, Mover
 from pipeline.freshness import check_agg_freshness
 
@@ -87,7 +88,8 @@ def build_digest(conn, target_day: date) -> DigestData:
         cur.execute(_AGENCIES_SQL)
         agencies = cur.fetchall()
     agency_ids = [a[0] for a in agencies]
-    stale_ids = {s.agency_id for s in check_agg_freshness(conn, agency_ids)}
+    ch_client = get_client()
+    stale_ids = {s.agency_id for s in check_agg_freshness(conn, ch_client, agency_ids)}
 
     sections: list[AgencySection] = []
     net_delay_weighted = 0.0

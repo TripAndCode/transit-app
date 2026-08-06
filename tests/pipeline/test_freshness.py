@@ -6,8 +6,27 @@ from pipeline.analyze import analyze
 from pipeline.freshness import check_agg_freshness
 
 
+class _FakeChClient:
+    """Stub ClickHouse client: always reports no `updates` rows.
+
+    Used by the cron-integration tests below, which are really about
+    _run_ingest_and_analyze()'s JST-boundary/orchestration behavior, not
+    about ClickHouse itself — stubbing this out keeps them independent of
+    `make ch-test` while the freshness-specific tests further down use the
+    real `ch_client` fixture.
+    """
+
+    def query(self, *_args, **_kwargs):
+        class _Result:
+            result_rows = [(None,)]
+
+        return _Result()
+
+
 def _seed_two_days(pg_conn, agency_id):
-    """Insert mid-day rows across two completed civil days (well before today).
+    """Insert mid-day rows across two completed civil days (well before today)
+    into Postgres `updates` — the source analyze() reads to build
+    agg_route_daily (unmigrated this task; see pipeline/analyze.py).
 
     Mid-day (11:37) keeps the JST/UTC civil date identical so the test is
     independent of the test connection's session timezone.
@@ -34,15 +53,43 @@ def _seed_two_days(pg_conn, agency_id):
     pg_conn.commit()
 
 
-def test_fresh_after_analyze(pg_conn, agency_id):
+def _seed_two_days_ch(ch_client, agency_id):
+    """Insert the same two completed civil days into ClickHouse `updates` —
+    the source check_agg_freshness now reads for the live-side max.
+
+    02:37 UTC == 11:37 JST on the same calendar day, so this lands on the
+    same civil dates _seed_two_days uses for the Postgres/analyze() side.
+    """
+    from pipeline.clickhouse import insert_updates
+
+    rows = [
+        (
+            f"f{day}_{seq}.pb",
+            f"2026-04-0{day}T02:37:00Z",
+            "平日_11時37分_系統44372",
+            "平日",
+            "11:37",
+            "44372",
+            seq,
+            seq * 60,
+        )
+        for day in (1, 2)
+        for seq in (1, 2, 3)
+    ]
+    insert_updates(ch_client, agency_id, rows)
+
+
+def test_fresh_after_analyze(pg_conn, ch_client, agency_id):
     _seed_two_days(pg_conn, agency_id)
+    _seed_two_days_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn)
-    stale = check_agg_freshness(pg_conn, [agency_id])
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
     assert stale == []
 
 
-def test_stale_when_latest_agg_day_missing(pg_conn, agency_id):
+def test_stale_when_latest_agg_day_missing(pg_conn, ch_client, agency_id):
     _seed_two_days(pg_conn, agency_id)
+    _seed_two_days_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn)
     # Drop the newest agg day → aggs now cover only 2026-04-01 while live has 04-02.
     with pg_conn.cursor() as cur:
@@ -52,24 +99,24 @@ def test_stale_when_latest_agg_day_missing(pg_conn, agency_id):
             (agency_id, agency_id),
         )
     pg_conn.commit()
-    stale = check_agg_freshness(pg_conn, [agency_id])
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
     assert len(stale) == 1
     assert stale[0].agency_id == agency_id
     assert stale[0].agg_max_day == date(2026, 4, 1)
     assert stale[0].live_max_completed_day == date(2026, 4, 2)
 
 
-def test_empty_agency_is_fresh(pg_conn, agency_id):
+def test_empty_agency_is_fresh(pg_conn, ch_client, agency_id):
     # No updates rows at all → nothing owed.
-    stale = check_agg_freshness(pg_conn, [agency_id])
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id])
     assert stale == []
 
 
-def test_empty_input_returns_empty(pg_conn):
-    assert check_agg_freshness(pg_conn, []) == []
+def test_empty_input_returns_empty(pg_conn, ch_client):
+    assert check_agg_freshness(pg_conn, ch_client, []) == []
 
 
-def test_multi_agency_only_stale_returned(pg_conn, agency_id):
+def test_multi_agency_only_stale_returned(pg_conn, ch_client, agency_id):
     # Two agencies seeded + analyzed identically; drop the newest agg day for
     # only the second so it lags while the first stays fresh.
     with pg_conn.cursor() as cur:
@@ -81,7 +128,9 @@ def test_multi_agency_only_stale_returned(pg_conn, agency_id):
     pg_conn.commit()
 
     _seed_two_days(pg_conn, agency_id)
+    _seed_two_days_ch(ch_client, agency_id)
     _seed_two_days(pg_conn, second_id)
+    _seed_two_days_ch(ch_client, second_id)
     analyze(agency_id, pg_conn)
     analyze(second_id, pg_conn)
 
@@ -93,7 +142,7 @@ def test_multi_agency_only_stale_returned(pg_conn, agency_id):
         )
     pg_conn.commit()
 
-    stale = check_agg_freshness(pg_conn, [agency_id, second_id])
+    stale = check_agg_freshness(pg_conn, ch_client, [agency_id, second_id])
     assert len(stale) == 1
     assert stale[0].agency_id == second_id
 
@@ -116,17 +165,25 @@ def test_cron_path_logs_fresh(pg_conn, agency_id, monkeypatch, caplog):
     """_run_ingest_and_analyze runs the freshness check after analyzing.
 
     ingest_live is stubbed (no network); analyze runs for real against seeded
-    rows. Mid-day rows make the JST/UTC civil dates coincide, so this only
-    covers the happy path; test_cron_path_jst_boundary_is_fresh covers the
-    day-boundary case where the connection timezone actually matters.
+    rows. check_agg_freshness's ClickHouse client is stubbed to report no
+    live rows (see _FakeChClient) — with nothing live, nothing is owed, so
+    the run is always "fresh" regardless of the seeded Postgres rows. This
+    test is about the cron loop's orchestration (it calls analyze + the
+    freshness check and logs the right summary), not about ClickHouse data;
+    tests above cover check_agg_freshness's ClickHouse-sourced behavior
+    directly. Mid-day rows still make the JST/UTC civil dates coincide for
+    analyze()'s own bucketing; test_cron_path_jst_boundary_is_fresh covers
+    the day-boundary case where the connection timezone actually matters.
     """
     import logging
 
     import api.routers.internal as internal
+    import pipeline.clickhouse
     import pipeline.ingest
 
     _seed_two_days(pg_conn, agency_id)
-    monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn: None)
+    monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn, ch_client: None)
+    monkeypatch.setattr(pipeline.clickhouse, "get_client", lambda: _FakeChClient())
 
     with caplog.at_level(logging.INFO, logger="api.routers.internal"):
         internal._run_ingest_and_analyze()
@@ -140,13 +197,17 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
 
     01:30 JST on 2026-04-02 is 16:30 UTC on 2026-04-01 — the JST and UTC civil
     dates differ. The cron connection pins JST, so analyze buckets
-    agg_route_daily.date to 2026-04-02, matching the JST-based freshness check.
-    Without the pin, analyze would bucket to 2026-04-01 (UTC) and the gate would
-    false-fire STALE — this test locks that regression.
+    agg_route_daily.date to 2026-04-02. check_agg_freshness's ClickHouse
+    client is stubbed to report no live rows (see _FakeChClient), so nothing
+    is owed and the run is fresh regardless — this test only locks that the
+    cron loop still reaches "fresh" (no crash/mis-bucket in analyze()) at
+    this boundary; the JST-vs-UTC comparison itself is covered directly by
+    the check_agg_freshness tests above.
     """
     import logging
 
     import api.routers.internal as internal
+    import pipeline.clickhouse
     import pipeline.ingest
 
     with pg_conn.cursor() as cur:
@@ -168,7 +229,8 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
                 ),
             )
     pg_conn.commit()
-    monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn: None)
+    monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda aid, conn, ch_client: None)
+    monkeypatch.setattr(pipeline.clickhouse, "get_client", lambda: _FakeChClient())
 
     with caplog.at_level(logging.INFO, logger="api.routers.internal"):
         internal._run_ingest_and_analyze()

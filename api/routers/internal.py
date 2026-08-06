@@ -45,6 +45,7 @@ def _run_ingest_and_analyze() -> None:
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
     from pipeline.analyze import analyze
+    from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
 
@@ -53,6 +54,7 @@ def _run_ingest_and_analyze() -> None:
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
 
+    ch_client = get_client()
     conn = psycopg2.connect(db_url)
     # Pin JST so analyze() buckets `captured_at::date` on the same civil day the
     # read API serves under (api/main + gtfs_pipeline._get_conn both pin JST);
@@ -73,7 +75,7 @@ def _run_ingest_and_analyze() -> None:
 
         for aid in agency_ids:
             try:
-                ingest_live(aid, conn)
+                ingest_live(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: ingest_live failed for agency %s", aid)
             try:
@@ -83,7 +85,7 @@ def _run_ingest_and_analyze() -> None:
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
-        stale = check_agg_freshness(conn, agency_ids)
+        stale = check_agg_freshness(conn, ch_client, agency_ids)
         if stale:
             _log.error(
                 "cron: %d agency(ies) have stale aggregates after analyze: %s",

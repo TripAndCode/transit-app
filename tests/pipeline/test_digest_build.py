@@ -1,10 +1,37 @@
 """DB-backed tests for build_digest."""
 
 from datetime import date
+from unittest.mock import patch
+
+import pytest
 
 from pipeline.digest.build import build_digest
 
 DAY = date(2026, 4, 2)
+
+
+class _EmptyChClient:
+    """Stub ClickHouse client: every query behaves like an agency with no
+    `updates` rows at all (max_captured_at → None), matching this file's old
+    Postgres-only fixtures which never seeded the live `updates` table
+    either — so is_stale stays False, same as before the ClickHouse port."""
+
+    def query(self, *_args, **_kwargs):
+        class _Result:
+            result_rows = [(None,)]
+
+        return _Result()
+
+
+@pytest.fixture(autouse=True)
+def _stub_ch_client():
+    """build_digest() now builds its own ClickHouse client (via
+    pipeline.clickhouse.get_client()) to feed check_agg_freshness's live-day
+    lookup. This test file is Postgres-only and pre-dates ClickHouse, so
+    stub the client out rather than requiring `make ch-test` for every
+    digest test — none of them assert on ClickHouse-sourced staleness."""
+    with patch("pipeline.digest.build.get_client", return_value=_EmptyChClient()):
+        yield
 
 
 def _seed(pg_conn, agency_id):

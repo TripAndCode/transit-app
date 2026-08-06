@@ -16,6 +16,14 @@ _FAKE_ROW = (
 )
 
 
+def _ch_route_codes(ch_client, agency_id):
+    result = ch_client.query(
+        "SELECT route_code FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY route_code",
+        parameters={"agency_id": agency_id},
+    )
+    return [r[0] for r in result.result_rows]
+
+
 def test_parse_trip_id_weekday():
     result = parse_trip_id("平日_11時37分_系統44372")
     assert result is not None
@@ -30,8 +38,9 @@ def test_parse_trip_id_invalid():
     assert result is None
 
 
-def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
-    """Ingest a fake tarball and verify rows land in updates with correct agency_id."""
+def test_ingest_creates_rows(pg_conn, ch_client, agency_id, tmp_path):
+    """Ingest a fake tarball and verify rows land in ClickHouse's updates
+    table with correct agency_id."""
     # 8-tuple shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
     #                 route_code, stop_sequence, dep_delay)
     fake_row = (
@@ -54,22 +63,23 @@ def test_ingest_creates_rows(pg_conn, agency_id, tmp_path):
         tgz_path = tmp_path / "20260401.tar.gz"
         tgz_path.write_bytes(buf.getvalue())
 
-        count = ingest(str(tmp_path), agency_id, pg_conn)
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
     assert count == 1
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT route_code, dep_delay, agency_id FROM updates WHERE agency_id = %s",
-            (agency_id,),
-        )
-        rows = cur.fetchall()
+    result = ch_client.query(
+        "SELECT route_code, dep_delay, agency_id FROM updates WHERE agency_id = {agency_id:UInt16}",
+        parameters={"agency_id": agency_id},
+    )
+    rows = result.result_rows
     assert len(rows) == 1
     assert rows[0][0] == "44372"
     assert rows[0][1] == 120
     assert rows[0][2] == agency_id
 
 
-def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(pg_conn, agency_id, tmp_path):
+def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(
+    pg_conn, ch_client, agency_id, tmp_path
+):
     """One malformed member inside a tarball must only roll back ITS OWN
     insert, not every good member already inserted earlier in the same
     tarball since the last 300-member commit boundary - the identical bug
@@ -90,15 +100,12 @@ def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_ins
         return [_FAKE_ROW]
 
     with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
-        ingest(str(tmp_path), agency_id, pg_conn)
+        ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
-        rows = cur.fetchall()
-    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
 
 
-def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, agency_id, tmp_path):
+def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, ch_client, agency_id, tmp_path):
     """One malformed loose .pb file must not abort ingestion of the rest -
     matching the tarball loop right above it in ingest(), which already
     isolates per-tarball failures via try/except+rollback+continue."""
@@ -113,16 +120,13 @@ def test_ingest_loose_pb_continues_past_one_malformed_file(pg_conn, agency_id, t
         return [_FAKE_ROW]
 
     with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
-        count = ingest(str(tmp_path), agency_id, pg_conn)
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
     assert count == 1  # the good file's row still landed
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
-        rows = cur.fetchall()
-    assert [r[0] for r in rows] == ["44372"]
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]
 
 
-def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_conn, agency_id, tmp_path):
+def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_conn, ch_client, agency_id, tmp_path):
     """A file that fails must only roll back ITS OWN work, not every good
     file already inserted earlier in the same (not-yet-committed) batch.
     a_ok.pb sorts before z_bad.pb, so the good insert happens first and,
@@ -139,15 +143,14 @@ def test_ingest_loose_pb_failure_does_not_wipe_an_earlier_good_files_insert(pg_c
         return [_FAKE_ROW]
 
     with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
-        ingest(str(tmp_path), agency_id, pg_conn)
+        ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
-        rows = cur.fetchall()
-    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]  # a_ok.pb's row survives z_bad.pb's failure
 
 
-def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_members_insert(pg_conn, agency_id, tmp_path):
+def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_members_insert(
+    pg_conn, ch_client, agency_id, tmp_path
+):
     """tarfile.extractfile() can raise on a corrupt member (bad header/index)
     even when tarfile.open() and getmembers() succeeded. That must isolate
     like any other per-member failure, not escape the savepoint and roll
@@ -173,15 +176,12 @@ def test_ingest_tarball_extractfile_failure_does_not_wipe_an_earlier_good_member
         patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[_FAKE_ROW]),
         patch.object(tarfile.TarFile, "extractfile", flaky_extractfile),
     ):
-        ingest(str(tmp_path), agency_id, pg_conn)
+        ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT route_code FROM updates WHERE agency_id = %s", (agency_id,))
-        rows = cur.fetchall()
-    assert [r[0] for r in rows] == ["44372"]  # a_ok.pb's row survives z_bad.pb's extractfile failure
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]  # a_ok.pb's row survives z_bad.pb's extractfile failure
 
 
-def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
+def test_ingest_dedup_skips_seen_files(pg_conn, ch_client, agency_id, tmp_path):
     """Running ingest twice on the same folder inserts 0 rows the second time."""
     fake_row = (
         "20260401/TripUpdate_113700.pb",
@@ -203,14 +203,14 @@ def test_ingest_dedup_skips_seen_files(pg_conn, agency_id, tmp_path):
         tgz_path = tmp_path / "20260401.tar.gz"
         tgz_path.write_bytes(buf.getvalue())
 
-        first = ingest(str(tmp_path), agency_id, pg_conn)
-        second = ingest(str(tmp_path), agency_id, pg_conn)
+        first = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+        second = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
     assert first == 1
     assert second == 0
 
 
-def test_ingest_agency_isolated(pg_conn, tmp_path):
+def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
     """Two agencies ingesting same file_name don't interfere."""
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -263,12 +263,15 @@ def test_ingest_agency_isolated(pg_conn, tmp_path):
     make_tgz(dir_b / "20260401.tar.gz")
 
     with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row_a]):
-        ingest(str(dir_a), aid_a, pg_conn)
+        ingest(str(dir_a), aid_a, pg_conn, ch_client)
     with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row_b]):
-        ingest(str(dir_b), aid_b, pg_conn)
+        ingest(str(dir_b), aid_b, pg_conn, ch_client)
 
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT dep_delay FROM updates WHERE agency_id = %s", (aid_a,))
-        assert cur.fetchone()[0] == 60
-        cur.execute("SELECT dep_delay FROM updates WHERE agency_id = %s", (aid_b,))
-        assert cur.fetchone()[0] == 90
+    result_a = ch_client.query(
+        "SELECT dep_delay FROM updates WHERE agency_id = {agency_id:UInt16}", parameters={"agency_id": aid_a}
+    )
+    assert result_a.result_rows[0][0] == 60
+    result_b = ch_client.query(
+        "SELECT dep_delay FROM updates WHERE agency_id = {agency_id:UInt16}", parameters={"agency_id": aid_b}
+    )
+    assert result_b.result_rows[0][0] == 90

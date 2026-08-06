@@ -13,8 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
 
-import psycopg2.extras
-
+from pipeline.clickhouse import distinct_file_names, insert_updates
 from pipeline.strategies import get_ingest_strategy
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
@@ -35,13 +34,6 @@ _DATE_DIR_RE = re.compile(r"\d{8}")
 def _date_dir(name: str) -> str:
     """Return *name* if it is a YYYYMMDD token, otherwise ``""``."""
     return name if _DATE_DIR_RE.fullmatch(name) else ""
-
-
-def _insert_updates(cur, agency_id: int, rows: list[tuple]) -> int:
-    """Prepend ``agency_id`` to each row and bulk-INSERT into ``updates``."""
-    pg_rows = [(agency_id, *r) for r in rows]
-    psycopg2.extras.execute_batch(cur, UPDATE_INSERT_SQL, pg_rows)
-    return len(pg_rows)
 
 
 @contextmanager
@@ -173,7 +165,7 @@ def parse_pb(
     return rows
 
 
-def ingest(folder: str, agency_id: int, conn) -> int:
+def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns total rows attempted.
@@ -182,12 +174,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
     n_errors = 0
     n_inserted = 0
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT file_name FROM updates WHERE agency_id = %s",
-            (agency_id,),
-        )
-        done = {r[0] for r in cur.fetchall()}
+    done = distinct_file_names(ch_client, agency_id)
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
@@ -214,14 +201,22 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
-                        # _savepoint isolates one bad member from every good
-                        # member already inserted since the last commit
-                        # boundary in this tarball — extractfile() itself can
-                        # raise on a corrupt member header/index, not just
-                        # parse_feed, so it must be inside the savepoint too.
-                        # The outer try/except still covers genuinely
-                        # tar-wide failures (a corrupt archive tarfile.open
-                        # can't even read).
+                        # _savepoint isolates one bad member's Postgres-side work
+                        # (parse_feed's static_join JOIN, if any) from every good
+                        # member already inserted since the last commit boundary
+                        # in this tarball — extractfile() itself can raise on a
+                        # corrupt member header/index, not just parse_feed, so it
+                        # must be inside the savepoint too. The outer try/except
+                        # still covers genuinely tar-wide failures (a corrupt
+                        # archive tarfile.open can't even read).
+                        #
+                        # The ClickHouse insert is deliberately OUTSIDE the
+                        # savepoint: it no longer touches Postgres, so a Postgres
+                        # SAVEPOINT protects nothing for that step. It gets its
+                        # own try/except below — on failure the file is NOT added
+                        # to `done`, so it's retried on the next ingest() run
+                        # (mirrors this loop's pre-existing behavior: a file only
+                        # ever joined `done` after a successful insert).
                         try:
                             with _savepoint(cur, "tar_member"):
                                 ts = _ts(d, pb_name)
@@ -230,10 +225,15 @@ def ingest(folder: str, agency_id: int, conn) -> int:
                                     continue
                                 raw = fobj.read()
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
-                                n_inserted += _insert_updates(cur, agency_id, rows)
-                                done.add(f"{d}/{pb_name}")
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
+                            n_errors += 1
+                            continue
+                        try:
+                            n_inserted += insert_updates(ch_client, agency_id, rows)
+                            done.add(f"{d}/{pb_name}")
+                        except Exception as e:
+                            logger.error(f"  [ERROR] inserting {pb_name}: {e}")
                             n_errors += 1
                         if j % 300 == 0 and j > 0:
                             conn.commit()
@@ -250,16 +250,25 @@ def ingest(folder: str, agency_id: int, conn) -> int:
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
                 ts = _ts(d, path.name)
-                # _savepoint isolates one bad file from every good file
-                # already inserted since the last commit boundary in this
-                # batch (see _savepoint's docstring for why RELEASE matters).
+                # _savepoint isolates one bad file's Postgres-side work from
+                # every good file already inserted since the last commit
+                # boundary in this batch (see _savepoint's docstring for why
+                # RELEASE matters). The ClickHouse insert is outside the
+                # savepoint (see the tarball loop above for why) with its own
+                # try/except: on failure the file is NOT added to `done`, so
+                # it's retried on the next ingest() run.
                 try:
                     with _savepoint(cur, "pb_file"):
                         rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
-                        n_inserted += _insert_updates(cur, agency_id, rows)
-                        done.add(f"{d}/{path.name}")
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
+                    n_errors += 1
+                    continue
+                try:
+                    n_inserted += insert_updates(ch_client, agency_id, rows)
+                    done.add(f"{d}/{path.name}")
+                except Exception as e:
+                    logger.error(f"  [ERROR] inserting {path.name}: {e}")
                     n_errors += 1
                 if j % 500 == 0:
                     conn.commit()
@@ -272,7 +281,7 @@ def ingest(folder: str, agency_id: int, conn) -> int:
     return n_inserted
 
 
-def ingest_live(agency_id: int, conn) -> int:
+def ingest_live(agency_id: int, conn, ch_client) -> int:
     """Fetch the agency's GTFS-RT feed_url and ingest it live."""
     with conn.cursor() as cur:
         cur.execute(
@@ -296,8 +305,7 @@ def ingest_live(agency_id: int, conn) -> int:
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
 
-    with conn.cursor() as cur:
-        n_inserted = _insert_updates(cur, agency_id, rows)
+    n_inserted = insert_updates(ch_client, agency_id, rows)
     conn.commit()
 
     logger.info(f"Done: {n_inserted} rows inserted (live)")
