@@ -372,6 +372,60 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
 
 
 @pytest.mark.asyncio
+async def test_reports_compare_ranking_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
+    """Task 8: a time_band filter bypasses agg_daily_trend and reads live
+    `updates` from ClickHouse via `_route_avg_by_dow_ch` / `_compare_ranking_live`.
+
+    Hand-computable repro (same numbers as the original review's standalone
+    verification): route R1 gets 15 weekday (Tue 2026-05-19) observations at
+    120s (2.00 min) and 15 weekend (Sat 2026-05-23) observations at 300s
+    (5.00 min), both inside the 'noon' band (12:00-14:00) — expected
+    (heijitsu, kyujitsu, abs_delta, signed_delta) = (2.00, 5.00, 3.00, 3.00).
+
+    Two things must NOT leak into that average:
+    - An extra R1 weekday observation scheduled at 08:00 (outside 'noon')
+      with a wildly different delay (99999s) — if the time_band filter
+      weren't applied, this would blow the weekday average far past 2.00.
+    - A second route (R_THIN) with only 5 weekday/5 weekend in-band
+      observations — below the ``> 10`` minimum-sample-count gate
+      (`_route_avg_by_dow_ch`'s dedup HAVING-equivalent) — must not appear
+      in the results at all.
+    """
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+
+    # R1: 15+15 in-band observations with known, distinct averages.
+    await _seed_route_at(pool, agency_id, "R1", "平日", "2026-05-19", "12:30", [120] * 15)
+    await _seed_route_at(pool, agency_id, "R1", "土日祝", "2026-05-23", "12:30", [300] * 15)
+    # Out-of-band R1 weekday observation — must be excluded from the average.
+    await _seed_route_at(pool, agency_id, "R1", "平日", "2026-05-19", "08:00", [99999])
+    # R_THIN: only 5 in-band observations per side — below the minimum sample
+    # count, must not appear in the output at all.
+    await _seed_route_at(pool, agency_id, "R_THIN", "平日", "2026-05-19", "12:30", [999] * 5)
+    await _seed_route_at(pool, agency_id, "R_THIN", "土日祝", "2026-05-23", "12:30", [999] * 5)
+
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24&time_band=noon")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+
+    codes = {r[0] for r in rows}
+    assert "R_THIN" not in codes, "route below the minimum-sample-count gate leaked into the results"
+
+    r = next(x for x in rows if x[0] == "R1")
+    # (route_code, heijitsu_min, kyujitsu_min, abs_delta, signed_delta)
+    assert float(r[1]) == 2.0  # heijitsu (weekday) — the out-of-band 99999s observation must not skew this
+    assert float(r[2]) == 5.0  # kyujitsu (weekend)
+    assert float(r[3]) == 3.0  # abs delta
+    assert float(r[4]) == 3.0  # signed delta (kyujitsu - heijitsu, both positive here)
+
+
+@pytest.mark.asyncio
 async def test_reports_unknown_agency_returns_404(reports_client):
     client, _, _ = reports_client
     resp = await client.get("/api/99999/reports")
