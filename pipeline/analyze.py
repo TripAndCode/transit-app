@@ -27,6 +27,7 @@ import logging
 import psycopg2.extras
 
 from api.range import time_band_case_sql
+from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
 from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
@@ -481,20 +482,29 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # stale TripUpdate spikes, |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC — the same
         # rows the dedup clamp drops). Persisted (not just logged) so the app can
         # surface a feed-health banner. Agency-wide — does NOT require static data,
-        # so it runs outside the has_static block. One scan of the agency partition.
+        # so it runs outside the has_static block. Pure aggregation (no static-table
+        # JOIN), so it queries ClickHouse directly and bulk-loads the small per-day
+        # result into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare
+        # toDate() — same JST-not-UTC reasoning as everywhere else in this
+        # migration (see build_dedup_ch_sql's docstring in pipeline/db.py).
+        ch_feed_health = ch_client.query(
+            """
+            SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
+                   count() AS raw_samples,
+                   countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count
+            FROM updates
+            WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+            GROUP BY date
+            """,
+            parameters={"agency_id": agency_id, "max_delay": p["max_delay"]},
+        )
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count)
-                SELECT %(agency_id)s, captured_at::date,
-                       COUNT(*),
-                       COUNT(*) FILTER (WHERE ABS(dep_delay) > %(max_delay)s)
-                FROM updates
-                WHERE agency_id = %(agency_id)s AND dep_delay IS NOT NULL
-                GROUP BY captured_at::date
-                """,
-                p,
-            )
+            if ch_feed_health.result_rows:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES %s",
+                    [(agency_id, *row) for row in ch_feed_health.result_rows],
+                )
             logger.info(f"  agg_feed_health: {cur.rowcount} rows")
             cur.execute(
                 "SELECT COALESCE(SUM(clamp_count), 0) FROM agg_feed_health WHERE agency_id = %(agency_id)s",
@@ -541,21 +551,35 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
 
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
-            # Raw `updates` is fine here: it's a DISTINCT route_code set, unaffected
-            # by poll duplication, and doesn't read dep_delay.
-            sql = """
-                INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
-                SELECT %(agency_id)s, sst.stop_id,
-                       string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code)
-                FROM updates u
-                JOIN static_stop_times sst
-                  ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = u.trip_id
-                 AND sst.stop_sequence = u.stop_sequence
-                WHERE u.agency_id = %(agency_id)s
-                GROUP BY sst.stop_id
-            """
+            # Needs a JOIN against Postgres static_stop_times, so — mirroring the
+            # _analyze_deduped pattern — fetch the distinct raw keys from
+            # ClickHouse and bulk-load them into a small Postgres TEMP TABLE,
+            # then run the JOIN against that instead of raw `updates`. It's a
+            # DISTINCT route_code set, unaffected by poll duplication, and
+            # doesn't read dep_delay, so no clamp/dedup is needed on this side.
+            ch_keys = ch_client.query(
+                "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates WHERE agency_id = {agency_id:UInt16}",
+                parameters={"agency_id": agency_id},
+            )
             with conn.cursor() as cur:
+                cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
+                cur.execute(
+                    "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
+                    "ON COMMIT DROP"
+                )
+                if ch_keys.result_rows:
+                    psycopg2.extras.execute_values(cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows)
+                sql = """
+                    INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
+                    SELECT %(agency_id)s, sst.stop_id,
+                           string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
+                    FROM _analyze_raw_keys k
+                    JOIN static_stop_times sst
+                      ON sst.agency_id = %(agency_id)s
+                     AND sst.trip_id = k.trip_id
+                     AND sst.stop_sequence = k.stop_sequence
+                    GROUP BY sst.stop_id
+                """
                 cur.execute(sql, p)
                 logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
 
@@ -590,10 +614,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # ── agg_meta: audit record of this build (NOT load-bearing) ──────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
         # The freshness gate derives staleness from the aggs themselves; this
-        # only answers "when was this agency last analyzed".
+        # only answers "when was this agency last analyzed". `updates` now
+        # lives in ClickHouse, so this reuses the same max_captured_at helper
+        # Task 4 built and Task 5 already uses elsewhere (pipeline/freshness.py).
+        max_cap = ch_max_captured_at(ch_client, agency_id)
         with conn.cursor() as cur:
-            cur.execute("SELECT MAX(captured_at) FROM updates WHERE agency_id = %(agency_id)s", p)
-            max_cap = cur.fetchone()[0]
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at) "
                 "VALUES (%s, now(), %s) "

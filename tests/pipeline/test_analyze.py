@@ -415,6 +415,37 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
         assert cur.fetchone()[0] == "R1"
 
 
+def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
+    """A stop served by 2+ distinct routes must comma-join them, alphabetically
+    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path (Task 6
+    Step 5), not just the single-route case test_analyze_builds_agg_stop_routes
+    already covers."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s2','二番停留所',ST_SetSRID(ST_MakePoint(140.75,40.83),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES "
+            "(%s,'TA',1,'s2'),(%s,'TB',1,'s2')",
+            (agency_id, agency_id),
+        )
+        for trip, route, delay in [("TA", "R_A", 60), ("TB", "R_B", 90)]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES (%s,%s,'2026-06-09T08:10:00',%s,'平日',%s,%s,1,%s)",
+                (agency_id, f"{trip}.pb", trip, time(8, 10), route, delay),
+            )
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s2'", (agency_id,))
+        route_codes = cur.fetchone()[0]
+    assert route_codes == "R_A,R_B"  # comma-joined, alphabetically ordered
+
+
 def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id, ch_client):
     """NULL service_type rows (agency-9 case) must not abort the agg build,
     and — matching agg_route_stop_daily's '' sentinel treatment — must not be

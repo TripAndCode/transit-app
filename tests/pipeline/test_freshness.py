@@ -200,7 +200,11 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
 
 
 def test_analyze_writes_agg_meta(pg_conn, agency_id, ch_client):
+    """agg_meta's max_updates_captured_at now comes from ClickHouse (Task 6
+    Step 5's ch_max_captured_at swap), so this needs the ClickHouse seed too —
+    _seed_two_days alone (Postgres-only) would leave it NULL."""
     _seed_two_days(pg_conn, agency_id)
+    _seed_two_days_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
