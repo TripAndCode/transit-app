@@ -139,11 +139,20 @@ async def route_shape(
     # by shape equals the original single-JOIN COUNT(*) grouped by shape
     # (GROUP BY commutes over this partition), so this is exact, not
     # approximate.
+    #
+    # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
+    # / service) as the dedup query below — an earlier version scanned the
+    # route's ENTIRE history here with no date bound (measured 32.1s on
+    # agency 8's real data for one route, returning only ~100 rows), even
+    # though the shape should reflect what's actually being shown for the
+    # user's selected range, not all-time history.
+    ch_where_frag, ch_params = build_updates_filter_ch(ctx)
     trip_counts_result = await ch.query(
         "SELECT trip_id, count() AS n FROM updates "
         "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        f"AND {ch_where_frag} "
         "GROUP BY trip_id",
-        parameters={"agency_id": agency_id, "route": str(route)},
+        parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
     trip_counts: dict[str, int] = {tid: n for tid, n in trip_counts_result.result_rows}
 
@@ -173,11 +182,12 @@ async def route_shape(
         geometry = json.loads(raw) if raw is not None else None
 
     # Honor full ctx (DOW / time_band / service / dates) so the polyline
-    # colors match what compute_ranking et al. show for the same filters.
-    # When a shape is chosen, restrict to trips on that shape so the stops
-    # rendered align with the polyline; falls back to all-trips when the
-    # route has no shape data at all.
-    ch_where_frag, ch_params = build_updates_filter_ch(ctx)
+    # colors match what compute_ranking et al. show for the same filters —
+    # `ch_where_frag`/`ch_params` were already computed above (and reused
+    # for the shape-vote query too, so both queries agree on the same
+    # ctx-bounded window). When a shape is chosen, restrict to trips on that
+    # shape so the stops rendered align with the polyline; falls back to
+    # all-trips when the route has no shape data at all.
     shape_trip_ids: list[str] | None = None
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
