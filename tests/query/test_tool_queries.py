@@ -60,6 +60,75 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_cl
 
 
 @pytest.mark.asyncio
+async def test_route_dow_breakdown_half_up_rounding_at_exact_boundary(aconn, aagency_id, ch_client, ch_async_client):
+    """Fix 8c regression: ``round(avg(dep_delay) / 60.0, 2)`` was computed in
+    ClickHouse SQL, which rounds half-to-even (banker's rounding). Postgres'
+    numeric ROUND() (and this codebase's Decimal(ROUND_HALF_UP) helpers, e.g.
+    pipeline.reports.rankings._round2) round half away from zero instead. 12
+    rows at 127s + 12 rows at 128s average to exactly 127.5s = 2.125min — an
+    exact .5 boundary at the 3rd decimal. Half-up rounds to 2.13; ClickHouse's
+    native round() would give 2.12.
+    """
+    # Dedup keys on (route_code, service_type, scheduled_time, trip_id,
+    # captured_at::date, stop_sequence) — vary stop_sequence per row so all
+    # 24 rows survive dedup as distinct "stop events" instead of collapsing
+    # to the single latest-observation row (they'd otherwise share every
+    # other dedup-key column: same trip_id/date/route/service/sched_time).
+    day = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    for i, dep in enumerate([127] * 12 + [128] * 12):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_half', '平日', '10:00', 'R_HALF', $4, $5)",
+            aagency_id,
+            f"pb_half_{i}",
+            day,
+            i + 1,
+            dep,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
+    result = await route_dow_breakdown(aagency_id, ctx, aconn, ch_async_client, route="R_HALF")
+    assert len(result) == 1
+    avg_min = result[0][3]
+    assert str(avg_min) == "2.13"
+
+
+@pytest.mark.asyncio
+async def test_route_compare_service_half_up_rounding_at_exact_boundary(aconn, aagency_id, ch_client, ch_async_client):
+    """Same fix 8c regression as test_route_dow_breakdown_half_up_rounding_at_exact_boundary,
+    for route_compare_service's identical inline ``round(avg(dep_delay) / 60.0, 2)``.
+    """
+    # See test_route_dow_breakdown_half_up_rounding_at_exact_boundary for why
+    # stop_sequence must vary per row (dedup-key collision otherwise).
+    now = datetime.now(timezone(timedelta(hours=9)))
+    for i, dep in enumerate([127] * 12 + [128] * 12):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, 'trip_half2', '平日', '10:00', 'R_HALF2', $4, $5)",
+            aagency_id,
+            f"pb_half2_{i}",
+            now,
+            i + 1,
+            dep,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    today = date.today()
+    ctx = RangeCtx(from_date=today - timedelta(days=1), to_date=today + timedelta(days=1))
+    result = await route_compare_service(aagency_id, ctx, aconn, ch_async_client, route="R_HALF2")
+    assert len(result) == 1
+    avg_min = result[0][1]
+    assert str(avg_min) == "2.13"
+
+
+@pytest.mark.asyncio
 async def test_route_dow_breakdown_returns_empty_without_ch(aconn, aagency_id):
     """No ClickHouse client attached (``ch=None``, the default) -> empty
     result rather than raising — the same "safe default" convention

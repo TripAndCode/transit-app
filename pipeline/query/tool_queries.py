@@ -31,6 +31,7 @@ wiring a client at all.
 
 from api.range import RangeCtx
 from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.rankings import _round2
 
 
 async def route_dow_breakdown(
@@ -57,7 +58,7 @@ async def route_dow_breakdown(
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
         "       toDayOfWeek(date) AS dow,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "WHERE route_code = {rdb_route:String}\n"
@@ -65,7 +66,13 @@ async def route_dow_breakdown(
         "ORDER BY avg_min DESC",
         parameters={"agency_id": agency_id, "rdb_route": str(route), **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # ClickHouse's round() is round-half-to-even; round in Python (half-up) to
+    # match Postgres ROUND() and this codebase's other ClickHouse live-path
+    # roundings — see pipeline.reports.rankings._ranking_live.
+    return [
+        (route_code, service_type, dow, _round2(avg_min), samples)
+        for route_code, service_type, dow, avg_min, samples in result.result_rows
+    ]
 
 
 async def route_compare_service(
@@ -89,14 +96,16 @@ async def route_compare_service(
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT service_type,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "WHERE route_code = {rcs_route:String}\n"
         "GROUP BY service_type",
         parameters={"agency_id": agency_id, "rcs_route": str(route), **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # Round in Python (half-up) to match Postgres ROUND() — see
+    # route_dow_breakdown / pipeline.reports.rankings._ranking_live.
+    return [(service_type, _round2(avg_min), samples) for service_type, avg_min, samples in result.result_rows]
 
 
 async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
