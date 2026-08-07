@@ -417,9 +417,8 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
 def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
     """A stop served by 2+ distinct routes must comma-join them, alphabetically
-    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path (Task 6
-    Step 5), not just the single-route case test_analyze_builds_agg_stop_routes
-    already covers."""
+    ordered — guards the distinct-key-from-_analyze_deduped JOIN path, not just
+    the single-route case test_analyze_builds_agg_stop_routes already covers."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
