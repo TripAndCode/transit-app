@@ -292,6 +292,77 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
     assert 39.0 < lat < 42.0
 
 
+@pytest.mark.asyncio
+async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty(map_app_ch, ch_client):
+    """Pre-ClickHouse-migration behavior: a route with real observations,
+    all outside the caller's ctx window (default: last 30 days), must still
+    render its topology (geometry + unobserved_stops) even though there is
+    zero delay data to show for the selected window.
+
+    Commit 724ab7e bounded the shape-vote query by ctx so it stops
+    scanning the route's entire history on every request (was 32.1s on real
+    data). That fix has a side effect: if the ctx window itself has zero
+    observations for the route (e.g. it only ran on days outside the
+    selected range), the ctx-bounded dedup query returns nothing, so there
+    is no shape-vote signal and `chosen_shape_id` stays None — geometry and
+    unobserved_stops silently go empty too, even though pre-migration the
+    endpoint would still draw the route from its all-time shape. The
+    fallback all-time shape-vote query (fired only on this empty-window
+    edge case) restores that behavior."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
+            "       ($1, 'ST2', '次の停留所', 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
+            agency_id,
+        )
+        # Observations exist for this route, but all 60 days ago — well
+        # outside the endpoint's default 30-day ctx window.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW() - INTERVAL '60 days', 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW() - INTERVAL '60 days', 'test.pb', 'weekday', '09:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) "
+            "VALUES ($1, 'S1', "
+            "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(140.75, 40.83)]), 4326))",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # No from/to -> default ctx (last 30 days), which excludes the
+        # 60-day-old observations seeded above.
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["route"] == "R1"
+    # Delay data is correctly empty for the (empty) selected window.
+    assert body["stops"] == [], body
+    # But topology still renders from the all-time fallback shape vote.
+    assert body["geometry"] is not None, body
+    assert body["geometry"]["type"] == "LineString"
+    assert len(body["unobserved_stops"]) >= 2, body
+
+
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.

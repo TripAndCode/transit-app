@@ -173,6 +173,28 @@ async def route_shape(
     dedup_rows: list[tuple[str, int, int]] = list(dedup_result.result_rows)
     trip_counts: dict[str, int] = dict(Counter(tid for tid, _, _ in dedup_rows))
 
+    # If the ctx window has zero observations for this route (e.g. it only
+    # runs on days outside the selected range, or a time_band excludes every
+    # one of its trips), `dedup_rows`/`trip_counts` above come back empty —
+    # there's no shape-vote signal to derive from them, but the map should
+    # still be able to render the route's topology (geometry +
+    # unobserved-stop markers), just with no delay data on it, matching
+    # pre-ClickHouse-migration behavior. Run ONE fallback all-time
+    # shape-vote query, solely to pick a shape for rendering purposes — this
+    # is the only unbounded scan in this function, and it only fires on the
+    # empty-window edge case (not the common case), so it doesn't reintroduce
+    # the 32s-per-request problem the ctx bound above exists to fix. The
+    # per-stop delay stats (`avg_min`/`samples`) stay empty regardless, since
+    # there really are zero observations in the user's selected window.
+    if not trip_counts:
+        fallback_vote_result = await ch.query(
+            "SELECT trip_id, count() AS n FROM updates "
+            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "GROUP BY trip_id",
+            parameters={"agency_id": agency_id, "route": str(route)},
+        )
+        trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
+
     chosen_shape_id = None
     if trip_counts:
         shape_link_rows = await conn.fetch(
@@ -203,7 +225,9 @@ async def route_shape(
     # this route, filtering it a second time via ClickHouse would be another
     # redundant scan) so the per-stop delay stats rendered align with the
     # polyline; falls back to all-trips when the route has no shape data at
-    # all.
+    # all. In the empty-ctx-window fallback case above, `dedup_rows` is
+    # already empty, so this filter is a no-op and `stops` stays empty while
+    # `geometry`/`unobserved_stops` still render from the fallback shape.
     shape_trip_ids: list[str] | None = None
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
