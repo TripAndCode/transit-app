@@ -87,17 +87,27 @@ def build_dedup_ch_sql(
 ) -> str:
     """ClickHouse-dialect equivalent of build_dedup_inner_sql.
 
-    ClickHouse has no `DISTINCT ON`; the equivalent is `ORDER BY ...
-    LIMIT 1 BY (...)`, which additionally requires flipping the sort
-    direction relative to the Postgres version (DISTINCT ON keeps the
-    FIRST row per its ORDER BY; LIMIT 1 BY also keeps the first row of
-    its preceding ORDER BY — same semantics, different clause shape).
+    Picks the latest observation per stop event via a single-pass
+    `GROUP BY` + `argMax`, not a full sort. An earlier version used
+    `ORDER BY captured_at DESC, file_name DESC ... LIMIT 1 BY (...)`,
+    which is semantically identical (both keep the row with the maximal
+    `(captured_at, file_name)` per group) but forces ClickHouse to fully
+    SORT the entire filtered row set before taking the first row of each
+    group. At agency-8 scale (336M rows, full history, no date filter —
+    what `analyze()` runs) that sort didn't complete inside a 300s budget.
+    `argMax(dep_delay, (captured_at, file_name))` returns the `dep_delay`
+    from the row where the tuple `(captured_at, file_name)` is maximal
+    within the group — same latest-observation-wins, `file_name DESC`
+    tiebreak semantics as the old ORDER BY, computed as a streaming
+    aggregate instead. `id DESC` (a Postgres surrogate key, not carried
+    into the ClickHouse schema) is what `file_name DESC` already replaced
+    here — file names are unique per poll and sort consistently within a
+    day, which is all the original tiebreak needed.
 
-    `id DESC` (a Postgres surrogate key, not carried into the ClickHouse
-    schema) is replaced by `file_name DESC` as the deterministic tiebreak
-    when two rows share the same captured_at second — file names are
-    unique per poll and sort consistently within a day, which is all the
-    original tiebreak needed.
+    When `include_captured_at`, the winning row's `captured_at` is exactly
+    `max(captured_at)` within the group: ties on `captured_at` (broken by
+    `file_name`) share the same `captured_at` value by definition, so a
+    plain `max()` — not a second `argMax` — is correct and cheaper.
 
     `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
     every Postgres connection that ever touched `updates` pins
@@ -110,22 +120,45 @@ def build_dedup_ch_sql(
     exact UTC/JST aggregate-mis-bucketing bug this project already hit
     once (see the design doc's Risks section). `toDate(value, timezone)`
     is a real ClickHouse signature — it converts to a calendar date in
-    the given timezone regardless of the column's stored timezone.
+    the given timezone regardless of the column's stored timezone. The
+    `GROUP BY` repeats the full `toDate(...)` expression rather than the
+    `date` alias, to sidestep any ambiguity in how ClickHouse resolves a
+    GROUP BY key that shares a name with a SELECT-list alias.
 
     Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
     than a Python-formatted literal, for clickhouse-connect's server-side
     parameter binding.
+
+    Column order/count in the SELECT list must stay exactly
+    `route_code, service_type, scheduled_time, trip_id, date,
+    stop_sequence, dep_delay[, captured_at]` — `pipeline/analyze.py`
+    consumes the result by tuple position (`r[-1]` for `captured_at`).
+
+    Every reference to a base-table column that shares its name with a
+    SELECT-list alias (`dep_delay`, and `captured_at` when
+    `include_captured_at`) is qualified with the `u.` table alias below.
+    ClickHouse resolves a *bare* identifier that matches a SELECT alias by
+    textually substituting the alias's defining expression wherever that
+    bare identifier appears in the query — including back into this
+    query's own pre-aggregation `WHERE`, not just a caller's outer clause
+    — which turns e.g. `WHERE dep_delay IS NOT NULL` into
+    `WHERE argMax(dep_delay, ...) IS NOT NULL` and raises
+    `ILLEGAL_AGGREGATION` ("Aggregate function ... is found in WHERE").
+    Qualifying with `u.` makes these compound identifiers, which that
+    substitution rule doesn't match, so the WHERE clause still sees the
+    plain row-level column. Confirmed against a live ClickHouse instance.
     """
     extra = f" AND ({extra_where})" if extra_where else ""
-    captured = ", captured_at" if include_captured_at else ""
+    captured = ", max(u.captured_at) AS captured_at" if include_captured_at else ""
     return (
-        "SELECT route_code, service_type, scheduled_time, trip_id, "
-        f"toDate(captured_at, 'Asia/Tokyo') AS date, stop_sequence, dep_delay{captured} "
-        "FROM updates "
-        "WHERE dep_delay IS NOT NULL AND agency_id = {agency_id:UInt16} "
-        f"AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
-        "ORDER BY captured_at DESC, file_name DESC "
-        "LIMIT 1 BY route_code, service_type, scheduled_time, trip_id, toDate(captured_at, 'Asia/Tokyo'), stop_sequence"
+        "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured} "
+        "FROM updates AS u "
+        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
     )
 
 
