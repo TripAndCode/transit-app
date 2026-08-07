@@ -31,7 +31,7 @@ def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
     ``agency_id`` — callers must add it themselves (``build_dedup_ch_sql``'s
     inner WHERE references ``{agency_id:UInt16}``), same as every other
     ClickHouse call site in this codebase (see e.g.
-    ``pipeline.reports.rankings._route_avg_by_dow_ch``).
+    ``pipeline.reports.rankings._route_wd_we_avg_ch``).
     """
     where, params = build_updates_filter_ch(ctx)
     cte_sql = f"deduped AS ({build_dedup_ch_sql(extra_where=where, include_captured_at=False)})"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
 from api.range import RangeCtx, build_updates_filter_ch
@@ -407,64 +406,73 @@ async def compute_compare_ranking(
     return [tuple(r) for r in rows]
 
 
-async def _route_avg_by_dow_ch(agency_id: int, day_ctx: RangeCtx, ch) -> dict[str, tuple[float, int]]:
-    """Per-route (avg_min, n) from ClickHouse `updates`, deduped on a narrower
-    key than `build_dedup_ch_sql` (no service_type/scheduled_time — the
-    weekday-vs-weekend rollup doesn't need them; assumes (trip_id, date)
-    determines service_type in clean data, same assumption the original
-    Postgres wd_dedup/we_dedup CTEs made). Routes with <=10 deduped
-    observations are dropped, mirroring the original SQL's HAVING COUNT(*) > 10.
+async def _route_wd_we_avg_ch(agency_id: int, ctx: RangeCtx, ch) -> dict[str, tuple[float, int, float, int]]:
+    """Per-route (wd_avg_min, wd_n, we_avg_min, we_n) from ClickHouse `updates`,
+    computed with ONE query via conditional aggregates instead of two separate
+    queries (weekday ctx + weekend ctx) plus a Python-side mean/count/HAVING
+    reduction over every raw deduped row. The old shape shipped hundreds of
+    thousands of raw rows over HTTP for a 30-day window on agency 8 — this
+    moves the aggregation (and the >10-sample HAVING gate) into ClickHouse, so
+    only one row per qualifying route crosses the wire.
+
+    Deduped on a narrower key than `build_dedup_ch_sql` (no service_type/
+    scheduled_time — the weekday-vs-weekend rollup doesn't need them; assumes
+    (trip_id, date) determines service_type in clean data, same assumption
+    the original Postgres wd_dedup/we_dedup CTEs made). Routes with <=10
+    deduped weekday OR weekend observations are dropped entirely (both sides
+    must clear the gate), mirroring the original SQL's HAVING COUNT(*) > 10
+    on each side.
+
+    The inner subquery's `dep_delay`/`captured_at` references are qualified
+    with the `u.` table alias for the same reason `build_dedup_ch_sql`
+    qualifies them (see its docstring): the inner SELECT list defines
+    `dep_delay` as an `argMax(...)` alias, and ClickHouse would otherwise
+    textually substitute a bare `dep_delay` in that same subquery's WHERE
+    with the aggregate expression, raising `ILLEGAL_AGGREGATION`.
     """
-    where_frag, params = build_updates_filter_ch(day_ctx)
+    combined_ctx = RangeCtx(
+        from_date=ctx.from_date,
+        to_date=ctx.to_date,
+        dow="all",  # both sides needed in one pass; bucketed via toDayOfWeek below
+        time_band=ctx.time_band,
+        service="all",
+        routes=ctx.routes,
+    )
+    where_frag, params = build_updates_filter_ch(combined_ctx)
     result = await ch.query(
         f"""
-        SELECT route_code, dep_delay
-        FROM updates
-        WHERE agency_id = {{agency_id:UInt16}} AND dep_delay IS NOT NULL AND {where_frag}
-        ORDER BY captured_at DESC, file_name DESC
-        LIMIT 1 BY route_code, trip_id, toDate(captured_at, 'Asia/Tokyo'), stop_sequence
+        SELECT route_code,
+               avgIf(dep_delay, dow BETWEEN 1 AND 5) AS wd_avg, countIf(dow BETWEEN 1 AND 5) AS wd_n,
+               avgIf(dep_delay, dow IN (6, 7))       AS we_avg, countIf(dow IN (6, 7))       AS we_n
+        FROM (
+            SELECT u.route_code AS route_code,
+                   argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
+                   toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo')) AS dow
+            FROM updates AS u
+            WHERE u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where_frag}
+            GROUP BY u.route_code, u.trip_id, toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence,
+                     toDayOfWeek(toDate(u.captured_at, 'Asia/Tokyo'))
+        )
+        GROUP BY route_code
+        HAVING wd_n > 10 AND we_n > 10
         """,
         parameters={"agency_id": agency_id, **params},
     )
-    delays_by_route: dict[str, list[int]] = defaultdict(list)
-    for route_code, dep_delay in result.result_rows:
-        delays_by_route[route_code].append(dep_delay)
     return {
-        route_code: (sum(delays) / len(delays) / 60.0, len(delays))
-        for route_code, delays in delays_by_route.items()
-        if len(delays) > 10
+        route_code: (wd_avg / 60.0, wd_n, we_avg / 60.0, we_n)
+        for route_code, wd_avg, wd_n, we_avg, we_n in result.result_rows
     }
 
 
 async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -> list[tuple]:
     """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
-    weekday_ctx = RangeCtx(
-        from_date=ctx.from_date,
-        to_date=ctx.to_date,
-        dow="weekday",
-        time_band=ctx.time_band,
-        service="all",
-        routes=ctx.routes,
-    )
-    weekend_ctx = RangeCtx(
-        from_date=ctx.from_date,
-        to_date=ctx.to_date,
-        dow="weekend",
-        time_band=ctx.time_band,
-        service="all",
-        routes=ctx.routes,
-    )
-    wd_avg = await _route_avg_by_dow_ch(agency_id, weekday_ctx, ch)
-    we_avg = await _route_avg_by_dow_ch(agency_id, weekend_ctx, ch)
+    stats = await _route_wd_we_avg_ch(agency_id, ctx, ch)
 
     def _round2(x: float) -> Decimal:
         return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
     out: list[tuple] = []
-    for route_code, (wd_mean, _wd_n) in wd_avg.items():
-        if route_code not in we_avg:
-            continue
-        we_mean, _we_n = we_avg[route_code]
+    for route_code, (wd_mean, _wd_n, we_mean, _we_n) in stats.items():
         out.append(
             (
                 route_code,
@@ -476,7 +484,7 @@ async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -
         )
     # Sort by the UNROUNDED delta (matches the original SQL's ORDER BY
     # ABS(wd.avg_min - we.avg_min), computed before the display-only ROUND).
-    out.sort(key=lambda r: -abs(wd_avg[r[0]][0] - we_avg[r[0]][0]))
+    out.sort(key=lambda r: -abs(stats[r[0]][0] - stats[r[0]][2]))
     return out[:limit]
 
 
