@@ -151,6 +151,22 @@ async def route_shape(
     # proxy for shape-vote weight than the raw per-trip observation count,
     # since both are counted off the same dedup set.
     #
+    # Trade-off (deliberate, not proven bit-for-bit equivalent to the old
+    # two-query version): `dedup_rows` is filtered by `dep_delay IS NOT
+    # NULL` below, so a trip whose every observed StopTimeUpdate is
+    # arrival-only (no `dep_delay` — common at a route's last stop in
+    # GTFS-RT) contributes ZERO weight to the vote here, where the old raw
+    # `COUNT(*)` query counted it in full. We accept this: it reuses the
+    # dedup scan's own established definition of "counted observation" (see
+    # `pipeline/db.py::build_dedup_ch_sql` for the same filter-before-dedup
+    # ordering elsewhere in this codebase) rather than inventing a second,
+    # looser one just for the vote. A route where every trip on one shape
+    # variant happens to be arrival-only everywhere could in principle tip
+    # the vote toward a less-observed variant — accepted as a corner case,
+    # not chased further; see the regression test asserting the vote stays
+    # sensible (lands on the shape with real weighted support) when some
+    # trips are entirely NULL-delay.
+    #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
     # / service) honored by every other analytical endpoint — an earlier
     # version scanned the route's ENTIRE history here with no date bound

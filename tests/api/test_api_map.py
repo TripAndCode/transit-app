@@ -363,6 +363,104 @@ async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty
     assert len(body["unobserved_stops"]) >= 2, body
 
 
+@pytest.mark.asyncio
+async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, ch_client):
+    """The shape-vote's per-trip weights are now derived from the dedup
+    query's own rows (perf(map) b16fd70), which are filtered by `dep_delay
+    IS NOT NULL` before the `LIMIT 1 BY trip_id, stop_sequence` dedup — the
+    same filter-before-dedup ordering used everywhere else in this codebase
+    (see `pipeline/db.py::build_dedup_ch_sql`). A trip whose every observed
+    StopTimeUpdate is arrival-only (no `dep_delay` — common at a route's
+    terminal stop in GTFS-RT) therefore contributes ZERO weight to the vote,
+    not the full raw-row count the old separate `COUNT(*)` query would have
+    given it. This is a disclosed, accepted trade-off, not a bug — but the
+    vote must still land on the shape with real weighted support rather
+    than getting thrown off (e.g. picking the NULL-only shape, or None)
+    by the presence of arrival-only trips on a competing shape variant.
+
+    Fixture: shape S1 has two trips (T1, T2) with real dep_delay data over
+    three stops each (weight 6); shape S2 has one trip (T3) that is
+    arrival-only -- every one of its rows has NULL dep_delay, so it
+    contributes zero rows to the dedup scan and zero vote weight. The vote
+    must still pick S1 (the only shape with any weight), and the returned
+    per-stop stats must reflect only T1/T2's real delay data."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1'), ($1, 'T3', 'R1', 'S2')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', 'A', 40.80, 140.70, ST_SetSRID(ST_MakePoint(140.70, 40.80), 4326)), "
+            "       ($1, 'ST2', 'B', 40.81, 140.71, ST_SetSRID(ST_MakePoint(140.71, 40.81), 4326)), "
+            "       ($1, 'ST3', 'C', 40.82, 140.72, ST_SetSRID(ST_MakePoint(140.72, 40.82), 4326)), "
+            "       ($1, 'ST4', 'D', 45.00, 150.00, ST_SetSRID(ST_MakePoint(150.00, 45.00), 4326)), "
+            "       ($1, 'ST5', 'E', 45.01, 150.01, ST_SetSRID(ST_MakePoint(150.01, 45.01), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES "
+            "($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00'), "
+            "($1, 'T1', 3, 'ST3', '09:10:00', '09:10:00'), "
+            "($1, 'T2', 1, 'ST1', '10:00:00', '10:00:00'), "
+            "($1, 'T2', 2, 'ST2', '10:05:00', '10:05:00'), "
+            "($1, 'T2', 3, 'ST3', '10:10:00', '10:10:00'), "
+            "($1, 'T3', 1, 'ST4', '11:00:00', '11:00:00'), "
+            "($1, 'T3', 2, 'ST5', '11:05:00', '11:05:00')",
+            agency_id,
+        )
+        # T1/T2: real dep_delay data (shape S1). T3: NULL dep_delay on every
+        # row (arrival-only StopTimeUpdates, no departure delay ever
+        # reported) -- shape S2's only trip, so S2 gets zero vote weight.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) VALUES "
+            "($1, 'T1', 'R1', 1, 30, NOW(), 'f1.pb', 'weekday', '09:00:00'), "
+            "($1, 'T1', 'R1', 2, 60, NOW(), 'f1.pb', 'weekday', '09:05:00'), "
+            "($1, 'T1', 'R1', 3, 90, NOW(), 'f1.pb', 'weekday', '09:10:00'), "
+            "($1, 'T2', 'R1', 1, 40, NOW(), 'f2.pb', 'weekday', '10:00:00'), "
+            "($1, 'T2', 'R1', 2, 70, NOW(), 'f2.pb', 'weekday', '10:05:00'), "
+            "($1, 'T2', 'R1', 3, 100, NOW(), 'f2.pb', 'weekday', '10:10:00'), "
+            "($1, 'T3', 'R1', 1, NULL, NOW(), 'f3.pb', 'weekday', '11:00:00'), "
+            "($1, 'T3', 'R1', 2, NULL, NOW(), 'f3.pb', 'weekday', '11:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) VALUES "
+            "($1, 'S1', ST_SetSRID(ST_MakeLine(ARRAY["
+            "ST_MakePoint(140.70, 40.80), ST_MakePoint(140.71, 40.81), ST_MakePoint(140.72, 40.82)]), 4326)), "
+            "($1, 'S2', ST_SetSRID(ST_MakeLine(ARRAY["
+            "ST_MakePoint(150.00, 45.00), ST_MakePoint(150.01, 45.01)]), 4326))",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # The vote landed on S1 (real weighted support), not S2 (all-NULL, zero
+    # weight) and not None -- confirmed via S1's distinctive coordinates.
+    assert body["geometry"] is not None, body
+    coords = body["geometry"]["coordinates"]
+    assert coords[0] == [140.70, 40.80], body
+    assert coords[-1] == [140.72, 40.82], body
+    # Per-stop stats reflect only T1/T2's real delay data (2 samples/stop);
+    # T3's arrival-only rows never entered the dedup scan at all.
+    stops_by_seq = {s["stop_sequence"]: s for s in body["stops"]}
+    assert set(stops_by_seq) == {1, 2, 3}, body
+    for s in stops_by_seq.values():
+        assert s["samples"] == 2, body
+
+
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
