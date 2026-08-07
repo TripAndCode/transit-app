@@ -143,7 +143,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # the per-agency analyze loop on one connection); ANALYZE gives the
         # planner stats for the downstream GROUP BYs.
         ch_sql = build_dedup_ch_sql(include_captured_at=True)
-        ch_result = ch_client.query(ch_sql, parameters={"agency_id": agency_id})
         # Column order must match build_dedup_ch_sql's SELECT list exactly:
         # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, captured_at
         with conn.cursor() as cur:
@@ -157,32 +156,47 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 ) ON COMMIT DROP
                 """
             )
-            if ch_result.result_rows:
-                # clickhouse-connect returns DateTime64(0, 'UTC') columns as
-                # NAIVE Python datetimes (its default tz_mode is
-                # "naive_utc") that mean UTC. psycopg2 sends a naive
-                # datetime to Postgres as a plain literal, which Postgres
-                # then interprets in the SESSION's timezone — and every
-                # real analyze() caller (gtfs_pipeline._get_conn, the cron
-                # endpoint) pins `SET TIME ZONE 'Asia/Tokyo'`. Without this
-                # fixup, a ClickHouse timestamp that's naive-but-means-UTC
-                # would get reinterpreted as JST and land 9h early. Same
-                # guard as pipeline/clickhouse.py's max_captured_at /
-                # max_captured_at_before. captured_at is the last element
-                # of each row (see build_dedup_ch_sql's SELECT list above).
-                rows = [
-                    (
-                        *r[:-1],
-                        r[-1].replace(tzinfo=timezone.utc) if r[-1] is not None and r[-1].tzinfo is None else r[-1],
+            # `query_row_block_stream` (not `query`) so we never hold the whole
+            # dedup result in memory at once. `.query()` buffers the ENTIRE
+            # result as a Python list (`result_rows`) before returning it, and
+            # the tzinfo fixup below used to build a SECOND full-size list from
+            # that — two live copies of a set measured at 5.3M rows / 1.6-3.4GB
+            # for agency 8. Streaming yields one block (a list of row-tuples)
+            # at a time, so peak memory is bounded by one block, not the whole
+            # table. Each block is tzinfo-fixed and INSERTed independently;
+            # `execute_values`'s own page_size=10_000 chunking of the Postgres
+            # side is unaffected by how the ClickHouse side is fetched.
+            with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
+                for block in stream:
+                    if not block:
+                        continue
+                    # clickhouse-connect returns DateTime64(0, 'UTC') columns as
+                    # NAIVE Python datetimes (its default tz_mode is
+                    # "naive_utc") that mean UTC. psycopg2 sends a naive
+                    # datetime to Postgres as a plain literal, which Postgres
+                    # then interprets in the SESSION's timezone — and every
+                    # real analyze() caller (gtfs_pipeline._get_conn, the cron
+                    # endpoint) pins `SET TIME ZONE 'Asia/Tokyo'`. Without this
+                    # fixup, a ClickHouse timestamp that's naive-but-means-UTC
+                    # would get reinterpreted as JST and land 9h early. Same
+                    # guard as pipeline/clickhouse.py's max_captured_at /
+                    # max_captured_at_before. captured_at is the last element
+                    # of each row (see build_dedup_ch_sql's SELECT list above).
+                    rows = [
+                        (
+                            *r[:-1],
+                            r[-1].replace(tzinfo=timezone.utc)
+                            if r[-1] is not None and r[-1].tzinfo is None
+                            else r[-1],
+                        )
+                        for r in block
+                    ]
+                    psycopg2.extras.execute_values(
+                        cur,
+                        "INSERT INTO _analyze_deduped VALUES %s",
+                        rows,
+                        page_size=10_000,
                     )
-                    for r in ch_result.result_rows
-                ]
-                psycopg2.extras.execute_values(
-                    cur,
-                    "INSERT INTO _analyze_deduped VALUES %s",
-                    rows,
-                    page_size=10_000,
-                )
             cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────
