@@ -9,6 +9,16 @@ import re
 import struct
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Archive filenames/date-dirs encode local Japan time (same assumption the
+# whole app makes about `updates.captured_at`). _ts() must attach this
+# explicitly rather than returning a naive string: clickhouse-connect
+# resolves naive datetimes via the *process-local* host timezone when
+# writing DateTime64 columns, so a naive string is only correct by accident
+# on a JST-timezone host and silently wrong (9h off) on a UTC host such as
+# Railway/Docker/CI. See _ts()'s docstring.
+_JST = ZoneInfo("Asia/Tokyo")
 
 # ── varint protobuf decoder (no external dependencies) ────────────────────────
 
@@ -77,22 +87,32 @@ def _dec(b):
 
 
 def _ts(date_str: str, pb_name: str) -> str:
-    """Combine archive date dir + pb filename into an ISO timestamp.
+    """Combine archive date dir + pb filename into a JST-aware ISO timestamp.
 
     Same semantics as the original pipeline.ingest._ts: looks for
     `_HHMMSS.pb` in the filename and pairs it with date_str (YYYYMMDD).
     Falls back to plain date or 'now' if the format doesn't match.
+
+    The returned string is always timezone-aware (Asia/Tokyo), never naive:
+    archive filenames encode local Japan time, and clickhouse-connect
+    resolves a naive datetime using the *host process's* local timezone
+    when writing it, not JST — so a naive string here would silently shift
+    every archive-ingested row by the host/JST offset (9h on a UTC host).
     """
     m = re.search(r"_(\d{6})\.pb$", pb_name, re.IGNORECASE)
     if m and len(date_str) == 8:
         try:
-            return datetime.strptime(date_str + m.group(1), "%Y%m%d%H%M%S").isoformat()
+            return (
+                datetime.strptime(date_str + m.group(1), "%Y%m%d%H%M%S")
+                .replace(tzinfo=_JST)
+                .isoformat()
+            )
         except Exception:
             pass
     try:
-        return datetime.strptime(date_str, "%Y%m%d").isoformat()
+        return datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=_JST).isoformat()
     except Exception:
-        return datetime.now().isoformat()
+        return datetime.now(_JST).isoformat()
 
 
 # ── INSERT shape shared by all ingest strategies ──────────────────────────────
