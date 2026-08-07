@@ -236,6 +236,15 @@ async def describe_data(
         )
 
     if kind == "date_range":
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "ClickHouseに接続できないため取得できません。",
+                    "unable to fetch — ClickHouse is unavailable.",
+                    locale,
+                ),
+            )
         # toDate(captured_at, 'Asia/Tokyo') — NOT a bare toDate(captured_at) —
         # matches the JST civil day every Postgres connection touching
         # `updates` has always bucketed by (SET TIME ZONE 'Asia/Tokyo').
@@ -300,6 +309,15 @@ async def describe_data(
         )
 
     if kind == "sample_counts":
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "ClickHouseに接続できないため取得できません。",
+                    "unable to fetch — ClickHouse is unavailable.",
+                    locale,
+                ),
+            )
         # "サンプルが少ない路線" wants the least-sampled routes, so allow an
         # ascending order. Validate against an allowlist — never interpolate
         # raw LLM input into the ORDER BY clause.
@@ -393,6 +411,15 @@ async def describe_data(
         )
 
     if kind == "overview":
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                summary=_summary(
+                    "ClickHouseに接続できないため取得できません。",
+                    "unable to fetch — ClickHouse is unavailable.",
+                    locale,
+                ),
+            )
         route_count = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         stop_count = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
         obs_result = await ch.query(

@@ -18,6 +18,7 @@ the same filter.
 """
 
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -29,6 +30,8 @@ from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
 from api.triage import classify_route
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
@@ -428,12 +431,23 @@ async def today_route_summary(
     # captured_at DESC LIMIT 1 (not maxOrNull) is served off the sort index
     # instead of a full per-agency scan — see live_delays above / the
     # pipeline/clickhouse.py::max_captured_at docstring.
-    latest_result = await ch.query(
-        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id},
-    )
-    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+    #
+    # Purely informational: every substantive row below comes from Postgres
+    # agg_* tables, so a ClickHouse hiccup on this one freshness lookup must
+    # not 500 the whole endpoint — degrade to latest_captured_at=None instead
+    # (same "one non-critical sub-check shouldn't sink an otherwise-fine
+    # response" shape as pipeline.health.aggregate_freshness's degrade on
+    # agg_feed_health / api.routers.admin.admin_ops's per-sub-check try/except).
+    latest_ts = None
+    try:
+        latest_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+    except Exception:
+        _log.warning("ClickHouse freshness probe failed for agency %s — degrading to null", agency_id, exc_info=True)
 
     # Feed-health over the last 7 analyzed days (not just the latest): frozen/stale
     # feeds recur across days, so a single clean latest day must not hide a feed

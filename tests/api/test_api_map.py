@@ -740,6 +740,41 @@ async def test_analyze_builds_agg_route_daily(map_app, ch_client, ch_async_clien
 
 
 @pytest.mark.asyncio
+async def test_route_summary_degrades_when_clickhouse_freshness_probe_fails(map_app):
+    """Fix B regression: ClickHouse backs ONLY the informational
+    ``latest_captured_at`` freshness header here — every actual route row
+    comes from Postgres ``agg_route_daily``. A ClickHouse hiccup on that one
+    probe must degrade to ``latest_captured_at: null``, not 500 the whole
+    endpoint (no real ClickHouse needed for this — a client whose `.query`
+    always raises is enough to simulate the hiccup)."""
+
+    class _BrokenCh:
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("simulated ClickHouse outage")
+
+    app, agency_id = map_app
+    app.state.ch_client = _BrokenCh()
+    pool = app.state.pool
+    await _seed_route(
+        pool,
+        agency_id,
+        "R1",
+        "平日",
+        [(f"t{i}", 1, 300, "10:00") for i in range(25)],
+        baseline=None,
+        ch_client=None,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["latest_captured_at"] is None
+    r1 = next(r for r in body["routes"] if r["route_code"] == "R1")
+    assert r1["avg_delay_sec"] == 300
+    assert r1["samples"] == 25
+
+
+@pytest.mark.asyncio
 async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_async_client):
     """NULL service_type routes (no typed baseline) must still surface in triage —
     the old raw endpoint never filtered them, so the agg path must not either."""
