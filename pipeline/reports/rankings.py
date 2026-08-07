@@ -35,6 +35,21 @@ def _sec_to_min(sec: float | None) -> Decimal | None:
     return None if sec is None else (Decimal(sec) / 60).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
+def _round2(x: float) -> Decimal:
+    """Round an already-in-minutes float to 2 dp, half-up — matches Postgres
+    ``ROUND(x::numeric, 2)``. Used to round ClickHouse live-path results in
+    Python instead of ClickHouse's own ``round()`` (round-half-to-even),
+    which would otherwise diverge from the agg fast path at exact .5
+    boundaries for the same metric."""
+    return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
+
+
+def _round1(x: float) -> Decimal:
+    """Round an already-in-percent float to 1 dp, half-up — matches Postgres
+    ``ROUND(x::numeric, 1)``. Same rationale as :func:`_round2`."""
+    return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
     """Range-scan agg_route_daily_dist, summing the exact per-route scalars.
 
@@ -144,9 +159,9 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
-        "       round(quantileExact(0.5)(dep_delay) / 60.0, 2) AS p50_min,\n"
-        "       round(quantileExact(0.9)(dep_delay) / 60.0, 2) AS p90_min,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       quantileExact(0.5)(dep_delay) / 60.0 AS p50_min,\n"
+        "       quantileExact(0.9)(dep_delay) / 60.0 AS p90_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
@@ -155,7 +170,12 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
         "LIMIT {rk_limit:UInt32}",
         parameters={"agency_id": agency_id, "rk_limit": limit, **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # ClickHouse's round() is round-half-to-even; round in Python (half-up)
+    # to match Postgres ROUND() and the agg fast path's _avg_min/_sec_to_min.
+    return [
+        (route_code, service_type, _round2(avg_min), _round2(p50_min), _round2(p90_min), samples)
+        for route_code, service_type, avg_min, p50_min, p90_min, samples in result.result_rows
+    ]
 
 
 @perf.timed("reports.on_time")
@@ -214,10 +234,10 @@ async def _on_time_live(
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       round(sum(CASE WHEN dep_delay <= "
+        "       sum(CASE WHEN dep_delay <= "
         f"{threshold_sec}"
-        " THEN 1.0 ELSE 0 END) * 100.0 / count(*), 1) AS on_time_pct,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        " THEN 1.0 ELSE 0 END) * 100.0 / count(*) AS on_time_pct,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
@@ -226,7 +246,11 @@ async def _on_time_live(
         "LIMIT {ot_limit:UInt32}",
         parameters={"agency_id": agency_id, "ot_limit": limit, **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    return [
+        (route_code, service_type, _round1(on_time_pct), _round2(avg_min), samples)
+        for route_code, service_type, on_time_pct, avg_min, samples in result.result_rows
+    ]
 
 
 @perf.timed("reports.worst_5min")
@@ -272,7 +296,7 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int) 
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
         "       sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) AS late5_count,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
@@ -281,7 +305,11 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int) 
         "LIMIT {w5_limit:UInt32}",
         parameters={"agency_id": agency_id, "w5_limit": limit, **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    return [
+        (route_code, service_type, late5_count, _round2(avg_min), samples)
+        for route_code, service_type, late5_count, avg_min, samples in result.result_rows
+    ]
 
 
 @perf.timed("reports.dow_ranking")
@@ -337,7 +365,7 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
     result = await ch.query(
         f"WITH {cte_sql}\n"
         f"SELECT route_code, service_type, '{label}' AS dow,\n"
-        "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
@@ -346,7 +374,11 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
         "LIMIT {dr_limit:UInt32}",
         parameters={"agency_id": agency_id, "dr_limit": limit, **ch_params},
     )
-    return [tuple(r) for r in result.result_rows]
+    # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    return [
+        (route_code, service_type, dow, _round2(avg_min), samples)
+        for route_code, service_type, dow, avg_min, samples in result.result_rows
+    ]
 
 
 @perf.timed("reports.compare_ranking")
@@ -468,9 +500,6 @@ async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -
     """Live raw-scan weekday-vs-weekend compare — fallback for time_band queries."""
     stats = await _route_wd_we_avg_ch(agency_id, ctx, ch)
 
-    def _round2(x: float) -> Decimal:
-        return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
-
     out: list[tuple] = []
     for route_code, (wd_mean, _wd_n, we_mean, _we_n) in stats.items():
         out.append(
@@ -532,7 +561,7 @@ async def compute_hourly_heatmap(
         result = await ch.query(
             f"WITH {cte_sql}\n"
             f"SELECT date, {hour_expr} AS hour,\n"
-            "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+            "       avg(dep_delay) / 60.0 AS avg_min,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
@@ -542,11 +571,14 @@ async def compute_hourly_heatmap(
             parameters={"agency_id": agency_id, **ch_params},
         )
         rows = _ch_rows(result)
+    # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    # Idempotent on the fast path, whose agg_hour_daily.avg_min is already
+    # stored rounded to 2 dp.
     return [
         {
             "date": r["date"].isoformat(),
             "hour": int(r["hour"]),
-            "avg_min": float(r["avg_min"]) if r["avg_min"] is not None else None,
+            "avg_min": float(_round2(r["avg_min"])) if r["avg_min"] is not None else None,
             "samples": r["samples"],
         }
         for r in rows
@@ -599,7 +631,7 @@ async def compute_trend_series(
             f"WITH {cte_sql}\n"
             f"SELECT {bucket_expr} AS bucket,\n"
             "       route_code, service_type,\n"
-            "       round(avg(dep_delay) / 60.0, 2) AS avg_min,\n"
+            "       avg(dep_delay) / 60.0 AS avg_min,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "GROUP BY bucket, route_code, service_type\n"
@@ -614,7 +646,10 @@ async def compute_trend_series(
     for r in per_day:
         # SQL now aliases the time-bucketed column as "bucket".
         d = r["bucket"]
-        avg = float(r["avg_min"]) if r["avg_min"] is not None else None
+        # Round in Python (half-up) to match Postgres ROUND() — see
+        # _ranking_live. Idempotent on the fast path (agg_daily_trend's
+        # avg_min is already rounded to 2 dp by the SQL above).
+        avg = float(_round2(r["avg_min"])) if r["avg_min"] is not None else None
         n = r["samples"]
         by_date_samples[d] = by_date_samples.get(d, 0) + n
         if avg is not None:

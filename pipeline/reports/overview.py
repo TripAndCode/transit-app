@@ -29,11 +29,23 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _time_band_sql_on
+
+_MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
+
+
+def _round2(x: float) -> Decimal:
+    """Round an already-in-minutes float to 2 dp, half-up — matches Postgres
+    ``ROUND(x::numeric, 2)``. Used to round ClickHouse live-path results in
+    Python instead of ClickHouse's own ``round()`` (round-half-to-even),
+    which would otherwise diverge from the agg fast path at exact .5
+    boundaries for the same metric. Mirrors pipeline.reports.rankings._round2."""
+    return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None) -> date | None:
@@ -108,9 +120,7 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn, ch=None) -> tuple
         return avg, int(row["samples"] or 0)
 
     cte_sql, ch_params = _dedup_cte_ch(ctx)
-    sql = (
-        f"WITH {cte_sql}\nSELECT round(avg(dep_delay) / 60.0, 2) AS avg_min,\n       count(*) AS samples\nFROM deduped"
-    )
+    sql = f"WITH {cte_sql}\nSELECT avg(dep_delay) / 60.0 AS avg_min,\n       count(*) AS samples\nFROM deduped"
     result = await ch.query(sql, parameters={"agency_id": agency_id, **ch_params})
     avg_min_raw, samples_raw = result.result_rows[0]
     samples = int(samples_raw or 0)
@@ -118,7 +128,10 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn, ch=None) -> tuple
     # NULL — guard on `samples` (an exact count(*), never NaN) rather than
     # trusting avg_min_raw's own null-ness, matching Postgres's NULL-on-empty
     # semantics that the rest of this codebase (and its JSON consumers) rely on.
-    avg = float(avg_min_raw) if samples > 0 else None
+    # Round in Python (half-up) to match Postgres ROUND() — ClickHouse's own
+    # round() is round-half-to-even and would otherwise diverge from the agg
+    # fast path at exact .5-minute boundaries for the same metric.
+    avg = float(_round2(avg_min_raw)) if samples > 0 else None
     return avg, samples
 
 

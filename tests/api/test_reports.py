@@ -349,6 +349,44 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
 
 
 @pytest.mark.asyncio
+async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_client, ch_client, ch_async_client):
+    """Fix C regression: ClickHouse's round() is round-half-to-even; Postgres'
+    numeric ROUND() (and this codebase's Decimal(ROUND_HALF_UP) helpers) round
+    half away from zero. 12 rows at 127s + 12 rows at 128s average to exactly
+    127.5s = 2.125min — an exact .5 boundary at the 3rd decimal. Half-up
+    rounds to 2.13; ClickHouse's native round() would have given 2.12. Both
+    the ClickHouse live fallback (time_band=morning, _ranking_live) and the
+    agg fast path (time_band=all, after analyze(), agg_route_daily_dist) must
+    agree on 2.13 for the same underlying data.
+    """
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-10"
+    await _seed_route_at(pool, agency_id, "R_HALF", "平日", day, "08:00", [127] * 12 + [128] * 12)
+
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    # Live path: time_band forces the ClickHouse fallback.
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r_live = next(x for x in rows if x[0] == "R_HALF")
+    assert float(r_live[2]) == 2.13
+
+    # Fast path: analyze() builds agg_route_daily_dist from the same rows.
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r_agg = next(x for x in rows if x[0] == "R_HALF")
+    assert float(r_agg[2]) == 2.13
+
+
+@pytest.mark.asyncio
 async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
     """Task 8.5: trend's daily series (compute_trend_series) and hourly
     heatmap (compute_hourly_heatmap) both fall back to the ClickHouse live
