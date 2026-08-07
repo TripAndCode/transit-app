@@ -245,23 +245,41 @@ async def describe_data(
                     locale,
                 ),
             )
-        # toDate(captured_at, 'Asia/Tokyo') — NOT a bare toDate(captured_at) —
-        # matches the JST civil day every Postgres connection touching
-        # `updates` has always bucketed by (SET TIME ZONE 'Asia/Tokyo').
-        result = await ch.query(
-            "SELECT minOrNull(captured_at) AS first_obs, "
-            "       maxOrNull(captured_at) AS last_obs, "
-            "       COUNT(DISTINCT toDate(captured_at, 'Asia/Tokyo')) AS days, "
-            "       COUNT(*) AS rows_n "
-            "FROM updates WHERE agency_id = {agency_id:UInt16}",
+        # `updates`' ORDER BY key is (agency_id, captured_at, ...), so a plain
+        # agency-scoped ORDER BY captured_at ASC/DESC LIMIT 1 is index-served.
+        # A combined minOrNull/maxOrNull aggregate can't use that index and
+        # forces a full-table scan; a single query also can't get both the
+        # index-served min AND max at once, so this is split into two cheap
+        # probes instead, combined in Python.
+        first_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+            "ORDER BY captured_at ASC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
-        first_obs, last_obs, days, rows_n = result.result_rows[0]
-        if first_obs is None:
+        if not first_result.result_rows:
             return ToolResult(
                 kind="empty",
                 summary=_summary("観測データがありません。", "no observations.", locale),
             )
+        first_obs = first_result.result_rows[0][0]
+        last_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        last_obs = last_result.result_rows[0][0]
+        # toDate(captured_at, 'Asia/Tokyo') — NOT a bare toDate(captured_at) —
+        # matches the JST civil day every Postgres connection touching
+        # `updates` has always bucketed by (SET TIME ZONE 'Asia/Tokyo').
+        # COUNT(DISTINCT ...) / COUNT(*) still need a full scan (unrelated to
+        # the min/max sort-key optimization above), so they stay one query.
+        counts_result = await ch.query(
+            "SELECT COUNT(DISTINCT toDate(captured_at, 'Asia/Tokyo')) AS days, "
+            "       COUNT(*) AS rows_n "
+            "FROM updates WHERE agency_id = {agency_id:UInt16}",
+            parameters={"agency_id": agency_id},
+        )
+        days, rows_n = counts_result.result_rows[0]
         first_obs = _as_utc(first_obs)
         last_obs = _as_utc(last_obs)
         assert first_obs is not None and last_obs is not None  # first_obs None-check above guards both
@@ -358,15 +376,18 @@ async def describe_data(
             )
         # Clamp the DISPLAYED window so the summary never claims coverage past
         # where data actually exists. The BETWEEN above is unchanged; we only
-        # adjust the text. MAX(captured_at) is over the requested window so a
-        # NULL means no data fell in range.
+        # adjust the text. Only the max bound is needed here, so this reads
+        # off the sort key (agency_id, captured_at, ...) via ORDER BY ...
+        # DESC LIMIT 1 instead of a full-scan maxOrNull() aggregate; an empty
+        # result set (no data in range) means no data fell in range.
         data_end_ch = await ch.query(
-            "SELECT maxOrNull(captured_at) FROM updates "
+            "SELECT captured_at FROM updates "
             "WHERE agency_id = {agency_id:UInt16} "
-            "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date}",
+            "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date} "
+            "ORDER BY captured_at DESC LIMIT 1",
             parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
         )
-        data_end_ts = _as_utc(data_end_ch.result_rows[0][0])
+        data_end_ts = _as_utc(data_end_ch.result_rows[0][0]) if data_end_ch.result_rows else None
         data_end = data_end_ts.astimezone(_JST).date() if data_end_ts is not None else None
         window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
         if offset > 0:
@@ -422,12 +443,29 @@ async def describe_data(
             )
         route_count = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         stop_count = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
-        obs_result = await ch.query(
-            "SELECT COUNT(*) AS n, minOrNull(captured_at) AS first_obs, maxOrNull(captured_at) AS last_obs "
-            "FROM updates WHERE agency_id = {agency_id:UInt16}",
+        count_result = await ch.query(
+            "SELECT COUNT(*) AS n FROM updates WHERE agency_id = {agency_id:UInt16}",
             parameters={"agency_id": agency_id},
         )
-        obs_n, obs_first, obs_last = obs_result.result_rows[0]
+        obs_n = count_result.result_rows[0][0]
+        # `updates`' ORDER BY key is (agency_id, captured_at, ...) — a plain
+        # agency-scoped ORDER BY captured_at ASC/DESC LIMIT 1 is index-served,
+        # unlike a combined minOrNull/maxOrNull aggregate (full scan). A
+        # single query can't get both bounds at once, so this is split into
+        # two cheap probes, combined in Python; an empty result set (no rows
+        # for this agency) means "no observations" for that bound.
+        first_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+            "ORDER BY captured_at ASC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        obs_first = first_result.result_rows[0][0] if first_result.result_rows else None
+        last_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        obs_last = last_result.result_rows[0][0] if last_result.result_rows else None
         obs_first = _as_utc(obs_first)
         obs_last = _as_utc(obs_last)
         pairs = [

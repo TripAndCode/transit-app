@@ -153,6 +153,34 @@ async def test_describe_data_date_range(conn_with_observations_ch):
 
 
 @pytest.mark.asyncio
+async def test_describe_data_date_range_empty_agency(conn_with_seed, ch_async_client):
+    """Fix D regression: date_range's min/max split (two index-served
+    ORDER BY captured_at ASC/DESC LIMIT 1 probes instead of one full-scan
+    minOrNull/maxOrNull) must still report 'no observations' — not crash on
+    an empty result_rows list — when the agency has zero ClickHouse rows."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client
+        )
+    assert result.kind == "empty"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_overview_empty_agency(conn_with_seed, ch_async_client):
+    """Fix D regression: overview's min/max split must degrade to '—' (not
+    crash) when the agency has zero ClickHouse rows."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "overview"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert result.kind == "kv"
+    keys = dict(result.pairs)
+    assert keys["observations"] == "0"
+    assert keys["first_observed"] == "—"
+    assert keys["last_observed"] == "—"
+
+
+@pytest.mark.asyncio
 async def test_describe_data_agencies(conn_with_observations):
     """Default behavior must single-tenant: only the caller's own agency."""
     pool, agency_id = conn_with_observations
