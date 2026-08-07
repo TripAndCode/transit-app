@@ -181,6 +181,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     cur,
                     "INSERT INTO _analyze_deduped VALUES %s",
                     rows,
+                    page_size=10_000,
                 )
             cur.execute("ANALYZE _analyze_deduped")
 
@@ -588,7 +589,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "ON COMMIT DROP"
                 )
                 if ch_keys.result_rows:
-                    psycopg2.extras.execute_values(cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows)
+                    psycopg2.extras.execute_values(
+                        cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows, page_size=10_000
+                    )
                 sql = """
                     INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
                     SELECT %(agency_id)s, sst.stop_id,
