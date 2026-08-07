@@ -60,10 +60,16 @@ doctor:
 		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
 		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
 		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
+	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); \
+		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
+		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
 	@echo "── db ──"
 	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-pg' \
 		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-pg \
 		|| echo "  transit-pg NOT running — \`make db\`"
+	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-ch' \
+		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-ch \
+		|| echo "  transit-ch NOT running — \`make db\`"
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \
@@ -102,6 +108,7 @@ db:
 	docker compose exec db sh -c 'until pg_isready -U transit -d transit; do sleep 1; done'
 	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
+	@$(MAKE) ch-bootstrap
 
 db-down:
 	docker compose down
