@@ -191,26 +191,33 @@ async def _route_weekly_history(
     """Per-route weekly avg_min for the last ``weeks_back`` true 7-day
     buckets ending at ``ctx.to_date``. Honors DOW / service / routes.
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``. Slow
-    path falls back to live ``updates`` (ClickHouse) via the dedup CTE so
-    the hour-of-day filter is honored.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` — one
+    small indexed query per week (cheap; the table has no dedup to redo).
+    Slow path falls back to live ``updates`` (ClickHouse) so the hour-of-day
+    filter is honored — ONE dedup scan over the full ``weeks_back * 7``-day
+    span, bucketed by week index, rather than ``weeks_back`` separate dedup
+    scans of live `updates` (one per week): ``date`` is part of the dedup
+    key, so re-running the same argMax dedup once over the whole span and
+    then grouping by a week index is equivalent to the union of the
+    per-week queries, at 1/``weeks_back`` the round trips.
     """
     if not route_codes:
         return {}
 
     out: dict[str, list[float | None]] = {code: [] for code in route_codes}
-    for k in range(weeks_back - 1, -1, -1):
-        end = ctx.to_date - timedelta(days=7 * k)
-        start = end - timedelta(days=6)  # inclusive 7-day window
-        window_ctx = RangeCtx(
-            from_date=start,
-            to_date=end,
-            dow=ctx.dow,
-            time_band=ctx.time_band,
-            service=ctx.service,
-            routes=ctx.routes,
-        )
-        if ctx.time_band == "all":
+
+    if ctx.time_band == "all":
+        for k in range(weeks_back - 1, -1, -1):
+            end = ctx.to_date - timedelta(days=7 * k)
+            start = end - timedelta(days=6)  # inclusive 7-day window
+            window_ctx = RangeCtx(
+                from_date=start,
+                to_date=end,
+                dow=ctx.dow,
+                time_band=ctx.time_band,
+                service=ctx.service,
+                routes=ctx.routes,
+            )
             where, params, n = _agg_filter(window_ctx, next_param=2)
             where_clause = f" AND ({where})" if where else ""
             rows = await conn.fetch(
@@ -225,20 +232,47 @@ async def _route_weekly_history(
                 list(route_codes),
             )
             wk_map = {r["route_code"]: float(r["avg_min"]) for r in rows if r["avg_min"] is not None}
-        else:
-            cte_sql, ch_params = _dedup_cte_ch(window_ctx)
-            result = await ch.query(
-                f"WITH {cte_sql}\n"
-                "SELECT route_code,\n"
-                "       avg(dep_delay) / 60.0 AS avg_min\n"
-                "FROM deduped\n"
-                "WHERE route_code IN {rw_route_codes:Array(String)}\n"
-                "GROUP BY route_code",
-                parameters={"agency_id": agency_id, "rw_route_codes": list(route_codes), **ch_params},
-            )
-            wk_map = {route_code: float(avg_min) for route_code, avg_min in result.result_rows}
-        for code in route_codes:
-            out[code].append(wk_map.get(code))
+            for code in route_codes:
+                out[code].append(wk_map.get(code))
+        return out
+
+    # Live ClickHouse path: one dedup CTE over the whole [ctx.to_date -
+    # weeks_back*7 + 1, ctx.to_date] span, bucketed into weeks_back week-index
+    # groups via `intDiv(dateDiff('day', date, to_date), 7)` — 0 is the most
+    # recent 7-day bucket ending at ctx.to_date, weeks_back-1 the oldest,
+    # matching the original per-week loop's `k` and its oldest-first append
+    # order into `out[code]`.
+    span_from = ctx.to_date - timedelta(days=7 * weeks_back - 1)
+    span_ctx = RangeCtx(
+        from_date=span_from,
+        to_date=ctx.to_date,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT route_code,\n"
+        "       intDiv(dateDiff('day', date, {rw_to_date:Date}), 7) AS wk,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min\n"
+        "FROM deduped\n"
+        "WHERE route_code IN {rw_route_codes:Array(String)}\n"
+        "GROUP BY route_code, wk",
+        parameters={
+            "agency_id": agency_id,
+            "rw_route_codes": list(route_codes),
+            "rw_to_date": ctx.to_date,
+            **ch_params,
+        },
+    )
+    by_route_wk: dict[tuple[str, int], float] = {
+        (route_code, wk): float(avg_min) for route_code, wk, avg_min in result.result_rows
+    }
+    for code in route_codes:
+        for k in range(weeks_back - 1, -1, -1):
+            out[code].append(by_route_wk.get((code, k)))
     return out
 
 
