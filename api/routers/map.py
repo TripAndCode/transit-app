@@ -19,7 +19,7 @@ the same filter.
 
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -141,29 +141,37 @@ async def route_shape(
     # one variant — without this pin, multi-shape routes (e.g. Hiroshima
     # express bus with several variants) showed stops off the line.
     #
-    # `updates` now lives in ClickHouse, so this can no longer be a single
-    # cross-database JOIN: fetch per-trip observation counts from ClickHouse
-    # first, then join that trip_id set against Postgres `static_trips` and
-    # sum the counts per shape_id in Python. Sum-of-per-trip-counts grouped
-    # by shape equals the original single-JOIN COUNT(*) grouped by shape
-    # (GROUP BY commutes over this partition), so this is exact, not
-    # approximate.
+    # `updates` now lives in ClickHouse. The shape-vote and the per-stop
+    # delay dedup both scan the identical agency/route/ctx-bounded slice of
+    # `updates`, so run the dedup query FIRST — WITHOUT any shape filter,
+    # since chosen_shape_id isn't known yet — and derive the shape-vote's
+    # per-trip counts from its own deduped rows in Python instead of paying
+    # for a second ClickHouse scan. "Which trips appear, and how many
+    # deduped stop-events each contributes" is a valid (arguably better)
+    # proxy for shape-vote weight than the raw per-trip observation count,
+    # since both are counted off the same dedup set.
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
-    # / service) as the dedup query below — an earlier version scanned the
-    # route's ENTIRE history here with no date bound (measured 32.1s on
-    # agency 8's real data for one route, returning only ~100 rows), even
-    # though the shape should reflect what's actually being shown for the
-    # user's selected range, not all-time history.
+    # / service) honored by every other analytical endpoint — an earlier
+    # version scanned the route's ENTIRE history here with no date bound
+    # (measured 32.1s on agency 8's real data for one route, returning only
+    # ~100 rows), even though the shape should reflect what's actually being
+    # shown for the user's selected range, not all-time history.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
-    trip_counts_result = await ch.query(
-        "SELECT trip_id, count() AS n FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-        f"AND {ch_where_frag} "
-        "GROUP BY trip_id",
+    dedup_result = await ch.query(
+        f"""
+        SELECT trip_id, stop_sequence, dep_delay
+        FROM updates
+        WHERE agency_id = {{agency_id:UInt16}} AND route_code = {{route:String}}
+          AND dep_delay IS NOT NULL
+          AND {ch_where_frag}
+        ORDER BY captured_at DESC, file_name DESC
+        LIMIT 1 BY trip_id, stop_sequence
+        """,
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
-    trip_counts: dict[str, int] = {tid: n for tid, n in trip_counts_result.result_rows}
+    dedup_rows: list[tuple[str, int, int]] = list(dedup_result.result_rows)
+    trip_counts: dict[str, int] = dict(Counter(tid for tid, _, _ in dedup_rows))
 
     chosen_shape_id = None
     if trip_counts:
@@ -190,13 +198,12 @@ async def route_shape(
         raw = geom_row["geom_json"] if geom_row else None
         geometry = json.loads(raw) if raw is not None else None
 
-    # Honor full ctx (DOW / time_band / service / dates) so the polyline
-    # colors match what compute_ranking et al. show for the same filters —
-    # `ch_where_frag`/`ch_params` were already computed above (and reused
-    # for the shape-vote query too, so both queries agree on the same
-    # ctx-bounded window). When a shape is chosen, restrict to trips on that
-    # shape so the stops rendered align with the polyline; falls back to
-    # all-trips when the route has no shape data at all.
+    # When a shape is chosen, restrict `dedup_rows` to trips on that shape
+    # (in Python — `dedup_rows` already carries every ctx-bounded trip for
+    # this route, filtering it a second time via ClickHouse would be another
+    # redundant scan) so the per-stop delay stats rendered align with the
+    # polyline; falls back to all-trips when the route has no shape data at
+    # all.
     shape_trip_ids: list[str] | None = None
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
@@ -205,31 +212,9 @@ async def route_shape(
             chosen_shape_id,
         )
         shape_trip_ids = [r["trip_id"] for r in shape_trip_rows]
-        ch_shape_filter = " AND trip_id IN {shape_trip_ids:Array(String)}"
-        ch_params = {**ch_params, "shape_trip_ids": shape_trip_ids}
-    else:
-        ch_shape_filter = ""
+        shape_trip_id_set = set(shape_trip_ids)
+        dedup_rows = [row for row in dedup_rows if row[0] in shape_trip_id_set]
 
-    dedup_result = await ch.query(
-        f"""
-        SELECT trip_id, stop_sequence, dep_delay
-        FROM updates
-        WHERE agency_id = {{agency_id:UInt16}} AND route_code = {{route:String}}
-          AND dep_delay IS NOT NULL
-          AND {ch_where_frag}
-          {ch_shape_filter}
-        ORDER BY captured_at DESC, file_name DESC
-        LIMIT 1 BY trip_id, stop_sequence
-        """,
-        parameters={"agency_id": agency_id, "route": str(route), **ch_params},
-    )
-    dedup_rows: list[tuple[str, int, int]] = list(dedup_result.result_rows)
-
-    # If a shape was chosen but no observed trip actually falls on it (e.g.
-    # the ctx window excludes every trip that produced the shape_id vote
-    # above), the shape filter would otherwise silently return everything —
-    # ClickHouse's `IN {empty array}` matches zero rows, which is the
-    # correct (not the buggy) behavior here, so no extra guard is needed.
     static_join_rows: list = []
     if dedup_rows:
         dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
