@@ -14,11 +14,19 @@ class _EmptyChClient:
     """Stub ClickHouse client: every query behaves like an agency with no
     `updates` rows at all (max_captured_at → None), matching this file's old
     Postgres-only fixtures which never seeded the live `updates` table
-    either — so is_stale stays False, same as before the ClickHouse port."""
+    either — so is_stale stays False, same as before the ClickHouse port.
+
+    `result_rows = []` (not `[(None,)]`): `pipeline.clickhouse.max_captured_at`
+    /`max_captured_at_before` now query `ORDER BY captured_at DESC LIMIT 1`
+    instead of `maxOrNull(captured_at)` (index-served off the `updates` sort
+    key instead of a full aggregate scan) — a query with no matching rows
+    returns an EMPTY result set under `ORDER BY ... LIMIT 1`, unlike a
+    no-GROUP-BY aggregate like `maxOrNull`, which always returns exactly one
+    row (value `NULL`) even over zero input rows."""
 
     def query(self, *_args, **_kwargs):
         class _Result:
-            result_rows = [(None,)]
+            result_rows = []
 
         return _Result()
 

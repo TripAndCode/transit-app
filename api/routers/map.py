@@ -66,11 +66,17 @@ async def live_delays(
     limit: int = Query(default=200, le=500),
 ):
     """Rows from the most recent observation date with a freshness header."""
+    # ORDER BY captured_at DESC LIMIT 1, not maxOrNull(captured_at): captured_at
+    # is the second column of updates' (agency_id, captured_at, ...) sort key,
+    # so this form is served off the sort index (reads ~thousands of rows)
+    # instead of a full per-agency aggregate scan — see
+    # pipeline/clickhouse.py::max_captured_at's docstring for the full case.
     latest_result = await ch.query(
-        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
-    latest_ts = _as_utc(latest_result.result_rows[0][0])
+    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
@@ -418,12 +424,16 @@ async def today_route_summary(
     )
 
     # Freshness header reflects INGEST recency (what DataStalenessBanner means),
-    # not analyze recency — a cheap MAX, independent of the agg.
+    # not analyze recency — a cheap probe, independent of the agg. ORDER BY
+    # captured_at DESC LIMIT 1 (not maxOrNull) is served off the sort index
+    # instead of a full per-agency scan — see live_delays above / the
+    # pipeline/clickhouse.py::max_captured_at docstring.
     latest_result = await ch.query(
-        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
-    latest_ts = _as_utc(latest_result.result_rows[0][0])
+    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
 
     # Feed-health over the last 7 analyzed days (not just the latest): frozen/stale
     # feeds recur across days, so a single clean latest day must not hide a feed
@@ -487,12 +497,18 @@ async def route_trips(
     (from static_trips), and the trip's average dep_delay across its stops.
     Sorted worst-first — answers "which buses were late". Read-only.
     """
+    # ORDER BY captured_at DESC LIMIT 1 (not maxOrNull): captured_at is the
+    # second column of the sort key, so scanning from the tail finds a
+    # route_code match within a small number of granules for an
+    # active route, instead of a full per-agency aggregate scan — see
+    # pipeline/clickhouse.py::max_captured_at's docstring.
     latest_result = await ch.query(
-        "SELECT maxOrNull(captured_at) FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}",
+        "SELECT captured_at FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id, "route": route_code},
     )
-    latest_ts = _as_utc(latest_result.result_rows[0][0])
+    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
     if latest_ts is None:
         return {"date": None, "trips": []}
 
@@ -577,12 +593,15 @@ async def route_stop_profile(
     ordered by sequence — answers "where on the route does delay build". The
     name is best-effort (MAX over the sequence's mapped stop). Read-only.
     """
+    # ORDER BY captured_at DESC LIMIT 1 (not maxOrNull) — see route_trips
+    # above / pipeline/clickhouse.py::max_captured_at's docstring.
     latest_result = await ch.query(
-        "SELECT maxOrNull(captured_at) FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}",
+        "SELECT captured_at FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id, "route": route_code},
     )
-    latest_ts = _as_utc(latest_result.result_rows[0][0])
+    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
     if latest_ts is None:
         return {"date": None, "stops": []}
 

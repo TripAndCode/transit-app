@@ -65,14 +65,23 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     freshness header). For "what's the latest COMPLETED day" checks, use
     `max_captured_at_before` instead — do not add a same-day exclusion here,
     it would silently change this function's meaning for existing callers.
+
+    Uses `ORDER BY captured_at DESC LIMIT 1` rather than `maxOrNull(captured_at)`:
+    `captured_at` is the SECOND column in `updates`' `ORDER BY (agency_id,
+    captured_at, route_code, trip_id, stop_sequence)` sort key, so this form is
+    served directly off the sort index (reads ~thousands of rows), while
+    `maxOrNull` is a full per-agency aggregate scan that reads every row for
+    the agency. Same result either way — an empty result set (no rows for
+    `agency_id`) means "no latest row", matching `maxOrNull`'s `None`.
     """
     result = client.query(
-        "SELECT maxOrNull(captured_at) FROM updates WHERE agency_id = {agency_id:UInt16}",
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
-    value = result.result_rows[0][0]
-    if value is None:
+    if not result.result_rows:
         return None
+    value = result.result_rows[0][0]
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
@@ -86,13 +95,18 @@ def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime
     would incorrectly return "no completed day" whenever a later (e.g.
     today's, still-ingesting) row also exists, instead of falling back to
     the latest prior completed day.
+
+    Same `ORDER BY captured_at DESC LIMIT 1` index-served form as
+    `max_captured_at` (see its docstring) instead of `maxOrNull` — the
+    `captured_at < {before}` predicate composes fine with the sort-key scan.
     """
     result = client.query(
-        "SELECT maxOrNull(captured_at) FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64}",
+        "SELECT captured_at FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id, "before": before},
     )
-    value = result.result_rows[0][0]
-    if value is None:
+    if not result.result_rows:
         return None
+    value = result.result_rows[0][0]
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
