@@ -185,6 +185,23 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
 
     done = distinct_file_names(ch_client, agency_id)
 
+    # `done` is only updated by _flush() (every _BATCH_ROWS rows, Task 8.9),
+    # so a file buffered but not yet flushed is invisible to any dedup check
+    # against `done` alone. `seen` closes that gap: every file key is added
+    # to it the instant it's buffered (added to pending_files), not once it's
+    # flushed, so the same run can never buffer the same key twice - even
+    # across two tarballs, or between the tarball loop and the loose-.pb
+    # loop. Seeded from `done` so files already ingested in a PRIOR run are
+    # still skipped from the very first check.
+    #
+    # `seen` and `done` deliberately diverge on a failed flush: that batch's
+    # files stay in `seen` (so they aren't re-buffered later in THIS run -
+    # re-parsing them again would just duplicate the failure accounting, not
+    # help) but are absent from `done` (so the NEXT ingest() run, which
+    # recomputes `done` fresh from ClickHouse, retries them - see _flush()'s
+    # docstring for that crash-safety invariant).
+    seen = set(done)
+
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
@@ -245,7 +262,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         inner_dir = pathlib.Path(m.name).parent.name
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
-                    new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in done]
+                    new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in seen]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):
                         # _savepoint isolates one bad member's Postgres-side work
@@ -278,6 +295,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                             continue
                         pending_rows.extend(rows)
                         pending_files.append(f"{d}/{pb_name}")
+                        seen.add(f"{d}/{pb_name}")
                         if len(pending_rows) >= _BATCH_ROWS:
                             _flush()
                         if j % 300 == 0 and j > 0:
@@ -289,7 +307,16 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 conn.rollback()
             conn.commit()
 
-        new_pb = [p for p in pb_loose if f"{_date_dir(p.parent.name)}/{p.name}" not in done]
+        # Flush whatever the tarball loop above buffered (even under
+        # _BATCH_ROWS) so `done` is accurate before the loose-.pb loop below
+        # computes its own dedup skip-list. `new_pb`'s check against `seen`
+        # (not `done`) already prevents double-processing on its own even
+        # without this flush, but leaving files unflushed here would let
+        # `done` silently drift out of sync with what this run has actually
+        # persisted — this flush keeps the two in step at the loop boundary.
+        _flush()
+
+        new_pb = [p for p in pb_loose if f"{_date_dir(p.parent.name)}/{p.name}" not in seen]
         if new_pb:
             logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
@@ -312,6 +339,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     continue
                 pending_rows.extend(rows)
                 pending_files.append(f"{d}/{path.name}")
+                seen.add(f"{d}/{path.name}")
                 if len(pending_rows) >= _BATCH_ROWS:
                     _flush()
                 if j % 500 == 0:

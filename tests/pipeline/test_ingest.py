@@ -325,6 +325,44 @@ def test_ingest_batches_clickhouse_inserts_across_files(pg_conn, ch_client, agen
     assert result.result_rows[0][0] == n_files * rows_per_file
 
 
+def test_ingest_does_not_double_process_same_file_key_within_one_run(pg_conn, ch_client, agency_id, tmp_path):
+    """A file key that occurs twice within a single ingest() call - once as
+    a tarball member, once as a loose .pb sharing the same date+name key -
+    must only be ingested once, not twice.
+
+    `done` (the set of already-ingested file keys) is computed once at the
+    top of ingest() from ClickHouse and is only updated inside _flush(),
+    which runs at most once per _BATCH_ROWS rows (Task 8.9). With only one
+    row per file here, no mid-run flush is triggered, so `done` never gets
+    updated between the tarball loop and the loose-.pb loop. Before the fix
+    (an in-memory `seen` set updated at buffer-time, not flush-time), the
+    loose-.pb loop's dedup filter checked the still-stale `done` and did not
+    exclude the tarball's already-buffered file, so the shared key's row
+    landed twice."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    # Loose .pb sharing the exact same "20260401/dup.pb" key as the tarball
+    # member created below.
+    (day_dir / "dup.pb").write_bytes(b"\x00")
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        info = tarfile.TarInfo(name="20260401/dup.pb")
+        info.size = 1
+        tf.addfile(info, io.BytesIO(b"\x00"))
+    tgz_path = tmp_path / "20260401.tar.gz"
+    tgz_path.write_bytes(buf.getvalue())
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        return [(file_name, "2026-04-01T11:37:00", f"trip_{file_name}", "平日", "11:37", "44372", 1, 60)]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert count == 1  # the shared file key must only be ingested once, not twice
+    assert _ch_route_codes(ch_client, agency_id) == ["44372"]
+
+
 def test_ingest_flush_failure_leaves_all_batch_files_undone_for_retry(pg_conn, ch_client, agency_id, tmp_path):
     """The crash-safety property batching must preserve: a file's rows are
     only ever marked `done` in the same operation that successfully inserted
