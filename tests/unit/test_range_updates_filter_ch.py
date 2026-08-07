@@ -72,9 +72,18 @@ def test_time_band_clause_ch_all_is_noop():
 
 def test_time_band_clause_ch_morning_band():
     frag, params = time_band_clause_ch(_ctx(time_band="morning"))
-    assert "scheduled_time >=" in frag and "scheduled_time <" in frag
-    assert params["ch_tb_start"] == "05:00:00"
-    assert params["ch_tb_end"] == "09:00:00"
+    # Compares a normalized 5-char "HH:MM" prefix, not the raw scheduled_time
+    # string — agency 1 (aomori_regex ingest strategy) writes 5-char
+    # "HH:MM" values with no seconds, while every other agency
+    # (static_join) writes 8-char "HH:MM:SS". A raw lexicographic compare
+    # of "09:00" against an 8-char bound like "09:00:00" is wrong (the
+    # 5-char form sorts as "less than" its own 8-char equivalent), so both
+    # sides must be normalized to 5 chars for the comparison to be exact
+    # regardless of which ingest strategy wrote the row.
+    assert "substring(scheduled_time, 1, 5) >=" in frag
+    assert "substring(scheduled_time, 1, 5) <" in frag
+    assert params["ch_tb_start"] == "05:00"
+    assert params["ch_tb_end"] == "09:00"
 
 
 def test_build_updates_filter_ch_default_date_only():
@@ -199,4 +208,55 @@ def test_dow_clause_ch_matches_python_isoweekday():
         parameters={"agency_id": 1, **params_we},
     )
     assert result_we.result_rows[0][0] == 0
+    client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_time_band_clause_ch_boundary_matches_5char_scheduled_time():
+    """Agency 1 (青森市バス, aomori_regex ingest strategy) writes 5-char
+    "HH:MM" `scheduled_time` values (see pipeline/strategies/aomori_regex.py
+    — no seconds), unlike every static_join agency's 8-char "HH:MM:SS".
+    Under the old Postgres TIME column this didn't matter (Postgres
+    normalizes both to the same internal value); ClickHouse's `String`
+    column does not, so a raw lexicographic compare puts every band
+    boundary (05:00, 09:00, ...) in the PREVIOUS band instead of its own.
+
+    A trip scheduled at exactly 09:00 (the morning/forenoon boundary) must
+    land in "forenoon" (its own band, [09:00, 12:00)), never "morning"
+    ([05:00, 09:00)) — the bug this regresses would have matched the old
+    (previous) band because a raw compare treats the 5-char form as
+    lexicographically less than its own 8-char equivalent."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import insert_updates
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(
+        client,
+        1,
+        [
+            (
+                "a/1.pb",
+                datetime(2026, 8, 3, 3, 0, 0, tzinfo=timezone.utc),  # 12:00 JST
+                "T1",
+                "weekday",
+                "09:00",  # 5-char, no seconds — aomori_regex style
+                "R1",
+                1,
+                30,
+            )
+        ],
+    )
+
+    def _count(time_band):
+        frag, params = time_band_clause_ch(_ctx(time_band=time_band))
+        result = client.query(
+            f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+            parameters={"agency_id": 1, **params},
+        )
+        return result.result_rows[0][0]
+
+    assert _count("forenoon") == 1, "09:00 must land in its own band (forenoon starts at 09:00)"
+    assert _count("morning") == 0, "09:00 must NOT fall back into the previous band (morning ends at 09:00)"
     client.close()

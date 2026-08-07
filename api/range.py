@@ -297,16 +297,32 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
     (GTFS ``"HH:MM:SS"`` text — see the migration design doc), not a native
     TIME column, so the comparison is a zero-padded lexicographic string
-    range rather than a ``::time`` cast. This is exact for the same reason
-    `time_band_case_sql`'s Postgres CASE arms are: every stored string is a
-    zero-padded 24h clock time.
+    range rather than a ``::time`` cast.
+
+    Compares a normalized 5-char ``"HH:MM"`` prefix of `scheduled_time`,
+    NOT the raw string: every static_join agency writes 8-char
+    ``"HH:MM:SS"`` (GTFS `departure_time` TEXT), but agency 1 (青森市バス,
+    the `aomori_regex` ingest strategy — see
+    pipeline/strategies/aomori_regex.py) writes 5-char ``"HH:MM"`` with no
+    seconds. Under the old Postgres `TIME` column this didn't matter
+    (Postgres normalizes both forms to the same internal value);
+    ClickHouse's `String` does not, so a raw compare of ``"09:00"``
+    against an 8-char bound like ``"09:00:00"`` is wrong — the 5-char
+    form sorts as lexicographically LESS than its own 8-char equivalent,
+    so every trip scheduled exactly on a band boundary (05:00, 09:00,
+    12:00, 14:00, 17:00, 20:00) would fall into the PREVIOUS band, and
+    00:00 departures wouldn't match any band at all. Truncating both
+    sides to 5 chars is exact for both ingest-strategy shapes, since a
+    zero-padded ``"HH:MM"`` prefix alone is already enough to place a
+    clock time within these hour-granularity bands.
     """
     if ctx.time_band == "all":
         return "1", {}
     start, end = _TIME_BAND_RANGES[ctx.time_band]
     return (
-        "(scheduled_time >= {ch_tb_start:String} AND scheduled_time < {ch_tb_end:String})",
-        {"ch_tb_start": f"{start}:00", "ch_tb_end": f"{end}:00"},
+        "(substring(scheduled_time, 1, 5) >= {ch_tb_start:String} "
+        "AND substring(scheduled_time, 1, 5) < {ch_tb_end:String})",
+        {"ch_tb_start": start, "ch_tb_end": end},
     )
 
 
