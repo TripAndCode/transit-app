@@ -613,7 +613,15 @@ def _run_analyze(agency_id, ch_client):
     """analyze()'s dedup materialization now reads ClickHouse (Task 6); every
     test in this file seeds Postgres `updates` directly (pre-dating that
     migration), so mirror the same rows into ClickHouse first — see
-    tests.conftest.mirror_updates_to_ch."""
+    tests.conftest.mirror_updates_to_ch.
+
+    Pins `SET TIME ZONE 'Asia/Tokyo'` on the analyze connection, matching
+    every real analyze() caller (gtfs_pipeline._get_conn, the cron endpoint)
+    — without it, this connection defaults to UTC, which happened to mask a
+    real bug: analyze() bulk-loading ClickHouse's naive-UTC captured_at
+    values straight into a timestamptz column is only safe under a UTC
+    session; under the JST session production actually uses, it silently
+    shifted every captured_at (and last_seen_at) by 9 hours."""
     import os
 
     import psycopg2
@@ -624,6 +632,8 @@ def _run_analyze(agency_id, ch_client):
     mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
         analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:

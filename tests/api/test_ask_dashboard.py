@@ -30,6 +30,13 @@ def _run_analyze(agency_id, ch_client):
     mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(DATABASE_URL)
     try:
+        # Match every real analyze() caller (gtfs_pipeline._get_conn, the
+        # cron endpoint), which pins Asia/Tokyo — without this, the naive-UTC
+        # captured_at values ClickHouse returns get bulk-loaded under this
+        # connection's default (UTC) session timezone instead, masking any
+        # timezone-handling bug in analyze()'s ClickHouse bulk-load path.
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
         analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:

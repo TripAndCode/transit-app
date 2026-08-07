@@ -23,6 +23,7 @@ Aggregation tables produced:
 """
 
 import logging
+from datetime import timezone
 
 import psycopg2.extras
 
@@ -157,10 +158,29 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 """
             )
             if ch_result.result_rows:
+                # clickhouse-connect returns DateTime64(0, 'UTC') columns as
+                # NAIVE Python datetimes (its default tz_mode is
+                # "naive_utc") that mean UTC. psycopg2 sends a naive
+                # datetime to Postgres as a plain literal, which Postgres
+                # then interprets in the SESSION's timezone — and every
+                # real analyze() caller (gtfs_pipeline._get_conn, the cron
+                # endpoint) pins `SET TIME ZONE 'Asia/Tokyo'`. Without this
+                # fixup, a ClickHouse timestamp that's naive-but-means-UTC
+                # would get reinterpreted as JST and land 9h early. Same
+                # guard as pipeline/clickhouse.py's max_captured_at /
+                # max_captured_at_before. captured_at is the last element
+                # of each row (see build_dedup_ch_sql's SELECT list above).
+                rows = [
+                    (
+                        *r[:-1],
+                        r[-1].replace(tzinfo=timezone.utc) if r[-1] is not None and r[-1].tzinfo is None else r[-1],
+                    )
+                    for r in ch_result.result_rows
+                ]
                 psycopg2.extras.execute_values(
                     cur,
                     "INSERT INTO _analyze_deduped VALUES %s",
-                    ch_result.result_rows,
+                    rows,
                 )
             cur.execute("ANALYZE _analyze_deduped")
 
