@@ -604,11 +604,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # observation ever recorded was NULL/implausible delay is now
             # absent from this stop's route_codes. Measured against real dev
             # data (agency 8, 2026-08): NOT negligible — 10,260 of 277,552
-            # keys (~3.7%) are affected, causing 39 of ~2,414 stops (~1.6%)
-            # to drop out of agg_stop_routes entirely and a further 174
-            # (stop, route_code) pairs to lose one route from an otherwise
-            # still-listed stop's route_codes (see fix-8b-report.md for the
-            # full breakdown). Every one of the sampled lost keys had 100%
+            # keys (~3.7%) are affected: 39 of ~2,414 stops (~1.6%) lose all
+            # route-code coverage entirely, and a further 86 (stop,
+            # route_code) pairs are lost from 49 OTHER stops that otherwise
+            # keep at least one route (see fix-8b-report.md for the full
+            # breakdown). Every one of the sampled lost keys had 100%
             # NULL dep_delay (no implausible-spike contribution) — routes/
             # trips whose realtime feed never produced a numeric delay
             # estimate for that stop. Disclosed here rather than silently
