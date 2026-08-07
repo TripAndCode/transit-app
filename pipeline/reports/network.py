@@ -10,12 +10,16 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
 """
 
+import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from api.clickhouse import max_captured_at_before
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+
+_log = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -36,22 +40,6 @@ _FEED_SQL = """
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
-# Only a COMPLETED civil day counts (today's partial day is excluded). The
-# cutoff MUST be a WHERE filter applied BEFORE maxOrNull — NOT a Python-side
-# accept/reject of an unconditional maxOrNull(captured_at) — an earlier
-# version of this query computed the max over the whole table and only
-# accepted it if it was already < today's JST midnight, which silently
-# produced `None` (never "the latest prior completed day") for any agency
-# ingesting today too — i.e. every actively-ingesting agency, the normal
-# healthy case. Filtering the rows first means the query's result already IS
-# the latest completed day's max, with no further Python check needed. The
-# cutoff itself is still computed in Python (JST midnight, converted to UTC)
-# since ClickHouse's `captured_at` is stored as UTC.
-_LIVE_MAX_ONE_CH_SQL = (
-    "SELECT maxOrNull(captured_at) FROM updates "
-    "WHERE agency_id = {agency_id:UInt16} AND captured_at < {today_jst_midnight_utc:DateTime64}"
-)
-
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
@@ -66,14 +54,33 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     today_jst_midnight_utc = (
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
+    # One indexed read per agency (api.clickhouse.max_captured_at_before —
+    # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
+    # sync sibling; see its docstring) instead of `maxOrNull`, which is a
+    # full per-agency scan (measured ~24s total for 4 agencies vs ~4s for the
+    # indexed form on real dev data).
+    #
+    # This probe backs ONLY the `is_stale` field below — every other field in
+    # this function's result (avg_delay_min, on_time_pct, samples,
+    # raw_samples, clamp_pct, data_from, data_to) comes from Postgres agg_*
+    # tables. So a ClickHouse hiccup here must not fail the whole network
+    # summary — degrade this agency's live_max to None instead (same
+    # "one non-critical sub-check shouldn't sink an otherwise-fine response"
+    # shape as api.routers.map.today_route_summary's freshness try/except).
+    # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
+    # no completed day / can't determine → nothing owed), which is the
+    # correct degrade here.
     live_max: dict[int, "date | None"] = {}
     for a in agencies:
         aid = a["agency_id"]
-        result = await ch.query(
-            _LIVE_MAX_ONE_CH_SQL,
-            parameters={"agency_id": aid, "today_jst_midnight_utc": today_jst_midnight_utc},
-        )
-        mx = result.result_rows[0][0]
+        try:
+            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        except Exception:
+            _log.warning(
+                "ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True
+            )
+            live_max[aid] = None
+            continue
         if mx is None:
             live_max[aid] = None
             continue

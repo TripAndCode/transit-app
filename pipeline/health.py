@@ -58,27 +58,6 @@ class AgencyFreshness:
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id"
 
-# ClickHouse has no LATERAL join; the per-agency MAX(captured_at) is cheap
-# with agency_id as the leading ORDER BY column, so a plain GROUP BY over
-# every agency (not just active ones — filtered in Python below against the
-# already-fetched `agencies` rows) is the equivalent. The "only a COMPLETED
-# day counts" cutoff MUST be a WHERE filter applied BEFORE the MAX/GROUP BY —
-# NOT a Python-side accept/reject of an unconditional MAX(captured_at) — an
-# earlier version of this query computed MAX(captured_at) over the whole
-# table and only accepted it if it was already < today's JST midnight,
-# which silently produced `None` (never "the latest prior completed day")
-# for any agency ingesting today too — i.e. every actively-ingesting agency,
-# the normal healthy case. Filtering the rows first means the query's result
-# already IS the latest completed day's max, with no further Python check
-# needed. The cutoff itself is still computed in Python (JST midnight,
-# converted to UTC) since ClickHouse's `captured_at` is stored as UTC.
-_LIVE_MAX_CH_SQL = """
-    SELECT agency_id, MAX(captured_at) AS mx
-    FROM updates
-    WHERE captured_at < {today_jst_midnight_utc:DateTime64}
-    GROUP BY agency_id
-"""
-
 _FEED_HEALTH_SQL = """
     SELECT agency_id, SUM(raw_samples) AS raw, SUM(clamp_count) AS clamp
     FROM agg_feed_health
@@ -91,6 +70,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
     """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
+    from api.clickhouse import max_captured_at_before
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
@@ -105,14 +85,24 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
 
-    live_max_ch_result = await ch.query(
-        _LIVE_MAX_CH_SQL,
-        parameters={"today_jst_midnight_utc": today_jst_midnight_utc},
-    )
-    active_ids = {a["agency_id"] for a in agencies}
+    # One indexed read per agency (`api.clickhouse.max_captured_at_before` —
+    # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
+    # the whole `updates` table: the GROUP BY form has no `agency_id`
+    # predicate at all, so it reads the `captured_at` column for every row in
+    # the table (measured 46.5s / 574M rows on real dev data) — worse than
+    # even a per-agency full scan. `agencies` here is already filtered to
+    # non-deleted agencies (the query above), so no separate active-id filter
+    # is needed. The "only a COMPLETED day counts" cutoff is baked into the
+    # helper's `before` predicate (see its docstring and `pipeline.freshness`'s
+    # module docstring) — filtering BEFORE taking the max, not a Python-side
+    # accept/reject of an unconditional max, which would silently produce
+    # "no completed day" for any agency ingesting today too (the normal,
+    # healthy, continuously-ingesting case).
     live_max: dict[int, date] = {}
-    for aid, mx in live_max_ch_result.result_rows:
-        if aid not in active_ids or mx is None:
+    for a in agencies:
+        aid = a["agency_id"]
+        mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        if mx is None:
             continue
         mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
         live_max[aid] = mx_utc.astimezone(_JST).date()

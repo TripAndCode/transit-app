@@ -214,3 +214,33 @@ async def test_network_summary_endpoint(net_client, ch_client):
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
     assert brow["is_stale"] is True
+
+
+async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
+    """Fix 8a regression: ClickHouse backs ONLY the ``is_stale`` field here —
+    every other field (avg_delay_min, on_time_pct, samples, raw_samples,
+    clamp_pct, data_from, data_to) comes from Postgres agg_* tables. A
+    ClickHouse hiccup on the per-agency freshness probe must degrade that
+    agency's ``is_stale`` (via a None live_max — see is_stale's docstring:
+    "no completed day / can't determine -> not stale"), not 500/503 the whole
+    /api/network/summary response (mirrors api.routers.map's
+    today_route_summary freshness try/except; no real ClickHouse needed — a
+    client whose `.query` always raises is enough to simulate the hiccup)."""
+    pool, a, _b, _cc = net_pool
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+
+    class _BrokenCh:
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("simulated ClickHouse outage")
+
+    from api.main import app
+
+    app.state.pool = pool
+    app.state.ch_client = _BrokenCh()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    body = r.json()
+    arow = next(x for x in body["agencies"] if x["agency_id"] == a)
+    assert arow["avg_delay_min"] == 10.0  # Postgres-backed field unaffected by the CH outage
+    assert arow["is_stale"] is False  # degraded live_max=None -> is_stale(agg_day, None) is False
