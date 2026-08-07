@@ -17,9 +17,16 @@ in the signature for call-site stability even though these two no longer
 use it for their own query. ``ch`` defaults to ``None`` (returning an empty
 result rather than raising) for callers/tests that exercise routing logic
 (alias resolution, unsupported-tool handling, ...) without a real
-ClickHouse client attached; real dispatch always passes the real one
-(pipeline.query.tools.dispatch's own docstring documents the same
-``ch=None``-is-safe convention).
+ClickHouse client attached.
+
+That ``ch is None`` fallback is presently unreachable from real HTTP
+dispatch: ``api.deps.get_ch`` never hands out a bare ``None`` — when
+ClickHouse didn't come up at startup it returns a ``_ClickHouseUnavailable``
+stand-in that raises ``HTTPException(503)`` on first use instead (see
+api/deps.py). So a real request either gets a working client or 503s before
+ever reaching this ``is None`` check; the guard is kept only for direct
+unit-test callers that construct these functions' args by hand without
+wiring a client at all.
 """
 
 from api.range import RangeCtx

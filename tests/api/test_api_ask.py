@@ -154,6 +154,36 @@ async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client):
+    """Fix B follow-up regression: a rule-hit question routed to a
+    ClickHouse-backed describe_data kind (date_range/overview/sample_counts)
+    must return 200 with a graceful tool_error answer when ClickHouse is
+    unavailable, not 503 the whole request.
+
+    `ask_app`'s fixture sets `app.state.ch_client = None`, which `api.deps
+    .get_ch` now turns into the always-raising `_ClickHouseUnavailable`
+    stand-in (Fix A) rather than a bare `None` — exercising the real
+    dispatch path end-to-end, no mocking needed. Before this fix, Stage 1/2
+    had no try/except around `dispatch(...)` (unlike chat.py's Stage 3,
+    which already degrades this way), so the stand-in's HTTPException(503)
+    propagated all the way up and 503'd the endpoint.
+    """
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "いつからのデータ?"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_call"]["name"] == "describe_data"
+    assert data["tool_call"]["arguments"]["kind"] == "date_range"
+    assert data.get("router_stage") == "rules"
+    assert data["result"] is None
+    assert "describe_data" in data["answer"]
+
+
+@pytest.mark.asyncio
 async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
     """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""
     client, agency_id = ask_client

@@ -33,7 +33,7 @@ from api.range import (
 )
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
-from pipeline.query.chat import chat_with_tools
+from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
@@ -191,24 +191,47 @@ async def ask(
     cache_outcome: str | None = None
 
     if decision is not None:
-        result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale, ch=ch)
         stage = decision.stage
         tool_name = decision.tool
-        success = result.kind != "empty"
-        resp = AskResponse(
-            answer=render_tool_result(result, locale=locale),
-            tool_call={"name": decision.tool, "arguments": decision.args},
-            result={
-                "kind": result.kind,
-                "summary": result.summary,
-                "rows": result.rows,
-                "columns": result.columns,
-                "series": result.series,
-                "pairs": result.pairs,
-            },
-            ctx=ctx_dict,
-            router_stage=stage,
-        )
+        # Stage 1/2 is the deterministic-router path (regex/embedding-matched
+        # questions, e.g. describe_data's date_range/sample_counts/overview
+        # kinds) — the ROUTINE path for those question kinds, not an edge
+        # case. It has no LLM fallback to catch a failure, unlike Stage 3
+        # (pipeline.query.chat.chat_with_tools), which already wraps every
+        # dispatch(...) call in try/except and degrades to a tool_error
+        # answer. Without the same guard here, a ClickHouse-unavailable
+        # HTTPException raised deep inside dispatch (e.g. via api.deps.get_ch's
+        # _ClickHouseUnavailable stand-in) would 503 the whole /ask request
+        # instead of returning the same graceful 200 tool_error answer Stage 3
+        # gives — mirror that exact shape rather than inventing a new one.
+        try:
+            result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale, ch=ch)
+        except Exception as exc:
+            _log.exception("Tool %s failed (stage %s dispatch)", decision.tool, stage)
+            success = False
+            resp = AskResponse(
+                answer=_chat_str("tool_error", locale, name=decision.tool, exc=exc),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result=None,
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
+        else:
+            success = result.kind != "empty"
+            resp = AskResponse(
+                answer=render_tool_result(result, locale=locale),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result={
+                    "kind": result.kind,
+                    "summary": result.summary,
+                    "rows": result.rows,
+                    "columns": result.columns,
+                    "series": result.series,
+                    "pairs": result.pairs,
+                },
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
     else:
         payload = await chat_with_tools(
             body.question,
