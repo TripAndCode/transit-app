@@ -1393,3 +1393,42 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
     # plus the single 05-23 one.
     assert seq_out["headline"]["samples"] == 11
     assert seq_out["peak_hour_weekday"]["peak_hour"] == 7
+
+
+# ---------------------------------------------------------------------------
+# ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
+# AttributeError from `ch.query(...)`. These are the 3 spots in
+# pipeline/reports/overview.py that predate the shared _Grain/_require_grain
+# guard pattern. No agg/ClickHouse seeding needed — each guard fires before
+# any query is issued.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compute_overview_summary_slow_path_without_ch_raises(aconn, aagency_id):
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=None)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_by_dow_service_filtered_live_path_without_ch_raises(aconn, aagency_id):
+    """ctx.time_band == 'all' but a service filter is set, so agg_hour_daily
+    can't serve it and no grain was prefetched — the third (live-scan)
+    branch of _peak_hour_by_dow must guard on a missing ch too."""
+    from pipeline.reports.overview import _peak_hour_by_dow
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), service="平日")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekday", ch=None, grain=None)
+
+
+@pytest.mark.asyncio
+async def test_route_weekly_history_slow_path_without_ch_raises(aconn, aagency_id):
+    from pipeline.reports.overview import _route_weekly_history
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await _route_weekly_history(aagency_id, ["R1"], ctx, aconn, ch=None)

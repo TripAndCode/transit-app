@@ -601,7 +601,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, ch, limit=50)
+        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50, ch=ch)
         if not rows:
             return ToolResult(
                 kind="empty",

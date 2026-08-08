@@ -475,3 +475,101 @@ async def test_reports_unknown_agency_returns_404(reports_client):
     client, _, _ = reports_client
     resp = await client.get("/api/99999/reports")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
+# AttributeError from `ch.query(...)`. All six compute_* functions in
+# pipeline/reports/rankings.py accept ch=None (for fast-path-only callers);
+# these guard the live branch instead of letting it fail deep inside
+# clickhouse_connect. No agg/ClickHouse seeding needed — the guard fires
+# before any query is issued.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compute_ranking_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_ranking
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_ranking(aagency_id, ctx, aconn, ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_on_time_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_on_time
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_on_time(aagency_id, ctx, aconn, ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_worst_5min_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_worst_5min
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_worst_5min(aagency_id, ctx, aconn, ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_dow_ranking_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_dow_ranking
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_dow_ranking(aagency_id, ctx, aconn, "weekend", ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_compare_ranking_live_path_without_ch_raises(aconn, aagency_id):
+    """Also covers compute_compare_ranking's signature fix: ``ch`` used to be
+    a required positional arg (the only one of the six siblings without a
+    default); it now defaults to None like the rest, so this call is valid
+    without a ch at all."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_compare_ranking
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_compare_ranking(aagency_id, ctx, aconn)
+
+
+@pytest.mark.asyncio
+async def test_compute_hourly_heatmap_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_hourly_heatmap
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_hourly_heatmap(aagency_id, ctx, aconn, ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_trend_series_live_path_without_ch_raises(aconn, aagency_id):
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="ClickHouse client"):
+        await compute_trend_series(aagency_id, ctx, aconn, ch=None)

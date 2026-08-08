@@ -332,7 +332,7 @@ async def get_report(
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
-        rows = await compute_compare_ranking(agency_id, ctx, conn, ch, limit=n)
+        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n, ch=ch)
         intent = {"query_type": "compare_ranking", "limit": n}
     elif report_type == "dow_weekend":
         rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n, ch=ch)

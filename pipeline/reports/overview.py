@@ -456,6 +456,8 @@ async def _route_weekly_history(
     # recent 7-day bucket ending at ctx.to_date, weeks_back-1 the oldest,
     # matching the original per-week loop's `k` and its oldest-first append
     # order into `out[code]`.
+    if ch is None:
+        raise RuntimeError("_route_weekly_history's live fallback requires a ClickHouse client")
     span_from = ctx.to_date - timedelta(days=7 * weeks_back - 1)
     span_ctx = RangeCtx(
         from_date=span_from,
@@ -733,6 +735,9 @@ async def _peak_hour_by_dow(
         return _peak_from_hour_rows(
             [{"h": h, "avg_min": (total / n) / 60.0} for h, (n, total) in sorted(by_hour.items())]
         )
+
+    if ch is None:
+        raise RuntimeError("_peak_hour_by_dow's live fallback requires a ClickHouse client")
 
     overridden = RangeCtx(
         from_date=ctx.from_date,
@@ -1029,6 +1034,8 @@ async def compute_overview_summary(
     """
     grain: _Grain | None = None
     if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError("overview slow path requires a ClickHouse client")
         async with perf.timed_block("overview.grain"):
             grain = await _fetch_grain(agency_id, ctx, ch)
 

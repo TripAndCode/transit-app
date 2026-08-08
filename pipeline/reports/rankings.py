@@ -120,6 +120,8 @@ async def compute_ranking(
     ranking). A time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError("compute_ranking's time_band-filtered live fallback requires a ClickHouse client")
         return await _ranking_live(agency_id, ctx, conn, ch, sort_order, limit)
 
     rows = await _read_dist_with_hist(agency_id, ctx, conn)
@@ -199,6 +201,10 @@ async def compute_on_time(
     or a time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all" or threshold_sec != 60:
+        if ch is None:
+            raise RuntimeError(
+                "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
+            )
         return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
 
     rows = await _read_dist_scalars(agency_id, ctx, conn)
@@ -268,6 +274,8 @@ async def compute_worst_5min(
     analyze time). A time_band filter falls back to the live scan (ClickHouse).
     """
     if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError("compute_worst_5min's time_band-filtered live fallback requires a ClickHouse client")
         return await _worst_5min_live(agency_id, ctx, conn, ch, limit)
 
     rows = await _read_dist_scalars(agency_id, ctx, conn)
@@ -339,6 +347,8 @@ async def compute_dow_ranking(
     )
     label = "週末" if dow_group == "weekend" else "平日"
     if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError("compute_dow_ranking's time_band-filtered live fallback requires a ClickHouse client")
         return await _dow_ranking_live(agency_id, overridden, conn, ch, label, limit)
 
     # agg_daily_trend filtered to the weekday/weekend dates, sample-weighted.
@@ -387,8 +397,8 @@ async def compute_compare_ranking(
     agency_id: int,
     ctx: RangeCtx,
     conn,
-    ch,
     limit: int = 100,
+    ch=None,
 ) -> list[tuple]:
     """Per-route weekday-vs-weekend delay difference, sorted by absolute delta.
 
@@ -396,6 +406,10 @@ async def compute_compare_ranking(
     but preserves ``routes`` so route-restricted comparisons work.
     """
     if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError(
+                "compute_compare_ranking's time_band-filtered live fallback requires a ClickHouse client"
+            )
         return await _compare_ranking_live(agency_id, ctx, ch, limit)
 
     # Both DOW sides from one agg_daily_trend pass (dow split via FILTER), summed
@@ -556,6 +570,8 @@ async def compute_hourly_heatmap(
         # docstring — so the hour is read off the first two characters
         # rather than EXTRACT(). Every group here has >= 3 rows (the HAVING
         # gate), so avg() is never NaN.
+        if ch is None:
+            raise RuntimeError("compute_hourly_heatmap's live fallback requires a ClickHouse client")
         cte_sql, ch_params = _dedup_cte_ch(ctx)
         hour_expr = "toUInt8(substring(scheduled_time, 1, 2))"
         result = await ch.query(
@@ -624,6 +640,8 @@ async def compute_trend_series(
         # time_band filter needs the hour-of-day, only on raw updates
         # (ClickHouse). Every group here has > 5 rows (the HAVING gate), so
         # avg() is never NaN.
+        if ch is None:
+            raise RuntimeError("compute_trend_series's time_band-filtered live fallback requires a ClickHouse client")
         _CH_BUCKET_EXPR = {"day": "date", "week": "toStartOfWeek(date, 1)", "month": "toStartOfMonth(date)"}
         bucket_expr = _CH_BUCKET_EXPR.get(granularity, "date")
         cte_sql, ch_params = _dedup_cte_ch(ctx)
