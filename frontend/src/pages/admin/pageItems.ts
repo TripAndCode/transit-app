@@ -1,4 +1,4 @@
-export type PageItem = number | "ellipsis";
+type PageItem = number | "ellipsis";
 
 /** Numbered-pager items for `page` of `totalPages`: all pages when the count
  *  is small, otherwise first/last plus a fixed 3-wide window slid (never
