@@ -17,15 +17,19 @@ string. All cases must still log the full detail server-side.
 """
 
 import logging
+import os
 from datetime import date
 from types import SimpleNamespace
 
+import asyncpg
 import clickhouse_connect
 import pytest
 from fastapi import HTTPException
 
 from api.range import RangeCtx
 from pipeline.query import chat
+
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 _SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT * FROM updates"
 
@@ -153,3 +157,183 @@ async def test_logger_still_captures_full_exception_detail(monkeypatch, caplog):
         await chat.chat_with_tools("質問", _ctx(), conn=None, agency_id=1, locale="ja")
 
     assert any(rec.exc_info and _SECRET in str(rec.exc_info[1]) for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
+    """A missing agg_* table (migration/analyze behind) must propagate out of
+    chat_with_tools untouched — not be swallowed into a generic 200 tool_error
+    — so a caller's registered aggregate_not_ready_handler can turn it into
+    the machine-readable 503 the frontend reacts to (Fix-9i regression:
+    review found the generic ``except Exception`` clause was catching this
+    before it could reach that handler)."""
+
+    async def _raise_undefined_table(*a, **k):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise_undefined_table)
+
+    with pytest.raises(asyncpg.exceptions.UndefinedTableError):
+        await chat.chat_with_tools("質問", _ctx(), conn=None, agency_id=1, locale="ja")
+
+
+# ─── Build-mode sentinel site (Site 1: `__build__ TOOL {json}`) ──────────────
+#
+# This is the zero-LLM determinism path the guided builder UI submits — live
+# in production, not gated behind any flag. Fix-9i's review found the initial
+# leakage-test suite only exercised the Stage-2/flag-off site; these pin the
+# same guarantees for build-mode's own try/except around dispatch(...).
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raiser,expected_key",
+    [
+        (lambda: HTTPException(status_code=503, detail=_SECRET), "service_unavailable"),
+        (lambda: clickhouse_connect.driver.exceptions.DatabaseError(_SECRET), "service_unavailable"),
+        (lambda: ValueError(_SECRET), "tool_error"),
+    ],
+    ids=["http_503", "clickhouse_error", "generic_exception"],
+)
+async def test_build_mode_sentinel_hides_exception_text(monkeypatch, raiser, expected_key):
+    """The build-mode dispatch except-block must degrade to the safe locale
+    string, never the raw exception text, for all three failure classes."""
+
+    async def _raise(*a, **k):
+        raise raiser()
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise)
+
+    out = await chat.chat_with_tools("__build__ describe_data {}", _ctx(), conn=None, agency_id=1, locale="ja")
+
+    assert out["success"] is False
+    assert _SECRET not in out["answer"]
+    assert out["answer"] == chat._chat_str(expected_key, "ja", name="describe_data")
+    assert out["cache_outcome"] == "bypass"
+
+
+@pytest.mark.asyncio
+async def test_build_mode_sentinel_non_503_http_exception_propagates(monkeypatch):
+    """A non-503 HTTPException from build-mode dispatch is a real error and
+    must propagate, matching the other four sites' behavior."""
+
+    async def _raise_400(*a, **k):
+        raise HTTPException(status_code=400, detail="bad request")
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise_400)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat.chat_with_tools("__build__ describe_data {}", _ctx(), conn=None, agency_id=1, locale="ja")
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_build_mode_sentinel_undefined_table_error_propagates(monkeypatch):
+    """A missing agg_* table during build-mode dispatch must also propagate,
+    not be swallowed — same guarantee as the other four sites."""
+
+    async def _raise_undefined_table(*a, **k):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise_undefined_table)
+
+    with pytest.raises(asyncpg.exceptions.UndefinedTableError):
+        await chat.chat_with_tools("__build__ describe_data {}", _ctx(), conn=None, agency_id=1, locale="ja")
+
+
+# ─── Cache pre-hit site (Site 2: ASK_INTENT_CACHE_ENABLED=true, exact-question
+# pre-LLM lookup hit) ──────────────────────────────────────────────────────────
+#
+# Requires a real DB: the pre-hit path reads/writes ask_intent_cache. Mirrors
+# tests/query/test_chat_intent_cache.py's pool_with_agency fixture convention.
+
+
+@pytest.fixture
+async def pool_with_agency(apply_schema):
+    """Pool + agency_id + a route so describe_data + tool dispatch can run."""
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM ask_intent_cache")
+        row = await c.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
+        )
+        agency_id = row["agency_id"]
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM ask_intent_cache")
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+async def _seed_cache_row(pool, agency_id: int, question: str, tool: str = "describe_data"):
+    """Pre-populate ask_intent_cache so a later chat_with_tools call for the
+    same question text hits the pre-LLM lookup (Site 2), not the LLM path."""
+    from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
+
+    ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
+    can_args = canonicalize(tool, {}, ctx_dict)
+    sig_hash = signature_hash(tool, can_args)
+    sig = IntentSignature(tool=tool, args={}, confidence=0.9)
+
+    from pipeline.query import intent_cache as ic
+
+    async with pool.acquire() as conn:
+        await ic.upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raiser,expected_key",
+    [
+        (lambda: HTTPException(status_code=503, detail=_SECRET), "service_unavailable"),
+        (lambda: clickhouse_connect.driver.exceptions.DatabaseError(_SECRET), "service_unavailable"),
+        (lambda: ValueError(_SECRET), "tool_error"),
+    ],
+    ids=["http_503", "clickhouse_error", "generic_exception"],
+)
+async def test_cache_pre_hit_hides_exception_text(monkeypatch, pool_with_agency, raiser, expected_key):
+    """The cache-pre-hit dispatch except-block (ASK_INTENT_CACHE_ENABLED=true,
+    exact-question-text lookup hit — skips the LLM entirely) must degrade to
+    the safe locale string, never the raw exception text."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    question = "いつからのデータ？"
+    await _seed_cache_row(pool, agency_id, question)
+
+    async def _raise(*a, **k):
+        raise raiser()
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise)
+
+    async with pool.acquire() as conn:
+        out = await chat.chat_with_tools(question, _ctx(), conn, agency_id, locale="ja")
+
+    assert out["success"] is False
+    assert _SECRET not in out["answer"]
+    assert out["answer"] == chat._chat_str(expected_key, "ja", name="describe_data")
+    assert out["cache_outcome"] == "hit"
+
+
+@pytest.mark.asyncio
+async def test_cache_pre_hit_undefined_table_error_propagates(monkeypatch, pool_with_agency):
+    """A missing agg_* table during a cache-pre-hit dispatch must also
+    propagate, not be swallowed — same guarantee as the other four sites."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    question = "いつからのデータ？"
+    await _seed_cache_row(pool, agency_id, question)
+
+    async def _raise_undefined_table(*a, **k):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(chat, "dispatch", _raise_undefined_table)
+
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.exceptions.UndefinedTableError):
+            await chat.chat_with_tools(question, _ctx(), conn, agency_id, locale="ja")

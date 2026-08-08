@@ -7,6 +7,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+import asyncpg
 import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
@@ -301,7 +302,7 @@ async def append_message_endpoint(
         except HTTPException as exc:
             if exc.status_code != 503:
                 raise
-            _log.warning("Tool %s unavailable: ClickHouse client unavailable", resolved_tool)
+            _log.warning("Tool %s unavailable: %s", resolved_tool, exc.detail)
             rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
             assistant_msg = await _conv.append_message(
                 conn,
@@ -330,6 +331,20 @@ async def append_message_endpoint(
                 rendered_summary=rendered,
             )
             return {"user": user_msg, "assistant": assistant_msg}
+        except asyncpg.exceptions.UndefinedTableError:
+            # A missing agg_* table (migration/analyze behind) must propagate to
+            # FastAPI's registered aggregate_not_ready_handler (api/main.py +
+            # api/aggregate_errors.py) so the frontend gets the machine-readable
+            # {"code": "aggregate_not_ready"} 503 it reacts to — not a generic
+            # tool_error that masks it (mirrors api/routers/ask.py's Fix-8f
+            # convention). Re-raising immediately, before any further query runs
+            # on this `conn`, also avoids poisoning the still-open
+            # `conn.transaction()` above with a second failing statement (which
+            # would otherwise surface as an unhandled
+            # asyncpg.exceptions.InFailedSQLTransactionError instead of this
+            # error) — the transaction context manager rolls back cleanly once
+            # this propagates out of it.
+            raise
         except Exception:
             # Never interpolate raw exception text into a persisted message —
             # it can carry internal details (SQL fragments, relation names,

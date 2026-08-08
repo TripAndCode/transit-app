@@ -481,3 +481,51 @@ async def test_append_message_logs_full_exception_server_side(conv_app, monkeypa
         assert r.status_code == 200, r.text
 
     assert any(rec.exc_info and _SECRET in str(rec.exc_info[1]) for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_append_message_undefined_table_error_propagates(conv_app, monkeypatch):
+    """Fix-9i regression: dispatch() raising asyncpg.exceptions.UndefinedTableError
+    (an agg_* table missing on a migration-lagged environment) must propagate
+    out of append_message_endpoint so FastAPI's registered
+    aggregate_not_ready_handler (api/main.py + api/aggregate_errors.py) turns
+    it into the machine-readable {"code": "aggregate_not_ready"} 503 the
+    frontend reacts to — mirroring api/routers/ask.py's Fix-8f.
+
+    Before this fix, the blanket `except Exception` swallowed this into a
+    generic 200 tool_error. Worse, dispatch() runs inside this endpoint's
+    `async with conn.transaction():`, so if the except block had gone on to
+    run another query on the same (now-aborted) connection — as the
+    'except Exception' branch here does, via _conv.append_message(conn, ...)
+    — Postgres would raise asyncpg.exceptions.InFailedSQLTransactionError
+    instead, surfacing as an unhandled bare 500. This test pins that neither
+    happens: the response is the clean 503 aggregate_not_ready shape."""
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_undefined_table(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_undefined_table)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 503, f"expected 503 aggregate_not_ready, got {r.status_code}: {r.text[:200]}"
+        data = r.json()
+        assert data["code"] == "aggregate_not_ready"
+        # The internal relation name is server-log-only, never client-visible.
+        assert "agg_route_daily_dist" not in data["detail"]
+
+        # And the conversation itself is left usable — no half-written user
+        # message with no matching assistant reply, no poisoned connection
+        # leaking into the next request on this same conversation.
+        ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
+        assert ml.status_code == 200
+        assert ml.json() == []

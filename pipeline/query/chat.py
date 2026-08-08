@@ -33,6 +33,7 @@ import json
 import logging
 import os
 
+import asyncpg
 import clickhouse_connect
 from fastapi import HTTPException
 
@@ -246,7 +247,7 @@ async def chat_with_tools(
             except HTTPException as exc:
                 if exc.status_code != 503:
                     raise
-                _log.warning("Build-mode dispatch for %s: ClickHouse client unavailable", build_tool)
+                _log.warning("Build-mode dispatch for %s unavailable: %s", build_tool, exc.detail)
                 return {
                     "answer": _chat_str("service_unavailable", locale, name=build_tool),
                     "tool_call": {"name": build_tool, "arguments": can_args},
@@ -269,6 +270,13 @@ async def chat_with_tools(
                     "canonical_args": can_args,
                     "cache_outcome": "bypass",
                 }
+            except asyncpg.exceptions.UndefinedTableError:
+                # An agg_* table missing (migration/analyze behind) must propagate
+                # to FastAPI's registered aggregate_not_ready_handler so the
+                # frontend gets the machine-readable {"code": "aggregate_not_ready"}
+                # 503 it reacts to — not a generic 200 tool_error that masks it
+                # (mirrors api/routers/ask.py's Fix-8f convention).
+                raise
             except Exception:
                 _log.exception("Build-mode dispatch failed for %s", build_tool)
                 return {
@@ -404,7 +412,7 @@ async def chat_with_tools(
             except HTTPException as exc:
                 if exc.status_code != 503:
                     raise
-                _log.warning("Tool %s unavailable (cache pre-hit): ClickHouse client unavailable", name)
+                _log.warning("Tool %s unavailable (cache pre-hit): %s", name, exc.detail)
                 return {
                     "answer": _chat_str("service_unavailable", locale, name=name),
                     "tool_call": {"name": name, "arguments": args},
@@ -427,6 +435,10 @@ async def chat_with_tools(
                     "canonical_args": args,
                     "cache_outcome": "hit",
                 }
+            except asyncpg.exceptions.UndefinedTableError:
+                # Missing agg_* table must propagate to aggregate_not_ready_handler,
+                # not be swallowed into a generic tool_error (see Site 1 comment).
+                raise
             except Exception:
                 _log.exception("Tool %s failed (cache pre-hit)", name)
                 return {
@@ -518,7 +530,7 @@ async def chat_with_tools(
             except HTTPException as exc:
                 if exc.status_code != 503:
                     raise
-                _log.warning("Tool %s unavailable: ClickHouse client unavailable", name)
+                _log.warning("Tool %s unavailable: %s", name, exc.detail)
                 return {
                     "answer": _chat_str("service_unavailable", locale, name=name),
                     "tool_call": {"name": name, "arguments": args},
@@ -541,6 +553,10 @@ async def chat_with_tools(
                     "canonical_args": None,
                     "cache_outcome": None,
                 }
+            except asyncpg.exceptions.UndefinedTableError:
+                # Missing agg_* table must propagate to aggregate_not_ready_handler,
+                # not be swallowed into a generic tool_error (see Site 1 comment).
+                raise
             except Exception:
                 _log.exception("Tool %s failed", name)
                 return {
@@ -606,7 +622,7 @@ async def chat_with_tools(
         except HTTPException as exc:
             if exc.status_code != 503:
                 raise
-            _log.warning("Tool %s unavailable: ClickHouse client unavailable", name)
+            _log.warning("Tool %s unavailable: %s", name, exc.detail)
             return {
                 "answer": _chat_str("service_unavailable", locale, name=name),
                 "tool_call": {"name": name, "arguments": args},
@@ -629,6 +645,10 @@ async def chat_with_tools(
                 "canonical_args": can_args,
                 "cache_outcome": cache_outcome,
             }
+        except asyncpg.exceptions.UndefinedTableError:
+            # Missing agg_* table must propagate to aggregate_not_ready_handler,
+            # not be swallowed into a generic tool_error (see Site 1 comment).
+            raise
         except Exception:
             _log.exception("Tool %s failed", name)
             return {
@@ -719,7 +739,7 @@ async def chat_with_tools(
         if exc.status_code != 503:
             raise
         # A ClickHouse-unavailable stand-in raise, not a deliberate decline.
-        _log.warning("Tool %s unavailable: ClickHouse client unavailable", name)
+        _log.warning("Tool %s unavailable: %s", name, exc.detail)
         return {
             "answer": _chat_str("service_unavailable", locale, name=name),
             "tool_call": {"name": name, "arguments": args},
@@ -734,6 +754,10 @@ async def chat_with_tools(
             "result": None,
             "success": False,
         }
+    except asyncpg.exceptions.UndefinedTableError:
+        # Missing agg_* table must propagate to aggregate_not_ready_handler,
+        # not be swallowed into a generic tool_error (see Site 1 comment).
+        raise
     except Exception:
         _log.exception("Tool %s failed", name)
         # A tool blowing up is a hard failure, not a deliberate decline.
