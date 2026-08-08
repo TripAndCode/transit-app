@@ -1,11 +1,11 @@
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import asyncpg
 import pytest
 
 from api.range import RangeCtx
-from pipeline.query.tools import dispatch
+from pipeline.query.tools import _is_route_registered, dispatch
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -214,3 +214,69 @@ async def test_dispatch_time_series_applies_route_filter(conn_two_routes_obs):
     # Route 3021 has zero observations → empty series. If the route filter
     # were NOT applied this would return the all_result data instead.
     assert empty_result.kind == "empty"
+
+
+class _ExplodingChClient:
+    """Stand-in ``ch`` that fails the test if `_is_route_registered` ever
+    reaches the ClickHouse fallback query — used to prove the agg_route_daily
+    fast path resolves True on its own, without ever touching ClickHouse."""
+
+    async def query(self, *args, **kwargs):
+        raise AssertionError("agg_route_daily fast path should have short-circuited before any ClickHouse query")
+
+
+@pytest.mark.asyncio
+async def test_is_route_registered_fast_path_hits_agg_route_daily_not_clickhouse(aconn, aagency_id):
+    """A route already recorded in agg_route_daily (i.e. analyze() has run
+    at least once for it) must resolve True from the fast Postgres check
+    alone. Demoting the ClickHouse scan to a fallback (rather than removing
+    it) must not reintroduce it on the common, already-analyzed-route path —
+    proven here via a `ch` stub that raises if queried at all."""
+    await aconn.execute(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        " trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'FASTPATH', '平日', 60, 120, 3, 10, now())",
+        aagency_id,
+    )
+    result = await _is_route_registered("FASTPATH", aconn, aagency_id, ch=_ExplodingChClient())
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_is_route_registered_falls_back_to_clickhouse_when_agg_stale(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """A route with live observations already in ClickHouse but nothing yet
+    in agg_route_daily (e.g. a brand-new agency/route whose analyze() run
+    hasn't happened yet, or failed — api/routers/internal.py's cron loop
+    deliberately tolerates per-agency analyze() failures) must still resolve
+    True via the ClickHouse fallback rather than a false 'not registered'."""
+    from pipeline.clickhouse import insert_updates
+
+    insert_updates(
+        ch_client,
+        aagency_id,
+        [
+            (
+                "raw_fallback.pb",
+                datetime.now(timezone.utc),
+                "trip_raw",
+                "平日",
+                "10:00:00",
+                "RAWFALLBACK",
+                1,
+                60,
+            )
+        ],
+    )
+    result = await _is_route_registered("RAWFALLBACK", aconn, aagency_id, ch=ch_async_client)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_is_route_registered_returns_false_when_absent_everywhere(aconn, aagency_id, ch_client, ch_async_client):
+    """A route absent from static_routes, agg_route_daily, AND raw ClickHouse
+    `updates` is genuinely unregistered → False."""
+    result = await _is_route_registered("NEVER_SEEN", aconn, aagency_id, ch=ch_async_client)
+    assert result is False

@@ -452,9 +452,9 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     empty (e.g. right after a TRUNCATE). Keep registry separate from period
     data so the user sees the correct guidance.
 
-    ``ch`` defaults to ``None`` for tests that never exercise the fallback
-    (the static_routes check above already covers them); real dispatch
-    always passes the real ClickHouse client.
+    ``ch`` defaults to ``None`` for tests that never exercise the ClickHouse
+    fallback (the static_routes / agg_route_daily checks above already cover
+    them); real dispatch always passes the real ClickHouse client.
     """
     if not route:
         return False
@@ -468,24 +468,41 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     )
     if row is not None:
         return True
-    # Fallback: some agencies may not have static_routes loaded yet but do
+    # Fast path: some agencies may not have static_routes loaded yet but do
     # have observations. Treat any historical observation as proof the route
-    # exists, even outside the selected window. Answered from Postgres's
-    # agg_route_daily (small, indexed on agency_id/date/route_code/service_type)
-    # rather than a live ClickHouse scan of `updates`: route_code there is the
-    # 3rd sort-key column behind an unconstrained captured_at, so a route that
-    # was never observed forces a full-column scan to prove absence — measured
-    # at 336M rows read / 400-1500ms on real data, and this is exactly the path
-    # a never-registered route hits every time. agg_route_daily records every
-    # route ever analyzed for the agency, which is exactly "any historical
-    # observation" — the same fact the old ClickHouse query proved, just from
-    # a table that's already indexed for it.
-    fallback_row = await conn.fetchrow(
+    # exists, even outside the selected window. Checked first against
+    # Postgres's agg_route_daily (small, indexed on
+    # agency_id/date/route_code/service_type) rather than going straight to a
+    # live ClickHouse scan of `updates`: route_code there is the 3rd sort-key
+    # column behind an unconstrained captured_at, so proving a route was
+    # never observed forces a full-column scan — measured at 336M rows read /
+    # 400-1500ms on real data. Most Ask-tab queries name a route that HAS
+    # been analyzed at least once, so this fast path resolves the common case
+    # without ever touching ClickHouse.
+    fast_row = await conn.fetchrow(
         "SELECT 1 FROM agg_route_daily WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
         agency_id,
         str(route),
     )
-    return fallback_row is not None
+    if fast_row is not None:
+        return True
+    # agg_route_daily is only as fresh as the last successful analyze() run
+    # for this agency — api/routers/internal.py's cron loop deliberately
+    # tolerates per-agency analyze() failures (so one broken agency doesn't
+    # starve the rest), so a brand-new agency/route can have live
+    # observations sitting in ClickHouse before agg_route_daily ever picks
+    # them up. Fall back to the raw scan ONLY on a Postgres "not found" —
+    # this bounds the expensive scan to true negatives (a route genuinely
+    # never observed, the rare case), preserving almost all of the fast
+    # path's win while never returning a false "not registered" for a route
+    # analyze() simply hasn't caught up to yet.
+    if ch is None:
+        return False
+    result = await ch.query(
+        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
+        parameters={"agency_id": agency_id, "route": str(route)},
+    )
+    return bool(result.result_rows)
 
 
 async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:

@@ -95,12 +95,19 @@ def _run_ingest_and_analyze() -> None:
         else:
             _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
-        conn.close()
-        # Close the sync ClickHouse client's underlying HTTP connection pool.
-        # This job runs as a BackgroundTask inside the long-lived API
-        # process, so a missing close() here leaks one client + pool per
-        # invocation of this endpoint instead of one per short-lived CLI run.
-        ch_client.close()
+        # Nested try/finally: if conn.close() raises, ch_client.close() must
+        # still run — an unguarded `conn.close(); ch_client.close()` would
+        # skip the ClickHouse close on a Postgres close error, silently
+        # reintroducing the client + HTTP pool leak this block exists to fix.
+        try:
+            conn.close()
+        finally:
+            # Close the sync ClickHouse client's underlying HTTP connection
+            # pool. This job runs as a BackgroundTask inside the long-lived
+            # API process, so a missing close() here leaks one client + pool
+            # per invocation of this endpoint instead of one per short-lived
+            # CLI run.
+            ch_client.close()
 
 
 @router.post("/ingest", status_code=202)
