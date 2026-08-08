@@ -396,3 +396,56 @@ def test_ingest_flush_failure_leaves_all_batch_files_undone_for_retry(pg_conn, c
 
     assert second_count == n_files
     assert _ch_route_codes(ch_client, agency_id) == ["44372"] * n_files
+
+
+def test_ingest_flush_batch_failure_retries_per_file_isolating_the_bad_file(pg_conn, ch_client, agency_id, tmp_path):
+    """A DataError from insert_updates() on the WHOLE batch (e.g. one file's
+    row has a None in a non-Nullable ClickHouse column, such as route_code
+    LowCardinality(String) or stop_sequence UInt16 - clickhouse_connect's
+    columnar type check rejects the whole insert call, not just the bad
+    row) must not discard every file in the batch - only the actually
+    offending file. _flush() must retry file-by-file on a batch failure:
+    good files' rows land and are marked `done`; the bad file's rows are
+    dropped for THIS run (counted as an error, logged by name) but must NOT
+    be marked `done`, so the next ingest() run retries just that file -
+    not the two good files, which must not be re-inserted."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir()
+    for name in ("a_ok.pb", "m_bad.pb", "z_ok2.pb"):
+        (day_dir / name).write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        route = "999" if "bad" in file_name else ("111" if "a_ok" in file_name else "222")
+        return [(file_name, "2026-04-01T11:37:00", f"trip_{file_name}", "平日", "11:37", route, 1, 60)]
+
+    real_insert = insert_updates
+
+    def flaky_insert(client, aid, rows):
+        # First call: the whole 3-file batch - simulates clickhouse_connect
+        # rejecting the entire columnar insert because ONE row in it has a
+        # None in a non-Nullable column.
+        if len(rows) > 1:
+            raise ValueError("Code: 44. DB::Exception: None in non-Nullable column for the whole batch")
+        # Per-file retry call: only the row from the actually-bad file fails.
+        if "bad" in rows[0][0]:
+            raise ValueError("Code: 44. DB::Exception: None in non-Nullable column (route_code)")
+        return real_insert(client, aid, rows)
+
+    with (
+        patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed),
+        patch("pipeline.ingest.insert_updates", side_effect=flaky_insert),
+    ):
+        first_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    # (a) + (c): the two good files' rows survive the bad file's failure.
+    assert first_count == 2
+    assert _ch_route_codes(ch_client, agency_id) == ["111", "222"]
+
+    # (b): re-running ingest() must retry ONLY the bad file - the two good
+    # files are already `done` and must not be re-inserted (which would
+    # duplicate their rows).
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        second_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert second_count == 1
+    assert _ch_route_codes(ch_client, agency_id) == ["111", "222", "999"]

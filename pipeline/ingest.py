@@ -194,12 +194,15 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # loop. Seeded from `done` so files already ingested in a PRIOR run are
     # still skipped from the very first check.
     #
-    # `seen` and `done` deliberately diverge on a failed flush: that batch's
-    # files stay in `seen` (so they aren't re-buffered later in THIS run -
-    # re-parsing them again would just duplicate the failure accounting, not
-    # help) but are absent from `done` (so the NEXT ingest() run, which
-    # recomputes `done` fresh from ClickHouse, retries them - see _flush()'s
-    # docstring for that crash-safety invariant).
+    # `seen` and `done` deliberately diverge on a failed flush: a failing
+    # file stays in `seen` (so it isn't re-buffered later in THIS run -
+    # re-parsing it again would just duplicate the failure accounting, not
+    # help) but is absent from `done` (so the NEXT ingest() run, which
+    # recomputes `done` fresh from ClickHouse, retries it - see _flush()'s
+    # docstring for that crash-safety invariant). _flush() retries a failed
+    # whole-batch insert file-by-file, so this divergence is scoped to just
+    # the file(s) that actually failed on retry, not every file that shared
+    # the batch with them.
     seen = set(done)
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
@@ -212,16 +215,24 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     #
     # Crash-safety invariant, preserved from the old per-file code just at
     # batch grain: a file's rows are only ever marked `done` in the exact
-    # same operation that successfully inserted them. If insert_updates
-    # raises, NONE of this batch's files are added to `done` — all of them
-    # are retried on the next ingest() run. Trade-off: on a batch-insert
-    # failure, n_errors increments by the whole batch's file count, not just
-    # the specific bad file (if any) — acceptable because a batch failure is
-    # almost always systemic (e.g. a dropped connection), not a bad file,
-    # since every file in the batch already parsed successfully before being
-    # buffered.
+    # same operation that successfully inserted them. If the whole-batch
+    # insert_updates call raises, _flush() retries file-by-file (see below)
+    # so only the actually-offending file(s) — not every file that happened
+    # to share a batch with them — end up uncounted/undone. A batch-insert
+    # failure is either systemic (e.g. a dropped connection, in which case
+    # every per-file retry fails too and every file is correctly retried
+    # next run) or caused by one bad row tripping clickhouse_connect's
+    # client-side columnar type check (e.g. a None in a non-Nullable column
+    # — see db/clickhouse/schema.sql's route_code/stop_sequence), in which
+    # case only that row's file fails the retry and every other file in the
+    # batch still lands.
     pending_rows: list[tuple] = []
     pending_files: list[str] = []
+    # Parallel to pending_files: how many of pending_rows' trailing rows
+    # belong to the file at the same index. Lets a failed whole-batch insert
+    # be retried file-by-file by slicing pending_rows back into the pieces
+    # each file contributed, without re-parsing anything.
+    pending_counts: list[int] = []
 
     def _flush() -> None:
         nonlocal n_inserted, n_errors
@@ -238,10 +249,28 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
             n_inserted += insert_updates(ch_client, agency_id, pending_rows)
             done.update(pending_files)
         except Exception as e:
-            logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
-            n_errors += len(pending_files)
+            logger.error(
+                f"  [ERROR] batch insert of {len(pending_files)} files failed, "
+                f"retrying file-by-file: {e}"
+            )
+            offset = 0
+            for file_name, n_rows in zip(pending_files, pending_counts, strict=True):
+                file_rows = pending_rows[offset : offset + n_rows]
+                offset += n_rows
+                if not file_rows:
+                    # Zero-row file — nothing to insert, so nothing can fail;
+                    # mark done same as the happy path would have.
+                    done.add(file_name)
+                    continue
+                try:
+                    n_inserted += insert_updates(ch_client, agency_id, file_rows)
+                    done.add(file_name)
+                except Exception as e2:
+                    logger.error(f"  [ERROR] inserting {file_name}: {e2}")
+                    n_errors += 1
         pending_rows.clear()
         pending_files.clear()
+        pending_counts.clear()
 
     tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
     pb_loose = sorted(root.rglob("*.pb"))
@@ -295,6 +324,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                             continue
                         pending_rows.extend(rows)
                         pending_files.append(f"{d}/{pb_name}")
+                        pending_counts.append(len(rows))
                         seen.add(f"{d}/{pb_name}")
                         if len(pending_rows) >= _BATCH_ROWS:
                             _flush()
@@ -339,6 +369,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     continue
                 pending_rows.extend(rows)
                 pending_files.append(f"{d}/{path.name}")
+                pending_counts.append(len(rows))
                 seen.add(f"{d}/{path.name}")
                 if len(pending_rows) >= _BATCH_ROWS:
                     _flush()
@@ -353,7 +384,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     _flush()
 
     if n_errors:
-        logger.warning(f"Skipped {n_errors} files with parse errors")
+        logger.warning(f"Skipped {n_errors} files due to parse or insert errors — see log above for detail")
     logger.info(f"\nDone: {n_inserted} new rows inserted")
     return n_inserted
 
