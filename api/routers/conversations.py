@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
@@ -16,8 +18,11 @@ from api.security import csrf_guard
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
+from pipeline.query.chat import _chat_str
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["conversations"])
 
@@ -293,8 +298,45 @@ async def append_message_endpoint(
                 question=user_summary,
             )
             result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
-        except Exception as exc:
-            rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            _log.warning("Tool %s unavailable: ClickHouse client unavailable", resolved_tool)
+            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=resolved_chip_id,
+                tool=resolved_tool,
+                args=can_args,
+                signature_hash=sig_hash,
+                result=None,
+                rendered_summary=rendered,
+            )
+            return {"user": user_msg, "assistant": assistant_msg}
+        except clickhouse_connect.driver.exceptions.Error:
+            _log.exception("Tool %s failed: ClickHouse query error", resolved_tool)
+            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=resolved_chip_id,
+                tool=resolved_tool,
+                args=can_args,
+                signature_hash=sig_hash,
+                result=None,
+                rendered_summary=rendered,
+            )
+            return {"user": user_msg, "assistant": assistant_msg}
+        except Exception:
+            # Never interpolate raw exception text into a persisted message —
+            # it can carry internal details (SQL fragments, relation names,
+            # endpoint URLs) that would resurface every time this conversation
+            # is reloaded. Full detail still goes to the server-side log.
+            _log.exception("Tool %s failed", resolved_tool)
+            rendered = _chat_str("tool_error", locale, name=resolved_tool)
             assistant_msg = await _conv.append_message(
                 conn,
                 conversation_id,

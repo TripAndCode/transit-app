@@ -296,3 +296,188 @@ async def test_migrate_anon_idempotent(conv_app):
         assert r2.json()["inserted"] == 0
         r3 = await c.get(f"/api/{agency}/conversations")
         assert len(r3.json()) == 2
+
+
+# ─── Error-leakage regression (Fix-9i) ─────────────────────────────────────
+#
+# A dispatch() failure during append_message_endpoint used to render
+# f"ツール {tool} の実行に失敗しました: {exc}" straight into rendered_summary,
+# which is PERSISTED to ask_conversation_messages — so a leaked ClickHouse
+# error string (SQL fragment / server version / query endpoint URL) would
+# resurface every time the conversation is reloaded, not just once. These
+# tests pin: (a) the ClickHouse-unavailable and (b) generic-exception paths
+# both degrade to the safe locale strings, never the raw exception text,
+# in BOTH the HTTP response and the row actually written to the DB; (c) a
+# non-503 HTTPException still propagates untouched; (d) the real error is
+# still logged server-side.
+
+_SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT * FROM updates"
+
+
+@pytest.mark.asyncio
+async def test_append_message_clickhouse_unavailable_hides_exception_text(conv_app, monkeypatch):
+    """dispatch() raising the _ClickHouseUnavailable stand-in's HTTPException(503)
+    must persist+return the generic service_unavailable text, never the raw detail."""
+    from fastapi import HTTPException
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_503(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise HTTPException(status_code=503, detail=_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_503)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("service_unavailable", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+    assert row["rendered_summary"] == rendered
+
+
+@pytest.mark.asyncio
+async def test_append_message_clickhouse_query_error_hides_exception_text(conv_app, monkeypatch):
+    """A mid-query clickhouse_connect error (real client, query failed) gets
+    the same graceful degrade as the client-unavailable stand-in."""
+    import clickhouse_connect
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_ch_error(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise clickhouse_connect.driver.exceptions.DatabaseError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_ch_error)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("service_unavailable", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+
+
+@pytest.mark.asyncio
+async def test_append_message_non_503_http_exception_propagates(conv_app, monkeypatch):
+    """A non-503 HTTPException from dispatch (a real 4xx tool error) must
+    propagate untouched, not be swallowed into a graceful 200 answer."""
+    from fastapi import HTTPException
+
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_400(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise HTTPException(status_code=400, detail="bad tool args")
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_400)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_append_message_generic_exception_does_not_leak_text(conv_app, monkeypatch):
+    """A genuinely unexpected exception (not ClickHouse, not HTTPException)
+    must still degrade gracefully without echoing its raw message into the
+    persisted rendered_summary."""
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_generic(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise ValueError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_generic)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("tool_error", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+
+
+@pytest.mark.asyncio
+async def test_append_message_logs_full_exception_server_side(conv_app, monkeypatch, caplog):
+    """Even though the user-facing/persisted text is now generic, the real
+    error must still be captured server-side via logger.exception."""
+    import logging
+
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_generic(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise ValueError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_generic)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        with caplog.at_level(logging.ERROR, logger="api.routers.conversations"):
+            r = await c.post(
+                f"/api/{agency}/conversations/{conv_id}/messages",
+                json={"tool": "describe_data", "args": {}},
+                headers=_CSRF,
+            )
+        assert r.status_code == 200, r.text
+
+    assert any(rec.exc_info and _SECRET in str(rec.exc_info[1]) for rec in caplog.records)
