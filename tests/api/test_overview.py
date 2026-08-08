@@ -1024,3 +1024,287 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
     assert r.status_code == 200
     codes = [x["route_code"] for x in r.json()["routes"]]
     assert "Z1" in codes
+
+
+# ---------------------------------------------------------------------------
+# Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
+#
+# Every slow-path stage helper used to run its OWN dedup scan of `updates`
+# (~12 per request; 8-22s each on real agency-8 data, enough to blow the
+# ClickHouse client's 30s max_execution_time). They now all derive from a
+# single `_fetch_grain` round trip. These tests pin both halves of that: the
+# round-trip count, and the semantics that the consolidation had to preserve
+# (per-consumer date windows, per-consumer DOW, hour-of-day extraction).
+# ---------------------------------------------------------------------------
+
+
+class _CountingCh:
+    """Async ClickHouse client proxy that records every query it forwards."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.queries = []
+
+    async def query(self, sql, parameters=None, **kwargs):
+        self.queries.append(sql)
+        return await self._inner.query(sql, parameters=parameters, **kwargs)
+
+
+async def _seed_update(aconn, agency_id, when, route_code, dep_delay, *, sched="08:00", service="平日", seq=1):
+    """Insert one `updates` row (Postgres); mirror to ClickHouse afterwards."""
+    await aconn.execute(
+        "INSERT INTO updates "
+        "(agency_id, file_name, captured_at, trip_id, service_type, "
+        " scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES ($1, $2, $3, $4, $5, ($6::text)::time, $7, $8, $9)",
+        agency_id,
+        f"f_{route_code}_{when.isoformat()}_{sched}_{seq}_{dep_delay}",
+        when,
+        f"trip_{route_code}_{when.date().isoformat()}_{sched}_{seq}",
+        service,
+        sched,
+        route_code,
+        seq,
+        dep_delay,
+    )
+
+
+@pytest.mark.asyncio
+async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_client, ch_async_client):
+    """The whole slow-path payload comes from ONE ClickHouse round trip.
+
+    Dataset deliberately has no movers (a single route, and no route with
+    >= 10 samples in BOTH the current and baseline 7-day windows), so
+    `_route_weekly_history` — the one helper that keeps its own wider-span
+    scan — short-circuits before querying. Everything else must be served
+    from the shared grain.
+    """
+    for i, dep in enumerate([120, 240, 360]):
+        await _seed_update(
+            aconn,
+            aagency_id,
+            datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc),
+            "R_G1",
+            dep,
+            seq=i + 1,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    counting = _CountingCh(ch_async_client)
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+
+    assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
+    # ...and it is the grain query: one dedup CTE grouped to the shared grain.
+    assert "GROUP BY date, route_code, service_type" in counting.queries[0]
+    # The payload is still fully populated off that single query.
+    assert out["headline"]["samples"] == 3
+    assert out["headline"]["avg_min"] == pytest.approx(4.0, abs=0.01)  # (2+4+6)/3
+    assert out["sparkline_points"] == [4.0]
+    assert out["service_split"] == {"平日": 4.0}
+    assert out["top_delayed"]["routes"][0]["route_code"] == "R_G1"
+    assert out["concentration"]["top_routes"][0]["route_code"] == "R_G1"
+    assert out["peak_hour_weekday"]["peak_hour"] == 8
+
+
+@pytest.mark.asyncio
+async def test_slow_path_movers_add_exactly_one_more_query(aconn, aagency_id, ch_client, ch_async_client):
+    """With movers present the count is 2, not 12: the shared grain plus
+    `_route_weekly_history`'s own scan, which deliberately keeps its wider
+    4-week span (it reaches further back than the grain and depends on
+    route_codes only known after the movers deltas are computed)."""
+    cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    for i in range(10):
+        await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), "R_MV", 60, seq=i + 1)
+        await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), "R_MV", 600, seq=i + 1)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    counting = _CountingCh(ch_async_client)
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+
+    assert len(counting.queries) == 2, f"expected 2 ClickHouse queries, got {len(counting.queries)}"
+    worse = out["movers"]["worse"]
+    assert [m["route_code"] for m in worse] == ["R_MV"]
+    assert worse[0]["delta_min"] == pytest.approx(9.0, abs=0.01)  # 10 min - 1 min
+
+
+@pytest.mark.asyncio
+async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aagency_id, ch_client, ch_async_client):
+    """The grain must span 7 days BEFORE ctx.from_date.
+
+    The baseline window is the 7 days immediately before the current one, and
+    the current window is clamped to start no earlier than ctx.from_date — so
+    the baseline can legitimately fall entirely outside ctx. A grain that only
+    covered ctx would silently report `baseline_avg_min: None`.
+    """
+    # ctx is a single day; its baseline is 2026-05-11..2026-05-17, wholly before it.
+    await _seed_update(
+        aconn, aagency_id, datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc), "R_BL", 600
+    )
+    await _seed_update(
+        aconn, aagency_id, datetime.combine(date(2026, 5, 14), time(12, 0), tzinfo=timezone.utc), "R_BL", 300, seq=2
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    assert out["headline"]["avg_min"] == pytest.approx(10.0, abs=0.01)
+    assert out["headline"]["baseline_avg_min"] == pytest.approx(5.0, abs=0.01)
+    assert out["headline"]["delta_min"] == pytest.approx(5.0, abs=0.01)
+    # The pre-ctx baseline day must NOT leak into the ctx-windowed surfaces.
+    assert out["sparkline_points"] == [10.0]
+
+
+@pytest.mark.asyncio
+async def test_slow_path_dow_applies_per_consumer(aconn, aagency_id, ch_client, ch_async_client):
+    """`ctx.dow` gates the ctx-windowed helpers, but `peak_hour_weekday` /
+    `peak_hour_weekend` must IGNORE it and re-partition weekday vs weekend.
+
+    This is why the grain carries no DOW filter of its own: baking `ctx.dow`
+    into the shared WHERE would make the weekend peak permanently empty
+    whenever the user narrowed to weekdays.
+    """
+    # 2026-05-21 Thu (weekday), 2026-05-23 Sat (weekend).
+    await _seed_update(
+        aconn,
+        aagency_id,
+        datetime.combine(date(2026, 5, 21), time(12, 0), tzinfo=timezone.utc),
+        "R_DW",
+        120,
+        sched="07:00",
+    )
+    await _seed_update(
+        aconn,
+        aagency_id,
+        datetime.combine(date(2026, 5, 23), time(12, 0), tzinfo=timezone.utc),
+        "R_DW",
+        600,
+        sched="08:00",
+        seq=2,
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning", dow="weekday")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+
+    # ctx.dow='weekday' keeps only the Thursday row for the headline/sparkline.
+    assert out["headline"]["samples"] == 1
+    assert out["headline"]["avg_min"] == pytest.approx(2.0, abs=0.01)
+    assert out["sparkline_points"] == [2.0]
+    # ...but both peak-hour splits still see their own day-of-week slice.
+    assert out["peak_hour_weekday"]["peak_hour"] == 7
+    assert out["peak_hour_weekday"]["by_hour"][7] == pytest.approx(2.0, abs=0.01)
+    assert out["peak_hour_weekend"] is not None, "ctx.dow must not suppress the weekend peak"
+    assert out["peak_hour_weekend"]["peak_hour"] == 8
+    assert out["peak_hour_weekend"]["by_hour"][8] == pytest.approx(10.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_slow_path_concentration_ignores_early_running(aconn, aagency_id, ch_client, ch_async_client):
+    """Concentration measures contribution to LATENESS: the grain's
+    `sum_late_sec` is `SUM(GREATEST(dep_delay, 0))`, so a route that ran early
+    contributes zero rather than cancelling another route's lateness out."""
+    when = datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc)
+    await _seed_update(aconn, aagency_id, when, "R_LATE", 600)
+    await _seed_update(aconn, aagency_id, when, "R_EARLY", -600, seq=2)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    top = out["concentration"]["top_routes"]
+    assert [t["route_code"] for t in top] == ["R_LATE", "R_EARLY"]
+    assert top[0]["share_pct"] == pytest.approx(100.0, abs=0.05)
+    assert top[1]["share_pct"] == pytest.approx(0.0, abs=0.05)
+    # The signed average still nets the two out (-10 and +10 over 2 samples).
+    assert out["headline"]["avg_min"] == pytest.approx(0.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch_client, ch_async_client):
+    """Routes tied on delta_min rank by route_code, not by set-iteration order.
+
+    `_movers` used to iterate `set(cur) & set(prv)` and rely on a stable sort,
+    which leaked Python's per-process string-hash randomization into which
+    routes made the top-10 and in what order — the same request against the
+    same data could return different movers after an app restart.
+    """
+    cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    # Three routes, identical +9.0 min delta: only route_code separates them.
+    for code in ("R_T3", "R_T1", "R_T2"):
+        for i in range(10):
+            await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), code, 60, seq=i + 1)
+            await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), code, 600, seq=i + 1)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    worse = out["movers"]["worse"]
+    assert [m["delta_min"] for m in worse] == [pytest.approx(9.0, abs=0.01)] * 3
+    # Ties are ordered by route_code (descending here — `worse` is the
+    # ascending-by-delta tail, reversed), never by hash order.
+    assert [m["route_code"] for m in worse] == ["R_T3", "R_T2", "R_T1"]
+
+
+@pytest.mark.asyncio
+async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client, ch_async_client):
+    """Pool-gather and sequential paths must produce identical payloads on the
+    slow path too — both read the same prefetched grain, which is now built
+    once before either branch runs."""
+    cur_day = datetime.combine(date(2026, 5, 22), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    for i in range(10):
+        await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), "R_PS", 120, seq=i + 1)
+        await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), "R_PS", 480, sched="07:00", seq=i + 1)
+    await _seed_update(
+        aconn, aagency_id, datetime.combine(date(2026, 5, 23), time(12, 0), tzinfo=timezone.utc), "R_PS", 300, seq=99
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from api.main import _init_connection
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
+    seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection)
+    try:
+        pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool, ch=ch_async_client)
+    finally:
+        await pool.close()
+
+    assert pool_out == seq_out
+    # Sanity: the fixture really did exercise the slow path end-to-end. The
+    # headline window anchors on the latest day WITH data (2026-05-23) and
+    # spans the 7 days back to 2026-05-17, so it covers the ten 05-22 rows
+    # plus the single 05-23 one.
+    assert seq_out["headline"]["samples"] == 11
+    assert seq_out["peak_hour_weekday"]["peak_hour"] == 7

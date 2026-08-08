@@ -23,13 +23,28 @@ Most helpers have two internal branches:
 DOW) on the fast path; ``agg_route_hour`` can't serve it (no date column). It
 falls back to the live path under a ``service``/``routes`` filter, since that
 table aggregates across all routes/services.
+
+The shared slow-path grain
+--------------------------
+Every slow-path helper used to issue its OWN ``_dedup_cte_ch`` scan of
+``updates``, so one Overview request fanned out ~12 independent full dedup
+scans of *substantially the same rows* — measured at 8-22 s and ~170 M rows
+read EACH on agency 8 over a 30-day window, which put several of them over
+``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a real
+500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
+dedup output to ``(date, route_code, service_type, hour)`` once, and each
+helper derives its own answer from that grain in Python. See
+:func:`_fetch_grain` for why one grain can serve consumers with three
+different date windows and two different DOW filters.
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Iterable, Iterator
 
 from api.range import RangeCtx
 from pipeline import perf
@@ -37,6 +52,13 @@ from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _time_band_sql_on
 
 _MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
+
+# How many days before ``ctx.from_date`` the shared grain has to reach.
+# ``_baseline_ctx``-style baseline windows start at ``cur_ctx.from_date - 7``
+# and ``cur_ctx.from_date >= ctx.from_date`` always holds (it is built with a
+# ``max(..., ctx.from_date)`` clamp in ``compute_overview_summary``), so 7 days
+# is the exact worst case — see :func:`_fetch_grain`.
+_GRAIN_LOOKBACK_DAYS = 7
 
 
 def _round2(x: float) -> Decimal:
@@ -48,7 +70,198 @@ def _round2(x: float) -> Decimal:
     return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
-async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None) -> date | None:
+# ---------------------------------------------------------------------------
+# Shared slow-path grain
+# ---------------------------------------------------------------------------
+
+# (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
+# ``service_type`` is Nullable in ClickHouse; ``hour`` is None only for rows
+# with a NULL ``scheduled_time`` (which the time-band filter already excludes —
+# see _fetch_grain), so consumers that need an hour skip None defensively.
+# ``sum_delay_sec`` / ``sum_late_sec`` stay in SECONDS as exact integers, so
+# summing partial groups in Python is lossless and the single trailing
+# ``/ 60.0`` reproduces the SQL's own ``/ 60.0`` bit-for-bit.
+_GrainRow = tuple[date, str, "str | None", "int | None", int, int, int]
+
+
+@dataclass(frozen=True)
+class _Grain:
+    """One request's worth of deduped ``updates``, fetched in ONE round trip.
+
+    ``rows`` is the dedup output pre-aggregated to
+    ``(date, route_code, service_type, hour)`` over ``[from_date, to_date]``
+    with ``agency_id`` + ``service`` + ``routes`` + ``time_band`` already
+    applied, but deliberately WITHOUT any day-of-week filter — see
+    :func:`_fetch_grain`.
+    """
+
+    rows: tuple[_GrainRow, ...]
+    from_date: date
+    to_date: date
+
+
+def _require_grain(grain: _Grain | None) -> _Grain:
+    """Narrow an optional grain on a slow-path branch.
+
+    Every helper below is module-private and only ever reached through
+    :func:`compute_overview_summary`, which prefetches the grain whenever
+    ``ctx.time_band != 'all'`` — i.e. exactly when a slow-path branch can be
+    taken. An explicit raise rather than ``assert`` so the invariant still
+    holds under ``python -O``.
+    """
+    if grain is None:  # pragma: no cover - unreachable via the public entry point
+        raise RuntimeError("overview slow path reached without a prefetched grain")
+    return grain
+
+
+def _dow_matches(d: date, dow: str) -> bool:
+    """Python counterpart of :func:`api.range.dow_clause_ch`.
+
+    ``dow_clause_ch`` filters on ``toDayOfWeek(toDate(captured_at,
+    'Asia/Tokyo'))`` — mode 0, so 1=Monday..7=Sunday — and the grain's ``date``
+    column IS that same ``toDate(captured_at, 'Asia/Tokyo')`` expression, so
+    ``date.isoweekday()`` (also 1=Monday..7=Sunday) reproduces it exactly.
+    """
+    if dow == "all":
+        return True
+    iso = d.isoweekday()
+    if dow == "weekday":
+        return 1 <= iso <= 5
+    return iso in (6, 7)
+
+
+def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_GrainRow]:
+    """Grain rows inside ``ctx``'s date window that satisfy ``ctx.dow``.
+
+    This is the in-Python equivalent of the date-range + DOW half of
+    ``build_updates_filter_ch(ctx)``; the other half (service / routes /
+    time_band) was already applied server-side when the grain was fetched,
+    because those three are identical across every consumer of one request.
+    """
+    lo, hi, dow = ctx.from_date, ctx.to_date, ctx.dow
+    for row in grain.rows:
+        d = row[0]
+        if lo <= d <= hi and _dow_matches(d, dow):
+            yield row
+
+
+def _grain_avg_min(rows: Iterable[_GrainRow]) -> tuple[float | None, int]:
+    """``(avg_min, samples)`` over ``rows`` — the ``avg(dep_delay) / 60.0``,
+    ``count(*)`` pair the per-helper ClickHouse queries used to return.
+
+    ``avg_min`` is None for zero input rows, mirroring Postgres's NULL-on-empty
+    (and unlike ClickHouse's ``avg()``, which returns NaN over an empty input —
+    see :func:`_headline_stats`). The division order ``(sum / n) / 60.0`` is
+    deliberate: it matches ``avg(dep_delay) / 60.0``, whose numerator
+    ClickHouse accumulates as an exact Int64 for an ``Int32`` column, so the
+    two agree to the last bit (verified against live data).
+    """
+    n = 0
+    total = 0
+    for row in rows:
+        n += row[4]
+        total += row[5]
+    if n == 0:
+        return None, 0
+    return (total / n) / 60.0, n
+
+
+def _grain_sum_by(rows: Iterable[_GrainRow], key_index: int, value_index: int = 5) -> dict:
+    """``{group_key: (samples, summed_value_sec)}`` for one grain column.
+
+    ``value_index`` picks ``sum_delay_sec`` (5, the default — for averages) or
+    ``sum_late_sec`` (6 — for :func:`_concentration`'s lateness contribution).
+    """
+    acc: dict = {}
+    for row in rows:
+        slot = acc.get(row[key_index])
+        if slot is None:
+            acc[row[key_index]] = [row[4], row[value_index]]
+        else:
+            slot[0] += row[4]
+            slot[1] += row[value_index]
+    return {k: (v[0], v[1]) for k, v in acc.items()}
+
+
+async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
+    """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
+
+    Replaces the ~12 independent ``_dedup_cte_ch`` scans the slow-path stage
+    helpers used to issue (see the module docstring). Three things make a
+    single shared scan possible:
+
+    * ``service``, ``routes`` and ``time_band`` are IDENTICAL across every
+      consumer within one ``compute_overview_summary`` call — ``cur_ctx``,
+      ``base_ctx`` and ``_peak_hour_by_dow``'s override all copy them verbatim
+      from ``ctx`` — so they are pushed into the shared server-side WHERE.
+    * ``dow`` is NOT: ``_peak_hour_by_dow`` deliberately REPLACES ``ctx.dow``
+      with ``weekday``/``weekend`` regardless of what the user chose. So no DOW
+      filter is applied here at all; each consumer applies its own in Python
+      off each row's ``date`` (:func:`_dow_matches`).
+    * The date windows differ (``ctx`` / ``cur_ctx`` / ``base_ctx``), so the
+      grain spans their union and each consumer re-filters. The union bound is
+      ``[ctx.from_date - 7, ctx.to_date]``:
+      ``cur_ctx.from_date = max(anchor - 6, ctx.from_date) >= ctx.from_date``
+      and ``base_ctx.from_date = cur_ctx.from_date - 7``, so no consumer ever
+      reaches further back than 7 days before ``ctx.from_date``; and
+      ``anchor`` is either a date inside ``ctx`` or ``ctx.to_date`` itself, so
+      ``cur_ctx.to_date = anchor <= ctx.to_date`` bounds the far end. Because
+      this bound needs no knowledge of ``anchor``, ``_latest_data_date`` —
+      which computes ``anchor`` — can be served from the grain too, keeping
+      the whole slow path at one round trip instead of two.
+
+    ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
+    fetched separately for ``_peak_hour_by_dow``: measured on live agency-8
+    data, adding it costs nothing (the group-by cardinality rises 4.8 k → 10 k
+    rows on a 30-day morning window while wall time stays ~7.7 s — the cost is
+    all in the scan), whereas a second query genuinely doubles it. Even a
+    full-365-day window stays around 120 k grain rows, inside
+    ``get_ch_client``'s 200 k ``max_result_rows`` cap.
+
+    The hour is read off ``scheduled_time``'s first two characters, exactly as
+    ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
+    ``Nullable(String)`` in ClickHouse, not a native TIME column (see
+    ``api.range.time_band_clause_ch``'s docstring). A NULL ``scheduled_time``
+    yields a NULL hour, but cannot actually occur here — ``time_band != 'all'``
+    is what puts us on the slow path at all, and ``time_band_clause_ch``'s
+    ``substring(scheduled_time, 1, 5) >= ...`` comparison is already NULL for
+    those rows and so drops them. ``toUInt8OrNull`` rather than the live path's
+    bare ``toUInt8``: identical on every real row (all four ingested agencies
+    write a zero-padded 2-digit hour — verified, zero non-matching rows), but a
+    hypothetical malformed value degrades to "excluded from the hour histogram"
+    instead of failing the one query the whole payload now depends on.
+    """
+    span_ctx = RangeCtx(
+        from_date=ctx.from_date - timedelta(days=_GRAIN_LOOKBACK_DAYS),
+        to_date=ctx.to_date,
+        dow="all",  # applied per-consumer in Python; see the docstring
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx)
+    hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT date,\n"
+        "       route_code,\n"
+        "       service_type,\n"
+        f"       {hour_expr} AS hour,\n"
+        "       count(*) AS samples,\n"
+        "       sum(dep_delay) AS sum_delay,\n"
+        "       sum(greatest(dep_delay, 0)) AS sum_late\n"
+        "FROM deduped\n"
+        f"GROUP BY date, route_code, service_type, {hour_expr}",
+        parameters={"agency_id": agency_id, **ch_params},
+    )
+    rows: tuple[_GrainRow, ...] = tuple(
+        (d, route_code, service_type, hour, int(samples), int(sum_delay or 0), int(sum_late or 0))
+        for d, route_code, service_type, hour, samples, sum_delay, sum_late in result.result_rows
+    )
+    return _Grain(rows=rows, from_date=span_ctx.from_date, to_date=span_ctx.to_date)
+
+
+async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> date | None:
     """Most recent date inside ctx that has any samples.
 
     Used to anchor the headline's 7-day window to where data actually
@@ -56,9 +269,9 @@ async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dat
     when ingest is lagging or the user selects a wide historical range.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` for
-    sub-millisecond response. Slow path (any other time band) falls back
-    to live ``updates`` (ClickHouse) via the dedup CTE so the filter is
-    honored.
+    sub-millisecond response. Slow path (any other time band) reads the shared
+    grain (:func:`_fetch_grain`), which honours the same filters — it replaces
+    a ``maxOrNull(date) FROM deduped`` scan of live ``updates``.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -67,11 +280,8 @@ async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dat
         row = await conn.fetchrow(sql, agency_id, *params)
         return row["d"] if row and row["d"] else None
 
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
-    sql = f"WITH {cte_sql}\nSELECT maxOrNull(date) AS d FROM deduped"
-    result = await ch.query(sql, parameters={"agency_id": agency_id, **ch_params})
-    d = result.result_rows[0][0]
-    return d if d is not None else None
+    dates = [row[0] for row in _grain_window(_require_grain(grain), ctx)]
+    return max(dates) if dates else None
 
 
 def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
@@ -95,14 +305,15 @@ def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
     )
 
 
-async def _headline_stats(agency_id: int, ctx: RangeCtx, conn, ch=None) -> tuple[float | None, int]:
+async def _headline_stats(
+    agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> tuple[float | None, int]:
     """Return (avg_min, samples) for the headline over ``ctx``.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` as a
     sample-weighted average so days with more observations weigh
-    proportionally. Slow path (any other time band) falls back to live
-    ``updates`` (ClickHouse) via the dedup CTE so the hour-of-day filter is
-    honored.
+    proportionally. Slow path (any other time band) reads the shared grain
+    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -119,28 +330,25 @@ async def _headline_stats(agency_id: int, ctx: RangeCtx, conn, ch=None) -> tuple
         avg = float(row["avg_min"]) if row["avg_min"] is not None else None
         return avg, int(row["samples"] or 0)
 
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
-    sql = f"WITH {cte_sql}\nSELECT avg(dep_delay) / 60.0 AS avg_min,\n       count(*) AS samples\nFROM deduped"
-    result = await ch.query(sql, parameters={"agency_id": agency_id, **ch_params})
-    avg_min_raw, samples_raw = result.result_rows[0]
-    samples = int(samples_raw or 0)
-    # ClickHouse's avg() over zero input rows (no GROUP BY) returns NaN, not
-    # NULL — guard on `samples` (an exact count(*), never NaN) rather than
-    # trusting avg_min_raw's own null-ness, matching Postgres's NULL-on-empty
-    # semantics that the rest of this codebase (and its JSON consumers) rely on.
-    # Round in Python (half-up) to match Postgres ROUND() — ClickHouse's own
-    # round() is round-half-to-even and would otherwise diverge from the agg
-    # fast path at exact .5-minute boundaries for the same metric.
-    avg = float(_round2(avg_min_raw)) if samples > 0 else None
+    # `_grain_avg_min` returns None (not ClickHouse's NaN) for zero input rows
+    # and guards on `samples` — an exact row count — matching Postgres's
+    # NULL-on-empty semantics that the rest of this codebase (and its JSON
+    # consumers) rely on. Round in Python (half-up) to match Postgres ROUND() —
+    # ClickHouse's own round() is round-half-to-even and would otherwise
+    # diverge from the agg fast path at exact .5-minute boundaries.
+    avg_min_raw, samples = _grain_avg_min(_grain_window(_require_grain(grain), ctx))
+    avg = float(_round2(avg_min_raw)) if samples > 0 and avg_min_raw is not None else None
     return avg, samples
 
 
-async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict[str, tuple[float, int]]:
+async def _per_route_avg(
+    agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> dict[str, tuple[float, int]]:
     """Per-route avg_min + samples for ``ctx``. Keyed by route_code.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted average. Slow path falls back to live ``updates``
-    (ClickHouse) so the hour-of-day filter is honored.
+    a sample-weighted average. Slow path reads the shared grain
+    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -157,19 +365,12 @@ async def _per_route_avg(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict[s
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
 
-    # GROUP BY route_code means every emitted group has >= 1 row, so unlike
-    # _headline_stats there's no empty-input NaN case to guard here.
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
-    sql = (
-        f"WITH {cte_sql}\n"
-        "SELECT route_code,\n"
-        "       avg(dep_delay) / 60.0 AS avg_min,\n"
-        "       count(*) AS samples\n"
-        "FROM deduped\n"
-        "GROUP BY route_code"
-    )
-    result = await ch.query(sql, parameters={"agency_id": agency_id, **ch_params})
-    return {route_code: (float(avg_min), int(samples)) for route_code, avg_min, samples in result.result_rows}
+    # Grouping by route_code means every emitted group has >= 1 sample, so
+    # unlike _headline_stats there's no empty-input case to guard here. Values
+    # stay UNROUNDED: _movers derives its deltas from them and does its own
+    # rounding.
+    by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1)
+    return {route_code: ((total / n) / 60.0, n) for route_code, (n, total) in by_route.items()}
 
 
 async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> dict[str, str | None]:
@@ -310,7 +511,7 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
     return count
 
 
-async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict:
+async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
     """Top-20 routes by total positive delay contribution + rest share.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
@@ -320,9 +521,10 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict:
     intent as the per-row metric: contribution to LATENESS, not the
     signed sum.
 
-    Slow path (any non-default time band) falls back to live ``updates``
-    (ClickHouse) and computes the per-row ``SUM(GREATEST(dep_delay, 0)) / 60``
-    exactly, so the hour-of-day filter is honored.
+    Slow path (any non-default time band) reads the shared grain
+    (:func:`_fetch_grain`), whose ``sum_late_sec`` column is the per-row
+    ``SUM(GREATEST(dep_delay, 0))`` computed exactly, so the hour-of-day filter
+    is honored.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -338,20 +540,17 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict:
             *params,
         )
     else:
-        # GROUP BY route_code means every emitted group has >= 1 row (no
-        # empty-input NaN case), and sum()/greatest() are never NULL for a
+        # Grouping by route_code means every emitted group has >= 1 sample (no
+        # empty-input case), and the summed lateness is never NULL for a
         # non-empty group, so no ORDER BY ... NULLS LAST equivalent is needed.
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            "SELECT route_code,\n"
-            "       sum(greatest(dep_delay, 0)) / 60.0 AS total_late_min\n"
-            "FROM deduped\n"
-            "GROUP BY route_code\n"
-            "ORDER BY total_late_min DESC",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-        rows = _ch_rows(result)
+        # Ties are broken by route_code so the top-20 cut is reproducible —
+        # the ClickHouse `ORDER BY total_late_min DESC` this replaces left tied
+        # rows in an arbitrary, run-to-run-unstable order.
+        by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=6)
+        rows = [
+            {"route_code": code, "total_late_min": late / 60.0}
+            for code, (_n, late) in sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))
+        ]
     if not rows:
         return {"top_routes": [], "rest_share_pct": 0.0, "rest_route_count": 0}
     grand_total = sum(float(r["total_late_min"] or 0.0) for r in rows)
@@ -375,7 +574,9 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict:
     }
 
 
-async def _top_delayed_routes(agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None) -> dict:
+async def _top_delayed_routes(
+    agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
+) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
     now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
     (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
@@ -389,7 +590,7 @@ async def _top_delayed_routes(agency_id: int, cur_ctx: RangeCtx, conn, limit: in
     not _concentration()'s "total lateness contribution" sum — a route with
     few samples but a high average must outrank a route with more samples
     but a lower average, which _concentration()'s metric would get backwards.
-    Slow path falls back to live updates (ClickHouse) for a non-default
+    Slow path reads the shared grain (:func:`_fetch_grain`) for a non-default
     time_band, same as _concentration().
     """
     if cur_ctx.time_band == "all":
@@ -407,19 +608,14 @@ async def _top_delayed_routes(agency_id: int, cur_ctx: RangeCtx, conn, limit: in
             *params,
         )
     else:
-        # GROUP BY route_code -> every group has >= 1 row, no empty-input
-        # NaN case; avg() is never NULL for a non-empty group.
-        cte_sql, ch_params = _dedup_cte_ch(cur_ctx)
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            "SELECT route_code,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min\n"
-            "FROM deduped\n"
-            "GROUP BY route_code\n"
-            "ORDER BY avg_min DESC",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-        rows = _ch_rows(result)
+        # Grouping by route_code -> every group has >= 1 sample, no
+        # empty-input case; the average is never NULL for a non-empty group.
+        # Ties broken by route_code, as in _concentration().
+        by_route = _grain_sum_by(_grain_window(_require_grain(grain), cur_ctx), key_index=1)
+        rows = [
+            {"route_code": code, "avg_min": (total / n) / 60.0}
+            for code, (n, total) in sorted(by_route.items(), key=lambda kv: (-(kv[1][1] / kv[1][0]), kv[0]))
+        ]
 
     if not rows:
         return {"routes": [], "delayed_count": 0}
@@ -441,14 +637,15 @@ async def _top_delayed_routes(agency_id: int, cur_ctx: RangeCtx, conn, limit: in
     }
 
 
-async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict | None:
+async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict | None:
     """24-bucket avg by EXTRACT(HOUR FROM scheduled_time) + peak hour.
 
-    ``ch`` is accepted (and unused) only so callers can pass it uniformly
-    alongside the other stage helpers (e.g. ``compute_overview_summary``'s
-    pool-gather path's ``_own_conn``) — this function has no live-fallback
-    branch: ``agg_route_hour`` always applies ``time_band`` itself, so there
-    is nothing here for the ClickHouse dedup path to serve.
+    ``ch`` and ``grain`` are accepted (and unused) only so callers can pass
+    them uniformly alongside the other stage helpers (e.g.
+    ``compute_overview_summary``'s pool-gather path's ``_own_conn``) — this
+    function has no live-fallback branch: ``agg_route_hour`` always applies
+    ``time_band`` itself, so there is nothing here for the ClickHouse dedup
+    path (or the shared grain) to serve.
 
     Reads from ``agg_route_hour``, which is a fixed analyze-period rollup
     (no date column). Consequence: the date range and DOW in ``ctx`` are
@@ -482,7 +679,9 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict | Non
     return _peak_from_hour_rows(rows)
 
 
-async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None) -> dict | None:
+async def _peak_hour_by_dow(
+    agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
+) -> dict | None:
     """24-hour avg delay restricted to weekday (``'weekday'``) or weekend
     (``'weekend'``) only.
 
@@ -490,8 +689,18 @@ async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str,
     DOW), a sample-weighted average across the range — sub-second instead of
     the raw dedup scan that was ~96% of Overview's cold load. That table is
     aggregated across all routes/services, so a ``service``/``routes`` filter,
-    or any ``time_band`` other than ``'all'``, falls back to the live
-    (ClickHouse) path.
+    or any ``time_band`` other than ``'all'``, has to leave it.
+
+    ``time_band != 'all'`` (the case that also puts every other stage helper on
+    its slow path) is served from the shared grain. The remaining case —
+    ``time_band == 'all'`` but a ``service``/``routes`` filter, where nothing
+    else in the payload needs live ``updates`` and so no grain was fetched —
+    still runs its own dedup scan.
+
+    Either way, ``dow_group`` REPLACES ``ctx.dow``: the question asked here is
+    "weekday vs weekend", regardless of any day-of-week the user had already
+    narrowed to. That is exactly why the grain carries no DOW filter of its own
+    (see :func:`_fetch_grain`).
     """
     if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
         dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
@@ -505,6 +714,21 @@ async def _peak_hour_by_dow(agency_id: int, ctx: RangeCtx, conn, dow_group: str,
         )
         rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date))
         return _peak_from_hour_rows(rows)
+
+    if grain is not None:
+        # `hour is None` <=> the row's scheduled_time was NULL, which is what
+        # the live query below excludes with `WHERE scheduled_time IS NOT NULL`.
+        by_hour: dict[int, list[int]] = {}
+        lo, hi = ctx.from_date, ctx.to_date
+        for d, _route_code, _service_type, hour, samples, sum_delay, _sum_late in grain.rows:
+            if hour is None or not (lo <= d <= hi) or not _dow_matches(d, dow_group):
+                continue
+            slot = by_hour.setdefault(hour, [0, 0])
+            slot[0] += samples
+            slot[1] += sum_delay
+        return _peak_from_hour_rows(
+            [{"h": h, "avg_min": (total / n) / 60.0} for h, (n, total) in sorted(by_hour.items())]
+        )
 
     overridden = RangeCtx(
         from_date=ctx.from_date,
@@ -554,13 +778,12 @@ def _peak_from_hour_rows(rows) -> dict | None:
     }
 
 
-async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None) -> list[dict]:
+async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[dict]:
     """Per-day breakdown of 平日 vs 土日祝 avg delay over ``ctx``.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted per-(date, service_type) average. Slow path falls
-    back to live ``updates`` (ClickHouse) so the hour-of-day filter is
-    honored.
+    a sample-weighted per-(date, service_type) average. Slow path reads the
+    shared grain (:func:`_fetch_grain`) so the hour-of-day filter is honored.
 
     Returns a list of ``{date: ISO str, weekday: float|None, weekend:
     float|None}`` rows sorted by date. Dates with neither service_type
@@ -579,18 +802,16 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None) -> 
         )
         rows = await conn.fetch(sql, agency_id, *params)
     else:
-        # GROUP BY (date, service_type) -> every group has >= 1 row.
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            "SELECT date, service_type,\n"
-            "       avg(dep_delay) / 60.0 AS avg\n"
-            "FROM deduped\n"
-            "GROUP BY date, service_type\n"
-            "ORDER BY date",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-        rows = _ch_rows(result)
+        # Grouping by (date, service_type) -> every group has >= 1 sample.
+        acc: dict[tuple[date, str | None], list[int]] = {}
+        for row in _grain_window(_require_grain(grain), ctx):
+            slot = acc.setdefault((row[0], row[2]), [0, 0])
+            slot[0] += row[4]
+            slot[1] += row[5]
+        rows = [
+            {"date": d, "service_type": service_type, "avg": (total / n) / 60.0}
+            for (d, service_type), (n, total) in sorted(acc.items(), key=lambda kv: kv[0][0])
+        ]
     by_date: dict[str, dict[str, float | None]] = {}
     for r in rows:
         d_raw = r["date"]
@@ -611,7 +832,9 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None) -> 
     return out
 
 
-async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, ch=None) -> dict:
+async def _movers(
+    agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None
+) -> dict:
     """Top-10 worsened + top-10 improved routes by signed delta_min.
 
     Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
@@ -624,9 +847,17 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, c
     Frontend card variant slices :code:`.slice(0, 3)`; modal variant
     uses the full 10.
     """
-    cur = await _per_route_avg(agency_id, cur_ctx, conn, ch=ch)
-    prv = await _per_route_avg(agency_id, base_ctx, conn, ch=ch)
-    common = set(cur) & set(prv)
+    cur = await _per_route_avg(agency_id, cur_ctx, conn, ch=ch, grain=grain)
+    prv = await _per_route_avg(agency_id, base_ctx, conn, ch=ch, grain=grain)
+    # `sorted(...)`, not a bare set intersection: routes tie on the 2-dp-rounded
+    # `delta_min` often enough to matter (real dev data, agency 8, a 30-day
+    # morning window: two routes both at +0.74), and `deltas.sort` below is
+    # stable — so iterating a *set* leaked Python's per-process string-hash
+    # randomization straight into which routes appear in the top-10 and in what
+    # order. The same request against the same data returned different movers
+    # after an app restart; pinning the input order (and the tie-break in
+    # `deltas.sort`) makes the ranking reproducible.
+    common = sorted(set(cur) & set(prv))
     deltas: list[tuple[str, float, float]] = []
     MIN_SAMPLES = 10
     for code in common:
@@ -639,7 +870,7 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, c
         d_min = cur_avg - prv_avg
         d_pct = (d_min / prv_avg) * 100.0
         deltas.append((code, round(d_min, 2), round(d_pct, 1)))
-    deltas.sort(key=lambda x: x[1])
+    deltas.sort(key=lambda x: (x[1], x[0]))  # route_code breaks delta_min ties
     # Partition by sign so "worse" only contains routes with positive
     # delta_min and "better" only routes with negative delta_min. With
     # the wider top-10 limit, sign-partitioning is the right way to
@@ -675,12 +906,12 @@ async def _movers(agency_id: int, cur_ctx: RangeCtx, base_ctx: RangeCtx, conn, c
     }
 
 
-async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict[str, float]:
+async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict[str, float]:
     """avg_min per service_type (typically '平日' / '土日祝').
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted average. Slow path falls back to live ``updates``
-    (ClickHouse) so the hour-of-day filter is honored.
+    a sample-weighted average. Slow path reads the shared grain
+    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -695,22 +926,20 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None) -> dict[s
             *params,
         )
     else:
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            "SELECT service_type,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min\n"
-            "FROM deduped\n"
-            "GROUP BY service_type",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-        rows = _ch_rows(result)
+        # Sorted by service_type purely for a stable key order in the JSON
+        # envelope; the ClickHouse `GROUP BY service_type` this replaces
+        # emitted groups in an arbitrary order.
+        by_service = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=2)
+        rows = [
+            {"service_type": service_type, "avg_min": (total / n) / 60.0}
+            for service_type, (n, total) in sorted(((k, v) for k, v in by_service.items() if k), key=lambda kv: kv[0])
+        ]
     return {
         r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"] and r["avg_min"] is not None
     }
 
 
-async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None) -> list[float]:
+async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
     """Daily avg_min points (oldest first) over ``ctx``.
 
     Returns the FULL daily series. The frontend hero card slices the
@@ -718,8 +947,8 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None) -> list
     full series (typically 30+ points for a 30-day default range).
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
-    a sample-weighted average per date. Slow path falls back to live
-    ``updates`` (ClickHouse) so the hour-of-day filter is honored.
+    a sample-weighted average per date. Slow path reads the shared grain
+    (:func:`_fetch_grain`) so the hour-of-day filter is honored.
     """
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
@@ -735,17 +964,10 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None) -> list
             *params,
         )
     else:
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
-        result = await ch.query(
-            f"WITH {cte_sql}\n"
-            "SELECT date AS day,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min\n"
-            "FROM deduped\n"
-            "GROUP BY date\n"
-            "ORDER BY date ASC",
-            parameters={"agency_id": agency_id, **ch_params},
-        )
-        rows = _ch_rows(result)
+        by_day = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=0)
+        rows = [
+            {"day": d, "avg_min": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0])
+        ]
     pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
     return pts
 
@@ -778,15 +1000,26 @@ async def compute_overview_summary(
     per-stage timed_blocks is used unchanged, preserving behaviour for
     tests and ad-hoc callers.
 
-    ``ch`` is the ClickHouse client used by every stage helper's
-    non-default-time_band live-fallback branch (``updates`` itself now
-    lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
+    ``ch`` is the ClickHouse client used by the slow path (``updates`` itself
+    now lives in ClickHouse, not Postgres). Defaults to ``None`` for callers
     that only ever exercise the ``ctx.time_band == 'all'`` fast path (most
     existing tests); real dispatch (the ``/overview/summary`` route) always
     passes the real client.
+
+    On the slow path (``ctx.time_band != 'all'``) the ONE ClickHouse query the
+    whole payload needs is issued up front (:func:`_fetch_grain`) and handed to
+    every stage helper, which then derives its own numbers from it in Python.
+    Previously each helper ran its own dedup scan — ~12 per request. The fast
+    path is unchanged: ``grain`` stays ``None`` and every helper reads its
+    ``agg_*`` table exactly as before.
     """
+    grain: _Grain | None = None
+    if ctx.time_band != "all":
+        async with perf.timed_block("overview.grain"):
+            grain = await _fetch_grain(agency_id, ctx, ch)
+
     async with perf.timed_block("overview.latest_date"):
-        latest = await _latest_data_date(agency_id, ctx, conn, ch=ch)
+        latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
     # If no data anywhere in ctx, anchor to ctx.to_date so empty payload
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
@@ -816,8 +1049,8 @@ async def compute_overview_summary(
 
     if pool is None:
         async with perf.timed_block("overview.headline"):
-            avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn, ch=ch)
-            baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn, ch=ch)
+            avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn, ch=ch, grain=grain)
+            baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn, ch=ch, grain=grain)
 
         delta_min = None
         delta_pct = None
@@ -827,21 +1060,21 @@ async def compute_overview_summary(
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
         async with perf.timed_block("overview.movers"):
-            movers = await _movers(agency_id, cur_ctx, base_ctx, conn, ch=ch)
+            movers = await _movers(agency_id, cur_ctx, base_ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.concentration"):
-            concentration = await _concentration(agency_id, ctx, conn, ch=ch)
+            concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.top_delayed"):
-            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch)
+            top_delayed = await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.peaks"):
             peak = await _peak_hour(agency_id, ctx, conn)
-            peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch)
-            peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch)
+            peak_weekday = await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain)
+            peak_weekend = await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain)
         async with perf.timed_block("overview.service_split"):
-            service_split = await _service_split(agency_id, ctx, conn, ch=ch)
-            service_split_daily = await _service_split_daily(agency_id, ctx, conn, ch=ch)
+            service_split = await _service_split(agency_id, ctx, conn, ch=ch, grain=grain)
+            service_split_daily = await _service_split_daily(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
             # Hero card slices `.slice(-7)`; modal shows full series.
-            sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch)
+            sparkline_points = await _daily_sparkline(agency_id, ctx, conn, ch=ch, grain=grain)
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
@@ -851,16 +1084,20 @@ async def compute_overview_summary(
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
-        # label captures the wall-clock total.
+        # label captures the wall-clock total. On the slow path the single
+        # ClickHouse grain query has already run (above, before this branch),
+        # so what still fans out here is the Postgres work — `_peak_hour`,
+        # `_route_short_names`, `_route_weekly_history`, and every fast-path
+        # helper's `agg_*` read.
         async def _own_conn(fn, *args):
-            """Acquire a pool connection, call ``fn(*args, conn, ch=ch)``, release."""
+            """Acquire a pool connection, call ``fn(*args, conn, ch=ch, grain=grain)``, release."""
             async with pool.acquire() as c:
-                return await fn(*args, c, ch=ch)
+                return await fn(*args, c, ch=ch, grain=grain)
 
         async def _peak_dow(group: str) -> dict | None:
             """Acquire a pool connection and run ``_peak_hour_by_dow`` for ``group``."""
             async with pool.acquire() as c:
-                return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch)
+                return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
         (
             (avg_min, samples),
