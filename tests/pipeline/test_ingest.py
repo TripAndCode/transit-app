@@ -2,6 +2,8 @@ import io
 import tarfile
 from unittest.mock import patch
 
+from clickhouse_connect.driver.exceptions import DataError, OperationalError
+
 from pipeline.clickhouse import insert_updates
 from pipeline.ingest import ingest, parse_trip_id
 
@@ -398,37 +400,72 @@ def test_ingest_flush_failure_leaves_all_batch_files_undone_for_retry(pg_conn, c
     assert _ch_route_codes(ch_client, agency_id) == ["44372"] * n_files
 
 
-def test_ingest_flush_batch_failure_retries_per_file_isolating_the_bad_file(pg_conn, ch_client, agency_id, tmp_path):
+def _ch_landed(ch_client, agency_id):
+    """Sorted (file_name, stop_sequence) pairs actually persisted - pins the
+    exact rows that landed, not just a count, so slice-boundary arithmetic
+    (pending_counts) and the zero-row-file branch are both exercised."""
+    result = ch_client.query(
+        "SELECT file_name, stop_sequence FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY file_name, stop_sequence",
+        parameters={"agency_id": agency_id},
+    )
+    return sorted((r[0], r[1]) for r in result.result_rows)
+
+
+def _make_multi_row_files(tmp_path, agency_id, counts_by_file):
+    """Write one empty .pb per key in counts_by_file (values = row count) and
+    return a fake_parse_feed that yields that many rows per file, each with a
+    distinct stop_sequence (1..n) - so a slice-boundary bug (off-by-one in
+    pending_counts) shows up as wrong/missing (file_name, stop_sequence)
+    pairs rather than just a wrong total count."""
+    day_dir = tmp_path / "20260401"
+    day_dir.mkdir(exist_ok=True)
+    for name in counts_by_file:
+        (day_dir / name).write_bytes(b"\x00")
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        pb_name = file_name.split("/")[-1]
+        n = counts_by_file[pb_name]
+        return [
+            (file_name, "2026-04-01T11:37:00", f"trip_{file_name}_{k}", "平日", "11:37", "44372", k, 60)
+            for k in range(1, n + 1)
+        ]
+
+    return fake_parse_feed
+
+
+def test_ingest_flush_batch_dataerror_retries_per_file_isolating_the_bad_file(
+    pg_conn, ch_client, agency_id, tmp_path
+):
     """A DataError from insert_updates() on the WHOLE batch (e.g. one file's
     row has a None in a non-Nullable ClickHouse column, such as route_code
     LowCardinality(String) or stop_sequence UInt16 - clickhouse_connect's
     columnar type check rejects the whole insert call, not just the bad
     row) must not discard every file in the batch - only the actually
-    offending file. _flush() must retry file-by-file on a batch failure:
+    offending file. _flush() must retry file-by-file on a DataError:
     good files' rows land and are marked `done`; the bad file's rows are
     dropped for THIS run (counted as an error, logged by name) but must NOT
     be marked `done`, so the next ingest() run retries just that file -
-    not the two good files, which must not be re-inserted."""
-    day_dir = tmp_path / "20260401"
-    day_dir.mkdir()
-    for name in ("a_ok.pb", "m_bad.pb", "z_ok2.pb"):
-        (day_dir / name).write_bytes(b"\x00")
+    not the good files, which must not be re-inserted.
 
-    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
-        route = "999" if "bad" in file_name else ("111" if "a_ok" in file_name else "222")
-        return [(file_name, "2026-04-01T11:37:00", f"trip_{file_name}", "平日", "11:37", route, 1, 60)]
+    Files carry DIFFERENT row counts (2 / 0 / 3 / 1), including a zero-row
+    file, to pin the pending_counts slice-boundary arithmetic and the
+    zero-row-file branch - not just a same-size-files count check."""
+    counts = {"a_ok.pb": 2, "m_zero.pb": 0, "q_ok2.pb": 3, "z_bad.pb": 1}
+    fake_parse_feed = _make_multi_row_files(tmp_path, agency_id, counts)
 
     real_insert = insert_updates
 
     def flaky_insert(client, aid, rows):
-        # First call: the whole 3-file batch - simulates clickhouse_connect
-        # rejecting the entire columnar insert because ONE row in it has a
-        # None in a non-Nullable column.
-        if len(rows) > 1:
-            raise ValueError("Code: 44. DB::Exception: None in non-Nullable column for the whole batch")
-        # Per-file retry call: only the row from the actually-bad file fails.
-        if "bad" in rows[0][0]:
-            raise ValueError("Code: 44. DB::Exception: None in non-Nullable column (route_code)")
+        file_names = {r[0] for r in rows}
+        if len(file_names) > 1:
+            # The whole-batch call: simulates clickhouse_connect rejecting
+            # the entire columnar insert because ONE row in it has a None in
+            # a non-Nullable column.
+            raise DataError("Code: 44. DB::Exception: None in non-Nullable column for the whole batch")
+        if any("bad" in fn for fn in file_names):
+            # Per-file retry call for the actually-bad file.
+            raise DataError("Code: 44. DB::Exception: None in non-Nullable column (route_code)")
         return real_insert(client, aid, rows)
 
     with (
@@ -437,15 +474,74 @@ def test_ingest_flush_batch_failure_retries_per_file_isolating_the_bad_file(pg_c
     ):
         first_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
-    # (a) + (c): the two good files' rows survive the bad file's failure.
-    assert first_count == 2
-    assert _ch_route_codes(ch_client, agency_id) == ["111", "222"]
+    # (a) + (c): the good files' rows (including the zero-row file, trivially)
+    # survive the bad file's failure - exact (file_name, stop_sequence) set,
+    # not just a count.
+    assert first_count == 5  # 2 (a_ok) + 0 (m_zero) + 3 (q_ok2)
+    assert _ch_landed(ch_client, agency_id) == [
+        ("20260401/a_ok.pb", 1),
+        ("20260401/a_ok.pb", 2),
+        ("20260401/q_ok2.pb", 1),
+        ("20260401/q_ok2.pb", 2),
+        ("20260401/q_ok2.pb", 3),
+    ]
 
-    # (b): re-running ingest() must retry ONLY the bad file - the two good
-    # files are already `done` and must not be re-inserted (which would
-    # duplicate their rows).
+    # (b): re-running ingest() must retry ONLY the bad file - the good files
+    # are already `done` and must not be re-inserted (which would duplicate
+    # their rows).
     with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
         second_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
 
-    assert second_count == 1
-    assert _ch_route_codes(ch_client, agency_id) == ["111", "222", "999"]
+    assert second_count == 1  # only z_bad.pb's row, retried and now succeeding
+    assert _ch_landed(ch_client, agency_id) == [
+        ("20260401/a_ok.pb", 1),
+        ("20260401/a_ok.pb", 2),
+        ("20260401/q_ok2.pb", 1),
+        ("20260401/q_ok2.pb", 2),
+        ("20260401/q_ok2.pb", 3),
+        ("20260401/z_bad.pb", 1),
+    ]
+
+
+def test_ingest_flush_non_dataerror_falls_back_to_whole_batch_discard_no_per_file_retry(
+    pg_conn, ch_client, agency_id, tmp_path
+):
+    """A non-DataError failure (connection drop, timeout, server-side error -
+    modeled here with clickhouse_connect's OperationalError) must NOT enter
+    the per-file retry path: unlike a DataError, the client can't prove the
+    batch never reached the server, so retrying file-by-file could either
+    hammer an already-struggling server with hundreds of doomed inserts, or
+    duplicate rows that actually committed despite the client raising.
+    Confirm the old whole-batch-discard behavior: insert_updates is called
+    exactly ONCE (no per-file retry calls at all, even for files that would
+    have succeeded), zero rows land, and every file - including the ones
+    that were never actually bad - is retried on the next run."""
+    counts = {"a_ok.pb": 2, "m_zero.pb": 0, "q_ok2.pb": 3, "z_ok3.pb": 1}
+    fake_parse_feed = _make_multi_row_files(tmp_path, agency_id, counts)
+
+    with (
+        patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed),
+        patch("pipeline.ingest.insert_updates", side_effect=OperationalError("connection dropped")) as mock_insert,
+    ):
+        first_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert first_count == 0
+    assert _ch_landed(ch_client, agency_id) == []
+    assert mock_insert.call_count == 1  # the whole batch, NOT retried per file
+
+    # Second run (no failure injected): every file - including the three
+    # that would have succeeded under a per-file retry - is retried and
+    # lands exactly once, proving none of them were silently duplicated or
+    # skipped by the first run's discarded attempt.
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        second_count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert second_count == 6  # 2 + 0 + 3 + 1
+    assert _ch_landed(ch_client, agency_id) == [
+        ("20260401/a_ok.pb", 1),
+        ("20260401/a_ok.pb", 2),
+        ("20260401/q_ok2.pb", 1),
+        ("20260401/q_ok2.pb", 2),
+        ("20260401/q_ok2.pb", 3),
+        ("20260401/z_ok3.pb", 1),
+    ]

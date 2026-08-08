@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
 
+from clickhouse_connect.driver.exceptions import DataError
+
 from pipeline.clickhouse import distinct_file_names, insert_updates
 from pipeline.strategies import get_ingest_strategy
 
@@ -216,16 +218,24 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # Crash-safety invariant, preserved from the old per-file code just at
     # batch grain: a file's rows are only ever marked `done` in the exact
     # same operation that successfully inserted them. If the whole-batch
-    # insert_updates call raises, _flush() retries file-by-file (see below)
-    # so only the actually-offending file(s) — not every file that happened
-    # to share a batch with them — end up uncounted/undone. A batch-insert
-    # failure is either systemic (e.g. a dropped connection, in which case
-    # every per-file retry fails too and every file is correctly retried
-    # next run) or caused by one bad row tripping clickhouse_connect's
-    # client-side columnar type check (e.g. a None in a non-Nullable column
-    # — see db/clickhouse/schema.sql's route_code/stop_sequence), in which
-    # case only that row's file fails the retry and every other file in the
-    # batch still lands.
+    # insert_updates call raises a clickhouse_connect DataError — a
+    # client-side columnar serialization failure (e.g. a None in a
+    # non-Nullable column, see db/clickhouse/schema.sql's
+    # route_code/stop_sequence) that provably never reached the server, so
+    # retrying is safe — _flush() retries file-by-file (see below) so only
+    # the actually-offending file(s), not every file that happened to share
+    # a batch with them, end up uncounted/undone.
+    #
+    # Any OTHER exception (connection drop, timeout, server-side error) is
+    # NOT retried per-file and falls back to the old whole-batch-discard
+    # behavior instead: such a failure is either systemic (in which case
+    # ~600 doomed per-file HTTP inserts would just hammer an already-struggling
+    # server) or, worse, may have actually committed server-side despite the
+    # client raising (e.g. a read timeout after the request body was fully
+    # sent) — in which case a per-file retry would silently re-insert and
+    # permanently duplicate every "good" file's rows. Whole-batch discard is
+    # safe here because the next run's distinct_file_names() re-check would
+    # skip any file that DID actually land, and re-buffer any that didn't.
     pending_rows: list[tuple] = []
     pending_files: list[str] = []
     # Parallel to pending_files: how many of pending_rows' trailing rows
@@ -246,31 +256,57 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
         if not pending_files:
             return
         try:
-            n_inserted += insert_updates(ch_client, agency_id, pending_rows)
-            done.update(pending_files)
-        except Exception as e:
-            logger.error(
-                f"  [ERROR] batch insert of {len(pending_files)} files failed, "
-                f"retrying file-by-file: {e}"
-            )
-            offset = 0
-            for file_name, n_rows in zip(pending_files, pending_counts, strict=True):
-                file_rows = pending_rows[offset : offset + n_rows]
-                offset += n_rows
-                if not file_rows:
-                    # Zero-row file — nothing to insert, so nothing can fail;
-                    # mark done same as the happy path would have.
-                    done.add(file_name)
-                    continue
-                try:
-                    n_inserted += insert_updates(ch_client, agency_id, file_rows)
-                    done.add(file_name)
-                except Exception as e2:
-                    logger.error(f"  [ERROR] inserting {file_name}: {e2}")
-                    n_errors += 1
-        pending_rows.clear()
-        pending_files.clear()
-        pending_counts.clear()
+            try:
+                n_inserted += insert_updates(ch_client, agency_id, pending_rows)
+                done.update(pending_files)
+            except DataError as e:
+                # Client-side columnar serialization failure — the insert
+                # provably never reached the server (0 rows land in every
+                # case, per empirical driver testing up to 40k rows / 2
+                # driver blocks), so it's safe to narrow the retry to just
+                # the file(s) actually carrying the bad row.
+                logger.error(
+                    f"  [ERROR] batch insert of {len(pending_files)} files failed with a "
+                    f"DataError, retrying file-by-file: {e}"
+                )
+                offset = 0
+                for file_name, n_rows in zip(pending_files, pending_counts, strict=True):
+                    file_rows = pending_rows[offset : offset + n_rows]
+                    offset += n_rows
+                    if not file_rows:
+                        # Zero-row file — nothing to insert, so nothing can
+                        # fail; mark done same as the happy path would have.
+                        done.add(file_name)
+                        continue
+                    try:
+                        n_inserted += insert_updates(ch_client, agency_id, file_rows)
+                        done.add(file_name)
+                    except Exception as e2:
+                        # Broad catch is safe here (unlike the top-level gate
+                        # above): this is a single one-shot attempt per file,
+                        # never itself retried, so there's no risk of
+                        # duplicating an already-committed insert — whatever
+                        # exception type, the file just stays un-done and is
+                        # picked up again (idempotently) next run.
+                        logger.error(f"  [ERROR] inserting {file_name}: {e2}")
+                        n_errors += 1
+            except Exception as e:
+                # NOT a DataError — connection drop, timeout, server-side
+                # failure, etc. Do not retry per-file: the failure may be
+                # systemic (retrying ~hundreds of files individually would
+                # just hammer an already-struggling server) or the batch may
+                # have actually committed server-side despite the client
+                # raising, in which case a per-file retry would duplicate
+                # every "good" file's rows. Fall back to the old
+                # whole-batch-discard behavior; the next run's
+                # distinct_file_names() re-check safely skips whatever
+                # actually landed and re-buffers whatever didn't.
+                logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
+                n_errors += len(pending_files)
+        finally:
+            pending_rows.clear()
+            pending_files.clear()
+            pending_counts.clear()
 
     tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
     pb_loose = sorted(root.rglob("*.pb"))
