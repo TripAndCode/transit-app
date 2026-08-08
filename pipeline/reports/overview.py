@@ -54,10 +54,12 @@ from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _time
 _MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
 
 # How many days before ``ctx.from_date`` the shared grain has to reach.
-# ``_baseline_ctx``-style baseline windows start at ``cur_ctx.from_date - 7``
-# and ``cur_ctx.from_date >= ctx.from_date`` always holds (it is built with a
-# ``max(..., ctx.from_date)`` clamp in ``compute_overview_summary``), so 7 days
-# is the exact worst case — see :func:`_fetch_grain`.
+# ``compute_overview_summary`` builds its two comparison windows inline as
+# ``cur_from = max(anchor - 6, ctx.from_date)`` and ``base_from = cur_from - 7``,
+# so the earliest date any consumer can ask for is ``ctx.from_date - 7`` — the
+# ``max(..., ctx.from_date)`` clamp on ``cur_from`` is what makes 7 the exact
+# worst case rather than a heuristic. See :func:`_fetch_grain`, and note that
+# :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
 
 
@@ -130,6 +132,24 @@ def _dow_matches(d: date, dow: str) -> bool:
     return iso in (6, 7)
 
 
+def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
+    """Fail loudly if a consumer asks for a window the grain never fetched.
+
+    The grain spans ``[ctx.from_date - _GRAIN_LOOKBACK_DAYS, ctx.to_date]``,
+    which is derived from how :func:`compute_overview_summary` builds
+    ``cur_ctx`` / ``base_ctx``. If that construction ever drifts — an off-by-one
+    in the clamp, a wider baseline — the Python filters here would happily
+    aggregate over a TRUNCATED window and return a plausible-looking but wrong
+    user-facing average, with nothing to notice. Raising turns that class of
+    regression into a visible failure instead of a quiet data bug.
+    """
+    if from_date < grain.from_date or to_date > grain.to_date:
+        raise RuntimeError(
+            f"overview grain [{grain.from_date}..{grain.to_date}] does not cover "
+            f"the requested window [{from_date}..{to_date}]"
+        )
+
+
 def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_GrainRow]:
     """Grain rows inside ``ctx``'s date window that satisfy ``ctx.dow``.
 
@@ -137,12 +157,13 @@ def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_GrainRow]:
     ``build_updates_filter_ch(ctx)``; the other half (service / routes /
     time_band) was already applied server-side when the grain was fetched,
     because those three are identical across every consumer of one request.
+
+    Not a generator function, so the coverage check fires when this is CALLED
+    rather than when the result is first iterated.
     """
+    _check_grain_covers(grain, ctx.from_date, ctx.to_date)
     lo, hi, dow = ctx.from_date, ctx.to_date, ctx.dow
-    for row in grain.rows:
-        d = row[0]
-        if lo <= d <= hi and _dow_matches(d, dow):
-            yield row
+    return (row for row in grain.rows if lo <= row[0] <= hi and _dow_matches(row[0], dow))
 
 
 def _grain_avg_min(rows: Iterable[_GrainRow]) -> tuple[float | None, int]:
@@ -282,27 +303,6 @@ async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain:
 
     dates = [row[0] for row in _grain_window(_require_grain(grain), ctx)]
     return max(dates) if dates else None
-
-
-def _baseline_ctx(ctx: RangeCtx) -> RangeCtx:
-    """Build the comparison-baseline ctx for the headline + movers.
-
-    Compares the most recent 7 days of ``ctx`` against the 7-day window
-    one week earlier. This keeps the delta semantically a true week-over-
-    week even when the user has widened the filter to a longer range.
-    """
-    end_current = ctx.to_date
-    start_current = end_current - timedelta(days=6)  # most-recent 7d
-    baseline_end = start_current - timedelta(days=1)
-    baseline_start = baseline_end - timedelta(days=6)
-    return RangeCtx(
-        from_date=baseline_start,
-        to_date=baseline_end,
-        dow=ctx.dow,
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=ctx.routes,
-    )
 
 
 async def _headline_stats(
@@ -716,6 +716,10 @@ async def _peak_hour_by_dow(
         return _peak_from_hour_rows(rows)
 
     if grain is not None:
+        # Iterates `grain.rows` directly rather than going through
+        # `_grain_window` (the DOW filter here is `dow_group`, not `ctx.dow`),
+        # so the coverage invariant has to be asserted explicitly.
+        _check_grain_covers(grain, ctx.from_date, ctx.to_date)
         # `hour is None` <=> the row's scheduled_time was NULL, which is what
         # the live query below excludes with `WHERE scheduled_time IS NOT NULL`.
         by_hour: dict[int, list[int]] = {}
@@ -849,16 +853,14 @@ async def _movers(
     """
     cur = await _per_route_avg(agency_id, cur_ctx, conn, ch=ch, grain=grain)
     prv = await _per_route_avg(agency_id, base_ctx, conn, ch=ch, grain=grain)
-    # `sorted(...)`, not a bare set intersection: routes tie on the 2-dp-rounded
-    # `delta_min` often enough to matter (real dev data, agency 8, a 30-day
-    # morning window: two routes both at +0.74), and `deltas.sort` below is
-    # stable — so iterating a *set* leaked Python's per-process string-hash
-    # randomization straight into which routes appear in the top-10 and in what
-    # order. The same request against the same data returned different movers
-    # after an app restart; pinning the input order (and the tie-break in
-    # `deltas.sort`) makes the ranking reproducible.
-    common = sorted(set(cur) & set(prv))
-    deltas: list[tuple[str, float, float]] = []
+    common = set(cur) & set(prv)
+    # (route_code, delta_min_2dp, delta_pct_1dp, delta_min_raw). The RAW delta
+    # is carried purely to rank on: ranking on the rounded value manufactures
+    # ties that don't exist — real dev data, agency 1 over a wide morning
+    # window, has two routes at -1.7244 and -1.7203, which both round to -1.72.
+    # Ranking on the rounded value made the top-10 cutoff between them a
+    # coin-flip; ranking on the raw value orders them by their actual deltas.
+    deltas: list[tuple[str, float, float, float]] = []
     MIN_SAMPLES = 10
     for code in common:
         cur_avg, cur_n = cur[code]
@@ -869,18 +871,30 @@ async def _movers(
             continue
         d_min = cur_avg - prv_avg
         d_pct = (d_min / prv_avg) * 100.0
-        deltas.append((code, round(d_min, 2), round(d_pct, 1)))
-    deltas.sort(key=lambda x: (x[1], x[0]))  # route_code breaks delta_min ties
+        deltas.append((code, round(d_min, 2), round(d_pct, 1), d_min))
+    # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
+    # they're distinct — which is what makes the ranking reproducible: the order
+    # `common` happens to be iterated in cannot influence the result. It used to:
+    # ranking on the rounded delta left genuine ties, and Python's stable sort
+    # then preserved the *set* iteration order, leaking per-process string-hash
+    # randomization into which routes made the top-10. The same request against
+    # the same data returned different movers after an app restart.
+    deltas.sort(key=lambda x: (x[3], x[0]))
     # Partition by sign so "worse" only contains routes with positive
     # delta_min and "better" only routes with negative delta_min. With
     # the wider top-10 limit, sign-partitioning is the right way to
     # prevent the two lists from overlapping (a route can't both
-    # improve and worsen at once).
+    # improve and worsen at once). The partition tests the ROUNDED delta on
+    # purpose: a route whose delta rounds to 0.00 belongs in neither list
+    # rather than being shown as having "worsened by 0.0 min".
     worse_all = [d for d in deltas if d[1] > 0]
     better_all = [d for d in deltas if d[1] < 0]
-    worse = list(reversed(worse_all[-10:]))  # largest positive first
+    # Both slices resolve exact-tie order the same way — ascending route_code —
+    # so `worse` re-sorts rather than reversing the ascending tail (`reversed()`
+    # would have flipped ties into descending route_code for one list only).
+    worse = sorted(worse_all, key=lambda x: (-x[3], x[0]))[:10]  # largest positive first
     better = better_all[:10]  # most-negative first
-    codes = [c for c, _, _ in worse + better]
+    codes = [c for c, _, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
     history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4, ch=ch)
 
@@ -901,8 +915,8 @@ async def _movers(
         }
 
     return {
-        "worse": [_entry(c, dm, dp, "up") for c, dm, dp in worse],
-        "better": [_entry(c, dm, dp, "down") for c, dm, dp in better],
+        "worse": [_entry(c, dm, dp, "up") for c, dm, dp, _raw in worse],
+        "better": [_entry(c, dm, dp, "down") for c, dm, dp, _raw in better],
     }
 
 

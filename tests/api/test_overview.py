@@ -1243,20 +1243,32 @@ async def test_slow_path_concentration_ignores_early_running(aconn, aagency_id, 
 
 @pytest.mark.asyncio
 async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch_client, ch_async_client):
-    """Routes tied on delta_min rank by route_code, not by set-iteration order.
+    """Routes with genuinely equal deltas rank by route_code, ascending, in
+    BOTH the worse and better lists.
 
-    `_movers` used to iterate `set(cur) & set(prv)` and rely on a stable sort,
-    which leaked Python's per-process string-hash randomization into which
-    routes made the top-10 and in what order — the same request against the
-    same data could return different movers after an app restart.
+    `_movers` ranks on `(raw delta_min, route_code)` — a total order, since
+    route_codes are distinct — which is what makes the ranking independent of
+    the order `set(cur) & set(prv)` happens to be iterated in. It used to rank
+    on the ROUNDED delta and lean on a stable sort, so Python's per-process
+    string-hash randomization decided which routes made the top-10 and in what
+    order; the same request against the same data returned different movers
+    after an app restart.
     """
     cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     prv_day = cur_day - timedelta(days=7)
-    # Three routes, identical +9.0 min delta: only route_code separates them.
-    for code in ("R_T3", "R_T1", "R_T2"):
+    # Seeded in scrambled route_code order so the seed order can't be what
+    # produces a sorted answer. Three routes tie at +9.0 min, three at -9.0 min.
+    for code, prv_dep, cur_dep in (
+        ("R_W3", 60, 600),
+        ("R_B1", 600, 60),
+        ("R_W1", 60, 600),
+        ("R_B3", 600, 60),
+        ("R_W2", 60, 600),
+        ("R_B2", 600, 60),
+    ):
         for i in range(10):
-            await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), code, 60, seq=i + 1)
-            await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), code, 600, seq=i + 1)
+            await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), code, prv_dep, seq=i + 1)
+            await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), code, cur_dep, seq=i + 1)
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
@@ -1266,10 +1278,83 @@ async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
     worse = out["movers"]["worse"]
+    better = out["movers"]["better"]
     assert [m["delta_min"] for m in worse] == [pytest.approx(9.0, abs=0.01)] * 3
-    # Ties are ordered by route_code (descending here — `worse` is the
-    # ascending-by-delta tail, reversed), never by hash order.
-    assert [m["route_code"] for m in worse] == ["R_T3", "R_T2", "R_T1"]
+    assert [m["delta_min"] for m in better] == [pytest.approx(-9.0, abs=0.01)] * 3
+    # Both lists resolve ties the same way: ascending route_code, never hash order.
+    assert [m["route_code"] for m in worse] == ["R_W1", "R_W2", "R_W3"]
+    assert [m["route_code"] for m in better] == ["R_B1", "R_B2", "R_B3"]
+
+
+@pytest.mark.asyncio
+async def test_slow_path_movers_rank_on_raw_not_rounded_delta(aconn, aagency_id, ch_client, ch_async_client):
+    """Two routes whose deltas both round to the same 2dp value must still be
+    ordered by their TRUE deltas, not tie-broken by route_code.
+
+    Ranking on the rounded delta manufactured ties that don't exist in the
+    data (found on live agency-1 data: -1.7244 and -1.7203 both round to
+    -1.72), turning the top-10 cutoff between two genuinely different routes
+    into an arbitrary pick. Here `R_AA` improves slightly LESS than `R_BB`, so
+    a raw-delta ranking puts `R_BB` first — the opposite of what an
+    ascending-route_code tie-break on the rounded value would give.
+    """
+    cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    # 10 samples/side, baseline 600s (10.0 min) for both. Current totals differ
+    # by 3 seconds: R_AA 3625s -> 6.041667 min (delta -3.958333), R_BB 3622s ->
+    # 6.036667 min (delta -3.963333). Distinct raw deltas, identical to 2 dp.
+    for code, cur_total in (("R_AA", 3625), ("R_BB", 3622)):
+        for i in range(10):
+            await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), code, 600, seq=i + 1)
+        # Spread cur_total across 10 samples: 9 equal + 1 remainder.
+        per = cur_total // 10
+        rem = cur_total - per * 9
+        for i in range(9):
+            await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), code, per, seq=i + 1)
+        await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=9), code, rem, seq=10)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    better = out["movers"]["better"]
+    assert len(better) == 2
+    # Both display the SAME rounded delta_min...
+    assert better[0]["delta_min"] == better[1]["delta_min"]
+    # ...but R_BB's raw delta is more negative, so it must rank first. An
+    # ascending-route_code tie-break on the rounded value would say "R_AA".
+    assert [m["route_code"] for m in better] == ["R_BB", "R_AA"]
+
+
+@pytest.mark.asyncio
+async def test_slow_path_rejects_a_window_the_grain_does_not_cover(aconn, aagency_id, ch_client, ch_async_client):
+    """A consumer window outside the grain's span must raise, not silently
+    aggregate over a truncated window and return a plausible wrong average."""
+    await _seed_update(
+        aconn, aagency_id, datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc), "R_CV", 120
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain, _headline_stats, _peak_hour_by_dow
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    # The grain reaches exactly 7 days before ctx.from_date, and no further.
+    assert grain.from_date == date(2026, 5, 11)
+    assert grain.to_date == date(2026, 5, 24)
+
+    too_early = RangeCtx(from_date=date(2026, 5, 10), to_date=date(2026, 5, 24), time_band="morning")
+    with pytest.raises(RuntimeError, match="does not cover"):
+        await _headline_stats(aagency_id, too_early, aconn, ch=ch_async_client, grain=grain)
+
+    too_late = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 25), time_band="morning")
+    with pytest.raises(RuntimeError, match="does not cover"):
+        await _peak_hour_by_dow(aagency_id, too_late, aconn, "weekday", ch=ch_async_client, grain=grain)
 
 
 @pytest.mark.asyncio
