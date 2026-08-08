@@ -138,12 +138,20 @@ async def live_delays(
         """,
         parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
     )
-    cols = rows_result.column_names
-    ts_idx = cols.index("captured_at")
+    # Build each row via dict(zip(...)) rather than deriving a column index
+    # up front (e.g. `cols.index("captured_at")`): clickhouse-connect returns
+    # `column_names == ()` for a zero-row result (routine here — an agency's
+    # latest JST day can have observations where every one has a NULL
+    # dep_delay, e.g. arrival-only rows or a degraded poll, in which case
+    # `latest_ts` above is non-None but this query's `dep_delay IS NOT NULL`
+    # filter matches zero rows), and `().index(...)` raises `ValueError`
+    # unconditionally, before the loop even runs. Looping over `zip(...)`
+    # instead just doesn't execute when `result_rows` is empty, so `[]` falls
+    # out naturally.
     out_rows = []
     for r in rows_result.result_rows:
-        row = dict(zip(cols, r, strict=True))
-        row["captured_at"] = _as_utc(r[ts_idx])
+        row = dict(zip(rows_result.column_names, r, strict=True))
+        row["captured_at"] = _as_utc(row["captured_at"])
         out_rows.append(row)
     return {
         "latest_captured_at": latest_ts.isoformat(),

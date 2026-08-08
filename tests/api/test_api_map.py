@@ -139,6 +139,40 @@ async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_
 
 
 @pytest.mark.asyncio
+async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_client):
+    """Regression for a 500: the freshness probe (`latest_ts`) has no
+    `dep_delay` filter, but the rows query adds `AND dep_delay IS NOT NULL`.
+    When the agency's only/latest observation has a NULL dep_delay (routine —
+    arrival-only StopTimeUpdates, or a degraded poll), `latest_ts` resolves
+    to a real timestamp while the rows query legitimately matches zero rows.
+    clickhouse-connect returns `column_names == ()` for that zero-row result,
+    so deriving `cols.index("captured_at")` up front raised an unhandled
+    `ValueError` -> 500. This differs from `test_live_delays_empty` (zero
+    rows at all, which short-circuits on `latest_ts is None` before ever
+    running the rows query) -- here `latest_ts` IS set, and the crash was in
+    the second query's row-building code."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_NULL', 'R_NULL', 1, NULL, NOW(), 'null.pb', 'weekday', '10:05:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["rows"] == []
+    assert payload["latest_captured_at"] is not None
+
+
+@pytest.mark.asyncio
 async def test_heatmap_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/delays/heatmap")
