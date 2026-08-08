@@ -434,9 +434,7 @@ def _make_multi_row_files(tmp_path, agency_id, counts_by_file):
     return fake_parse_feed
 
 
-def test_ingest_flush_batch_dataerror_retries_per_file_isolating_the_bad_file(
-    pg_conn, ch_client, agency_id, tmp_path
-):
+def test_ingest_flush_batch_dataerror_retries_per_file_isolating_the_bad_file(pg_conn, ch_client, agency_id, tmp_path):
     """A DataError from insert_updates() on the WHOLE batch (e.g. one file's
     row has a None in a non-Nullable ClickHouse column, such as route_code
     LowCardinality(String) or stop_sequence UInt16 - clickhouse_connect's

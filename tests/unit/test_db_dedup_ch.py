@@ -233,9 +233,7 @@ def test_dedup_cte_ch_picks_latest_observation():
     )
     rows = result.result_rows
     assert len(rows) == 1
-    assert rows[0][0] == 120, (
-        f"expected latest (120s), got {rows[0][0]} (would be 300 under old MAX semantics)"
-    )
+    assert rows[0][0] == 120, f"expected latest (120s), got {rows[0][0]} (would be 300 under old MAX semantics)"
     client.close()
 
 

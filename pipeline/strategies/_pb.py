@@ -109,4 +109,3 @@ def _ts(date_str: str, pb_name: str) -> str:
         return datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=_JST).isoformat()
     except Exception:
         return datetime.now(_JST).isoformat()
-
