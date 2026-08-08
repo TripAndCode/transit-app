@@ -610,19 +610,31 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
     assert body["geometry"]["coordinates"][0] == [20.0, 20.0], body
 
 
-@pytest.mark.asyncio
-async def test_route_shape_returns_empty_for_nonexistent_route(map_client_ch):
-    """A fabricated/never-observed route_code must resolve to the same empty
-    shape as any other "not found" response, via the existence precheck at
-    the TOP of route_shape -- before the ctx-bounded ClickHouse dedup query
-    ever runs, not just inside the empty-window fallback branch. (A prior
-    version of this precheck sat inside that fallback branch, so a
+class _ExplodingChClient:
+    """Stand-in ``ch`` that fails the test if route_shape ever reaches
+    ClickHouse -- proves the agg_route_daily existence precheck at the TOP
+    of the function short-circuits before the ctx-bounded dedup query, not
+    just that the two happen to produce the same output. A prior version of
+    this precheck sat inside the empty-window fallback branch instead, so a
     fabricated route_code under a wide ctx window still paid for the
-    ctx-bounded dedup query's full cost before ever reaching the precheck --
-    measured 336,368,237 rows / 923 MiB / 2.35s on real data.) No agency/CH
-    seeding at all: map_client_ch's agency has zero agg_route_daily rows."""
-    client, agency_id = map_client_ch
-    resp = await client.get(f"/api/{agency_id}/route-shape?route=NOPE&from=2025-01-01&to=2026-12-31")
+    ctx-bounded dedup query's full cost (measured 336,368,237 rows / 923 MiB
+    / 2.35s on real data) before ever reaching the precheck -- an assertion
+    on the response body alone can't tell those two placements apart."""
+
+    async def query(self, *args, **kwargs):
+        raise AssertionError("agg_route_daily precheck should have short-circuited before any ClickHouse query")
+
+
+@pytest.mark.asyncio
+async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
+    """A fabricated/never-observed route_code must resolve to the same empty
+    shape as any other "not found" response, without ever touching ClickHouse
+    (see _ExplodingChClient). No agency/CH seeding at all: this agency has
+    zero agg_route_daily rows."""
+    app, agency_id = map_app
+    app.state.ch_client = _ExplodingChClient()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=NOPE&from=2025-01-01&to=2026-12-31")
     assert resp.status_code == 200
     assert resp.json() == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
 
