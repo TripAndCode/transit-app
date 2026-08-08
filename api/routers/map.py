@@ -20,12 +20,13 @@ the same filter.
 import json
 import logging
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
@@ -250,21 +251,41 @@ async def route_shape(
     # there's no shape-vote signal to derive from them, but the map should
     # still be able to render the route's topology (geometry +
     # unobserved-stop markers), just with no delay data on it, matching
-    # pre-ClickHouse-migration behavior. Run ONE fallback all-time
-    # shape-vote query, solely to pick a shape for rendering purposes — this
-    # is the only unbounded scan in this function, and it only fires on the
-    # empty-window edge case (not the common case), so it doesn't reintroduce
-    # the 32s-per-request problem the ctx bound above exists to fix. The
-    # per-stop delay stats (`avg_min`/`samples`) stay empty regardless, since
-    # there really are zero observations in the user's selected window.
+    # pre-ClickHouse-migration behavior. Run ONE fallback shape-vote query
+    # (bounded to the last 180 days off the agency's own latest data — see
+    # below), solely to pick a shape for rendering purposes — this only
+    # fires on the empty-window edge case (not the common case), so even
+    # its now-bounded form doesn't reintroduce the 32s-per-request problem
+    # the ctx bound above exists to fix. The per-stop delay stats
+    # (`avg_min`/`samples`) stay empty regardless, since there really are
+    # zero observations in the user's selected window.
     if not trip_counts:
-        fallback_vote_result = await ch.query(
-            "SELECT trip_id, count() AS n FROM updates "
-            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-            "GROUP BY trip_id",
-            parameters={"agency_id": agency_id, "route": str(route)},
-        )
-        trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
+        # Bounded, not unbounded: a route_code + no date bound can't be
+        # pruned by the sort key (route_code sits behind the unconstrained
+        # captured_at), so proving this route has no fallback data at all
+        # would otherwise cost a full ~336M-row scan on this anonymous,
+        # reachable endpoint — trivially reachable by picking a time_band/dow
+        # the route doesn't run in. Anchor the bound to the AGENCY's own
+        # latest captured_at (not wall-clock "now") so it's meaningful even
+        # against old/replayed data, and use a wider window than the
+        # route_trips/route_stop_profile probes below (180 days, not 30):
+        # this vote only picks a shape for rendering topology, and map
+        # topology changes far less often than delay data, so a route that
+        # simply runs infrequently shouldn't lose its shape. A route with
+        # zero observations in the window still correctly falls through to
+        # `chosen_shape_id = None` (arguably more correct than before, which
+        # would resurrect arbitrarily ancient data for a truly retired route).
+        agency_latest = await max_captured_at(ch, agency_id)
+        if agency_latest is not None:
+            fallback_bound = agency_latest - timedelta(days=180)
+            fallback_vote_result = await ch.query(
+                "SELECT trip_id, count() AS n FROM updates "
+                "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+                "  AND captured_at >= {bound:DateTime64} "
+                "GROUP BY trip_id",
+                parameters={"agency_id": agency_id, "route": str(route), "bound": fallback_bound},
+            )
+            trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
 
     chosen_shape_id = None
     if trip_counts:
@@ -590,16 +611,32 @@ async def route_trips(
     (from static_trips), and the trip's average dep_delay across its stops.
     Sorted worst-first — answers "which buses were late". Read-only.
     """
-    # ORDER BY captured_at DESC LIMIT 1 (not maxOrNull): captured_at is the
-    # second column of the sort key, so scanning from the tail finds a
-    # route_code match within a small number of granules for an
-    # active route, instead of a full per-agency aggregate scan — see
-    # pipeline/clickhouse.py::max_captured_at's docstring.
+    # Resolve the agency's own latest captured_at FIRST (agency_id is the
+    # sort key's leading column, so this is index-served regardless of route
+    # activity — see api.clickhouse.max_captured_at's docstring), then bound
+    # the route-scoped probe below to the last 30 days from it. Without this
+    # bound, `route_code = {route}` alone can't be pruned by the sort key
+    # (route_code sits behind the unconstrained captured_at), so an
+    # unknown/inactive route_code on this anonymous, reachable endpoint would
+    # cost a full ~336M-row scan to prove "no data" — see the security review
+    # that added this bound. The bound is a literal Python-computed value
+    # (not a ClickHouse scalar subquery — measured to read MORE rows, not
+    # fewer, since it isn't servable as a sort-key literal), and anchored to
+    # the agency's own data rather than wall-clock "now" so it's meaningful
+    # against replayed/old data too. A route with zero observations in the
+    # last 30 days still correctly falls through to the empty response below
+    # — for a route active more than 30 days ago, this is arguably more
+    # correct than before (which would resurrect arbitrarily ancient data).
+    agency_latest = await max_captured_at(ch, agency_id)
+    if agency_latest is None:
+        return {"date": None, "trips": []}
+    route_probe_bound = agency_latest - timedelta(days=30)
     latest_result = await ch.query(
         "SELECT captured_at FROM updates "
         "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "  AND captured_at >= {bound:DateTime64} "
         "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "route": route_code},
+        parameters={"agency_id": agency_id, "route": route_code, "bound": route_probe_bound},
     )
     latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
     if latest_ts is None:
@@ -701,13 +738,19 @@ async def route_stop_profile(
     ordered by sequence — answers "where on the route does delay build". The
     name is best-effort (MAX over the sequence's mapped stop). Read-only.
     """
-    # ORDER BY captured_at DESC LIMIT 1 (not maxOrNull) — see route_trips
-    # above / pipeline/clickhouse.py::max_captured_at's docstring.
+    # Bounded route-scoped probe, anchored to the agency's own latest
+    # captured_at — see route_trips above for the full rationale (same
+    # unbounded-scan vulnerability, same fix).
+    agency_latest = await max_captured_at(ch, agency_id)
+    if agency_latest is None:
+        return {"date": None, "stops": []}
+    route_probe_bound = agency_latest - timedelta(days=30)
     latest_result = await ch.query(
         "SELECT captured_at FROM updates "
         "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "  AND captured_at >= {bound:DateTime64} "
         "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "route": route_code},
+        parameters={"agency_id": agency_id, "route": route_code, "bound": route_probe_bound},
     )
     latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
     if latest_ts is None:
@@ -766,8 +809,6 @@ async def route_stop_profile(
     ]
 
     # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
-    from datetime import timedelta
-
     stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
     cohort_by_stop: dict[str, dict] = {}
     if stop_ids:

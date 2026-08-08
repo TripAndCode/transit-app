@@ -50,6 +50,32 @@ async def get_ch_client():
     )
 
 
+async def max_captured_at(ch, agency_id: int) -> datetime | None:
+    """Async counterpart of `pipeline.clickhouse.max_captured_at`.
+
+    Absolute latest `captured_at` for the agency (today included) — see that
+    function's docstring for why the index-served `ORDER BY captured_at DESC
+    LIMIT 1` form beats `maxOrNull`. Agency-scoped only (no route/date
+    filter), so it stays servable off the sort key's leading `agency_id`
+    column regardless of how the caller intends to use the result — callers
+    that need a *route*-scoped probe (e.g. `api.routers.map`'s `route_trips`,
+    `route_stop_profile`, `route_shape`) should call this first and derive a
+    literal Python-computed lower bound from it, rather than filtering
+    `updates` by `route_code` with no date bound: `route_code` sits behind
+    the unconstrained `captured_at` in the sort key, so an unbounded
+    route-scoped query can't be pruned and costs a full-table scan whenever
+    the route doesn't exist or has no recent data.
+    """
+    result = await ch.query(
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
+        parameters={"agency_id": agency_id},
+    )
+    if not result.result_rows:
+        return None
+    value = result.result_rows[0][0]
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
 async def max_captured_at_before(ch, agency_id: int, before: datetime) -> datetime | None:
     """Async counterpart of `pipeline.clickhouse.max_captured_at_before`.
 
