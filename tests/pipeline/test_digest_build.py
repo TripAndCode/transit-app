@@ -271,7 +271,9 @@ def test_build_digest_survives_ch_query_failure(pg_conn, agency_id):
     """A ClickHouse outage during check_agg_freshness's live-day probe must
     not kill the whole (Postgres-only) digest — only the advisory staleness
     flag should degrade to "not stale", every other (Postgres-sourced) field
-    must still come through."""
+    must still come through. staleness_known must flip to False so the
+    renderer can tell "known fresh" apart from "staleness unknown" — see
+    test_build_digest_ch_failure_does_not_render_as_fresh."""
     _seed(pg_conn, agency_id)
 
     with patch("pipeline.digest.build.get_client", return_value=_FailingChClient()):
@@ -282,6 +284,7 @@ def test_build_digest_survives_ch_query_failure(pg_conn, agency_id):
     assert section.has_data is True
     assert section.avg_delay_min == 5.0
     assert data.network_avg_delay_min == 5.0
+    assert data.staleness_known is False
 
 
 def test_build_digest_survives_get_client_failure(pg_conn, agency_id):
@@ -297,7 +300,30 @@ def test_build_digest_survives_get_client_failure(pg_conn, agency_id):
 
     section = next(s for s in data.sections if s.agency_id == agency_id)
     assert section.is_stale is False
-    assert section.avg_delay_min == 5.0
+    assert data.staleness_known is False
+
+
+def test_build_digest_ch_failure_does_not_render_as_fresh(pg_conn, agency_id):
+    """End-to-end: a ClickHouse outage must not produce an affirmative "all
+    fresh" claim in the rendered Markdown — that's the digest's only output
+    surface (gtfs_pipeline.cmd_digest just writes it to stdout; the
+    _log.warning goes to logs a human digest-reader never sees). The
+    rendered text must instead honestly signal that staleness is unknown."""
+    from pipeline.digest.render import render_digest
+
+    _seed(pg_conn, agency_id)
+
+    with patch("pipeline.digest.build.get_client", return_value=_FailingChClient()):
+        data = build_digest(pg_conn, DAY)
+
+    for locale, fresh_phrase in (("ja", "全事業者最新"), ("en", "all agencies current")):
+        out = render_digest(data, locale)
+        assert fresh_phrase not in out
+        assert "鮮度警告" not in out  # also not a false stale-warning
+        assert "Freshness: aggregates lagging" not in out
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.avg_delay_min == 5.0  # Postgres-sourced field still comes through
 
 
 def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):
