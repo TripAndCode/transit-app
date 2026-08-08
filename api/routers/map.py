@@ -82,15 +82,52 @@ async def live_delays(
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring for
+    # why: the old ORDER BY ... LIMIT 1 BY form forces a full sort of the
+    # filtered rowset before dedup, which measured too close to the 30s
+    # max_execution_time cap on wide windows). Multiple non-key columns
+    # (route_code, service_type, scheduled_time, dep_delay) are read off the
+    # SAME winning row, so they're packed into ONE tuple-argMax rather than
+    # one argMax per column — per-column argMax on a captured_at tie could
+    # silently mix columns from two different physical rows. The inner
+    # query's tuple is unpacked by position in the outer SELECT so the
+    # result's column names/order match the pre-migration SELECT list
+    # exactly (`route_code, service_type, scheduled_time, dep_delay`).
+    #
+    # This endpoint dedups by trip_id ALONE (no stop_sequence in the group
+    # key), unlike build_dedup_ch_sql. A single GTFS-RT poll commonly reports
+    # a propagated dep_delay for several of a trip's upcoming stops at once
+    # (confirmed on real data: ~13% of trips on a given day), so more than
+    # one physical row can share the exact same (captured_at, file_name) for
+    # one trip_id — a tie the old sort-based form also never broke
+    # (ORDER BY trip_id, captured_at DESC had no third key either), leaving
+    # its winner among those rows to whatever order the query engine happened
+    # to produce. `-toInt32(u.stop_sequence)` makes that residual tie
+    # deterministic here: among same-poll rows for one trip, the one for the
+    # LOWEST stop_sequence (the soonest upcoming stop) wins — the most
+    # currently-relevant row for a live board. Confirmed against real data:
+    # this is the only field this ambiguity ever touches (route_code /
+    # service_type / dep_delay / captured_at are trip-level and identical
+    # across a trip's stop_sequence rows; only `scheduled_time` — the
+    # per-stop field — could differ).
     rows_result = await ch.query(
         """
-        SELECT trip_id, route_code, service_type, scheduled_time, dep_delay, captured_at
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16}
-          AND dep_delay IS NOT NULL
-          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-        ORDER BY trip_id, captured_at DESC
-        LIMIT 1 BY trip_id
+        SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
+            winner.3 AS scheduled_time, winner.4 AS dep_delay, captured_at
+        FROM (
+            SELECT u.trip_id AS trip_id,
+                argMax(
+                    tuple(u.route_code, u.service_type, u.scheduled_time, u.dep_delay),
+                    (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
+                ) AS winner,
+                max(u.captured_at) AS captured_at
+            FROM updates AS u
+            WHERE u.agency_id = {agency_id:UInt16}
+              AND u.dep_delay IS NOT NULL
+              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+            GROUP BY u.trip_id
+        ) AS grouped
+        ORDER BY trip_id
         LIMIT {limit:UInt32}
         """,
         parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
@@ -173,15 +210,20 @@ async def route_shape(
     # ~100 rows), even though the shape should reflect what's actually being
     # shown for the user's selected range, not all-time history.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
+    # only one non-key column (dep_delay) is read off the winning row, so a
+    # single argMax suffices; base-table columns are qualified with the `u.`
+    # alias per that same docstring's convention, in case ch_where_frag (built
+    # by api.range.build_updates_filter_ch) ever references an output alias.
     dedup_result = await ch.query(
         f"""
-        SELECT trip_id, stop_sequence, dep_delay
-        FROM updates
-        WHERE agency_id = {{agency_id:UInt16}} AND route_code = {{route:String}}
-          AND dep_delay IS NOT NULL
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+          AND u.dep_delay IS NOT NULL
           AND {ch_where_frag}
-        ORDER BY captured_at DESC, file_name DESC
-        LIMIT 1 BY trip_id, stop_sequence
+        GROUP BY u.trip_id, u.stop_sequence
         """,
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
@@ -549,15 +591,26 @@ async def route_trips(
     if latest_ts is None:
         return {"date": None, "trips": []}
 
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
+    # Two non-key columns (scheduled_time, dep_delay) are read off the SAME
+    # winning row, so they're packed into ONE tuple-argMax rather than one
+    # argMax per column — per-column argMax on a captured_at tie could
+    # silently mix columns from two different physical rows. Unpacked by
+    # position in the outer SELECT to keep the result's column order exactly
+    # `trip_id, stop_sequence, scheduled_time, dep_delay` (this function
+    # unpacks each row by position below).
     dedup_result = await ch.query(
         """
-        SELECT trip_id, stop_sequence, scheduled_time, dep_delay
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}
-          AND dep_delay IS NOT NULL
-          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-        ORDER BY captured_at DESC, file_name DESC
-        LIMIT 1 BY trip_id, stop_sequence
+        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay
+        FROM (
+            SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
+                argMax(tuple(u.scheduled_time, u.dep_delay), (u.captured_at, u.file_name)) AS winner
+            FROM updates AS u
+            WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
+              AND u.dep_delay IS NOT NULL
+              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+            GROUP BY u.trip_id, u.stop_sequence
+        ) AS grouped
         """,
         parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )
@@ -642,15 +695,18 @@ async def route_stop_profile(
     if latest_ts is None:
         return {"date": None, "stops": []}
 
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
+    # only one non-key column (dep_delay) is read off the winning row, so a
+    # single argMax suffices.
     dedup_result = await ch.query(
         """
-        SELECT trip_id, stop_sequence, dep_delay
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String}
-          AND dep_delay IS NOT NULL
-          AND toDate(captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-        ORDER BY captured_at DESC, file_name DESC
-        LIMIT 1 BY trip_id, stop_sequence
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
+          AND u.dep_delay IS NOT NULL
+          AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+        GROUP BY u.trip_id, u.stop_sequence
         """,
         parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )
