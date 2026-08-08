@@ -12,12 +12,41 @@ import clickhouse_connect
 
 
 async def get_ch_client():
+    """Caps any single query at 30s execution time and 200k result rows —
+    the ClickHouse-side counterpart to api.main._init_connection's Postgres
+    `statement_timeout`. All read endpoints serve from small precomputed
+    agg_* tables (sub-second); ClickHouse only backs the pathological
+    live-fallback scans over `updates` (see api.main.lifespan), so these
+    caps should only ever fire as a safety net against a hung or
+    runaway request — never on real traffic.
+
+    `result_overflow_mode: "throw"` (not the default "break") matters as
+    much as the row number itself: "break" truncates the result set
+    silently and returns what it has so far, which would hand a caller
+    wrong/incomplete data with no signal. "throw" raises a catchable
+    DatabaseError (TOO_MANY_ROWS_OR_BYTES) instead, so an over-cap query
+    fails loudly rather than returning a partial answer that looks correct.
+
+    200_000 rows is generous headroom over this codebase's real query
+    shapes: every live-fallback path is a single-agency, date-bounded scan
+    over `updates` (per-stop/per-route rows for one agency's service day),
+    which tops out in the thousands, not hundreds of thousands — see
+    max_captured_at_before's docstring for how these queries are shaped to
+    stay index-served. clickhouse-connect converts these to strings itself
+    when posting settings over HTTP, so plain Python int/str values here are
+    fine as written.
+    """
     return await clickhouse_connect.get_async_client(
         host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
         port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
         username=os.environ["CLICKHOUSE_USER"],
         password=os.environ["CLICKHOUSE_PASSWORD"],
         database=os.environ["CLICKHOUSE_DATABASE"],
+        settings={
+            "max_execution_time": 30,
+            "max_result_rows": 200_000,
+            "result_overflow_mode": "throw",
+        },
     )
 
 
