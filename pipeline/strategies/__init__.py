@@ -2,8 +2,9 @@
 
 Each ingest strategy module exposes:
     parse_feed(pb_bytes: bytes, agency_id: int, conn) -> list[tuple]
-        Returns rows ready for the standard updates INSERT (9-tuple, see
-        pipeline.strategies._pb.UPDATE_INSERT_SQL).
+        Returns rows ready for pipeline.clickhouse.insert_updates (8-tuple,
+        see pipeline.clickhouse.UPDATE_COLUMNS — agency_id is prepended by
+        insert_updates, not part of this tuple).
 
 Each static strategy module exposes:
     fetch(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]

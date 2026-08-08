@@ -19,7 +19,7 @@ from pipeline.clickhouse import distinct_file_names, insert_updates
 from pipeline.strategies import get_ingest_strategy
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
-from pipeline.strategies._pb import UPDATE_INSERT_SQL, _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
+from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
 from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,

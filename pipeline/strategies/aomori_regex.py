@@ -1,6 +1,6 @@
 """Aomori RT ingest strategy.
 
-Decodes a TripUpdate pb into rows matching pipeline.strategies._pb.UPDATE_INSERT_SQL.
+Decodes a TripUpdate pb into rows matching pipeline.clickhouse.insert_updates.
 The trip_id regex (provided per agency in DB column trip_id_pattern, defaulting
 to the Aomori format) carries route_code, service_type, and scheduled_time.
 
@@ -44,7 +44,7 @@ def parse_feed(
     agency_id: int,
     conn,
 ) -> list:
-    """Return rows shaped for UPDATE_INSERT_SQL.
+    """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
                 route_code, stop_sequence, dep_delay).

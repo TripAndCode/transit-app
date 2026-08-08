@@ -552,7 +552,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
-        # already clamped via build_dedup_inner_sql) — NOT raw `updates`. So
+        # already clamped via build_dedup_ch_sql) — NOT raw `updates`. So
         # `samples` counts observations, not feed polls (a frozen/heavily-polled
         # trip no longer inflates the count), and the per-stop mean matches the
         # reports/route-summary surfaces, which read the same deduped set.

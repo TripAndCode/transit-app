@@ -47,7 +47,7 @@ TimeBand = Literal[
 ServiceType = Literal["all", "平日", "土日祝"]
 
 # (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
-# 0011 made `scheduled_time` a TIME column, so `time_band_clause` casts both
+# 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
 # sides of the comparison to TIME — these literals are sent over the wire as
 # text and cast server-side. '24:00' is a valid Postgres TIME (end-of-day).
 _TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
@@ -171,9 +171,9 @@ def date_range_clause(
     ``column::date BETWEEN`` form — those tables are small aggregates with no
     index at stake.
 
-    The ``::text`` coercion keeps asyncpg sending the params as TEXT,
-    mirroring time_band_clause; ``str()`` normalizes the mixed caller types
-    (ISO str from the API ctx, datetime.date from tests).
+    The ``::text`` coercion keeps asyncpg sending the params as TEXT instead
+    of trying (and failing) to infer a native type; ``str()`` normalizes the
+    mixed caller types (ISO str from the API ctx, datetime.date from tests).
     """
     if column_type == "text_date":
         fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
@@ -197,65 +197,6 @@ def dow_clause(
         return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
     # weekend: Saturday (6) + Sunday (7)
     return f"EXTRACT(ISODOW FROM {column}::date) IN (6, 7)", [], next_param
-
-
-def time_band_clause(
-    column: str,
-    ctx: RangeCtx,
-    next_param: int,
-) -> tuple[str, list, int]:
-    """Return a WHERE fragment filtering ``column`` (a TIME column) to the
-    range named by ``ctx.time_band``.
-
-    Each placeholder is cast as ``(${n}::text)::time`` so asyncpg sends
-    the Python ``str`` over the wire as TEXT — without the ``::text``
-    coercion, asyncpg's prepared-statement type inference would try to
-    encode the string as ``datetime.time`` and fail. The server then
-    parses the text into TIME for the comparison.
-    """
-    if ctx.time_band == "all":
-        return "TRUE", [], next_param
-    start, end = _TIME_BAND_RANGES[ctx.time_band]
-    fragment = f"({column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time)"
-    return fragment, [start, end], next_param + 2
-
-
-def build_updates_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """Combined WHERE fragment for the ``updates`` table.
-
-    Applies date range + DOW + time-band + service + routes filters. Returns
-    a single AND-joined fragment plus the asyncpg-style parameter list.
-    """
-    parts: list[str] = []
-    params: list = []
-    n = next_param
-
-    frag, p, n = date_range_clause("captured_at", ctx, n)
-    parts.append(frag)
-    params.extend(p)
-
-    frag, p, n = dow_clause("captured_at", ctx, n)
-    if frag != "TRUE":
-        parts.append(frag)
-        params.extend(p)
-
-    frag, p, n = time_band_clause("scheduled_time", ctx, n)
-    if frag != "TRUE":
-        parts.append(frag)
-        params.extend(p)
-
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
-
-    if ctx.routes:
-        # ANY array — efficient with the existing index on route_code
-        parts.append(f"route_code = ANY(${n}::text[])")
-        params.append(list(ctx.routes))
-        n += 1
-
-    return " AND ".join(parts), params, n
 
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -292,7 +233,8 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 
 
 def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
-    """ClickHouse-dialect counterpart of :func:`time_band_clause`.
+    """Return a WHERE fragment filtering ClickHouse's ``updates.scheduled_time``
+    to the range named by ``ctx.time_band``.
 
     ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
     (GTFS ``"HH:MM:SS"`` text — see the migration design doc), not a native
@@ -327,14 +269,14 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
 
 
 def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
-    """ClickHouse-dialect counterpart of :func:`build_updates_filter`.
+    """Combined WHERE fragment for ClickHouse's ``updates`` table.
 
     Applies date range + DOW + time-band + service + routes filters against
     ClickHouse's `updates` table. Returns a single AND-joined fragment plus a
     ``{name: value}`` dict ready for ``ch.query(..., parameters=...)`` —
     ClickHouse uses named `{name:Type}` parameters, not asyncpg's positional
-    ``$N``, so (unlike `build_updates_filter`) there's no `next_param` to
-    thread; every fragment here uses its own unique parameter names.
+    ``$N``, so there's no `next_param` to thread; every fragment here uses
+    its own unique parameter names.
     """
     parts: list[str] = []
     params: dict = {}
@@ -368,7 +310,7 @@ def time_band_case_sql(column: str) -> str:
     """SQL CASE mapping a TIME column to its `_TIME_BAND_RANGES` band key.
 
     Generated from `_TIME_BAND_RANGES` so analyze's bucketing can never drift
-    from `time_band_clause`'s filter. NULL / out-of-range -> 'none'.
+    from `time_band_clause_ch`'s filter. NULL / out-of-range -> 'none'.
     """
     arms = "\n".join(
         f"            WHEN {column} >= '{start}'::time AND {column} < '{end}'::time THEN '{band}'"

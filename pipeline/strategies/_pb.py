@@ -110,14 +110,3 @@ def _ts(date_str: str, pb_name: str) -> str:
     except Exception:
         return datetime.now(_JST).isoformat()
 
-
-# ── INSERT shape shared by all ingest strategies ──────────────────────────────
-
-
-UPDATE_INSERT_SQL = """
-    INSERT INTO updates
-      (agency_id, file_name, captured_at, trip_id, service_type, scheduled_time,
-       route_code, stop_sequence, dep_delay)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    ON CONFLICT DO NOTHING
-"""

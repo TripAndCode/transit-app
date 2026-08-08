@@ -3,26 +3,18 @@
 from __future__ import annotations
 
 from api.range import RangeCtx, build_agg_daily_trend_filter, build_updates_filter_ch, dow_clause
-from pipeline.db import build_dedup_ch_sql, build_dedup_inner_sql
-
-
-def _dedup_cte(where_frag: str) -> str:
-    """Wrap the shared latest-by-captured_at dedup SQL in a `deduped` CTE.
-
-    `where_frag` is a trusted server-built fragment from
-    `api.range.build_updates_filter` — never user input.
-
-    Postgres/asyncpg dialect. As of Task 8.5 this has zero remaining live
-    callers in this codebase (every `_dedup_cte` call site was ported to
-    `_dedup_cte_ch` below) — kept because `build_dedup_inner_sql` still has
-    other real Postgres-side callers this task doesn't own the full picture
-    of (Task 6's review), and this wrapper is small and harmless dead code.
-    """
-    return f"deduped AS ({build_dedup_inner_sql(placeholder='$1', extra_where=where_frag)})"
+from pipeline.db import build_dedup_ch_sql
 
 
 def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
-    """ClickHouse-dialect counterpart of :func:`_dedup_cte`.
+    """ClickHouse-dialect dedup CTE builder.
+
+    Wraps the shared latest-by-captured_at dedup SQL (`build_dedup_ch_sql`)
+    in a `deduped` CTE, combined with `ctx`'s WHERE filter
+    (`api.range.build_updates_filter_ch`). Every report/route/overview
+    helper that needs the live (non-aggregated) `updates` table goes
+    through this one builder so the dedup+filter shape can't drift between
+    call sites.
 
     Returns ``(cte_sql, parameters)`` instead of a bare CTE fragment string,
     because ClickHouse parameters are a ``{name: value}`` dict passed to
@@ -124,7 +116,8 @@ def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str
 
     Returns ``('', [], next_param)`` when ``time_band == 'all'`` or an
     unknown band name. Matches the asyncpg ``::text)::time`` cast pattern
-    that :func:`api.range.time_band_clause` uses for ``updates``.
+    used elsewhere in this module (e.g. :func:`_agg_filter`'s siblings) for
+    Postgres TIME columns.
     """
     if time_band == "all":
         return "", [], next_param

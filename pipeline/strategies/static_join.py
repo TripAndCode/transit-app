@@ -52,7 +52,7 @@ def parse_feed(
     agency_id: int,
     conn,
 ) -> list:
-    """Return rows shaped for UPDATE_INSERT_SQL.
+    """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
                 route_code, stop_sequence, dep_delay).

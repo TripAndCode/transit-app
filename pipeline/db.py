@@ -1,9 +1,10 @@
-"""Shared DB helpers and SQL builders used by both psycopg2 (analyze) and
-asyncpg (api / reports / tool_queries) paths.
+"""Shared DB helpers and SQL builders for the (psycopg2) Postgres side of
+this codebase, plus the ClickHouse dedup query builder.
 
-The dedup SQL lives here so the two paths never drift apart. Update one
-place and every report endpoint, the analyze materializer, and the LLM
-tool helpers all pick up the change atomically.
+`build_dedup_ch_sql` lives here so the analyze materializer, every report
+endpoint, and the LLM tool helpers can't drift apart on the definition of
+"the latest observation per stop event" — they all read the ClickHouse
+`updates` table through this one builder.
 """
 
 import psycopg2
@@ -35,9 +36,8 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 
-def build_dedup_inner_sql(
+def build_dedup_ch_sql(
     *,
-    placeholder: str = "%(agency_id)s",
     extra_where: str = "",
     include_captured_at: bool = False,
 ) -> str:
@@ -45,47 +45,8 @@ def build_dedup_inner_sql(
 
     GTFS-RT feeds publish refining `dep_delay` estimates as the trip nears
     each stop. The latest observation is what passengers actually
-    experienced; `MAX(dep_delay)` (the previous behavior) biased toward
+    experienced; `MAX(dep_delay)` (a previous behavior) biased toward
     the deepest mid-flight overestimate.
-
-    Rows with `dep_delay IS NULL` are filtered at the inner SELECT so the
-    function surfaces the last NUMERIC estimate per group, not a trailing
-    "no estimate" row.
-
-    `placeholder` selects the parameter style for `agency_id`:
-    `%(agency_id)s` for psycopg2 (analyze.py), `$1` for asyncpg
-    (reports.py, pipeline.query.tool_queries). `extra_where` is ANDed
-    onto the inner WHERE; pass server-built SQL only.
-
-    `include_captured_at` adds the raw `captured_at` to the projection (the
-    DISTINCT ON already keeps the latest row per group, so it's that row's
-    timestamp) — used by agg_route_daily for a per-day `last_seen_at`.
-
-    The trailing `id DESC` makes the dedup deterministic when two rows
-    share the same `captured_at` (different files, same poll second).
-    """
-    # Wrap in parens so a fragment containing top-level OR composes correctly.
-    extra = f" AND ({extra_where})" if extra_where else ""
-    captured = ", captured_at" if include_captured_at else ""
-    return (
-        "SELECT DISTINCT ON (route_code, service_type, scheduled_time, "
-        "trip_id, captured_at::date, stop_sequence) "
-        "route_code, service_type, scheduled_time, trip_id, "
-        f"captured_at::date AS date, stop_sequence, dep_delay{captured} "
-        "FROM updates "
-        f"WHERE dep_delay IS NOT NULL AND agency_id = {placeholder} "
-        f"AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
-        "ORDER BY route_code, service_type, scheduled_time, trip_id, "
-        "captured_at::date, stop_sequence, captured_at DESC, id DESC"
-    )
-
-
-def build_dedup_ch_sql(
-    *,
-    extra_where: str = "",
-    include_captured_at: bool = False,
-) -> str:
-    """ClickHouse-dialect equivalent of build_dedup_inner_sql.
 
     Picks the latest observation per stop event via a single-pass
     `GROUP BY` + `argMax`, not a full sort. An earlier version used
@@ -168,10 +129,6 @@ def build_dedup_ch_sql(
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
     )
-
-
-# Psycopg2 binding used by pipeline/analyze.py.
-_DEDUP_INNER = build_dedup_inner_sql()
 
 
 def _static_loaded(conn, agency_id: int) -> bool:
