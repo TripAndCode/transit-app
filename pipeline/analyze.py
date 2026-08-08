@@ -144,7 +144,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # planner stats for the downstream GROUP BYs.
         ch_sql = build_dedup_ch_sql(include_captured_at=True)
         # Column order must match build_dedup_ch_sql's SELECT list exactly:
-        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, captured_at
+        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, last_captured_at
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
             cur.execute(
@@ -180,8 +180,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     # fixup, a ClickHouse timestamp that's naive-but-means-UTC
                     # would get reinterpreted as JST and land 9h early. Same
                     # guard as pipeline/clickhouse.py's max_captured_at /
-                    # max_captured_at_before. captured_at is the last element
-                    # of each row (see build_dedup_ch_sql's SELECT list above).
+                    # max_captured_at_before. last_captured_at is the last
+                    # element of each row (see build_dedup_ch_sql's SELECT
+                    # list above).
                     rows = [
                         (
                             *r[:-1],

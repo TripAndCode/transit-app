@@ -46,7 +46,7 @@ async def get_ch(request: Request):
     (only if a caller actually tries to use it) when ``app.state.ch_client``
     is ``None`` — see :class:`_ClickHouseUnavailable`.
     """
-    ch_client = request.app.state.ch_client
+    ch_client = getattr(request.app.state, "ch_client", None)
     return _CH_UNAVAILABLE if ch_client is None else ch_client
 
 

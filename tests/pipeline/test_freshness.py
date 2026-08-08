@@ -32,6 +32,12 @@ class _FakeChClient:
 
         return _Result()
 
+    def close(self) -> None:
+        """No-op: mirrors the real (sync) ClickHouse client's close(), which
+        _run_ingest_and_analyze now calls in its `finally` block alongside
+        `conn.close()` (see api/routers/internal.py) to avoid leaking a
+        client + HTTP pool per cron invocation."""
+
 
 def _seed_two_days(pg_conn, agency_id):
     """Insert mid-day rows across two completed civil days (well before today)

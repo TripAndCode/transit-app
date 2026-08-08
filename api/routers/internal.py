@@ -96,6 +96,11 @@ def _run_ingest_and_analyze() -> None:
             _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
         conn.close()
+        # Close the sync ClickHouse client's underlying HTTP connection pool.
+        # This job runs as a BackgroundTask inside the long-lived API
+        # process, so a missing close() here leaks one client + pool per
+        # invocation of this endpoint instead of one per short-lived CLI run.
+        ch_client.close()
 
 
 @router.post("/ingest", status_code=202)

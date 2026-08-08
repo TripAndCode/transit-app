@@ -107,7 +107,15 @@ def build_dedup_ch_sql(
     When `include_captured_at`, the winning row's `captured_at` is exactly
     `max(captured_at)` within the group: ties on `captured_at` (broken by
     `file_name`) share the same `captured_at` value by definition, so a
-    plain `max()` — not a second `argMax` — is correct and cheaper.
+    plain `max()` — not a second `argMax` — is correct and cheaper. The
+    output column is aliased `last_captured_at`, NOT `captured_at`: a caller
+    combining `include_captured_at=True` with an `extra_where` fragment that
+    references bare `captured_at` (e.g. `date_range_clause_ch`/`dow_clause_ch`
+    in api/range.py) would otherwise collide with this SELECT-list alias —
+    see the `u.`-qualification note below for why ClickHouse's alias
+    substitution rule turns that into `ILLEGAL_AGGREGATION` (confirmed
+    against a live instance). No current caller combines the two, but the
+    distinct alias name means no future one can hit this by accident.
 
     `toDate(captured_at, 'Asia/Tokyo')`, NOT bare `toDate(captured_at)`:
     every Postgres connection that ever touched `updates` pins
@@ -131,12 +139,12 @@ def build_dedup_ch_sql(
 
     Column order/count in the SELECT list must stay exactly
     `route_code, service_type, scheduled_time, trip_id, date,
-    stop_sequence, dep_delay[, captured_at]` — `pipeline/analyze.py`
-    consumes the result by tuple position (`r[-1]` for `captured_at`).
+    stop_sequence, dep_delay[, last_captured_at]` — `pipeline/analyze.py`
+    consumes the result by tuple position (`r[-1]` for `last_captured_at`).
 
     Every reference to a base-table column that shares its name with a
-    SELECT-list alias (`dep_delay`, and `captured_at` when
-    `include_captured_at`) is qualified with the `u.` table alias below.
+    SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
+    below.
     ClickHouse resolves a *bare* identifier that matches a SELECT alias by
     textually substituting the alias's defining expression wherever that
     bare identifier appears in the query — including back into this
@@ -149,7 +157,7 @@ def build_dedup_ch_sql(
     plain row-level column. Confirmed against a live ClickHouse instance.
     """
     extra = f" AND ({extra_where})" if extra_where else ""
-    captured = ", max(u.captured_at) AS captured_at" if include_captured_at else ""
+    captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "

@@ -11,6 +11,19 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 2
 fi
 
+# check_aggs also opens a ClickHouse client (pipeline/clickhouse.py::get_client),
+# which reads these three via os.environ[...] with no defaults — an unset one
+# raises a bare KeyError that this script would otherwise misreport as
+# "aggregates stale" (PROBLEM (migrations=0 aggs=1)) instead of "config is
+# broken". CLICKHOUSE_HOST/CLICKHOUSE_PORT have safe defaults in get_client,
+# so only the credential/database vars need a preflight guard here.
+for var in CLICKHOUSE_USER CLICKHOUSE_PASSWORD CLICKHOUSE_DATABASE; do
+  if [ -z "${!var:-}" ]; then
+    echo "drift_check: $var is not set; refusing to run (ClickHouse client would crash, not report drift)." >&2
+    exit 2
+  fi
+done
+
 cd "$(dirname "$0")/.." || exit 3
 # Redact credentials (user:pass@) before logging — journald is broadly readable.
 db_safe="$(printf '%s' "$DATABASE_URL" | sed -E 's#://[^@/]*@#://***@#; s#\?.*$##')"
