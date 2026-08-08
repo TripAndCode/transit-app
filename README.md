@@ -164,9 +164,9 @@ make db-down          # stop Postgres, keep the volume
 
 ## Data ingest: two paths
 
-Both paths land in the same `updates` / `static_*` / `agg_*` tables; the API
-doesn't care which fed them. See the [architecture diagram](#runtime--data-flow)
-for how they fit together.
+Both paths land in the same `updates` (ClickHouse) / `static_*` / `agg_*`
+(Postgres) tables; the API doesn't care which fed them. See the
+[architecture diagram](#runtime--data-flow) for how they fit together.
 
 - **Path B — Oracle archive (primary).** A collector VM archives GTFS-RT and
   static GTFS. Locally, `make fetch-ingest` rsyncs the archives over SSH and
@@ -193,6 +193,12 @@ for how they fit together.
 
 Data is stored in a named Docker volume (`transit-app_transit_pgdata`) — it survives container restarts.
 
+`make db` also brings up ClickHouse (raw `updates`, ~575M rows across 4
+agencies) and applies `db/clickhouse/schema.sql` via `make ch-bootstrap` —
+see [`db/clickhouse/`](db/clickhouse/). `make ch-test` starts the separate
+throwaway ClickHouse instance tests run against (`:8124`); set
+`RUN_CH_INTEGRATION=1` to include ClickHouse-gated tests in a `pytest` run.
+
 ### Migrations
 
 Each schema change ships as a numbered up/down pair under `db/migrations/`. Run `make migrate` (dev) or `docker compose exec app python gtfs_pipeline.py migrate up` (prod) after pulling new migrations; `db.migrate` records applied versions in `schema_migrations`.
@@ -212,7 +218,10 @@ make ingest FOLDER=./raw_archives
 make ingest FOLDER=./raw_archives AGENCY_ID=1   # with explicit agency
 ```
 
-Reads `.pb` files from tarballs and loose files. Deduplication key is `{date_dir}/{pb_name}`.
+Reads `.pb` files from tarballs and loose files, writes rows to ClickHouse's
+`updates` table (batched, not per-file — see `pipeline/clickhouse.py`).
+Deduplication key is `{date_dir}/{pb_name}`, tracked via ClickHouse's own
+distinct `file_name` values (no separate file-tracking table).
 
 ### Live ingest (scheduled)
 
@@ -237,11 +246,12 @@ Loads `stops.txt`, `stop_times.txt`, `trips.txt`, `routes.txt`, `calendar_dates.
 make analyze
 ```
 
-Rebuilds the precomputed `agg_*` tables every read endpoint serves from
-(per-route / -stop / -hour / -day rollups). Each run wipes the agency's
-`agg_*` rows and rewrites them in one transaction from the *latest* `dep_delay`
-per stop event (what passengers actually experienced), so routes that fall
-below the sample-count cutoffs drop out rather than going stale.
+Reads and dedups ClickHouse's `updates`, then rebuilds the precomputed
+Postgres `agg_*` tables every read endpoint serves from (per-route / -stop /
+-hour / -day rollups). Each run wipes the agency's `agg_*` rows and rewrites
+them in one transaction from the *latest* `dep_delay` per stop event (what
+passengers actually experienced), so routes that fall below the sample-count
+cutoffs drop out rather than going stale.
 
 ---
 
@@ -489,11 +499,12 @@ flowchart TD
 
     subgraph RAILWAY["Railway project · private network"]
         job["Daily ingest job · cron 1×/day<br/>ingest → analyze_all → prune"]
+        ch["ClickHouse · MergeTree<br/>raw: updates (~575M rows, 4 agencies)<br/>sort key: agency_id, captured_at, route_code, ..."]
         subgraph DB["Postgres · PostGIS + pgvector"]
-            raw["raw: updates, static_*"]
+            static["static_* tables"]
             agg["precomputed: agg_* tables"]
         end
-        app["App container · one image<br/>FastAPI API + React SPA, same origin<br/>reads agg_* (sub-second)"]
+        app["App container · one image<br/>FastAPI API + React SPA, same origin<br/>reads agg_* (sub-second)<br/>falls back to ClickHouse for time_band-filtered queries"]
     end
 
     LLM["LLM providers<br/>Cerebras / Groq"]
@@ -503,20 +514,29 @@ flowchart TD
     collect -->|daily upload| bucket
     bucket -->|daily pull · HTTPS| job
     feeds -.->|"fallback: ingest_live (live sample)"| job
-    job -->|write| raw
-    raw -->|analyze rebuilds| agg
+    job -->|write| ch
+    ch -->|analyze dedups + rebuilds| agg
     agg --> app
+    ch -.->|"live fallback (time_band filter)"| app
     app -->|HTTPS · TLS at Railway edge| user
     app -.->|Ask stage 3 only| LLM
 ```
 
-Four things this encodes:
+Five things this encodes:
 
-- **Read endpoints never scan raw data.** Every API response comes from the
-  precomputed `agg_*` tables (sub-second); `analyze` rebuilds them after each
-  ingest. Raw `updates` is write-only at request time.
+- **Read endpoints almost never scan raw data.** Every API response comes from
+  the precomputed `agg_*` tables (sub-second); `analyze` rebuilds them after
+  each ingest. The one exception is a `time_band`-filtered ("slow path") query
+  — those fall back to a live ClickHouse scan, since `agg_*` doesn't carry an
+  hour-of-day column.
+- **Raw `updates` lives in ClickHouse, not Postgres.** A columnar MergeTree
+  table gives better compression and scan throughput at ~575M-row scale than
+  Postgres did; Postgres keeps `static_*`/`agg_*`/OLTP/PostGIS/pgvector, none
+  of which benefit from a columnar store. `analyze` reads ClickHouse and
+  writes `agg_*` back into Postgres — every downstream aggregate-builder query
+  is otherwise unchanged.
 - **The database is private.** Ingest, analyze, and backups all run *inside* the
-  Railway project — nothing external connects to Postgres.
+  Railway project — nothing external connects to Postgres or ClickHouse.
 - **Oracle is the primary source, `ingest_live` is the fallback.** The dense 30s
   Oracle archive (via R2) feeds production; a direct live-feed sample is the
   no-Oracle backup path.
@@ -532,9 +552,10 @@ Four things this encodes:
 GTFS-RT .pb files / live feed_url
     │
     ▼
-pipeline/ingest.py          zero-dependency protobuf parser → updates table
-pipeline/static_loader.py   GTFS Static zip → static_* tables
-pipeline/analyze.py         SQL aggregations → agg_* tables
+pipeline/ingest.py          zero-dependency protobuf parser → updates table (ClickHouse)
+pipeline/clickhouse.py      sync ClickHouse client + dedup/insert helpers
+pipeline/static_loader.py   GTFS Static zip → static_* tables (Postgres)
+pipeline/analyze.py         reads ClickHouse updates, dedups, writes agg_* (Postgres)
     │
     ▼
 api/main.py                 FastAPI app (asyncpg pool, Asia/Tokyo session, SPA static fallback)
