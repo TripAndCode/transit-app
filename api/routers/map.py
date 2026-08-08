@@ -300,7 +300,13 @@ async def route_shape(
         for r in shape_link_rows:
             shape_counts[r["shape_id"]] += trip_counts.get(r["trip_id"], 0)
         if shape_counts:
-            chosen_shape_id = max(shape_counts, key=lambda sid: shape_counts[sid])
+            # Explicit tie-break key: `shape_counts` is a `defaultdict`
+            # populated from an unordered Postgres query, so two shape
+            # variants tied on vote count would otherwise pick whichever
+            # happened to be inserted first that run — non-deterministic
+            # polyline/unobserved_stops between identical requests. Same bug
+            # class already fixed for movers ranking in overview.py.
+            chosen_shape_id = max(shape_counts, key=lambda sid: (shape_counts[sid], sid))
 
     geometry = None
     if chosen_shape_id is not None:
