@@ -308,6 +308,25 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
     assert len(feats) == 2, feats  # would be 1 under an oversized eps
 
 
+async def _seed_route_existence(conn, agency_id, route_code, service_type="weekday"):
+    """Minimal agg_route_daily row so route_shape/route_trips/route_stop_profile's
+    existence precheck (map.py) passes for route_code -- real
+    avg/worst/trips/samples figures don't matter here, only that a row
+    exists. Checks agg_route_daily specifically, not agg_route_stats: the
+    latter is built with a >20-lifetime-sample threshold and a NOT NULL
+    service_type filter (pipeline/analyze.py), making it a lossy existence
+    oracle, whereas agg_route_daily (what today_route_summary's route list
+    is built from) has no such filter."""
+    await conn.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, $2, $3, 0, 0, 1, 1, NOW())",
+        agency_id,
+        route_code,
+        service_type,
+    )
+
+
 @pytest.mark.asyncio
 async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_client):
     """When static_trips.shape_id resolves to a static_shapes row, the
@@ -315,6 +334,7 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
             "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1')",
@@ -385,23 +405,17 @@ async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is
     restores that behavior — bounded to the last 30 days off the agency's
     OWN latest captured_at (not an unbounded all-time scan: a security
     review found the bound must be tight enough to matter, since no agency
-    yet has more than ~130 days of history for a wider bound to exclude, and
-    gated behind an agg_route_stats existence precheck so a fabricated
-    route_code can't reach ClickHouse at all). The 60-day-old seed below is
-    still within 30 days of the AGENCY's latest activity (its own captured_at,
-    the only row this agency has), so it's still found."""
+    yet has more than ~130 days of history for a wider bound to exclude).
+    The endpoint's existence precheck (at the top of the function, ahead of
+    ANY ClickHouse call, not just this fallback) means a fabricated
+    route_code never reaches ClickHouse at all -- R1 needs an agg_route_daily
+    row to pass it. The 60-day-old seed below is still within 30 days of the
+    AGENCY's latest activity (its own captured_at, the only row this agency
+    has), so it's still found."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
-        # agg_route_stats existence row: the fallback vote's precheck (added
-        # alongside the bound) requires this before it will even try
-        # ClickHouse — real avg_min/p90_min/samples aren't needed here, only
-        # the row's existence.
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
-            "VALUES ($1, 'R1', 'weekday', NULL, NULL, NULL)",
-            agency_id,
-        )
+        await _seed_route_existence(conn, agency_id, "R1")
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
             agency_id,
@@ -477,6 +491,7 @@ async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, 
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
             "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1'), ($1, 'T3', 'R1', 'S2')",
@@ -562,6 +577,7 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R_TIE2")
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
             "VALUES ($1, 'TA', 'R_TIE2', 'S_A'), ($1, 'TZ', 'R_TIE2', 'S_Z')",
@@ -594,15 +610,35 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
     assert body["geometry"]["coordinates"][0] == [20.0, 20.0], body
 
 
+@pytest.mark.asyncio
+async def test_route_shape_returns_empty_for_nonexistent_route(map_client_ch):
+    """A fabricated/never-observed route_code must resolve to the same empty
+    shape as any other "not found" response, via the existence precheck at
+    the TOP of route_shape -- before the ctx-bounded ClickHouse dedup query
+    ever runs, not just inside the empty-window fallback branch. (A prior
+    version of this precheck sat inside that fallback branch, so a
+    fabricated route_code under a wide ctx window still paid for the
+    ctx-bounded dedup query's full cost before ever reaching the precheck --
+    measured 336,368,237 rows / 923 MiB / 2.35s on real data.) No agency/CH
+    seeding at all: map_client_ch's agency has zero agg_route_daily rows."""
+    client, agency_id = map_client_ch
+    resp = await client.get(f"/api/{agency_id}/route-shape?route=NOPE&from=2025-01-01&to=2026-12-31")
+    assert resp.status_code == 200
+    assert resp.json() == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
+
+
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
     Always inserts an agg_route_stats row for (agency_id, route_code,
     service_type), even when baseline is None (NULL avg_min/p90_min/samples
-    in that case) — route_trips/route_stop_profile/route_shape's fallback now
-    precheck this table for route existence before touching ClickHouse at
-    all (map.py's anonymous-scan hardening), so a route seeded only via this
-    helper must have a row here to be treated as "exists".
+    in that case) — needed for route-summary's baseline-lookup tests, not for
+    existence: route_trips/route_stop_profile/route_shape's existence
+    precheck (map.py's anonymous-scan hardening) checks agg_route_daily, not
+    agg_route_stats (the latter is a lossy existence oracle — see
+    _seed_route_existence's docstring) — which the unconditional
+    agg_route_daily insert below already covers for any route seeded via
+    this helper.
     ch_client: optional sync ClickHouse client — when given, the raw rows
     seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
     (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile
@@ -808,7 +844,7 @@ async def test_route_trips_empty_when_no_data(map_client_ch):
 
 @pytest.mark.asyncio
 async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
-    """A route that DOES exist (has an agg_route_stats row, so it passes the
+    """A route that DOES exist (has an agg_route_daily row, so it passes the
     existence precheck) but whose only ClickHouse observations are older
     than the 30-day bound anchored to the agency's own latest activity must
     resolve to the empty response, not resurrect that stale data as if it
@@ -824,14 +860,10 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
             "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
             agency_id,
         )
-        # R_STALE exists (has a baseline row, so it passes the precheck) but
-        # its only observations are 60 days old -- outside the 30-day bound
-        # anchored to the agency's latest activity seeded above.
-        await conn.execute(
-            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
-            "VALUES ($1, 'R_STALE', 'weekday', NULL, NULL, NULL)",
-            agency_id,
-        )
+        # R_STALE exists (has an agg_route_daily row, so it passes the
+        # precheck) but its only observations are 60 days old -- outside the
+        # 30-day bound anchored to the agency's latest activity seeded above.
+        await _seed_route_existence(conn, agency_id, "R_STALE")
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
@@ -891,6 +923,7 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_c
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
         # Same setup as the positive test, but DO NOT insert into static_shapes
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",

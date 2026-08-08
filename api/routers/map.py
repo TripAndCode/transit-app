@@ -175,6 +175,40 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
+    # Cheap Postgres existence precheck FIRST, before touching ClickHouse at
+    # all -- ahead of the ctx-bounded dedup query below, not just inside the
+    # empty-window fallback branch further down. A fabricated route_code must
+    # cost ~0 ClickHouse work: measured on real data, with the precheck
+    # misplaced inside the fallback branch, a fabricated route_code under a
+    # wide ctx window still cost 336,368,237 rows / 923 MiB / 2.35s, because
+    # the ctx-bounded dedup query ran to completion first regardless (it's
+    # bounded, but still real, unnecessary work for a route that doesn't
+    # exist at all).
+    #
+    # Checks `agg_route_daily`, not `agg_route_stats`: agg_route_stats is
+    # built with `HAVING COUNT(*) > 20` and `WHERE service_type IS NOT NULL`
+    # (pipeline/analyze.py), so it's a LOSSY existence oracle -- a real,
+    # legitimately-observed route with <=20 lifetime deduped samples or an
+    # all-NULL service_type is invisible to it even though
+    # today_route_summary's route list (built from agg_route_daily, no such
+    # filter) would show it with bucket="no_baseline". Checking
+    # agg_route_daily instead matches the grain of the table that actually
+    # populates the route list users click through from. No secondary index
+    # on route_code (agg_route_daily's PK leads with (agency_id, date)), but
+    # the table holds per-agency route×day×service rows, not raw `updates` --
+    # measured ~1ms on real data even for agency 8's ~14k rows, for both a
+    # fabricated and a real route_code. Accepted trade-off: a brand-new route
+    # that's been ingested but not yet analyzed (no agg_route_daily row yet)
+    # renders with no shape for one cron cycle -- the same trade-off
+    # today_route_summary already accepts elsewhere in this file.
+    route_exists = await conn.fetchval(
+        "SELECT 1 FROM agg_route_daily WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
+        agency_id,
+        str(route),
+    )
+    if route_exists is None:
+        return {"route": route, "geometry": None, "stops": [], "unobserved_stops": []}
+
     # Most-frequent shape_id for this route, bridged via updates.trip_id
     # (route_code is regex-extracted and is not guaranteed equal to GTFS
     # route_id across feeds, so joining on trip_id keeps geometry tied
@@ -258,40 +292,23 @@ async def route_shape(
     # (`avg_min`/`samples`) stay empty regardless, since there really are
     # zero observations in the user's selected window.
     if not trip_counts:
-        # Cheap Postgres existence precheck FIRST, before touching ClickHouse
-        # at all: a date bound alone doesn't help against a fabricated
-        # route_code, since a bound just caps the scan at "one window's worth
-        # of the WHOLE table" (measured on real data: a wider window, tried
-        # first here, read the exact same ~336M rows as no bound at all,
-        # because every agency's history is currently shorter than the
-        # window). `agg_route_stats`'s PK is (agency_id, route_code,
-        # service_type), so this is an index-only scan (~2ms on real data)
-        # regardless of route_code — a fabricated code now costs ~0
-        # ClickHouse work. Once a route is confirmed real, a uniform 30-day
-        # bound (matching route_trips/route_stop_profile below) caps the
-        # remaining cost, anchored to the agency's own latest captured_at
-        # (not wall-clock "now") so it's meaningful against old/replayed data
-        # too. Accepted trade-off: a brand-new route that's been ingested but
-        # not yet analyzed (no agg_route_stats row yet) renders with no
-        # shape for one cron cycle — same trade-off today_route_summary
-        # already accepts elsewhere in this file.
-        route_exists = await conn.fetchval(
-            "SELECT 1 FROM agg_route_stats WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
-            agency_id,
-            str(route),
-        )
-        if route_exists is not None:
-            agency_latest = await max_captured_at(ch, agency_id)
-            if agency_latest is not None:
-                fallback_bound = agency_latest - timedelta(days=30)
-                fallback_vote_result = await ch.query(
-                    "SELECT trip_id, count() AS n FROM updates "
-                    "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-                    "  AND captured_at >= {bound:DateTime64} "
-                    "GROUP BY trip_id",
-                    parameters={"agency_id": agency_id, "route": str(route), "bound": fallback_bound},
-                )
-                trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
+        # Existence is already confirmed by the precheck at the top of this
+        # function, so this bound only needs to cap the cost for a route
+        # that's real but has nothing in the ctx window: 30 days off the
+        # agency's own latest captured_at (not wall-clock "now") so it's
+        # meaningful against old/replayed data too, matching the uniform
+        # bound used by route_trips/route_stop_profile below.
+        agency_latest = await max_captured_at(ch, agency_id)
+        if agency_latest is not None:
+            fallback_bound = agency_latest - timedelta(days=30)
+            fallback_vote_result = await ch.query(
+                "SELECT trip_id, count() AS n FROM updates "
+                "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+                "  AND captured_at >= {bound:DateTime64} "
+                "GROUP BY trip_id",
+                parameters={"agency_id": agency_id, "route": str(route), "bound": fallback_bound},
+            )
+            trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
 
     chosen_shape_id = None
     if trip_counts:
@@ -628,14 +645,26 @@ async def route_trips(
     # endpoint must cost ~0 ClickHouse work, not just a bounded-but-still-huge
     # scan (measured: a date bound alone still read ~170M rows here, since no
     # agency yet has more than ~130 days of history for the bound to actually
-    # exclude). `agg_route_stats`'s PK is (agency_id, route_code,
-    # service_type), so this is an index-only scan (~2ms on real data)
-    # regardless of route_code. Accepted trade-off: a brand-new route that's
-    # been ingested but not yet analyzed (no agg_route_stats row yet) reads
-    # as "not found" for one cron cycle — same trade-off today_route_summary
-    # already accepts elsewhere in this file.
+    # exclude).
+    #
+    # Checks `agg_route_daily`, not `agg_route_stats`: agg_route_stats is
+    # built with `HAVING COUNT(*) > 20` and `WHERE service_type IS NOT NULL`
+    # (pipeline/analyze.py), so it's a LOSSY existence oracle -- a real,
+    # legitimately-observed route with <=20 lifetime deduped samples or an
+    # all-NULL service_type is invisible to it even though
+    # today_route_summary's route list (built from agg_route_daily, no such
+    # filter) would show it with bucket="no_baseline". Checking
+    # agg_route_daily instead matches the grain of the table that actually
+    # populates the route list users click through from. No secondary index
+    # on route_code (agg_route_daily's PK leads with (agency_id, date)), but
+    # the table holds per-agency route×day×service rows, not raw `updates` --
+    # measured ~1ms on real data even for agency 8's ~14k rows, for both a
+    # fabricated and a real route_code. Accepted trade-off: a brand-new route
+    # that's been ingested but not yet analyzed (no agg_route_daily row yet)
+    # reads as "not found" for one cron cycle -- the same trade-off
+    # today_route_summary already accepts elsewhere in this file.
     route_exists = await conn.fetchval(
-        "SELECT 1 FROM agg_route_stats WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
+        "SELECT 1 FROM agg_route_daily WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
         agency_id,
         route_code,
     )
@@ -767,11 +796,12 @@ async def route_stop_profile(
     ordered by sequence — answers "where on the route does delay build". The
     name is best-effort (MAX over the sequence's mapped stop). Read-only.
     """
-    # Existence precheck + bounded route-scoped probe — see route_trips
-    # above for the full rationale (same fabricated-route-code /
+    # Existence precheck (against agg_route_daily, not agg_route_stats — see
+    # route_trips above for why) + bounded route-scoped probe — see
+    # route_trips above for the full rationale (same fabricated-route-code /
     # unbounded-scan vulnerability, same fix).
     route_exists = await conn.fetchval(
-        "SELECT 1 FROM agg_route_stats WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
+        "SELECT 1 FROM agg_route_daily WHERE agency_id = $1 AND route_code = $2 LIMIT 1",
         agency_id,
         route_code,
     )
