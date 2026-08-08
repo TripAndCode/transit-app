@@ -551,9 +551,58 @@ async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, 
         assert s["samples"] == 2, body
 
 
+@pytest.mark.asyncio
+async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client):
+    """Two shape variants with EQUAL vote weight (one trip each, same number
+    of deduped stop-events) must resolve to the same shape on every request,
+    not whichever `shape_link_rows`' unordered Postgres query happens to
+    return first. `chosen_shape_id = max(shape_counts, key=lambda sid:
+    (shape_counts[sid], sid))` breaks the tie on `shape_id` itself, so the
+    lexicographically LARGER id (`S_Z` > `S_A`) must always win here."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "VALUES ($1, 'TA', 'R_TIE2', 'S_A'), ($1, 'TZ', 'R_TIE2', 'S_Z')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) VALUES "
+            "($1, 'S_A', ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(10.0, 10.0), ST_MakePoint(10.1, 10.1)]), 4326)), "
+            "($1, 'S_Z', ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(20.0, 20.0), ST_MakePoint(20.1, 20.1)]), 4326))",
+            agency_id,
+        )
+        # Equal weight: one trip per shape, one dep_delay-bearing row each.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) VALUES "
+            "($1, 'TA', 'R_TIE2', 1, 30, NOW(), 'a.pb', 'weekday', '09:00:00'), "
+            "($1, 'TZ', 'R_TIE2', 1, 30, NOW(), 'z.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R_TIE2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["geometry"] is not None, body
+    # S_Z's distinctive coordinates confirm it (not S_A) won the tie.
+    assert body["geometry"]["coordinates"][0] == [20.0, 20.0], body
+
+
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
+    Always inserts an agg_route_stats row for (agency_id, route_code,
+    service_type), even when baseline is None (NULL avg_min/p90_min/samples
+    in that case) — route_trips/route_stop_profile/route_shape's fallback now
+    precheck this table for route existence before touching ClickHouse at
+    all (map.py's anonymous-scan hardening), so a route seeded only via this
+    helper must have a row here to be treated as "exists".
     ch_client: optional sync ClickHouse client — when given, the raw rows
     seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
     (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile

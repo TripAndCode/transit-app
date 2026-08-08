@@ -70,16 +70,7 @@ async def live_delays(
     limit: int = Query(default=200, le=500),
 ):
     """Rows from the most recent observation date with a freshness header."""
-    # ORDER BY captured_at DESC LIMIT 1, not maxOrNull(captured_at): captured_at
-    # is the second column of updates' (agency_id, captured_at, ...) sort key,
-    # so this form is served off the sort index (reads ~thousands of rows)
-    # instead of a full per-agency aggregate scan — see
-    # pipeline/clickhouse.py::max_captured_at's docstring for the full case.
-    latest_result = await ch.query(
-        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id},
-    )
-    latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+    latest_ts = await max_captured_at(ch, agency_id)
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
@@ -230,6 +221,12 @@ async def route_shape(
     # single argMax suffices; base-table columns are qualified with the `u.`
     # alias per that same docstring's convention, in case ch_where_frag (built
     # by api.range.build_updates_filter_ch) ever references an output alias.
+    # `ORDER BY u.trip_id, u.stop_sequence` (matching route_trips' equivalent
+    # dedup query) makes the row order deterministic: a bare GROUP BY has no
+    # defined output order, and `lon`/`lat` below are float means accumulated
+    # by summing `dedup_rows` in whatever order they arrive — without a fixed
+    # order, floating-point summation is order-dependent and could produce a
+    # last-bit-different average across otherwise-identical requests.
     dedup_result = await ch.query(
         f"""
         SELECT u.trip_id, u.stop_sequence,
@@ -239,6 +236,7 @@ async def route_shape(
           AND u.dep_delay IS NOT NULL
           AND {ch_where_frag}
         GROUP BY u.trip_id, u.stop_sequence
+        ORDER BY u.trip_id, u.stop_sequence
         """,
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
