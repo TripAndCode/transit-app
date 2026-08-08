@@ -75,8 +75,7 @@ async def live_delays(
     # instead of a full per-agency aggregate scan — see
     # pipeline/clickhouse.py::max_captured_at's docstring for the full case.
     latest_result = await ch.query(
-        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "ORDER BY captured_at DESC LIMIT 1",
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
     latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
@@ -466,8 +465,7 @@ async def today_route_summary(
     latest_ts = None
     try:
         latest_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-            "ORDER BY captured_at DESC LIMIT 1",
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)

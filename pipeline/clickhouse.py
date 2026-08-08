@@ -75,8 +75,7 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     `agency_id`) means "no latest row", matching `maxOrNull`'s `None`.
     """
     result = client.query(
-        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "ORDER BY captured_at DESC LIMIT 1",
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
     if not result.result_rows:

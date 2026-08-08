@@ -102,11 +102,7 @@ def _ts(date_str: str, pb_name: str) -> str:
     m = re.search(r"_(\d{6})\.pb$", pb_name, re.IGNORECASE)
     if m and len(date_str) == 8:
         try:
-            return (
-                datetime.strptime(date_str + m.group(1), "%Y%m%d%H%M%S")
-                .replace(tzinfo=_JST)
-                .isoformat()
-            )
+            return datetime.strptime(date_str + m.group(1), "%Y%m%d%H%M%S").replace(tzinfo=_JST).isoformat()
         except Exception:
             pass
     try:

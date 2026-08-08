@@ -76,9 +76,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         try:
             mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
         except Exception:
-            _log.warning(
-                "ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True
-            )
+            _log.warning("ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True)
             live_max[aid] = None
             continue
         if mx is None:

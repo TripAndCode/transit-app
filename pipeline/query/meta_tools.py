@@ -252,8 +252,7 @@ async def describe_data(
         # index-served min AND max at once, so this is split into two cheap
         # probes instead, combined in Python.
         first_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-            "ORDER BY captured_at ASC LIMIT 1",
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         if not first_result.result_rows:
@@ -263,8 +262,7 @@ async def describe_data(
             )
         first_obs = first_result.result_rows[0][0]
         last_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-            "ORDER BY captured_at DESC LIMIT 1",
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         last_obs = last_result.result_rows[0][0]
@@ -455,14 +453,12 @@ async def describe_data(
         # two cheap probes, combined in Python; an empty result set (no rows
         # for this agency) means "no observations" for that bound.
         first_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-            "ORDER BY captured_at ASC LIMIT 1",
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         obs_first = first_result.result_rows[0][0] if first_result.result_rows else None
         last_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} "
-            "ORDER BY captured_at DESC LIMIT 1",
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         obs_last = last_result.result_rows[0][0] if last_result.result_rows else None

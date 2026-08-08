@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from api.clickhouse import get_ch_client
@@ -15,7 +15,7 @@ async def test_get_ch_dependency_returns_working_client():
     app.state.ch_client = await get_ch_client()
 
     @app.get("/probe")
-    async def probe(ch=pytest.importorskip("fastapi").Depends(get_ch)):
+    async def probe(ch=Depends(get_ch)):
         result = await ch.query("SELECT 1")
         return {"rows": [list(row) for row in result.result_rows]}
 

@@ -185,9 +185,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     rows = [
                         (
                             *r[:-1],
-                            r[-1].replace(tzinfo=timezone.utc)
-                            if r[-1] is not None and r[-1].tzinfo is None
-                            else r[-1],
+                            r[-1].replace(tzinfo=timezone.utc) if r[-1] is not None and r[-1].tzinfo is None else r[-1],
                         )
                         for r in block
                     ]

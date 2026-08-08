@@ -24,8 +24,15 @@ def test_apply_schema_creates_updates_table():
     result = client.query("DESCRIBE TABLE updates")
     columns = [row[0] for row in result.result_rows]
     assert columns == [
-        "agency_id", "captured_at", "file_name", "trip_id",
-        "service_type", "scheduled_time", "route_code", "stop_sequence", "dep_delay",
+        "agency_id",
+        "captured_at",
+        "file_name",
+        "trip_id",
+        "service_type",
+        "scheduled_time",
+        "route_code",
+        "stop_sequence",
+        "dep_delay",
     ]
     # idempotent re-apply must not raise
     apply_schema(client)
