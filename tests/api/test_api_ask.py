@@ -181,6 +181,43 @@ async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client
     assert data.get("router_stage") == "rules"
     assert data["result"] is None
     assert "describe_data" in data["answer"]
+    # Fix 8f: the degraded answer must come from a fixed locale string, never
+    # from the exception's raw text (the _ClickHouseUnavailable stand-in's
+    # HTTPException.detail is "ClickHouse is unavailable") — that text must
+    # never reach an unauthenticated client.
+    assert "ClickHouse is unavailable" not in data["answer"]
+
+
+@pytest.mark.asyncio
+async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, monkeypatch):
+    """Fix 8f regression: Stage 1/2's dispatch(...) raising
+    ``asyncpg.exceptions.UndefinedTableError`` (an ``agg_*`` table missing on a
+    migration-lagged environment) must propagate out of the router body so
+    FastAPI's registered ``aggregate_not_ready_handler`` (see api/main.py and
+    api/aggregate_errors.py) catches it and returns the machine-readable
+    ``{"code": "aggregate_not_ready"}`` 503 the frontend is built to react to.
+
+    Before this fix, the blanket ``except Exception`` around ``dispatch(...)``
+    in api/routers/ask.py swallowed this and answered a generic 200
+    ``tool_error`` instead — exactly the regression this fix closes.
+    """
+    client, agency_id = ask_client
+
+    async def raise_undefined_table(*args, **kwargs):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr("api.routers.ask.dispatch", raise_undefined_table)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "いつからのデータ?"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 503, f"expected 503 aggregate_not_ready, got {resp.status_code}: {resp.text[:200]}"
+    data = resp.json()
+    assert data["code"] == "aggregate_not_ready"
+    # The internal relation name is server-log-only, never client-visible.
+    assert "agg_route_daily_dist" not in data["detail"]
 
 
 @pytest.mark.asyncio

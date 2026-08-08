@@ -16,6 +16,7 @@ import os as _os
 from datetime import timedelta
 from typing import Any, cast
 
+import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -199,18 +200,44 @@ async def ask(
         # case. It has no LLM fallback to catch a failure, unlike Stage 3
         # (pipeline.query.chat.chat_with_tools), which already wraps every
         # dispatch(...) call in try/except and degrades to a tool_error
-        # answer. Without the same guard here, a ClickHouse-unavailable
+        # answer. Without a guard here, a ClickHouse-unavailable
         # HTTPException raised deep inside dispatch (e.g. via api.deps.get_ch's
         # _ClickHouseUnavailable stand-in) would 503 the whole /ask request
-        # instead of returning the same graceful 200 tool_error answer Stage 3
-        # gives — mirror that exact shape rather than inventing a new one.
+        # instead of returning a graceful 200 answer.
+        #
+        # The catch here is intentionally narrow — only the two ClickHouse
+        # failure modes below degrade gracefully. Everything else (notably
+        # asyncpg.exceptions.UndefinedTableError on a migration-lagged
+        # environment) must propagate so FastAPI's registered exception
+        # handlers (e.g. aggregate_not_ready_handler in api/main.py) can turn
+        # it into their specific machine-readable response instead of a
+        # generic 200 tool_error that masks it (see api/aggregate_errors.py).
         try:
             result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale, ch=ch)
-        except Exception as exc:
-            _log.exception("Tool %s failed (stage %s dispatch)", decision.tool, stage)
+        except HTTPException as exc:
+            # The only HTTPException dispatch is expected to raise here is the
+            # _ClickHouseUnavailable stand-in's 503 (api/deps.py) — client was
+            # never created at startup. Any other status code is a real error
+            # (e.g. a tool's own 4xx) that must propagate untouched.
+            if exc.status_code != 503:
+                raise
+            _log.warning("Tool %s unavailable (stage %s dispatch): ClickHouse client unavailable", decision.tool, stage)
             success = False
             resp = AskResponse(
-                answer=_chat_str("tool_error", locale, name=decision.tool, exc=exc),
+                answer=_chat_str("service_unavailable", locale, name=decision.tool),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result=None,
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
+        except clickhouse_connect.driver.exceptions.Error:
+            # A real ClickHouse client was created, but the query itself
+            # failed mid-flight (network blip, server error, etc.) — distinct
+            # from the stand-in above, but the same graceful degrade applies.
+            _log.exception("Tool %s failed (stage %s dispatch): ClickHouse query error", decision.tool, stage)
+            success = False
+            resp = AskResponse(
+                answer=_chat_str("service_unavailable", locale, name=decision.tool),
                 tool_call={"name": decision.tool, "arguments": decision.args},
                 result=None,
                 ctx=ctx_dict,

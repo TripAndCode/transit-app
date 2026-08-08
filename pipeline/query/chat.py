@@ -137,6 +137,17 @@ _CHAT_STRINGS = {
     ("refusal_fallback", "en"): "I couldn't understand your question.",
     ("tool_error", "ja"): "ツール {name} の実行中にエラーが発生しました: {exc}",
     ("tool_error", "en"): "Error while running tool {name}: {exc}",
+    # Used when a tool fails due to a backend being unavailable (ClickHouse
+    # down at startup, or a mid-query ClickHouse error) rather than a normal
+    # tool-logic error. Deliberately does NOT interpolate the exception text —
+    # that text can contain internal details (e.g. an asyncpg relation name)
+    # that must never reach an unauthenticated client (see api/aggregate_errors.py).
+    ("service_unavailable", "ja"): (
+        "ツール {name} を実行できませんでした（一時的にサービスに接続できません）。しばらくしてから再度お試しください。"
+    ),
+    ("service_unavailable", "en"): (
+        "Could not run tool {name} right now (temporary service issue). Please retry later."
+    ),
 }
 
 
