@@ -5,6 +5,7 @@ pipeline/freshness.py and db/migrate.py. Same SQL logic, different adapter —
 the CLI keeps using the sync versions; the API calls these.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -12,6 +13,8 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from db.migrate import _versions_on_disk
+
+_log = logging.getLogger(__name__)
 
 # ── Migration status ─────────────────────────────────────────────────────
 
@@ -98,11 +101,27 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # accept/reject of an unconditional max, which would silently produce
     # "no completed day" for any agency ingesting today too (the normal,
     # healthy, continuously-ingesting case).
-    live_max: dict[int, date] = {}
+    #
+    # This probe backs ONLY the CH-derived fields below (is_stale/data_to/
+    # agg_behind_days) — every other field (last_analyzed_at, analyze_age_hours,
+    # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
+    # must not fail the whole call: degrade that agency's live_max to None and
+    # keep going, same shape as pipeline.reports.network.compute_network_summary's
+    # try/except around this same per-agency probe. is_stale(agg_day, None) is
+    # "not stale" (see its docstring), which is the correct degrade here.
+    live_max: dict[int, date | None] = {}
     for a in agencies:
         aid = a["agency_id"]
-        mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        try:
+            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        except Exception:
+            _log.warning(
+                "ClickHouse freshness probe failed for agency %s — degrading is_stale/data_to", aid, exc_info=True
+            )
+            live_max[aid] = None
+            continue
         if mx is None:
+            live_max[aid] = None
             continue
         mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
         live_max[aid] = mx_utc.astimezone(_JST).date()

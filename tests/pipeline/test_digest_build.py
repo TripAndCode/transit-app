@@ -31,6 +31,15 @@ class _EmptyChClient:
         return _Result()
 
 
+class _FailingChClient:
+    """Stub ClickHouse client whose query() always raises — simulates
+    check_agg_freshness's live-day probe failing mid-query (ClickHouse
+    unreachable, timeout, etc.)."""
+
+    def query(self, *_args, **_kwargs):
+        raise RuntimeError("simulated ClickHouse failure")
+
+
 @pytest.fixture(autouse=True)
 def _stub_ch_client():
     """build_digest() now builds its own ClickHouse client (via
@@ -256,6 +265,39 @@ def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):
     assert section.avg_delay_min == 10.0  # unchanged: still the full-population headline
     assert section.baseline_avg_min == 5.0
     assert section.delta_min == 0.0  # NOT +5.0 - route A (the only one with a baseline) shows no drift
+
+
+def test_build_digest_survives_ch_query_failure(pg_conn, agency_id):
+    """A ClickHouse outage during check_agg_freshness's live-day probe must
+    not kill the whole (Postgres-only) digest — only the advisory staleness
+    flag should degrade to "not stale", every other (Postgres-sourced) field
+    must still come through."""
+    _seed(pg_conn, agency_id)
+
+    with patch("pipeline.digest.build.get_client", return_value=_FailingChClient()):
+        data = build_digest(pg_conn, DAY)
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.is_stale is False
+    assert section.has_data is True
+    assert section.avg_delay_min == 5.0
+    assert data.network_avg_delay_min == 5.0
+
+
+def test_build_digest_survives_get_client_failure(pg_conn, agency_id):
+    """get_client() itself raising (e.g. a missing ClickHouse env var) must
+    not kill the whole digest either."""
+    _seed(pg_conn, agency_id)
+
+    def boom():
+        raise KeyError("CLICKHOUSE_HOST")
+
+    with patch("pipeline.digest.build.get_client", side_effect=boom):
+        data = build_digest(pg_conn, DAY)
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.is_stale is False
+    assert section.avg_delay_min == 5.0
 
 
 def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):

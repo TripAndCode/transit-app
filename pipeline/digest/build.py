@@ -11,12 +11,15 @@ they'd get no baseline and never become movers.
 Adds feed-health (agg_feed_health) and freshness (check_agg_freshness).
 """
 
+import logging
 from datetime import date
 
 from api.triage import classify_route
 from pipeline.clickhouse import get_client
 from pipeline.digest.models import AgencySection, DigestData, Mover
 from pipeline.freshness import check_agg_freshness
+
+_log = logging.getLogger(__name__)
 
 TOP_MOVERS = 5
 
@@ -88,8 +91,18 @@ def build_digest(conn, target_day: date) -> DigestData:
         cur.execute(_AGENCIES_SQL)
         agencies = cur.fetchall()
     agency_ids = [a[0] for a in agencies]
-    ch_client = get_client()
-    stale_ids = {s.agency_id for s in check_agg_freshness(conn, ch_client, agency_ids)}
+    # Every other field in the digest comes from Postgres agg_* tables; this
+    # ClickHouse probe backs ONLY the advisory `is_stale` flag per section. A
+    # ClickHouse hiccup here (get_client() raising on a missing env var, or
+    # check_agg_freshness's live-day query failing mid-run) must not kill the
+    # whole (otherwise Postgres-only) digest — degrade to "no stale agencies
+    # known" and keep going, same shape as pipeline.health.aggregate_freshness
+    # and pipeline.reports.network.compute_network_summary's per-probe try/except.
+    try:
+        stale_ids = {s.agency_id for s in check_agg_freshness(conn, get_client(), agency_ids)}
+    except Exception:
+        _log.warning("ClickHouse freshness probe failed — digest omits staleness flags", exc_info=True)
+        stale_ids = set()
 
     sections: list[AgencySection] = []
     net_delay_weighted = 0.0
