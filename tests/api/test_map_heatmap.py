@@ -122,6 +122,14 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
             seq,
             stop_id,
         )
+    # agg_route_stats existence row: route_stop_profile prechecks this table
+    # (agency_id, route_code) before touching ClickHouse at all — real
+    # avg_min/p90_min/samples aren't needed here, only the row's existence.
+    await pool.execute(
+        "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
+        "VALUES ($1, 'K31', '平日', NULL, NULL, NULL)",
+        aid,
+    )
     # Raw updates for today (K31 with big delay at S1)
     today = date.today()
     jst = timezone(timedelta(hours=9))

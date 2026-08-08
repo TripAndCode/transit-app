@@ -367,7 +367,7 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_cl
 
 
 @pytest.mark.asyncio
-async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty(map_app_ch, ch_client):
+async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is_empty(map_app_ch, ch_client):
     """Pre-ClickHouse-migration behavior: a route with real observations,
     all outside the caller's ctx window (default: last 30 days), must still
     render its topology (geometry + unobserved_stops) even though there is
@@ -381,11 +381,27 @@ async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty
     is no shape-vote signal and `chosen_shape_id` stays None — geometry and
     unobserved_stops silently go empty too, even though pre-migration the
     endpoint would still draw the route from its all-time shape. The
-    fallback all-time shape-vote query (fired only on this empty-window
-    edge case) restores that behavior."""
+    fallback shape-vote query (fired only on this empty-window edge case)
+    restores that behavior — bounded to the last 30 days off the agency's
+    OWN latest captured_at (not an unbounded all-time scan: a security
+    review found the bound must be tight enough to matter, since no agency
+    yet has more than ~130 days of history for a wider bound to exclude, and
+    gated behind an agg_route_stats existence precheck so a fabricated
+    route_code can't reach ClickHouse at all). The 60-day-old seed below is
+    still within 30 days of the AGENCY's latest activity (its own captured_at,
+    the only row this agency has), so it's still found."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        # agg_route_stats existence row: the fallback vote's precheck (added
+        # alongside the bound) requires this before it will even try
+        # ClickHouse — real avg_min/p90_min/samples aren't needed here, only
+        # the row's existence.
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
+            "VALUES ($1, 'R1', 'weekday', NULL, NULL, NULL)",
+            agency_id,
+        )
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
             agency_id,
@@ -431,7 +447,7 @@ async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty
     assert body["route"] == "R1"
     # Delay data is correctly empty for the (empty) selected window.
     assert body["stops"] == [], body
-    # But topology still renders from the all-time fallback shape vote.
+    # But topology still renders from the bounded fallback shape vote.
     assert body["geometry"] is not None, body
     assert body["geometry"]["type"] == "LineString"
     assert len(body["unobserved_stops"]) >= 2, body
@@ -590,18 +606,17 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
             len(delays),
             seeded_at,
         )
-        if baseline is not None:
-            avg_min, p90_min, samples = baseline
-            await conn.execute(
-                "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-                "avg_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6)",
-                agency_id,
-                route_code,
-                service_type,
-                avg_min,
-                p90_min,
-                samples,
-            )
+        avg_min, p90_min, samples = baseline if baseline is not None else (None, None, None)
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
+            "avg_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6)",
+            agency_id,
+            route_code,
+            service_type,
+            avg_min,
+            p90_min,
+            samples,
+        )
     if ch_client is not None:
         from tests.conftest import mirror_updates_to_ch
 
@@ -738,6 +753,48 @@ async def test_route_trips_drilldown(map_app_ch, ch_client):
 async def test_route_trips_empty_when_no_data(map_client_ch):
     client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "trips": []}
+
+
+@pytest.mark.asyncio
+async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
+    """A route that DOES exist (has an agg_route_stats row, so it passes the
+    existence precheck) but whose only ClickHouse observations are older
+    than the 30-day bound anchored to the agency's own latest activity must
+    resolve to the empty response, not resurrect that stale data as if it
+    were "today's". Regression for the pre-bound behavior, which scanned all
+    history and would have returned the 60-day-old trip as current."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # Sets this agency's latest captured_at to "now" via an unrelated route.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
+            agency_id,
+        )
+        # R_STALE exists (has a baseline row, so it passes the precheck) but
+        # its only observations are 60 days old -- outside the 30-day bound
+        # anchored to the agency's latest activity seeded above.
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
+            "VALUES ($1, 'R_STALE', 'weekday', NULL, NULL, NULL)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_STALE', 'R_STALE', 1, 600, NOW() - INTERVAL '60 days', 'stale.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_STALE/trips")
     assert resp.status_code == 200
     assert resp.json() == {"date": None, "trips": []}
 
