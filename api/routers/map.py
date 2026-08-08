@@ -82,34 +82,40 @@ async def live_delays(
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring for
-    # why: the old ORDER BY ... LIMIT 1 BY form forces a full sort of the
-    # filtered rowset before dedup, which measured too close to the 30s
-    # max_execution_time cap on wide windows). Multiple non-key columns
-    # (route_code, service_type, scheduled_time, dep_delay) are read off the
-    # SAME winning row, so they're packed into ONE tuple-argMax rather than
-    # one argMax per column — per-column argMax on a captured_at tie could
-    # silently mix columns from two different physical rows. The inner
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring),
+    # matching the mechanism used at the other 3 sort-based-dedup sites in
+    # this file (route_shape, route_trips, route_stop_profile). Unlike those,
+    # this query is always bounded to one JST day off the sort index (measured
+    # ~1s on real data, nowhere near the 30s max_execution_time cap) — the old
+    # `ORDER BY ... LIMIT 1 BY` form was never a timeout risk here. The reason
+    # to rewrite it anyway is consistency (one dedup idiom across the file,
+    # not two) and determinism, per the tiebreak note below. Multiple non-key
+    # columns (route_code, service_type, scheduled_time, dep_delay) are read
+    # off the SAME winning row, so they're packed into ONE tuple-argMax rather
+    # than one argMax per column — per-column argMax on a captured_at tie
+    # could silently mix columns from two different physical rows. The inner
     # query's tuple is unpacked by position in the outer SELECT so the
     # result's column names/order match the pre-migration SELECT list
     # exactly (`route_code, service_type, scheduled_time, dep_delay`).
     #
     # This endpoint dedups by trip_id ALONE (no stop_sequence in the group
     # key), unlike build_dedup_ch_sql. A single GTFS-RT poll commonly reports
-    # a propagated dep_delay for several of a trip's upcoming stops at once
-    # (confirmed on real data: ~13% of trips on a given day), so more than
-    # one physical row can share the exact same (captured_at, file_name) for
-    # one trip_id — a tie the old sort-based form also never broke
-    # (ORDER BY trip_id, captured_at DESC had no third key either), leaving
-    # its winner among those rows to whatever order the query engine happened
-    # to produce. `-toInt32(u.stop_sequence)` makes that residual tie
-    # deterministic here: among same-poll rows for one trip, the one for the
-    # LOWEST stop_sequence (the soonest upcoming stop) wins — the most
-    # currently-relevant row for a live board. Confirmed against real data:
-    # this is the only field this ambiguity ever touches (route_code /
-    # service_type / dep_delay / captured_at are trip-level and identical
-    # across a trip's stop_sequence rows; only `scheduled_time` — the
-    # per-stop field — could differ).
+    # dep_delay for several of a trip's upcoming stops at once (confirmed on
+    # real data: ~13% of trips on a given day), so more than one physical row
+    # can share the exact same (captured_at, file_name) for one trip_id — a
+    # tie the old sort-based form also never broke (ORDER BY trip_id,
+    # captured_at DESC had no third key either), leaving its winner among
+    # those rows to whatever order the query engine happened to produce.
+    # `-toInt32(u.stop_sequence)` makes that residual tie deterministic here:
+    # among same-poll rows for one trip, the one for the LOWEST stop_sequence
+    # (the soonest upcoming stop) wins — the most currently-relevant row for a
+    # live board. `scheduled_time` is the field this tie *most commonly*
+    # touches (it's per-stop, so it differs across a trip's stop_sequence rows
+    # whenever the poll spans multiple stops) — but `dep_delay` is ALSO
+    # per-stop and can differ across those tied rows too: measured on real
+    # data, a handful of tied trips (4/1245 on one agency, 7/266 on another)
+    # had a different dep_delay between stop_sequences, by as much as a few
+    # hundred seconds. route_code/service_type are trip-level and unaffected.
     rows_result = await ch.query(
         """
         SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
@@ -598,7 +604,10 @@ async def route_trips(
     # silently mix columns from two different physical rows. Unpacked by
     # position in the outer SELECT to keep the result's column order exactly
     # `trip_id, stop_sequence, scheduled_time, dep_delay` (this function
-    # unpacks each row by position below).
+    # unpacks each row by position below). `ORDER BY trip_id` on the outer
+    # select restores the deterministic row order the old sort-based form got
+    # for free from its own ORDER BY — a bare GROUP BY has no defined output
+    # order, and this route's row count (~1.7k) makes the sort cheap.
     dedup_result = await ch.query(
         """
         SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay
@@ -611,6 +620,7 @@ async def route_trips(
               AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
             GROUP BY u.trip_id, u.stop_sequence
         ) AS grouped
+        ORDER BY trip_id
         """,
         parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )

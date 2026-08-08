@@ -99,6 +99,46 @@ async def test_live_delays_is_rate_limited_after_repeated_requests(map_client_ch
 
 
 @pytest.mark.asyncio
+async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_app_ch, ch_client):
+    """A single GTFS-RT poll commonly reports dep_delay for more than one of
+    a trip's upcoming stops at once (confirmed on real data: a propagated
+    delay estimate spanning several future StopTimeUpdates in one TripUpdate
+    message). live_delays dedups by trip_id ALONE (no stop_sequence in its
+    group key), so two such rows tie on the argMax rewrite's dedup key
+    (captured_at, file_name) -- `-toInt32(stop_sequence)` in the tiebreak
+    tuple breaks that residual tie deterministically: the LOWEST
+    stop_sequence (the soonest upcoming stop) wins, not whatever a bare
+    GROUP BY happens to return first."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # Same poll: identical captured_at (both NOW() calls resolve to the
+        # same transaction timestamp) AND identical file_name, two different
+        # stop_sequences of the SAME trip.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_TIE', 'R_TIE', 1, 60, NOW(), 'same.pb', 'weekday', '10:05:00'), "
+            "       ($1, 'T_TIE', 'R_TIE', 2, 300, NOW(), 'same.pb', 'weekday', '10:15:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    row = next(r for r in rows if r["trip_id"] == "T_TIE")
+    # stop_sequence isn't in the response, but its winning values are:
+    # stop_sequence=1 (the lower one) must win the tie, not stop_sequence=2.
+    assert row["dep_delay"] == 60
+    assert row["scheduled_time"] == "10:05:00"
+    assert row["route_code"] == "R_TIE"
+
+
+@pytest.mark.asyncio
 async def test_heatmap_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/delays/heatmap")
@@ -367,9 +407,9 @@ async def test_route_shape_falls_back_to_all_time_shape_when_ctx_window_is_empty
 async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, ch_client):
     """The shape-vote's per-trip weights are now derived from the dedup
     query's own rows (perf(map) b16fd70), which are filtered by `dep_delay
-    IS NOT NULL` before the `LIMIT 1 BY trip_id, stop_sequence` dedup — the
-    same filter-before-dedup ordering used everywhere else in this codebase
-    (see `pipeline/db.py::build_dedup_ch_sql`). A trip whose every observed
+    IS NOT NULL` before the argMax GROUP BY (trip_id, stop_sequence) dedup —
+    the same filter-before-dedup ordering used everywhere else in this
+    codebase (see `pipeline/db.py::build_dedup_ch_sql`). A trip whose every observed
     StopTimeUpdate is arrival-only (no `dep_delay` — common at a route's
     terminal stop in GTFS-RT) therefore contributes ZERO weight to the vote,
     not the full raw-row count the old separate `COUNT(*)` query would have
