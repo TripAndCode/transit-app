@@ -41,6 +41,7 @@ different date windows and two different DOW filters.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -50,6 +51,8 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _time_band_sql_on
+
+_log = logging.getLogger(__name__)
 
 _MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
 
@@ -697,7 +700,9 @@ async def _peak_hour_by_dow(
     its slow path) is served from the shared grain. The remaining case —
     ``time_band == 'all'`` but a ``service``/``routes`` filter, where nothing
     else in the payload needs live ``updates`` and so no grain was fetched —
-    still runs its own dedup scan.
+    still runs its own dedup scan. That scan is the only ClickHouse work in an
+    otherwise all-Postgres request, so it degrades to ``None`` on failure
+    instead of failing the whole payload (see the ``except`` below).
 
     Either way, ``dow_group`` REPLACES ``ctx.dow``: the question asked here is
     "weekday vs weekend", regardless of any day-of-week the user had already
@@ -752,15 +757,35 @@ async def _peak_hour_by_dow(
     # native TIME column) — see api.range.time_band_clause_ch's docstring —
     # so the hour is read off the first two characters rather than EXTRACT().
     hour_expr = "toUInt8(substring(scheduled_time, 1, 2))"
-    result = await ch.query(
-        f"WITH {cte_sql}\n"
-        f"SELECT {hour_expr} AS h,\n"
-        "       avg(dep_delay) / 60.0 AS avg_min\n"
-        "FROM deduped\n"
-        "WHERE scheduled_time IS NOT NULL\n"
-        f"GROUP BY {hour_expr}",
-        parameters={"agency_id": agency_id, **ch_params},
-    )
+    try:
+        result = await ch.query(
+            f"WITH {cte_sql}\n"
+            f"SELECT {hour_expr} AS h,\n"
+            "       avg(dep_delay) / 60.0 AS avg_min\n"
+            "FROM deduped\n"
+            "WHERE scheduled_time IS NOT NULL\n"
+            f"GROUP BY {hour_expr}",
+            parameters={"agency_id": agency_id, **ch_params},
+        )
+    except Exception:
+        # This is the ONLY ClickHouse call the whole Overview payload makes in
+        # this request shape (``time_band == 'all'`` + a service/routes filter):
+        # headline, movers, concentration, top_delayed, service_split and the
+        # sparkline are all served from Postgres ``agg_*`` tables here. So a
+        # ClickHouse hiccup must degrade THIS field rather than 500 the whole
+        # response — ``peak_hour_weekday``/``peak_hour_weekend`` are already
+        # ``PeakHour | None = None`` in api.routers.overview, and ``None`` is
+        # exactly what ``_peak_from_hour_rows`` returns for "no data". Same
+        # try/except-and-degrade shape as
+        # pipeline.reports.network.compute_network_summary's per-agency probe.
+        _log.warning(
+            "ClickHouse peak-hour probe failed for agency %s (%s) — degrading peak_hour_%s to null",
+            agency_id,
+            dow_group,
+            dow_group,
+            exc_info=True,
+        )
+        return None
     rows = _ch_rows(result)
     return _peak_from_hour_rows(rows)
 

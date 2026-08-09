@@ -1432,3 +1432,88 @@ async def test_route_weekly_history_slow_path_without_ch_raises(aconn, aagency_i
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
     with pytest.raises(RuntimeError, match="ClickHouse client"):
         await _route_weekly_history(aagency_id, ["R1"], ctx, aconn, ch=None)
+
+
+# ---------------------------------------------------------------------------
+# _peak_hour_by_dow's live scan is the ONLY ClickHouse work in an otherwise
+# all-Postgres request shape (`time_band == 'all'` + a service/routes filter),
+# so a ClickHouse hiccup there must degrade that one field, not 500 the whole
+# payload. Same degrade shape as pipeline.reports.network.compute_network_summary
+# and pipeline.health.aggregate_freshness.
+# ---------------------------------------------------------------------------
+
+
+class _FailingCh:
+    """ClickHouse client stub whose every query raises. Counts attempts."""
+
+    def __init__(self):
+        self.attempts = 0
+
+    async def query(self, sql, parameters=None, **kwargs):
+        self.attempts += 1
+        raise RuntimeError("simulated ClickHouse failure")
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_by_dow_live_scan_degrades_on_ch_failure(aconn, aagency_id):
+    """A ClickHouse failure in `_peak_hour_by_dow`'s live branch degrades that
+    one field to None, exactly as `_peak_from_hour_rows` does for "no data"."""
+    from pipeline.reports.overview import _peak_hour_by_dow
+
+    # time_band == 'all' but a service filter is set: agg_hour_daily can't
+    # serve it (aggregated across all services) and no grain was prefetched
+    # (nothing else in this request needs live `updates`), so this is the live
+    # third branch.
+    ctx = RangeCtx(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30), service="平日")
+    failing = _FailingCh()
+    assert await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekday", ch=failing, grain=None) is None
+    assert await _peak_hour_by_dow(aagency_id, ctx, aconn, "weekend", ch=failing, grain=None) is None
+    assert failing.attempts == 2, "both dow groups must have actually attempted the query"
+
+
+@pytest.mark.asyncio
+async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id):
+    """The whole /overview/summary payload must survive a ClickHouse hiccup in
+    `_peak_hour_by_dow`'s live branch.
+
+    In this request shape (`time_band == 'all'` + a service filter) every other
+    surface — headline, movers, concentration, top_delayed, peak_hour,
+    service_split, sparkline — is served from Postgres `agg_*` tables, so
+    letting the exception propagate would sink an otherwise complete response.
+    `peak_hour_weekday`/`peak_hour_weekend` are already `PeakHour | None = None`
+    in api.routers.overview, so degrading them to null is free.
+    """
+    # Baseline week (06-15..06-21) at 2.0 min, current week (06-22..06-28) at
+    # 5.0 min, >= 10 samples per side so the route qualifies as a mover.
+    for d in range(15, 22):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 6, d), "R_DEG", "平日", 2.0, 20)
+    for d in range(22, 29):
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 6, d), "R_DEG", "平日", 5.0, 20)
+    # agg_route_hour backs `peak_hour` (the non-DOW one) — it must still come
+    # through, proving only the two CH-derived fields degraded.
+    await _seed_agg_route_hour(aconn, aagency_id, "R_DEG", "平日", "08:00", 7.0, 30)
+    await _seed_agg_route_hour(aconn, aagency_id, "R_DEG", "平日", "17:00", 3.0, 30)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), service="平日")
+    failing = _FailingCh()
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=failing)
+
+    # The two ClickHouse-derived fields degrade to null...
+    assert out["peak_hour_weekday"] is None
+    assert out["peak_hour_weekend"] is None
+    assert failing.attempts == 2
+    # ...and every Postgres-served surface is fully populated.
+    assert out["headline"]["avg_min"] == pytest.approx(5.0, abs=0.01)
+    assert out["headline"]["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
+    assert out["headline"]["samples"] == 140
+    assert out["headline"]["window_from"] == "2026-06-22"
+    assert out["headline"]["window_to"] == "2026-06-28"
+    assert [m["route_code"] for m in out["movers"]["worse"]] == ["R_DEG"]
+    assert out["movers"]["worse"][0]["delta_min"] == pytest.approx(3.0, abs=0.01)
+    assert out["concentration"]["top_routes"][0]["route_code"] == "R_DEG"
+    assert out["top_delayed"]["routes"][0]["route_code"] == "R_DEG"
+    assert out["peak_hour"]["peak_hour"] == 8
+    assert out["service_split"] == {"平日": pytest.approx(3.5, abs=0.01)}
+    assert len(out["sparkline_points"]) == 14
