@@ -1517,3 +1517,170 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     assert out["peak_hour"]["peak_hour"] == 8
     assert out["service_split"] == {"平日": pytest.approx(3.5, abs=0.01)}
     assert len(out["sparkline_points"]) == 14
+
+
+# ---------------------------------------------------------------------------
+# `_route_weekly_history` derives its 4-week sparkline buckets from the shared
+# grain whenever the grain's span reaches back far enough, instead of issuing a
+# second full dedup scan. It keeps the live scan for a `ctx` window too narrow
+# for the grain to cover.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_weekly_history_fixture(aconn, ch_client, agency_id):
+    """Seed a route with data in 3 of the 4 weekly buckets ending 2026-05-24.
+
+    Buckets are keyed off `(2026-05-24 - date).days // 7`: wk0 = 05-18..05-24,
+    wk1 = 05-11..05-17, wk2 = 05-04..05-10, wk3 = 04-27..05-03 (left empty, so
+    the leading None is exercised too).
+    """
+    cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    for i in range(10):
+        await _seed_update(aconn, agency_id, prv_day + timedelta(minutes=i), "R_WH", 60, seq=i + 1)
+        await _seed_update(aconn, agency_id, cur_day + timedelta(minutes=i), "R_WH", 600, seq=i + 1)
+    # wk2, deliberately a non-round average (1090/3 s = 6.0555... min) so any
+    # rounding divergence between the grain-derived and ClickHouse forms shows.
+    old_day = datetime.combine(date(2026, 5, 6), time(12, 0), tzinfo=timezone.utc)
+    for i, dep in enumerate((300, 421, 369)):
+        await _seed_update(aconn, agency_id, old_day + timedelta(minutes=i), "R_WH", dep, seq=i + 1)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+
+@pytest.mark.asyncio
+async def test_route_weekly_history_grain_matches_live_exactly(aconn, aagency_id, ch_client, ch_async_client):
+    """The grain-derived weekly buckets must equal the ClickHouse ones EXACTLY
+    (not approximately): the grain's sums are integer seconds and the single
+    trailing `/ 60.0` reproduces `avg(dep_delay) / 60.0` bit-for-bit."""
+    await _seed_weekly_history_fixture(aconn, ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain, _grain_covers, _route_weekly_history
+
+    # 24-day ctx: grain spans 2026-04-24..2026-05-24, the weekly-history span is
+    # 2026-04-27..2026-05-24 — covered.
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
+    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    assert _grain_covers(grain, date(2026, 4, 27), date(2026, 5, 24))
+
+    counting = _CountingCh(ch_async_client)
+    derived = await _route_weekly_history(aagency_id, ["R_WH"], ctx, aconn, ch=counting, grain=grain)
+    assert counting.queries == [], "grain covers the span, so no ClickHouse query may be issued"
+
+    live = await _route_weekly_history(aagency_id, ["R_WH"], ctx, aconn, ch=ch_async_client, grain=None)
+    assert derived == live, f"grain-derived {derived} != ClickHouse {live}"
+    # Sanity: the fixture really produced 3 populated buckets + a leading gap.
+    assert derived["R_WH"][0] is None  # wk3, no data
+    assert derived["R_WH"][1] == pytest.approx(1090 / 3 / 60.0, abs=1e-12)  # wk2
+    assert derived["R_WH"][2] == pytest.approx(1.0, abs=1e-12)  # wk1
+    assert derived["R_WH"][3] == pytest.approx(10.0, abs=1e-12)  # wk0
+
+
+@pytest.mark.asyncio
+async def test_route_weekly_history_grain_matches_live_with_dow_filter(aconn, aagency_id, ch_client, ch_async_client):
+    """`ctx.dow` is applied server-side in the live branch and in Python in the
+    grain branch (`_dow_matches`) — the two must agree exactly."""
+    await _seed_weekly_history_fixture(aconn, ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain, _route_weekly_history
+
+    for dow in ("weekday", "weekend"):
+        ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning", dow=dow)
+        grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+        counting = _CountingCh(ch_async_client)
+        derived = await _route_weekly_history(aagency_id, ["R_WH"], ctx, aconn, ch=counting, grain=grain)
+        assert counting.queries == []
+        live = await _route_weekly_history(aagency_id, ["R_WH"], ctx, aconn, ch=ch_async_client, grain=None)
+        assert derived == live, f"dow={dow}: grain-derived {derived} != ClickHouse {live}"
+    # 2026-05-24 is a Sunday and 2026-05-17 a Sunday too, so the weekend slice
+    # keeps wk0/wk1 while the weekday slice keeps only the 2026-05-06 (Wed) rows.
+    assert derived["R_WH"][3] == pytest.approx(10.0, abs=1e-12)
+
+
+@pytest.mark.asyncio
+async def test_route_weekly_history_falls_back_when_grain_too_narrow(aconn, aagency_id, ch_client, ch_async_client):
+    """A `ctx` window the grain can't cover must still take the live scan — and
+    give the same answer a wide-window grain-derived run gives."""
+    await _seed_weekly_history_fixture(aconn, ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain, _grain_covers, _route_weekly_history
+
+    # 7-day ctx: grain spans 2026-05-11..2026-05-24, weekly-history needs
+    # 2026-04-27 — NOT covered.
+    narrow = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    narrow_grain = await _fetch_grain(aagency_id, narrow, ch_async_client)
+    assert not _grain_covers(narrow_grain, date(2026, 4, 27), date(2026, 5, 24))
+
+    counting = _CountingCh(ch_async_client)
+    fallback = await _route_weekly_history(aagency_id, ["R_WH"], narrow, aconn, ch=counting, grain=narrow_grain)
+    assert len(counting.queries) == 1, "an uncovered span must still issue its live scan"
+    assert "intDiv(dateDiff" in counting.queries[0]
+
+    # Same `to_date`, so the same four buckets — the grain-derived answer for a
+    # wide ctx must match the live answer for the narrow one.
+    wide = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
+    wide_grain = await _fetch_grain(aagency_id, wide, ch_async_client)
+    derived = await _route_weekly_history(aagency_id, ["R_WH"], wide, aconn, ch=ch_async_client, grain=wide_grain)
+    assert fallback == derived, f"live fallback {fallback} != grain-derived {derived}"
+
+
+@pytest.mark.asyncio
+async def test_route_weekly_history_grain_boundary_coverage(aconn, aagency_id, ch_client, ch_async_client):
+    """The coverage boundary: with `weeks_back=4` the grain reaches the span iff
+    `ctx.to_date - ctx.from_date >= 20` (grain start = from_date - 7, span start
+    = to_date - 27), assuming the headline anchor lands on `ctx.to_date`."""
+    await _seed_weekly_history_fixture(aconn, ch_client, aagency_id)
+
+    from pipeline.reports.overview import _fetch_grain, _grain_covers, _route_weekly_history
+
+    span_from, to_date = date(2026, 4, 27), date(2026, 5, 24)
+    just_under = RangeCtx(from_date=date(2026, 5, 5), to_date=to_date, time_band="morning")  # 19 days
+    at_boundary = RangeCtx(from_date=date(2026, 5, 4), to_date=to_date, time_band="morning")  # 20 days
+
+    under_grain = await _fetch_grain(aagency_id, just_under, ch_async_client)
+    assert not _grain_covers(under_grain, span_from, to_date)
+    boundary_grain = await _fetch_grain(aagency_id, at_boundary, ch_async_client)
+    assert _grain_covers(boundary_grain, span_from, to_date)
+    assert boundary_grain.from_date == span_from  # exactly reaches, not past
+
+    counting_under = _CountingCh(ch_async_client)
+    under = await _route_weekly_history(aagency_id, ["R_WH"], just_under, aconn, ch=counting_under, grain=under_grain)
+    assert len(counting_under.queries) == 1
+
+    counting_boundary = _CountingCh(ch_async_client)
+    boundary = await _route_weekly_history(
+        aagency_id, ["R_WH"], at_boundary, aconn, ch=counting_boundary, grain=boundary_grain
+    )
+    assert counting_boundary.queries == []
+    # Identical `to_date` => identical buckets, whichever side of the boundary.
+    assert under == boundary, f"live {under} != grain-derived {boundary} at the coverage boundary"
+
+
+@pytest.mark.asyncio
+async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id, ch_client, ch_async_client):
+    """A default-width slow-path request with movers is back to ONE ClickHouse
+    round trip: `_route_weekly_history`'s 4-week span fits inside the grain.
+
+    The narrow-`ctx` counterpart (`test_slow_path_movers_add_exactly_one_more_query`)
+    still measures 2, which is correct — the grain can't reach that far back there.
+    """
+    await _seed_weekly_history_fixture(aconn, ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    counting = _CountingCh(ch_async_client)
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=counting)
+
+    assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
+    assert "GROUP BY date, route_code, service_type" in counting.queries[0]
+    # The sparkline still comes through, populated off the grain.
+    worse = out["movers"]["worse"]
+    assert [m["route_code"] for m in worse] == ["R_WH"]
+    assert worse[0]["delta_min"] == pytest.approx(9.0, abs=0.01)
+    assert worse[0]["sparkline_points"] == [
+        pytest.approx(1090 / 3 / 60.0, abs=1e-9),
+        pytest.approx(1.0, abs=1e-9),
+        pytest.approx(10.0, abs=1e-9),
+    ]

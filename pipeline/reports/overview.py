@@ -36,6 +36,12 @@ dedup output to ``(date, route_code, service_type, hour)`` once, and each
 helper derives its own answer from that grain in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three
 different date windows and two different DOW filters.
+
+That is one round trip whenever the grain's span also contains
+:func:`_route_weekly_history`'s wider ``weeks_back * 7``-day window — the
+common case, including every default 30-day request. Only a ``ctx`` window too
+narrow for the grain to reach that far back costs a second scan, and only when
+``_movers`` found candidate routes to draw sparklines for.
 """
 
 from __future__ import annotations
@@ -135,6 +141,21 @@ def _dow_matches(d: date, dow: str) -> bool:
     return iso in (6, 7)
 
 
+def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
+    """Whether ``grain`` actually spans ``[from_date, to_date]``.
+
+    The non-raising counterpart of :func:`_check_grain_covers`, for the one
+    consumer whose window is a legitimate *maybe*: :func:`_route_weekly_history`
+    asks for ``weeks_back * 7`` days ending at ``ctx.to_date``, which the grain
+    contains for a wide ``ctx`` (every default 30-day request) and genuinely
+    does not for a narrow one — so "not covered" there means "fall back to the
+    live scan", not "invariant violated". Every other consumer's window is
+    derived from ``ctx`` by construction and MUST be covered, which is why
+    :func:`_check_grain_covers` raises for them.
+    """
+    return grain is not None and from_date >= grain.from_date and to_date <= grain.to_date
+
+
 def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
     """Fail loudly if a consumer asks for a window the grain never fetched.
 
@@ -146,7 +167,7 @@ def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
     user-facing average, with nothing to notice. Raising turns that class of
     regression into a visible failure instead of a quiet data bug.
     """
-    if from_date < grain.from_date or to_date > grain.to_date:
+    if not _grain_covers(grain, from_date, to_date):
         raise RuntimeError(
             f"overview grain [{grain.from_date}..{grain.to_date}] does not cover "
             f"the requested window [{from_date}..{to_date}]"
@@ -231,8 +252,18 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       ``anchor`` is either a date inside ``ctx`` or ``ctx.to_date`` itself, so
       ``cur_ctx.to_date = anchor <= ctx.to_date`` bounds the far end. Because
       this bound needs no knowledge of ``anchor``, ``_latest_data_date`` —
-      which computes ``anchor`` — can be served from the grain too, keeping
-      the whole slow path at one round trip instead of two.
+      which computes ``anchor`` — can be served from the grain too, instead of
+      costing its own round trip.
+
+    One consumer, :func:`_route_weekly_history`, asks for a window this bound
+    does NOT guarantee: ``weeks_back * 7`` days back from ``cur_ctx.to_date``,
+    which for the default ``weeks_back=4`` reaches ``anchor - 27``. The grain
+    covers that whenever ``anchor - ctx.from_date >= 20`` — true for a default
+    30-day request, false for a narrow one — so that helper checks coverage with
+    :func:`_grain_covers` and keeps its own live scan for the uncovered case.
+    Widening the grain to always cover it was rejected: it would add ~3 weeks of
+    scan to EVERY slow-path request to save a scan on the minority of requests
+    that are too narrow to be covered.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
     fetched separately for ``_peak_hour_by_dow``: measured on live agency-8
@@ -404,19 +435,32 @@ async def _route_weekly_history(
     conn,
     weeks_back: int = 4,
     ch=None,
+    grain: _Grain | None = None,
 ) -> dict[str, list[float | None]]:
     """Per-route weekly avg_min for the last ``weeks_back`` true 7-day
     buckets ending at ``ctx.to_date``. Honors DOW / service / routes.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` — one
     small indexed query per week (cheap; the table has no dedup to redo).
-    Slow path falls back to live ``updates`` (ClickHouse) so the hour-of-day
-    filter is honored — ONE dedup scan over the full ``weeks_back * 7``-day
-    span, bucketed by week index, rather than ``weeks_back`` separate dedup
-    scans of live `updates` (one per week): ``date`` is part of the dedup
-    key, so re-running the same argMax dedup once over the whole span and
-    then grouping by a week index is equivalent to the union of the
-    per-week queries, at 1/``weeks_back`` the round trips.
+
+    Slow path prefers the shared grain (:func:`_fetch_grain`) when it reaches
+    far enough back, and only falls back to its own live ``updates``
+    (ClickHouse) scan when it doesn't. The grain spans
+    ``[ctx.from_date - _GRAIN_LOOKBACK_DAYS, ctx.to_date]`` while this function
+    needs ``[ctx.to_date - (7 * weeks_back - 1), ctx.to_date]``, so for the
+    default ``weeks_back=4`` the grain covers it whenever ``ctx`` is at least
+    ~21 days wide — i.e. every default 30-day request, which is the common
+    case. That matters because this was the second ClickHouse round trip of an
+    otherwise one-round-trip slow path (measured at 5-19 s on live data, on top
+    of the grain's own 8-19 s), and it fires whenever ``_movers`` has any
+    candidate routes at all.
+
+    The live fallback (narrow ``ctx`` only) is ONE dedup scan over the full
+    ``weeks_back * 7``-day span, bucketed by week index, rather than
+    ``weeks_back`` separate dedup scans of live `updates` (one per week):
+    ``date`` is part of the dedup key, so re-running the same argMax dedup once
+    over the whole span and then grouping by a week index is equivalent to the
+    union of the per-week queries, at 1/``weeks_back`` the round trips.
     """
     if not route_codes:
         return {}
@@ -453,15 +497,50 @@ async def _route_weekly_history(
                 out[code].append(wk_map.get(code))
         return out
 
-    # Live ClickHouse path: one dedup CTE over the whole [ctx.to_date -
-    # weeks_back*7 + 1, ctx.to_date] span, bucketed into weeks_back week-index
-    # groups via `intDiv(dateDiff('day', date, to_date), 7)` — 0 is the most
-    # recent 7-day bucket ending at ctx.to_date, weeks_back-1 the oldest,
-    # matching the original per-week loop's `k` and its oldest-first append
-    # order into `out[code]`.
+    span_from = ctx.to_date - timedelta(days=7 * weeks_back - 1)
+
+    if _grain_covers(grain, span_from, ctx.to_date):
+        # The shared grain already holds every row this span needs, so derive
+        # the weekly buckets in Python instead of issuing a second full dedup
+        # scan. This reproduces the ClickHouse branch below exactly:
+        #
+        # * the same rows — the grain applied `agency_id` + `service` +
+        #   `routes` + `time_band` server-side (identical to `span_ctx`'s, all
+        #   copied from the same `ctx`), the `route_code IN (...)` and date-span
+        #   predicates are applied here, and `_dow_matches(_, ctx.dow)` is the
+        #   Python counterpart of `span_ctx`'s own `dow_clause_ch`;
+        # * the same week index — `intDiv(dateDiff('day', date, to_date), 7)`
+        #   is `(to_date - date).days // 7`;
+        # * the same arithmetic — grain sums are exact integer seconds, so
+        #   `(sum / n) / 60.0` matches `avg(dep_delay) / 60.0` bit-for-bit
+        #   (see :func:`_grain_avg_min`), and `count(*)` is `count(dep_delay)`
+        #   because the dedup CTE already drops NULL `dep_delay` rows.
+        wanted = set(route_codes)
+        acc: dict[tuple[str, int], list[int]] = {}
+        for row in _require_grain(grain).rows:
+            d, route_code = row[0], row[1]
+            if route_code not in wanted or not (span_from <= d <= ctx.to_date):
+                continue
+            if not _dow_matches(d, ctx.dow):
+                continue
+            slot = acc.setdefault((route_code, (ctx.to_date - d).days // 7), [0, 0])
+            slot[0] += row[4]
+            slot[1] += row[5]
+        for code in route_codes:
+            for k in range(weeks_back - 1, -1, -1):
+                bucket = acc.get((code, k))
+                out[code].append(((bucket[1] / bucket[0]) / 60.0) if bucket else None)
+        return out
+
+    # Live ClickHouse path (reached only when the grain doesn't reach back far
+    # enough — a `ctx` window narrower than ~3 weeks): one dedup CTE over the
+    # whole [ctx.to_date - weeks_back*7 + 1, ctx.to_date] span, bucketed into
+    # weeks_back week-index groups via `intDiv(dateDiff('day', date, to_date),
+    # 7)` — 0 is the most recent 7-day bucket ending at ctx.to_date,
+    # weeks_back-1 the oldest, matching the original per-week loop's `k` and its
+    # oldest-first append order into `out[code]`.
     if ch is None:
         raise RuntimeError("_route_weekly_history's live fallback requires a ClickHouse client")
-    span_from = ctx.to_date - timedelta(days=7 * weeks_back - 1)
     span_ctx = RangeCtx(
         from_date=span_from,
         to_date=ctx.to_date,
@@ -926,7 +1005,7 @@ async def _movers(
     better = better_all[:10]  # most-negative first
     codes = [c for c, _, _, _ in worse + better]
     names = await _route_short_names(agency_id, codes, conn)
-    history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4, ch=ch)
+    history = await _route_weekly_history(agency_id, codes, cur_ctx, conn, weeks_back=4, ch=ch, grain=grain)
 
     def _entry(code, dm, dp, direction):
         """Serialize one mover row (deltas, absolute averages, streak, sparkline)."""
@@ -1050,10 +1129,13 @@ async def compute_overview_summary(
     existing tests); real dispatch (the ``/overview/summary`` route) always
     passes the real client.
 
-    On the slow path (``ctx.time_band != 'all'``) the ONE ClickHouse query the
-    whole payload needs is issued up front (:func:`_fetch_grain`) and handed to
+    On the slow path (``ctx.time_band != 'all'``) the shared ClickHouse query
+    the payload needs is issued up front (:func:`_fetch_grain`) and handed to
     every stage helper, which then derives its own numbers from it in Python.
-    Previously each helper ran its own dedup scan — ~12 per request. The fast
+    Previously each helper ran its own dedup scan — ~12 per request. It is the
+    only query for any ``ctx`` wide enough for the grain to also cover
+    :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
+    request); a narrower ``ctx`` costs that one helper a second scan. The fast
     path is unchanged: ``grain`` stays ``None`` and every helper reads its
     ``agg_*`` table exactly as before.
     """
@@ -1130,11 +1212,12 @@ async def compute_overview_summary(
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
-        # label captures the wall-clock total. On the slow path the single
+        # label captures the wall-clock total. On the slow path the shared
         # ClickHouse grain query has already run (above, before this branch),
-        # so what still fans out here is the Postgres work — `_peak_hour`,
-        # `_route_short_names`, `_route_weekly_history`, and every fast-path
-        # helper's `agg_*` read.
+        # so what still fans out here is mostly Postgres work — `_peak_hour`,
+        # `_route_short_names`, and every fast-path helper's `agg_*` read (plus
+        # `_route_weekly_history`'s live scan, in the narrow-`ctx` case where
+        # the grain can't cover its span).
         async def _own_conn(fn, *args):
             """Acquire a pool connection, call ``fn(*args, conn, ch=ch, grain=grain)``, release."""
             async with pool.acquire() as c:
