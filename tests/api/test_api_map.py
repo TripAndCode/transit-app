@@ -999,6 +999,57 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_c
     assert len(body["stops"]) >= 2
 
 
+@pytest.mark.asyncio
+async def test_route_shape_returns_stops_when_no_trip_has_a_shape_id(map_app_ch, ch_client):
+    """shapes.txt is optional in GTFS -- an agency that never loaded one has
+    static_trips.shape_id NULL for every trip, so chosen_shape_id is always
+    None. Regression: gating the per-stop stats query on chosen_shape_id
+    (an earlier version of the route_shape query-bounding fix did) silently
+    dropped `stops` to `[]` for every route on such an agency -- main only
+    ever used shape_id to PIN stops to one variant when multiple existed,
+    never to gate whether stats ran at all."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        # No shape_id on this trip at all (NULL, not just unresolved geometry).
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', NULL)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
+            "       ($1, 'ST2', '次の停留所', 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["geometry"] is None, body
+    assert len(body["stops"]) >= 2, "stats query must run even with no shape_id at all"
+    assert {s["avg_min"] for s in body["stops"]} != {None}
+
+
 async def _seed_heatmap(pool, agency_id):
     from datetime import date, datetime, time, timedelta, timezone
 

@@ -353,20 +353,29 @@ async def route_shape(
         raw = geom_row["geom_json"] if geom_row else None
         geometry = json.loads(raw) if raw is not None else None
 
-    # Once a shape is chosen, fetch the per-stop delay stats scoped to ONLY
-    # that shape's trips — bounded by (trips on one shape variant x its
-    # stops), not by the whole route's trip count over the ctx window, so a
+    # Fetch the per-stop delay stats, scoped to the chosen shape's trips WHEN
+    # one was chosen — bounded by (trips on one shape variant x its stops),
+    # not by the whole route's trip count over the ctx window, so a
     # multi-variant route (e.g. the Hiroshima express case the shape-vote
-    # comment above discusses) doesn't pay for other variants' rows. This is
-    # a second ClickHouse scan (the vote query above no longer returns
-    # per-stop rows to filter in Python), but it's the one that must stay
-    # bounded, so the extra round trip is the right trade. In the
+    # comment above discusses) doesn't pay for other variants' rows.
+    #
+    # Runs UNCONDITIONALLY, not just when chosen_shape_id is not None: an
+    # agency with no shapes.txt at all has shape_id NULL for every trip, so
+    # chosen_shape_id is always None there — gating this query on it (an
+    # earlier version of this fix did) silently dropped `stops` to `[]` for
+    # every route on such an agency, a real regression from `main`'s
+    # always-run-the-stats-query behavior (main only used shape_id to PIN an
+    # otherwise-always-populated stops list to one variant, never to gate
+    # whether it ran at all). The trip filter is the only conditional part.
+    #
+    # This is a second ClickHouse scan (the vote query above no longer
+    # returns per-stop rows to filter in Python), but it's the one that must
+    # stay bounded, so the extra round trip is the right trade. In the
     # empty-ctx-window fallback case above, `{ch_where_frag}` still encodes
     # the real (empty) ctx window, so this query naturally comes back empty —
     # `stops` stays empty while `geometry`/`unobserved_stops` still render
-    # from the fallback shape, matching pre-fix behavior. Falls back to no
-    # stats when the route has no shape data at all.
-    dedup_rows: list[tuple[str, int, int]] = []
+    # from the fallback shape, matching pre-fix behavior.
+    shape_trip_ids: list[str] = []
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
             "SELECT trip_id FROM static_trips WHERE agency_id = $1 AND shape_id = $2",
@@ -374,27 +383,25 @@ async def route_shape(
             chosen_shape_id,
         )
         shape_trip_ids = [r["trip_id"] for r in shape_trip_rows]
-        if shape_trip_ids:
-            stats_result = await ch.query(
-                f"""
-                SELECT u.trip_id, u.stop_sequence,
-                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-                FROM updates AS u
-                WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-                  AND u.dep_delay IS NOT NULL
-                  AND u.trip_id IN {{shape_trip_ids:Array(String)}}
-                  AND {ch_where_frag}
-                GROUP BY u.trip_id, u.stop_sequence
-                ORDER BY u.trip_id, u.stop_sequence
-                """,
-                parameters={
-                    "agency_id": agency_id,
-                    "route": str(route),
-                    "shape_trip_ids": shape_trip_ids,
-                    **ch_params,
-                },
-            )
-            dedup_rows = list(stats_result.result_rows)
+    trip_filter_sql = "AND u.trip_id IN {shape_trip_ids:Array(String)}" if chosen_shape_id is not None else ""
+    stats_params = {"agency_id": agency_id, "route": str(route), **ch_params}
+    if chosen_shape_id is not None:
+        stats_params["shape_trip_ids"] = shape_trip_ids
+    stats_result = await ch.query(
+        f"""
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+          AND u.dep_delay IS NOT NULL
+          {trip_filter_sql}
+          AND {ch_where_frag}
+        GROUP BY u.trip_id, u.stop_sequence
+        ORDER BY u.trip_id, u.stop_sequence
+        """,
+        parameters=stats_params,
+    )
+    dedup_rows = list(stats_result.result_rows)
 
     static_join_rows: list = []
     if dedup_rows:
