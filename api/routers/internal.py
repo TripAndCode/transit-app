@@ -77,27 +77,36 @@ def _run_ingest_and_analyze() -> None:
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
 
-    ch_client = get_client()
-    conn = psycopg2.connect(db_url)
-    # Pin JST so analyze() buckets `captured_at::date` on the same civil day the
-    # read API serves under (api/main + gtfs_pipeline._get_conn both pin JST);
-    # the cluster default is UTC, which would mis-bucket ~20% of rows by date
-    # and also desync agg_route_daily from the JST-based freshness check below.
-    # Committed up front (autocommit) so it survives analyze's txn rollback.
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-        # Session-scoped advisory lock (not txn-scoped: this connection stays
-        # autocommit=False for the ingest/analyze work below, and the lock
-        # must hold across every one of those transactions, not just one).
-        # A concurrently-running invocation of this same job gets `False`
-        # back immediately rather than blocking -- BackgroundTasks has no
-        # caller to report failure to, so skipping is the right behavior,
-        # not queuing.
-        cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
-        got_lock = cur.fetchone()[0]
-    conn.autocommit = False
+    # Both acquired inside the try below (not here) so that a failure
+    # anywhere in setup -- get_client(), psycopg2.connect(), SET TIME ZONE,
+    # or the lock acquisition itself -- still reaches the finally block and
+    # closes whichever of the two was actually created, instead of leaking
+    # a ClickHouse client + HTTP pool (or a Postgres session) per failed
+    # poke inside this long-lived API process.
+    ch_client = None
+    conn = None
     try:
+        ch_client = get_client()
+        conn = psycopg2.connect(db_url)
+        # Pin JST so analyze() buckets `captured_at::date` on the same civil
+        # day the read API serves under (api/main + gtfs_pipeline._get_conn
+        # both pin JST); the cluster default is UTC, which would mis-bucket
+        # ~20% of rows by date and also desync agg_route_daily from the
+        # JST-based freshness check below. Committed up front (autocommit)
+        # so it survives analyze's txn rollback.
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+            # Session-scoped advisory lock (not txn-scoped: this connection
+            # stays autocommit=False for the ingest/analyze work below, and
+            # the lock must hold across every one of those transactions, not
+            # just one). A concurrently-running invocation of this same job
+            # gets `False` back immediately rather than blocking --
+            # BackgroundTasks has no caller to report failure to, so
+            # skipping is the right behavior, not queuing.
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
+            got_lock = cur.fetchone()[0]
+        conn.autocommit = False
         if not got_lock:
             _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
             return
@@ -138,15 +147,19 @@ def _run_ingest_and_analyze() -> None:
         # still run — an unguarded `conn.close(); ch_client.close()` would
         # skip the ClickHouse close on a Postgres close error, silently
         # reintroducing the client + HTTP pool leak this block exists to fix.
+        # Both guarded with `is not None`: get_client()/psycopg2.connect()
+        # itself can be what raised, leaving the other -- or both -- unset.
         try:
-            conn.close()
+            if conn is not None:
+                conn.close()
         finally:
             # Close the sync ClickHouse client's underlying HTTP connection
             # pool. This job runs as a BackgroundTask inside the long-lived
             # API process, so a missing close() here leaks one client + pool
             # per invocation of this endpoint instead of one per short-lived
             # CLI run.
-            ch_client.close()
+            if ch_client is not None:
+                ch_client.close()
 
 
 @router.post("/ingest", status_code=202)

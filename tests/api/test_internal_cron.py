@@ -147,3 +147,15 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
         with holder.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s)", (_CRON_LOCK_KEY,))
         holder.close()
+
+    # The lock must actually be released once the holder is gone -- not
+    # wedged forever, which would silently skip every subsequent cron poke.
+    with (
+        patch("pipeline.ingest.ingest_live") as fake_ingest,
+        patch("pipeline.analyze.analyze") as fake_analyze,
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+    ):
+        _run_ingest_and_analyze()
+
+    assert fake_ingest.call_count > 0
+    assert fake_analyze.call_count > 0
