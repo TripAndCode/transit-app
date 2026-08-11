@@ -38,12 +38,27 @@ def get_client():
 def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     """Prepend `agency_id` to each row and bulk-insert into `updates`.
 
-    No ON CONFLICT equivalent — see the design doc's dedup/idempotency
-    section. File-level idempotency (distinct_file_names, checked by the
-    caller before parsing) is the real duplicate guard; any rare
-    intra-file duplicate self-heals at dedup-query read time.
+    No ON CONFLICT equivalent at the database level — see the design doc's
+    dedup/idempotency section. File-level idempotency (distinct_file_names,
+    checked by the caller before parsing) is the real duplicate guard against
+    RE-INGESTING a file. Within a single call, dedup by (file_name, trip_id,
+    stop_sequence) here, first-occurrence-wins, matching Postgres's old
+    UNIQUE(agency_id, file_name, trip_id, stop_sequence) + ON CONFLICT DO
+    NOTHING exactly: a GTFS-RT feed occasionally repeats a TripUpdate entity
+    or a stop_sequence within one poll (both ingest strategies iterate every
+    entity/stop_time_update with no such check), and while that self-heals
+    for argMax-based dedup reads, it silently double-counts every raw
+    COUNT(*) consumer (agg_feed_health.raw_samples, describe_data's
+    total_rows/observations) that Postgres never had to guard against.
     """
-    ch_rows = [(agency_id, *r) for r in rows]
+    seen: set[tuple] = set()
+    ch_rows = []
+    for r in rows:
+        key = (r[0], r[2], r[6])  # (file_name, trip_id, stop_sequence)
+        if key in seen:
+            continue
+        seen.add(key)
+        ch_rows.append((agency_id, *r))
     if not ch_rows:
         return 0
     summary = client.insert("updates", ch_rows, column_names=UPDATE_COLUMNS)
@@ -56,6 +71,22 @@ def distinct_file_names(client, agency_id: int) -> set[str]:
         parameters={"agency_id": agency_id},
     )
     return {row[0] for row in result.result_rows}
+
+
+def recent_file_name_exists(client, agency_id: int, file_name: str, since: datetime) -> bool:
+    """Bounded existence check for one specific `file_name` — for callers
+    (ingest_live) that only ever need to ask about a file just constructed
+    from `now()`, where distinct_file_names' unbounded per-agency scan would
+    be wasteful to pay on every single poll. `since` keeps this index-served
+    off the `(agency_id, captured_at, ...)` sort key rather than forcing a
+    full-partition scan for the `file_name` predicate alone.
+    """
+    result = client.query(
+        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "AND captured_at >= {since:DateTime64} AND file_name = {file_name:String} LIMIT 1",
+        parameters={"agency_id": agency_id, "since": since, "file_name": file_name},
+    )
+    return bool(result.result_rows)
 
 
 def max_captured_at(client, agency_id: int) -> datetime | None:
