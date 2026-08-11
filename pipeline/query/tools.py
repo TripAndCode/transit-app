@@ -33,7 +33,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at
+import clickhouse_connect
+
 from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
@@ -535,23 +536,34 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # narrower than the fixed-window regression it replaces, and any
     # currently-running route (even all-NULL-delay) has captured_at near the
     # horizon regardless of its delay values.
-    horizon_row = await conn.fetchrow("SELECT max(date) AS d FROM agg_route_daily WHERE agency_id=$1", agency_id)
-    horizon = horizon_row["d"] if horizon_row else None
+    horizon = await conn.fetchval("SELECT max(date) FROM agg_route_daily WHERE agency_id=$1", agency_id)
     if horizon is not None:
         bound = datetime.combine(horizon, time.min, tzinfo=_JST).astimezone(timezone.utc)
-    else:
-        # Brand-new agency: no agg_route_daily rows at all yet, so there's no
-        # analyze horizon to anchor to. Fall back to a bounded scan off
-        # ClickHouse's own latest data instead of leaving this unbounded.
-        agency_latest = await max_captured_at(ch, agency_id)
-        if agency_latest is None:
-            return False
-        bound = agency_latest - timedelta(days=30)
-    result = await ch.query(
-        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-        "AND captured_at >= {bound:DateTime64} LIMIT 1",
-        parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
-    )
+        result = await ch.query(
+            "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "AND captured_at >= {bound:DateTime64} LIMIT 1",
+            parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
+        )
+        return bool(result.result_rows)
+    # No agg_route_daily rows for this agency AT ALL -- not a rare corner:
+    # it's the normal state right after a bulk historical backfill, before
+    # analyze() has ever completed. There is no "not yet analyzed" window to
+    # bound against here (unlike the horizon branch above), so a fixed
+    # constant would reintroduce the exact conflation this function exists
+    # to avoid -- a route that ran anywhere in the backfilled history except
+    # the last 30 days would read as unregistered. Scan unbounded, but cap
+    # execution time and fail OPEN (assume registered) on a timeout/error
+    # rather than fail closed: "couldn't prove it in 5s" is not evidence the
+    # route doesn't exist, and asserting a false "not registered" to the
+    # user is worse than one extra no-data reply from a false "registered".
+    try:
+        result = await ch.query(
+            "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
+            parameters={"agency_id": agency_id, "route": str(route)},
+            settings={"max_execution_time": 5},
+        )
+    except clickhouse_connect.driver.exceptions.Error:
+        return True
     return bool(result.result_rows)
 
 

@@ -275,6 +275,38 @@ async def test_is_route_registered_falls_back_to_clickhouse_when_agg_stale(
 
 
 @pytest.mark.asyncio
+async def test_is_route_registered_no_horizon_scans_unbounded_not_fixed_30_days(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """Regression: when an agency has ZERO agg_route_daily rows at all (the
+    normal state right after a bulk historical backfill, before analyze()
+    has ever completed -- not a rare corner), there is no analyze horizon to
+    bound against. A fixed 30-day-off-max_captured_at bound in that state
+    reintroduces the exact false-negative this function exists to prevent:
+    a route observed only far in the past (here, 60 days before the
+    agency's latest ClickHouse data) must still resolve True."""
+    from pipeline.clickhouse import insert_updates
+
+    now = datetime.now(timezone.utc)
+    insert_updates(
+        ch_client,
+        aagency_id,
+        [("old.pb", now - timedelta(days=60), "trip_old", "平日", "10:00:00", "OLDROUTE", 1, 60)],
+    )
+    # Unrelated recent traffic so the agency's overall latest captured_at is
+    # today, not day-60 -- this is what made the old fixed-30-day bound
+    # (today - 30d) exclude OLDROUTE's day-60 observation.
+    insert_updates(
+        ch_client,
+        aagency_id,
+        [("today.pb", now, "trip_today", "平日", "11:00:00", "UNRELATED", 1, 30)],
+    )
+
+    result = await _is_route_registered("OLDROUTE", aconn, aagency_id, ch=ch_async_client)
+    assert result is True
+
+
+@pytest.mark.asyncio
 async def test_is_route_registered_returns_false_when_absent_everywhere(aconn, aagency_id, ch_client, ch_async_client):
     """A route absent from static_routes, agg_route_daily, AND raw ClickHouse
     `updates` is genuinely unregistered → False."""
