@@ -10,13 +10,12 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
 """
 
-import asyncio
 import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before
+from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
 
@@ -72,22 +71,15 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
     # no completed day / can't determine → nothing owed), which is the
     # correct degrade here.
-    async def _probe(aid: int) -> "tuple[int, date | None]":
-        try:
-            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
-        except Exception:
-            _log.warning("ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True)
-            return aid, None
-        # max_captured_at_before always returns a tz-aware value (or None) —
-        # no tzinfo-is-None fixup needed here, unlike the raw ClickHouse
-        # driver return this helper wraps.
-        return aid, None if mx is None else mx.astimezone(_JST).date()
-
-    # Independent per-agency probes on the same async client — no reason to
-    # pay N round trips serially (measured ~4s for 4 agencies) when they can
-    # overlap. The per-agency try/except degrade above is preserved: gather
-    # never raises here, each probe catches its own failure internally.
-    live_max: dict[int, "date | None"] = dict(await asyncio.gather(*(_probe(a["agency_id"]) for a in agencies)))
+    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # and preserves the try/except degrade described above; shared with
+    # pipeline.health.aggregate_freshness's identical shape.
+    probed = await max_captured_at_before_by_agency(
+        ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
+    )
+    live_max: dict[int, "date | None"] = {
+        aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
+    }
 
     rows: list[dict[str, Any]] = []
     for a in agencies:
