@@ -27,14 +27,23 @@ _log = logging.getLogger(__name__)
 # on a thread pool, so two rapid POST /internal/cron/ingest calls (a double
 # cron poke, or a caller retrying on a slow response while the first request
 # still completed server-side) schedule two independently-running tasks. Both
-# would otherwise: (a) run analyze() concurrently on what would be two
-# separate psycopg2 connections anyway (safe on that front), but (b) both
-# call ingest_live for every agency, and ClickHouse has no ON CONFLICT DO
-# NOTHING to absorb the resulting duplicate poll (see pipeline/clickhouse.py's
-# insert_updates docstring) beyond the single-file bounded check
-# recent_file_name_exists already does. An arbitrary fixed key, chosen once —
-# only needs to be distinct from any other advisory lock this codebase takes,
-# and there are none as of this writing.
+# would otherwise: (a) run analyze() concurrently on separate psycopg2
+# connections -- NOT safe: each does DELETE FROM agg_* WHERE agency_id=...
+# then re-INSERTs the same PKs in its own transaction, so the loser hits a
+# unique-violation once the winner commits, not a harmless no-op; and
+# (b) both call ingest_live for every agency, and ClickHouse has no ON
+# CONFLICT DO NOTHING to absorb the resulting duplicate poll (see
+# pipeline/clickhouse.py's insert_updates docstring) beyond the single-file
+# bounded check recent_file_name_exists already does. An arbitrary fixed
+# key, chosen once — only needs to be distinct from any other advisory lock
+# this codebase takes, and there are none as of this writing.
+#
+# Scope note: this lock only covers THIS endpoint. gtfs_pipeline.py's CLI
+# commands (cmd_ingest_live, cmd_analyze_all) -- the primary production
+# ingest path per this module's docstring above -- take no equivalent lock,
+# so a cron poke overlapping a scheduled CLI run is still unprotected.
+# Extending the lock there is a reasonable follow-up, not done here to keep
+# this fix scoped to the endpoint that motivated it.
 _CRON_LOCK_KEY = 72710001
 
 
@@ -88,12 +97,10 @@ def _run_ingest_and_analyze() -> None:
         cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
         got_lock = cur.fetchone()[0]
     conn.autocommit = False
-    if not got_lock:
-        _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
-        conn.close()
-        ch_client.close()
-        return
     try:
+        if not got_lock:
+            _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
+            return
         with conn.cursor() as cur:
             cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
             agency_ids = [r[0] for r in cur.fetchall()]
@@ -123,13 +130,9 @@ def _run_ingest_and_analyze() -> None:
         else:
             _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
-        # No explicit pg_advisory_unlock call: Postgres releases every
-        # session-level advisory lock automatically when the backend's
-        # session ends, and conn.close() ends it. Session-level (not
-        # transaction-level) was the right choice for _CRON_LOCK_KEY in the
-        # first place -- it must hold across every transaction in the loop
-        # above, not just one -- so relying on the same session-teardown
-        # semantics to release it is consistent, not a shortcut.
+        # No explicit pg_advisory_unlock call: conn.close() below ends the
+        # session, and Postgres releases every session-level advisory lock
+        # a session holds when it ends.
         #
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
