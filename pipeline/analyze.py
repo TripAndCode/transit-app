@@ -23,11 +23,13 @@ Aggregation tables produced:
 """
 
 import logging
+from datetime import timezone
 
 import psycopg2.extras
 
 from api.range import time_band_case_sql
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_inner_sql
+from pipeline.clickhouse import max_captured_at as ch_max_captured_at
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
 from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
 
 logger = logging.getLogger(__name__)
@@ -47,14 +49,19 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 
 # The deduped fact slice is materialised ONCE per agency into a TEMP TABLE (see
 # analyze()), because the dedup is the expensive full-partition scan+sort and
-# every aggregate needs it. _DEDUP_TS is the SUPERSET every builder reads from:
+# every aggregate needs it. It is the SUPERSET every builder reads from:
 # UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス — which the
 # reports + route-summary surface), plus raw captured_at (agg_route_daily needs a
 # per-day last_seen_at). The service_type-keyed aggregates (route_stats/hour/dow)
 # filter `service_type IS NOT NULL` over the materialised set — equivalent to a
 # typed dedup because service_type is part of the dedup key. NULL service is
 # coalesced to '' where it must fit a NOT NULL column; the endpoints map it back.
-_DEDUP_TS = build_dedup_inner_sql(include_captured_at=True)
+#
+# As of the ClickHouse migration, the dedup itself runs in ClickHouse
+# (build_dedup_ch_sql, the `updates` fact table's new home) and the result is
+# bulk-loaded into this same-shaped Postgres TEMP TABLE — every builder below
+# is untouched, since it only ever read the materialised temp table, never
+# `updates` directly.
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -101,13 +108,18 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
         psycopg2.extras.execute_batch(cur, sql, rows)
 
 
-def analyze(agency_id: int, conn) -> None:
+def analyze(agency_id: int, conn, ch_client) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
     Wipes this agency's agg_* rows, then INSERTs the freshly
     computed set, all in one transaction. A crash mid-run rolls back to
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
+
+    *ch_client* is the ClickHouse client used to fetch the deduped fact
+    slice (the `updates` fact table now lives in ClickHouse); every
+    aggregate builder below still reads the Postgres TEMP TABLE it's
+    loaded into, unchanged.
     """
     p = {"agency_id": agency_id, "max_delay": MAX_PLAUSIBLE_DELAY_SEC}
     # Resolved BEFORE the txn opens: _static_loaded calls conn.rollback() in
@@ -122,15 +134,68 @@ def analyze(agency_id: int, conn) -> None:
                 cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
 
         # ── Materialise the deduped fact slice ONCE ──────────────────────
-        # The dedup is a full-partition seq-scan + sort; previously every
-        # aggregate re-derived it (9 scans/agency). Build it once into a TEMP
-        # table and have all builders read from it. ON COMMIT DROP ties its
-        # lifetime to this txn (safe for the per-agency analyze loop on one
-        # connection); ANALYZE gives the planner stats for the downstream
-        # GROUP BYs.
+        # The dedup is a full-partition scan + sort; previously every
+        # aggregate re-derived it (9 scans/agency) against Postgres. `updates`
+        # now lives in ClickHouse, so the dedup runs there instead and the
+        # result is bulk-loaded into the same-shaped Postgres TEMP TABLE every
+        # builder below reads from — unchanged from before this migration.
+        # ON COMMIT DROP ties the temp table's lifetime to this txn (safe for
+        # the per-agency analyze loop on one connection); ANALYZE gives the
+        # planner stats for the downstream GROUP BYs.
+        ch_sql = build_dedup_ch_sql(include_captured_at=True)
+        # Column order must match build_dedup_ch_sql's SELECT list exactly:
+        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, last_captured_at
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
-            cur.execute(f"CREATE TEMP TABLE _analyze_deduped ON COMMIT DROP AS ({_DEDUP_TS})", p)
+            cur.execute(
+                """
+                CREATE TEMP TABLE _analyze_deduped (
+                    route_code text, service_type text, scheduled_time time,
+                    trip_id text, date date, stop_sequence int, dep_delay int,
+                    captured_at timestamptz
+                ) ON COMMIT DROP
+                """
+            )
+            # `query_row_block_stream` (not `query`) so we never hold the whole
+            # dedup result in memory at once. `.query()` buffers the ENTIRE
+            # result as a Python list (`result_rows`) before returning it, and
+            # the tzinfo fixup below used to build a SECOND full-size list from
+            # that — two live copies of a set measured at 5.3M rows / 1.6-3.4GB
+            # for agency 8. Streaming yields one block (a list of row-tuples)
+            # at a time, so peak memory is bounded by one block, not the whole
+            # table. Each block is tzinfo-fixed and INSERTed independently;
+            # `execute_values`'s own page_size=10_000 chunking of the Postgres
+            # side is unaffected by how the ClickHouse side is fetched.
+            with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
+                for block in stream:
+                    if not block:
+                        continue
+                    # clickhouse-connect returns DateTime64(0, 'UTC') columns as
+                    # NAIVE Python datetimes (its default tz_mode is
+                    # "naive_utc") that mean UTC. psycopg2 sends a naive
+                    # datetime to Postgres as a plain literal, which Postgres
+                    # then interprets in the SESSION's timezone — and every
+                    # real analyze() caller (gtfs_pipeline._get_conn, the cron
+                    # endpoint) pins `SET TIME ZONE 'Asia/Tokyo'`. Without this
+                    # fixup, a ClickHouse timestamp that's naive-but-means-UTC
+                    # would get reinterpreted as JST and land 9h early. Same
+                    # guard as pipeline/clickhouse.py's max_captured_at /
+                    # max_captured_at_before. last_captured_at is the last
+                    # element of each row (see build_dedup_ch_sql's SELECT
+                    # list above).
+                    rows = [
+                        (
+                            *r[:-1],
+                            r[-1].replace(tzinfo=timezone.utc) if r[-1] is not None and r[-1].tzinfo is None else r[-1],
+                        )
+                        for r in block
+                    ]
+                    psycopg2.extras.execute_values(
+                        cur,
+                        "INSERT INTO _analyze_deduped VALUES %s",
+                        rows,
+                        page_size=10_000,
+                    )
             cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────
@@ -451,21 +516,34 @@ def analyze(agency_id: int, conn) -> None:
         # stale TripUpdate spikes, |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC — the same
         # rows the dedup clamp drops). Persisted (not just logged) so the app can
         # surface a feed-health banner. Agency-wide — does NOT require static data,
-        # so it runs outside the has_static block. One scan of the agency partition.
+        # so it runs outside the has_static block. Pure aggregation (no static-table
+        # JOIN), so it queries ClickHouse directly and bulk-loads the small per-day
+        # result into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare
+        # toDate() — same JST-not-UTC reasoning as everywhere else in this
+        # migration (see build_dedup_ch_sql's docstring in pipeline/db.py).
+        ch_feed_health = ch_client.query(
+            """
+            SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
+                   count() AS raw_samples,
+                   countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count
+            FROM updates
+            WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+            GROUP BY date
+            """,
+            parameters={"agency_id": agency_id, "max_delay": p["max_delay"]},
+        )
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count)
-                SELECT %(agency_id)s, captured_at::date,
-                       COUNT(*),
-                       COUNT(*) FILTER (WHERE ABS(dep_delay) > %(max_delay)s)
-                FROM updates
-                WHERE agency_id = %(agency_id)s AND dep_delay IS NOT NULL
-                GROUP BY captured_at::date
-                """,
-                p,
-            )
-            logger.info(f"  agg_feed_health: {cur.rowcount} rows")
+            if ch_feed_health.result_rows:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES %s",
+                    [(agency_id, *row) for row in ch_feed_health.result_rows],
+                )
+            # len(result_rows), not cur.rowcount: when ClickHouse returns no
+            # rows, no statement runs on this cursor, so cur.rowcount is the
+            # psycopg2 "nothing executed" sentinel -1 -- misleading in the
+            # one operational log line that confirms this builder ran.
+            logger.info(f"  agg_feed_health: {len(ch_feed_health.result_rows)} rows")
             cur.execute(
                 "SELECT COALESCE(SUM(clamp_count), 0) FROM agg_feed_health WHERE agency_id = %(agency_id)s",
                 p,
@@ -478,7 +556,7 @@ def analyze(agency_id: int, conn) -> None:
 
         # ── agg_stop_daily (per-stop, per-day delay; powers the heatmap) ──
         # Reads the deduped temp (one row per trip-stop event, latest estimate,
-        # already clamped via build_dedup_inner_sql) — NOT raw `updates`. So
+        # already clamped via build_dedup_ch_sql) — NOT raw `updates`. So
         # `samples` counts observations, not feed polls (a frozen/heavily-polled
         # trip no longer inflates the count), and the per-stop mean matches the
         # reports/route-summary surfaces, which read the same deduped set.
@@ -511,21 +589,50 @@ def analyze(agency_id: int, conn) -> None:
                 logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
 
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
-            # Raw `updates` is fine here: it's a DISTINCT route_code set, unaffected
-            # by poll duplication, and doesn't read dep_delay.
-            sql = """
-                INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
-                SELECT %(agency_id)s, sst.stop_id,
-                       string_agg(DISTINCT u.route_code, ',' ORDER BY u.route_code)
-                FROM updates u
-                JOIN static_stop_times sst
-                  ON sst.agency_id = %(agency_id)s
-                 AND sst.trip_id = u.trip_id
-                 AND sst.stop_sequence = u.stop_sequence
-                WHERE u.agency_id = %(agency_id)s
-                GROUP BY sst.stop_id
-            """
+            # Needs a JOIN against Postgres static_stop_times, so — mirroring the
+            # _analyze_deduped pattern — fetch the distinct raw keys from
+            # ClickHouse and bulk-load them into a small Postgres TEMP TABLE,
+            # then run the JOIN against that instead of raw `updates`. It's a
+            # DISTINCT route_code set, unaffected by poll duplication, and
+            # doesn't read dep_delay, so no clamp/dedup is needed on this side.
+            #
+            # Deliberately NOT derived from _analyze_deduped (a cheaper,
+            # single-scan alternative tried and reverted): _analyze_deduped is
+            # pre-filtered by the dedup's clamp (`dep_delay IS NOT NULL AND
+            # BETWEEN -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`),
+            # so a (route_code, trip_id, stop_sequence) whose every observation
+            # was NULL/implausible would silently drop out of stop coverage —
+            # measured on real agency-8 data at ~3.7% of keys, 39 stops losing
+            # ALL route coverage. `agg_stop_routes` is about which routes serve
+            # a stop, independent of whether any of those observations happened
+            # to carry a numeric delay — the extra ClickHouse round-trip
+            # (measured ~113s on agency 8's 336M rows) is the correctness-over-
+            # perf trade this table's semantics require.
+            ch_keys = ch_client.query(
+                "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates WHERE agency_id = {agency_id:UInt16}",
+                parameters={"agency_id": agency_id},
+            )
             with conn.cursor() as cur:
+                cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
+                cur.execute(
+                    "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
+                    "ON COMMIT DROP"
+                )
+                if ch_keys.result_rows:
+                    psycopg2.extras.execute_values(
+                        cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows, page_size=10_000
+                    )
+                sql = """
+                    INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
+                    SELECT %(agency_id)s, sst.stop_id,
+                           string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
+                    FROM _analyze_raw_keys k
+                    JOIN static_stop_times sst
+                      ON sst.agency_id = %(agency_id)s
+                     AND sst.trip_id = k.trip_id
+                     AND sst.stop_sequence = k.stop_sequence
+                    GROUP BY sst.stop_id
+                """
                 cur.execute(sql, p)
                 logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
 
@@ -560,10 +667,11 @@ def analyze(agency_id: int, conn) -> None:
         # ── agg_meta: audit record of this build (NOT load-bearing) ──────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
         # The freshness gate derives staleness from the aggs themselves; this
-        # only answers "when was this agency last analyzed".
+        # only answers "when was this agency last analyzed". `updates` now
+        # lives in ClickHouse, so this reuses the same max_captured_at helper
+        # Task 4 built and Task 5 already uses elsewhere (pipeline/freshness.py).
+        max_cap = ch_max_captured_at(ch_client, agency_id)
         with conn.cursor() as cur:
-            cur.execute("SELECT MAX(captured_at) FROM updates WHERE agency_id = %(agency_id)s", p)
-            max_cap = cur.fetchone()[0]
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at) "
                 "VALUES (%s, now(), %s) "

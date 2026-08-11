@@ -5,12 +5,16 @@ pipeline/freshness.py and db/migrate.py. Same SQL logic, different adapter —
 the CLI keeps using the sync versions; the API calls these.
 """
 
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
 from db.migrate import _versions_on_disk
+
+_log = logging.getLogger(__name__)
 
 # ── Migration status ─────────────────────────────────────────────────────
 
@@ -57,23 +61,6 @@ class AgencyFreshness:
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily GROUP BY agency_id"
 
-# LATERAL per agency (not a bare GROUP BY over all of `updates`) so each probe
-# is an agency_id-equality + MAX — an index-backed backward scan on
-# idx_updates_agency_at — instead of a full scan/aggregate of the whole
-# fact table. Only active agencies are probed (WHERE deleted_at IS NULL).
-_LIVE_MAX_SQL = """
-    SELECT a.agency_id, (m.mx AT TIME ZONE 'Asia/Tokyo')::date AS d
-    FROM agencies a
-    CROSS JOIN LATERAL (
-        SELECT MAX(u.captured_at) AS mx
-        FROM updates u
-        WHERE u.agency_id = a.agency_id
-          AND u.captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
-                              AT TIME ZONE 'Asia/Tokyo'
-    ) m
-    WHERE a.deleted_at IS NULL
-"""
-
 _FEED_HEALTH_SQL = """
     SELECT agency_id, SUM(raw_samples) AS raw, SUM(clamp_count) AS clamp
     FROM agg_feed_health
@@ -81,12 +68,18 @@ _FEED_HEALTH_SQL = """
     GROUP BY agency_id
 """
 
+_JST = ZoneInfo("Asia/Tokyo")
 
-async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]:
-    """Per-agency freshness using agg_meta, agg_route_daily, and updates."""
+
+async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
+    """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
+    from api.clickhouse import max_captured_at_before
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
     )
@@ -94,8 +87,44 @@ async def aggregate_freshness(conn: asyncpg.Connection) -> list[AgencyFreshness]
     meta = {r["agency_id"]: r["analyzed_at"] for r in meta_rows}
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
-    live_max_rows = await conn.fetch(_LIVE_MAX_SQL)
-    live_max = {r["agency_id"]: r["d"] for r in live_max_rows}
+
+    # One indexed read per agency (`api.clickhouse.max_captured_at_before` —
+    # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
+    # the whole `updates` table: the GROUP BY form has no `agency_id`
+    # predicate at all, so it reads the `captured_at` column for every row in
+    # the table (measured 46.5s / 574M rows on real dev data) — worse than
+    # even a per-agency full scan. `agencies` here is already filtered to
+    # non-deleted agencies (the query above), so no separate active-id filter
+    # is needed. The "only a COMPLETED day counts" cutoff is baked into the
+    # helper's `before` predicate (see its docstring and `pipeline.freshness`'s
+    # module docstring) — filtering BEFORE taking the max, not a Python-side
+    # accept/reject of an unconditional max, which would silently produce
+    # "no completed day" for any agency ingesting today too (the normal,
+    # healthy, continuously-ingesting case).
+    #
+    # This probe backs ONLY the CH-derived fields below (is_stale/data_to/
+    # agg_behind_days) — every other field (last_analyzed_at, analyze_age_hours,
+    # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
+    # must not fail the whole call: degrade that agency's live_max to None and
+    # keep going, same shape as pipeline.reports.network.compute_network_summary's
+    # try/except around this same per-agency probe. is_stale(agg_day, None) is
+    # "not stale" (see its docstring), which is the correct degrade here.
+    live_max: dict[int, date | None] = {}
+    for a in agencies:
+        aid = a["agency_id"]
+        try:
+            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        except Exception:
+            _log.warning(
+                "ClickHouse freshness probe failed for agency %s — degrading is_stale/data_to", aid, exc_info=True
+            )
+            live_max[aid] = None
+            continue
+        if mx is None:
+            live_max[aid] = None
+            continue
+        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
+        live_max[aid] = mx_utc.astimezone(_JST).date()
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

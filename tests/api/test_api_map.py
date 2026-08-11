@@ -47,9 +47,28 @@ async def map_client(map_app):
         yield client, agency_id
 
 
+@pytest.fixture
+async def map_app_ch(map_app, ch_async_client):
+    """`map_app` with `app.state.ch_client` wired to a real async ClickHouse
+    client (Task 8: /delays/live, /route-shape, /today/route-summary,
+    /today/route/*/trips and /today/route/*/stop-profile now read live
+    `updates` from ClickHouse instead of Postgres). Tests using this fixture
+    require `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
+    app, agency_id = map_app
+    app.state.ch_client = ch_async_client
+    yield app, agency_id
+
+
+@pytest.fixture
+async def map_client_ch(map_app_ch):
+    app, agency_id = map_app_ch
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client, agency_id
+
+
 @pytest.mark.asyncio
-async def test_live_delays_empty(map_client):
-    client, agency_id = map_client
+async def test_live_delays_empty(map_client_ch):
+    client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/delays/live")
     assert resp.status_code == 200
     payload = resp.json()
@@ -57,19 +76,19 @@ async def test_live_delays_empty(map_client):
 
 
 @pytest.mark.asyncio
-async def test_live_delays_unknown_agency(map_client):
-    client, _ = map_client
+async def test_live_delays_unknown_agency(map_client_ch):
+    client, _ = map_client_ch
     resp = await client.get("/api/99999/delays/live")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_live_delays_is_rate_limited_after_repeated_requests(map_client):
+async def test_live_delays_is_rate_limited_after_repeated_requests(map_client_ch):
     """map.py's endpoints must be throttled like every other public read
     router (overview/network/reports/ask) — unauthenticated callers can
     otherwise hit the heaviest live-scan endpoints without limit. Doesn't
     assert the exact configured threshold, only that the protection exists."""
-    client, agency_id = map_client
+    client, agency_id = map_client_ch
     statuses = []
     for _ in range(65):
         resp = await client.get(f"/api/{agency_id}/delays/live")
@@ -77,6 +96,106 @@ async def test_live_delays_is_rate_limited_after_repeated_requests(map_client):
         if resp.status_code == 429:
             break
     assert 429 in statuses, f"never throttled after 65 requests: {statuses}"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_app_ch, ch_client):
+    """A single GTFS-RT poll commonly reports dep_delay for more than one of
+    a trip's upcoming stops at once (confirmed on real data: a propagated
+    delay estimate spanning several future StopTimeUpdates in one TripUpdate
+    message). live_delays dedups by trip_id ALONE (no stop_sequence in its
+    group key), so two such rows tie on the argMax rewrite's dedup key
+    (captured_at, file_name) -- `-toInt32(stop_sequence)` in the tiebreak
+    tuple breaks that residual tie deterministically: the LOWEST
+    stop_sequence (the soonest upcoming stop) wins, not whatever a bare
+    GROUP BY happens to return first."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # Same poll: identical captured_at (both NOW() calls resolve to the
+        # same transaction timestamp) AND identical file_name, two different
+        # stop_sequences of the SAME trip.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_TIE', 'R_TIE', 1, 60, NOW(), 'same.pb', 'weekday', '10:05:00'), "
+            "       ($1, 'T_TIE', 'R_TIE', 2, 300, NOW(), 'same.pb', 'weekday', '10:15:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    row = next(r for r in rows if r["trip_id"] == "T_TIE")
+    # stop_sequence isn't in the response, but its winning values are:
+    # stop_sequence=1 (the lower one) must win the tie, not stop_sequence=2.
+    assert row["dep_delay"] == 60
+    assert row["scheduled_time"] == "10:05:00"
+    assert row["route_code"] == "R_TIE"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_normalizes_5char_scheduled_time_to_hhmmss(map_app_ch, ch_client):
+    """aomori_regex-strategy agencies write a 5-char "HH:MM" scheduled_time
+    (no seconds) to ClickHouse, unlike static_join's 8-char "HH:MM:SS" (see
+    pipeline/strategies/aomori_regex.py). Before Postgres's TIME column was
+    replaced by a plain ClickHouse String, every agency's wire format was
+    uniform "HH:MM:SS" regardless of ingest strategy. This pins that
+    /delays/live restores that uniform contract rather than exposing the
+    per-strategy storage format to API consumers."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    insert_updates(
+        ch_client,
+        agency_id=agency_id,
+        rows=[("aomori.pb", "2026-05-09T10:00:00Z", "T_5CHAR", "weekday", "10:05", "R_5CHAR", 1, 45)],
+    )
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    row = next(r for r in rows if r["trip_id"] == "T_5CHAR")
+    assert row["scheduled_time"] == "10:05:00"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_client):
+    """Regression for a 500: the freshness probe (`latest_ts`) has no
+    `dep_delay` filter, but the rows query adds `AND dep_delay IS NOT NULL`.
+    When the agency's only/latest observation has a NULL dep_delay (routine —
+    arrival-only StopTimeUpdates, or a degraded poll), `latest_ts` resolves
+    to a real timestamp while the rows query legitimately matches zero rows.
+    clickhouse-connect returns `column_names == ()` for that zero-row result,
+    so deriving `cols.index("captured_at")` up front raised an unhandled
+    `ValueError` -> 500. This differs from `test_live_delays_empty` (zero
+    rows at all, which short-circuits on `latest_ts is None` before ever
+    running the rows query) -- here `latest_ts` IS set, and the crash was in
+    the second query's row-building code."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_NULL', 'R_NULL', 1, NULL, NOW(), 'null.pb', 'weekday', '10:05:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["rows"] == []
+    assert payload["latest_captured_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -215,13 +334,33 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
     assert len(feats) == 2, feats  # would be 1 under an oversized eps
 
 
+async def _seed_route_existence(conn, agency_id, route_code, service_type="weekday"):
+    """Minimal agg_route_daily row so route_shape/route_trips/route_stop_profile's
+    existence precheck (map.py) passes for route_code -- real
+    avg/worst/trips/samples figures don't matter here, only that a row
+    exists. Checks agg_route_daily specifically, not agg_route_stats: the
+    latter is built with a >20-lifetime-sample threshold and a NOT NULL
+    service_type filter (pipeline/analyze.py), making it a lossy existence
+    oracle, whereas agg_route_daily (what today_route_summary's route list
+    is built from) has no such filter."""
+    await conn.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, $2, $3, 0, 0, 1, 1, NOW())",
+        agency_id,
+        route_code,
+        service_type,
+    )
+
+
 @pytest.mark.asyncio
-async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
+async def test_route_shape_returns_geometry_when_shapes_loaded(map_app_ch, ch_client):
     """When static_trips.shape_id resolves to a static_shapes row, the
     endpoint returns a GeoJSON LineString."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
             "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1')",
@@ -254,6 +393,9 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
             "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(140.75, 40.83)]), 4326))",
             agency_id,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
@@ -270,14 +412,282 @@ async def test_route_shape_returns_geometry_when_shapes_loaded(map_app):
     assert 39.0 < lat < 42.0
 
 
-async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None):
+@pytest.mark.asyncio
+async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is_empty(map_app_ch, ch_client):
+    """Pre-ClickHouse-migration behavior: a route with real observations,
+    all outside the caller's ctx window (default: last 30 days), must still
+    render its topology (geometry + unobserved_stops) even though there is
+    zero delay data to show for the selected window.
+
+    Commit 724ab7e bounded the shape-vote query by ctx so it stops
+    scanning the route's entire history on every request (was 32.1s on real
+    data). That fix has a side effect: if the ctx window itself has zero
+    observations for the route (e.g. it only ran on days outside the
+    selected range), the ctx-bounded dedup query returns nothing, so there
+    is no shape-vote signal and `chosen_shape_id` stays None — geometry and
+    unobserved_stops silently go empty too, even though pre-migration the
+    endpoint would still draw the route from its all-time shape. The
+    fallback shape-vote query (fired only on this empty-window edge case)
+    restores that behavior — bounded to the last 30 days off the agency's
+    OWN latest captured_at (not an unbounded all-time scan: a security
+    review found the bound must be tight enough to matter, since no agency
+    yet has more than ~130 days of history for a wider bound to exclude).
+    The endpoint's existence precheck (at the top of the function, ahead of
+    ANY ClickHouse call, not just this fallback) means a fabricated
+    route_code never reaches ClickHouse at all -- R1 needs an agg_route_daily
+    row to pass it. The 60-day-old seed below is still within 30 days of the
+    AGENCY's latest activity (its own captured_at, the only row this agency
+    has), so it's still found."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
+            "       ($1, 'ST2', '次の停留所', 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
+            agency_id,
+        )
+        # Observations exist for this route, but all 60 days ago — well
+        # outside the endpoint's default 30-day ctx window.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW() - INTERVAL '60 days', 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW() - INTERVAL '60 days', 'test.pb', 'weekday', '09:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) "
+            "VALUES ($1, 'S1', "
+            "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(140.75, 40.83)]), 4326))",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # No from/to -> default ctx (last 30 days), which excludes the
+        # 60-day-old observations seeded above.
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["route"] == "R1"
+    # Delay data is correctly empty for the (empty) selected window.
+    assert body["stops"] == [], body
+    # But topology still renders from the bounded fallback shape vote.
+    assert body["geometry"] is not None, body
+    assert body["geometry"]["type"] == "LineString"
+    assert len(body["unobserved_stops"]) >= 2, body
+
+
+@pytest.mark.asyncio
+async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, ch_client):
+    """The shape-vote's per-trip weights are now derived from the dedup
+    query's own rows (perf(map) b16fd70), which are filtered by `dep_delay
+    IS NOT NULL` before the argMax GROUP BY (trip_id, stop_sequence) dedup —
+    the same filter-before-dedup ordering used everywhere else in this
+    codebase (see `pipeline/db.py::build_dedup_ch_sql`). A trip whose every observed
+    StopTimeUpdate is arrival-only (no `dep_delay` — common at a route's
+    terminal stop in GTFS-RT) therefore contributes ZERO weight to the vote,
+    not the full raw-row count the old separate `COUNT(*)` query would have
+    given it. This is a disclosed, accepted trade-off, not a bug — but the
+    vote must still land on the shape with real weighted support rather
+    than getting thrown off (e.g. picking the NULL-only shape, or None)
+    by the presence of arrival-only trips on a competing shape variant.
+
+    Fixture: shape S1 has two trips (T1, T2) with real dep_delay data over
+    three stops each (weight 6); shape S2 has one trip (T3) that is
+    arrival-only -- every one of its rows has NULL dep_delay, so it
+    contributes zero rows to the dedup scan and zero vote weight. The vote
+    must still pick S1 (the only shape with any weight), and the returned
+    per-stop stats must reflect only T1/T2's real delay data."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S1'), ($1, 'T3', 'R1', 'S2')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', 'A', 40.80, 140.70, ST_SetSRID(ST_MakePoint(140.70, 40.80), 4326)), "
+            "       ($1, 'ST2', 'B', 40.81, 140.71, ST_SetSRID(ST_MakePoint(140.71, 40.81), 4326)), "
+            "       ($1, 'ST3', 'C', 40.82, 140.72, ST_SetSRID(ST_MakePoint(140.72, 40.82), 4326)), "
+            "       ($1, 'ST4', 'D', 45.00, 150.00, ST_SetSRID(ST_MakePoint(150.00, 45.00), 4326)), "
+            "       ($1, 'ST5', 'E', 45.01, 150.01, ST_SetSRID(ST_MakePoint(150.01, 45.01), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES "
+            "($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00'), "
+            "($1, 'T1', 3, 'ST3', '09:10:00', '09:10:00'), "
+            "($1, 'T2', 1, 'ST1', '10:00:00', '10:00:00'), "
+            "($1, 'T2', 2, 'ST2', '10:05:00', '10:05:00'), "
+            "($1, 'T2', 3, 'ST3', '10:10:00', '10:10:00'), "
+            "($1, 'T3', 1, 'ST4', '11:00:00', '11:00:00'), "
+            "($1, 'T3', 2, 'ST5', '11:05:00', '11:05:00')",
+            agency_id,
+        )
+        # T1/T2: real dep_delay data (shape S1). T3: NULL dep_delay on every
+        # row (arrival-only StopTimeUpdates, no departure delay ever
+        # reported) -- shape S2's only trip, so S2 gets zero vote weight.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) VALUES "
+            "($1, 'T1', 'R1', 1, 30, NOW(), 'f1.pb', 'weekday', '09:00:00'), "
+            "($1, 'T1', 'R1', 2, 60, NOW(), 'f1.pb', 'weekday', '09:05:00'), "
+            "($1, 'T1', 'R1', 3, 90, NOW(), 'f1.pb', 'weekday', '09:10:00'), "
+            "($1, 'T2', 'R1', 1, 40, NOW(), 'f2.pb', 'weekday', '10:00:00'), "
+            "($1, 'T2', 'R1', 2, 70, NOW(), 'f2.pb', 'weekday', '10:05:00'), "
+            "($1, 'T2', 'R1', 3, 100, NOW(), 'f2.pb', 'weekday', '10:10:00'), "
+            "($1, 'T3', 'R1', 1, NULL, NOW(), 'f3.pb', 'weekday', '11:00:00'), "
+            "($1, 'T3', 'R1', 2, NULL, NOW(), 'f3.pb', 'weekday', '11:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) VALUES "
+            "($1, 'S1', ST_SetSRID(ST_MakeLine(ARRAY["
+            "ST_MakePoint(140.70, 40.80), ST_MakePoint(140.71, 40.81), ST_MakePoint(140.72, 40.82)]), 4326)), "
+            "($1, 'S2', ST_SetSRID(ST_MakeLine(ARRAY["
+            "ST_MakePoint(150.00, 45.00), ST_MakePoint(150.01, 45.01)]), 4326))",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # The vote landed on S1 (real weighted support), not S2 (all-NULL, zero
+    # weight) and not None -- confirmed via S1's distinctive coordinates.
+    assert body["geometry"] is not None, body
+    coords = body["geometry"]["coordinates"]
+    assert coords[0] == [140.70, 40.80], body
+    assert coords[-1] == [140.72, 40.82], body
+    # Per-stop stats reflect only T1/T2's real delay data (2 samples/stop);
+    # T3's arrival-only rows never entered the dedup scan at all.
+    stops_by_seq = {s["stop_sequence"]: s for s in body["stops"]}
+    assert set(stops_by_seq) == {1, 2, 3}, body
+    for s in stops_by_seq.values():
+        assert s["samples"] == 2, body
+
+
+@pytest.mark.asyncio
+async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client):
+    """Two shape variants with EQUAL vote weight (one trip each, same number
+    of deduped stop-events) must resolve to the same shape on every request,
+    not whichever `shape_link_rows`' unordered Postgres query happens to
+    return first. `chosen_shape_id = max(shape_counts, key=lambda sid:
+    (shape_counts[sid], sid))` breaks the tie on `shape_id` itself, so the
+    lexicographically LARGER id (`S_Z` > `S_A`) must always win here."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R_TIE2")
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "VALUES ($1, 'TA', 'R_TIE2', 'S_A'), ($1, 'TZ', 'R_TIE2', 'S_Z')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) VALUES "
+            "($1, 'S_A', ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(10.0, 10.0), ST_MakePoint(10.1, 10.1)]), 4326)), "
+            "($1, 'S_Z', ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(20.0, 20.0), ST_MakePoint(20.1, 20.1)]), 4326))",
+            agency_id,
+        )
+        # Equal weight: one trip per shape, one dep_delay-bearing row each.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) VALUES "
+            "($1, 'TA', 'R_TIE2', 1, 30, NOW(), 'a.pb', 'weekday', '09:00:00'), "
+            "($1, 'TZ', 'R_TIE2', 1, 30, NOW(), 'z.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R_TIE2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["geometry"] is not None, body
+    # S_Z's distinctive coordinates confirm it (not S_A) won the tie.
+    assert body["geometry"]["coordinates"][0] == [20.0, 20.0], body
+
+
+class _ExplodingChClient:
+    """Stand-in ``ch`` that fails the test if route_shape ever reaches
+    ClickHouse -- proves the agg_route_daily existence precheck at the TOP
+    of the function short-circuits before the ctx-bounded dedup query, not
+    just that the two happen to produce the same output. A prior version of
+    this precheck sat inside the empty-window fallback branch instead, so a
+    fabricated route_code under a wide ctx window still paid for the
+    ctx-bounded dedup query's full cost (measured 336,368,237 rows / 923 MiB
+    / 2.35s on real data) before ever reaching the precheck -- an assertion
+    on the response body alone can't tell those two placements apart."""
+
+    async def query(self, *args, **kwargs):
+        raise AssertionError("agg_route_daily precheck should have short-circuited before any ClickHouse query")
+
+
+@pytest.mark.asyncio
+async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
+    """A fabricated/never-observed route_code must resolve to the same empty
+    shape as any other "not found" response, without ever touching ClickHouse
+    (see _ExplodingChClient). No agency/CH seeding at all: this agency has
+    zero agg_route_daily rows."""
+    app, agency_id = map_app
+    app.state.ch_client = _ExplodingChClient()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=NOPE&from=2025-01-01&to=2026-12-31")
+    assert resp.status_code == 200
+    assert resp.json() == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
+
+
+async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
     baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
+    Always inserts an agg_route_stats row for (agency_id, route_code,
+    service_type), even when baseline is None (NULL avg_min/p90_min/samples
+    in that case) — needed for route-summary's baseline-lookup tests, not for
+    existence: route_trips/route_stop_profile/route_shape's existence
+    precheck (map.py's anonymous-scan hardening) checks agg_route_daily, not
+    agg_route_stats (the latter is a lossy existence oracle — see
+    _seed_route_existence's docstring) — which the unconditional
+    agg_route_daily insert below already covers for any route seeded via
+    this helper.
+    ch_client: optional sync ClickHouse client — when given, the raw rows
+    seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
+    (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile
+    drilldowns and route-summary's freshness header now read live `updates`
+    from ClickHouse (Task 8), not Postgres.
 
-    Seeds raw `updates` (for the trips/stop-profile drilldowns, which still read
-    them) AND the precomputed `agg_route_daily` row the route-summary endpoint now
-    reads — computed here from day_rows rather than via a full analyze(), so the
-    hand-set baseline in agg_route_stats isn't clobbered. analyze()'s own builder
+    Seeds raw `updates` (for the trips/stop-profile drilldowns, which read
+    them from ClickHouse when `ch_client` is given) AND the precomputed
+    `agg_route_daily` row the route-summary endpoint now reads — computed
+    here from day_rows rather than via a full analyze(), so the hand-set
+    baseline in agg_route_stats isn't clobbered. analyze()'s own builder
     is covered separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
@@ -319,23 +729,26 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
             len(delays),
             seeded_at,
         )
-        if baseline is not None:
-            avg_min, p90_min, samples = baseline
-            await conn.execute(
-                "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-                "avg_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6)",
-                agency_id,
-                route_code,
-                service_type,
-                avg_min,
-                p90_min,
-                samples,
-            )
+        avg_min, p90_min, samples = baseline if baseline is not None else (None, None, None)
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
+            "avg_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$6)",
+            agency_id,
+            route_code,
+            service_type,
+            avg_min,
+            p90_min,
+            samples,
+        )
+    if ch_client is not None:
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, agency_id)
 
 
 @pytest.mark.asyncio
-async def test_route_summary_buckets_and_deviation(map_app):
-    app, agency_id = map_app
+async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Anomaly: today avg 420s, baseline avg 120s (2min) p90 360s (6min), 40 samples
     await _seed_route(
@@ -345,6 +758,7 @@ async def test_route_summary_buckets_and_deviation(map_app):
         "平日",
         [(f"t{i}", 1, 420, "10:00") for i in range(40)],
         baseline=(2.0, 6.0, 500),
+        ch_client=ch_client,
     )
     # No baseline route
     await _seed_route(
@@ -354,6 +768,7 @@ async def test_route_summary_buckets_and_deviation(map_app):
         "平日",
         [(f"n{i}", 1, 300, "11:00") for i in range(40)],
         baseline=None,
+        ch_client=ch_client,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -376,14 +791,22 @@ async def test_route_summary_buckets_and_deviation(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_null_service_uses_route_grain_baseline(map_app):
+async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, ch_client):
     """A NULL-service daily row (stored as '') has no per-(route,service_type)
     baseline, but the route has typed history — it should fall back to the
     route-grain baseline instead of being stuck as no_baseline (Hiroshima case)."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Today's row is NULL-service ('') and clearly anomalous (420s vs 360s p90).
-    await _seed_route(pool, agency_id, "R_NULLSVC", "", [(f"x{i}", 1, 420, "10:00") for i in range(40)], baseline=None)
+    await _seed_route(
+        pool,
+        agency_id,
+        "R_NULLSVC",
+        "",
+        [(f"x{i}", 1, 420, "10:00") for i in range(40)],
+        baseline=None,
+        ch_client=ch_client,
+    )
     # The route DOES have a typed (平日) baseline in agg_route_stats.
     async with pool.acquire() as conn:
         await conn.execute(
@@ -400,8 +823,8 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_low_confidence_caps_anomaly(map_app):
-    app, agency_id = map_app
+async def test_route_summary_low_confidence_caps_anomaly(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # Would be anomaly (avg 420 > p90 360) but only 5 obs -> watch + low_confidence
     await _seed_route(
@@ -411,6 +834,7 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app):
         "平日",
         [(f"thin{i}", 1, 420, "10:00") for i in range(5)],
         baseline=(2.0, 6.0, 500),
+        ch_client=ch_client,
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
@@ -420,8 +844,8 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_trips_drilldown(map_app):
-    app, agency_id = map_app
+async def test_route_trips_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # trip A: two stops, delays 600 & 540 -> avg 570; trip B: one stop, 120
     await _seed_route(
@@ -430,6 +854,7 @@ async def test_route_trips_drilldown(map_app):
         "R_DRILL",
         "平日",
         [("A", 1, 600, "08:40"), ("A", 2, 540, "08:40"), ("B", 1, 120, "12:05")],
+        ch_client=ch_client,
     )
     async with pool.acquire() as conn:
         await conn.execute(
@@ -448,16 +873,54 @@ async def test_route_trips_drilldown(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_trips_empty_when_no_data(map_client):
-    client, agency_id = map_client
+async def test_route_trips_empty_when_no_data(map_client_ch):
+    client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
     assert resp.status_code == 200
     assert resp.json() == {"date": None, "trips": []}
 
 
 @pytest.mark.asyncio
-async def test_route_stop_profile_drilldown(map_app):
-    app, agency_id = map_app
+async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
+    """A route that DOES exist (has an agg_route_daily row, so it passes the
+    existence precheck) but whose only ClickHouse observations are older
+    than the 30-day bound anchored to the agency's own latest activity must
+    resolve to the empty response, not resurrect that stale data as if it
+    were "today's". Regression for the pre-bound behavior, which scanned all
+    history and would have returned the 60-day-old trip as current."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # Sets this agency's latest captured_at to "now" via an unrelated route.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
+            agency_id,
+        )
+        # R_STALE exists (has an agg_route_daily row, so it passes the
+        # precheck) but its only observations are 60 days old -- outside the
+        # 30-day bound anchored to the agency's latest activity seeded above.
+        await _seed_route_existence(conn, agency_id, "R_STALE")
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_STALE', 'R_STALE', 1, 600, NOW() - INTERVAL '60 days', 'stale.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_STALE/trips")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "trips": []}
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
     pool = app.state.pool
     # seq 1: delays 60 & 120 -> avg 90; seq 2: 600 -> avg 600 (bottleneck)
     await _seed_route(
@@ -466,6 +929,7 @@ async def test_route_stop_profile_drilldown(map_app):
         "R_PROF",
         "平日",
         [("A", 1, 60, "08:40"), ("B", 1, 120, "09:00"), ("A", 2, 600, "08:40")],
+        ch_client=ch_client,
     )
     async with pool.acquire() as conn:
         await conn.execute(
@@ -491,12 +955,13 @@ async def test_route_stop_profile_drilldown(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
+async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_ch, ch_client):
     """If trips have a shape_id but static_shapes has no matching row,
     geometry is null and stops are still populated."""
-    app, agency_id = map_app
+    app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
         # Same setup as the positive test, but DO NOT insert into static_shapes
         await conn.execute(
             "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', 'S1')",
@@ -521,6 +986,9 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
             "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
             agency_id,
         )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
@@ -529,6 +997,57 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app):
     body = resp.json()
     assert body["geometry"] is None, body
     assert len(body["stops"]) >= 2
+
+
+@pytest.mark.asyncio
+async def test_route_shape_returns_stops_when_no_trip_has_a_shape_id(map_app_ch, ch_client):
+    """shapes.txt is optional in GTFS -- an agency that never loaded one has
+    static_trips.shape_id NULL for every trip, so chosen_shape_id is always
+    None. Regression: gating the per-stop stats query on chosen_shape_id
+    (an earlier version of the route_shape query-bounding fix did) silently
+    dropped `stops` to `[]` for every route on such an agency -- main only
+    ever used shape_id to PIN stops to one variant when multiple existed,
+    never to gate whether stats ran at all."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        # No shape_id on this trip at all (NULL, not just unresolved geometry).
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', 'R1', NULL)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
+            "       ($1, 'ST2', '次の停留所', 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["geometry"] is None, body
+    assert len(body["stops"]) >= 2, "stats query must run even with no shape_id at all"
+    assert {s["avg_min"] for s in body["stops"]} != {None}
 
 
 async def _seed_heatmap(pool, agency_id):
@@ -561,23 +1080,39 @@ async def _seed_heatmap(pool, agency_id):
             )
 
 
-def _run_analyze(agency_id):
+def _run_analyze(agency_id, ch_client):
+    """analyze()'s dedup materialization now reads ClickHouse (Task 6); every
+    test in this file seeds Postgres `updates` directly (pre-dating that
+    migration), so mirror the same rows into ClickHouse first — see
+    tests.conftest.mirror_updates_to_ch.
+
+    Pins `SET TIME ZONE 'Asia/Tokyo'` on the analyze connection, matching
+    every real analyze() caller (gtfs_pipeline._get_conn, the cron endpoint)
+    — without it, this connection defaults to UTC, which happened to mask a
+    real bug: analyze() bulk-loading ClickHouse's naive-UTC captured_at
+    values straight into a timestamptz column is only safe under a UTC
+    session; under the JST session production actually uses, it silently
+    shifted every captured_at (and last_seen_at) by 9 hours."""
     import os
 
     import psycopg2
 
     from pipeline.analyze import analyze
+    from tests.conftest import mirror_updates_to_ch
 
+    mirror_updates_to_ch(ch_client, agency_id)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
-        analyze(agency_id, conn)
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
         conn.commit()
     finally:
         conn.close()
 
 
 @pytest.mark.asyncio
-async def test_heatmap_agg_path_averages_deduped_observations(map_app):
+async def test_heatmap_agg_path_averages_deduped_observations(map_app, ch_client):
     """No route filter -> aggregate path, averaging DEDUPED observations.
 
     Three DISTINCT trips (T1/T2/T3) serve stop s1 once each, delays [60, 90, 121]:
@@ -615,7 +1150,7 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
                 time(8, 10),
                 d,
             )
-    _run_analyze(agency_id)  # populate agg_stop_daily + agg_stop_routes
+    _run_analyze(agency_id, ch_client)  # populate agg_stop_daily + agg_stop_routes
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/delays/heatmap")
     assert resp.status_code == 200
@@ -628,12 +1163,13 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_builds_agg_route_daily(map_app):
+async def test_analyze_builds_agg_route_daily(map_app, ch_client, ch_async_client):
     """analyze() populates agg_route_daily from raw updates, and route-summary
     reads it end-to-end (no raw scan)."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # route R1, 平日, 06-09: trip A stops 1&2 (60,120s), trip B stop 1 (600s)
@@ -650,7 +1186,7 @@ async def test_analyze_builds_agg_route_daily(map_app):
                 seq,
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R1'", agency_id)
     assert row is not None
@@ -675,12 +1211,48 @@ async def test_analyze_builds_agg_route_daily(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_keeps_null_service_routes(map_app):
+async def test_route_summary_degrades_when_clickhouse_freshness_probe_fails(map_app):
+    """Fix B regression: ClickHouse backs ONLY the informational
+    ``latest_captured_at`` freshness header here — every actual route row
+    comes from Postgres ``agg_route_daily``. A ClickHouse hiccup on that one
+    probe must degrade to ``latest_captured_at: null``, not 500 the whole
+    endpoint (no real ClickHouse needed for this — a client whose `.query`
+    always raises is enough to simulate the hiccup)."""
+
+    class _BrokenCh:
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("simulated ClickHouse outage")
+
+    app, agency_id = map_app
+    app.state.ch_client = _BrokenCh()
+    pool = app.state.pool
+    await _seed_route(
+        pool,
+        agency_id,
+        "R1",
+        "平日",
+        [(f"t{i}", 1, 300, "10:00") for i in range(25)],
+        baseline=None,
+        ch_client=None,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["latest_captured_at"] is None
+    r1 = next(r for r in body["routes"] if r["route_code"] == "R1")
+    assert r1["avg_delay_sec"] == 300
+    assert r1["samples"] == 25
+
+
+@pytest.mark.asyncio
+async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_async_client):
     """NULL service_type routes (no typed baseline) must still surface in triage —
     the old raw endpoint never filtered them, so the agg path must not either."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         await conn.execute(
@@ -691,7 +1263,7 @@ async def test_route_summary_keeps_null_service_routes(map_app):
             datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
             time(10, 0),
         )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -704,12 +1276,13 @@ async def test_route_summary_keeps_null_service_routes(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
+async def test_analyze_agg_route_daily_uses_sql_rounding(map_app, ch_client, ch_async_client):
     """avg_delay_sec rounds half-away-from-zero (SQL ROUND), not Python banker's
     rounding — guards the builder's rounding if anyone reimplements it in Python."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         for i, (trip, seq, d) in enumerate([("Z", 1, 2), ("Z", 2, 3)]):  # avg 2.5
@@ -725,7 +1298,7 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
                 seq,
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with pool.acquire() as conn:
         avg = await conn.fetchval(
             "SELECT avg_delay_sec FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_RND'",
@@ -735,7 +1308,7 @@ async def test_analyze_agg_route_daily_uses_sql_rounding(map_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_collapses_null_and_empty_service_type(map_app):
+async def test_analyze_collapses_null_and_empty_service_type(map_app, ch_client, ch_async_client):
     """A route with both a NULL and a genuine '' service_type on one day must
     collapse to ONE agg row, not abort analyze on a duplicate PK. The builder
     projects COALESCE(service_type,'') (NULL and '' both -> ''), so the GROUP BY
@@ -745,6 +1318,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         for trip, svc, d in [("T1", None, 100), ("T2", "", 200)]:
@@ -760,7 +1334,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
                 time(10, 0),
                 d,
             )
-    _run_analyze(agency_id)  # must not raise UniqueViolation
+    _run_analyze(agency_id, ch_client)  # must not raise UniqueViolation
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM agg_route_daily WHERE agency_id=$1 AND route_code='R_DUP'",
@@ -774,7 +1348,7 @@ async def test_analyze_collapses_null_and_empty_service_type(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_exposes_feed_health(map_app):
+async def test_route_summary_exposes_feed_health(map_app, ch_client, ch_async_client):
     """route-summary surfaces the per-day clamp/raw counts from agg_feed_health
     for the latest analyzed date (powers FeedHealthBanner)."""
     from datetime import datetime, time, timezone
@@ -782,6 +1356,7 @@ async def test_route_summary_exposes_feed_health(map_app):
     from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # one normal + one implausible spike on the same date → analyze builds
@@ -798,7 +1373,7 @@ async def test_route_summary_exposes_feed_health(map_app):
                 time(8, 10),
                 d,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -808,7 +1383,7 @@ async def test_route_summary_exposes_feed_health(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_feed_health_uses_7day_window(map_app):
+async def test_route_summary_feed_health_uses_7day_window(map_app, ch_client, ch_async_client):
     """Feed-health sums the last 7 days, so a spike on an EARLIER day still shows
     even when the latest analyzed day is clean (frozen feeds recur across days)."""
     from datetime import datetime, time, timezone
@@ -816,6 +1391,7 @@ async def test_route_summary_feed_health_uses_7day_window(map_app):
     from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # spike on 06-07 (clamped out of agg_route_daily) ...
@@ -837,7 +1413,7 @@ async def test_route_summary_feed_health_uses_7day_window(map_app):
             datetime(2026, 6, 9, 8, 10, tzinfo=timezone.utc),
             time(8, 10),
         )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -847,12 +1423,13 @@ async def test_route_summary_feed_health_uses_7day_window(map_app):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_returns_only_latest_date(map_app):
+async def test_route_summary_returns_only_latest_date(map_app, ch_client, ch_async_client):
     """route-summary serves MAX(date) only: a route present on an older day but
     not the latest must not leak into the response, and `date` is the latest."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app
+    app.state.ch_client = ch_async_client
     pool = app.state.pool
     async with pool.acquire() as conn:
         # R_OLD only on 06-08; R_NEW only on 06-09 (the latest)
@@ -867,7 +1444,7 @@ async def test_route_summary_returns_only_latest_date(map_app):
                 time(10, 0),
                 route,
             )
-    _run_analyze(agency_id)
+    _run_analyze(agency_id, ch_client)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     assert resp.status_code == 200
@@ -878,7 +1455,7 @@ async def test_route_summary_returns_only_latest_date(map_app):
 
 
 @pytest.mark.asyncio
-async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
+async def test_heatmap_route_filter_reads_agg_not_raw(map_app, ch_client):
     """Route filter -> agg_route_stop_daily, NOT raw updates. Without analyze the
     agg is empty -> 0 features (proving the source switched off the live path);
     after analyze, one dot whose 3 same-event polls dedup to a single observation
@@ -890,7 +1467,7 @@ async def test_heatmap_route_filter_reads_agg_not_raw(map_app):
         assert resp.status_code == 200
         assert resp.json()["features"] == []  # not live: raw updates ignored
 
-        _run_analyze(agency_id)
+        _run_analyze(agency_id, ch_client)
         resp = await client.get(f"/api/{agency_id}/delays/heatmap?routes=R1")
     assert resp.status_code == 200
     feats = resp.json()["features"]

@@ -16,10 +16,11 @@ import os as _os
 from datetime import timedelta
 from typing import Any, cast
 
+import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
     DEFAULT_RANGE_DAYS,
@@ -33,7 +34,7 @@ from api.range import (
 )
 from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
-from pipeline.query.chat import chat_with_tools
+from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
@@ -128,6 +129,7 @@ async def ask(
     body: AskRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     locale: str = Depends(get_locale),
 ):
     """Answer a natural-language question via tool-use.
@@ -190,24 +192,73 @@ async def ask(
     cache_outcome: str | None = None
 
     if decision is not None:
-        result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale)
         stage = decision.stage
         tool_name = decision.tool
-        success = result.kind != "empty"
-        resp = AskResponse(
-            answer=render_tool_result(result, locale=locale),
-            tool_call={"name": decision.tool, "arguments": decision.args},
-            result={
-                "kind": result.kind,
-                "summary": result.summary,
-                "rows": result.rows,
-                "columns": result.columns,
-                "series": result.series,
-                "pairs": result.pairs,
-            },
-            ctx=ctx_dict,
-            router_stage=stage,
-        )
+        # Stage 1/2 is the deterministic-router path (regex/embedding-matched
+        # questions, e.g. describe_data's date_range/sample_counts/overview
+        # kinds) — the ROUTINE path for those question kinds, not an edge
+        # case. It has no LLM fallback to catch a failure, unlike Stage 3
+        # (pipeline.query.chat.chat_with_tools), which already wraps every
+        # dispatch(...) call in try/except and degrades to a tool_error
+        # answer. Without a guard here, a ClickHouse-unavailable
+        # HTTPException raised deep inside dispatch (e.g. via api.deps.get_ch's
+        # _ClickHouseUnavailable stand-in) would 503 the whole /ask request
+        # instead of returning a graceful 200 answer.
+        #
+        # The catch here is intentionally narrow — only the two ClickHouse
+        # failure modes below degrade gracefully. Everything else (notably
+        # asyncpg.exceptions.UndefinedTableError on a migration-lagged
+        # environment) must propagate so FastAPI's registered exception
+        # handlers (e.g. aggregate_not_ready_handler in api/main.py) can turn
+        # it into their specific machine-readable response instead of a
+        # generic 200 tool_error that masks it (see api/aggregate_errors.py).
+        try:
+            result = await dispatch(decision.tool, decision.args, ctx, conn, agency_id, locale=locale, ch=ch)
+        except HTTPException as exc:
+            # The only HTTPException dispatch is expected to raise here is the
+            # _ClickHouseUnavailable stand-in's 503 (api/deps.py) — client was
+            # never created at startup. Any other status code is a real error
+            # (e.g. a tool's own 4xx) that must propagate untouched.
+            if exc.status_code != 503:
+                raise
+            _log.warning("Tool %s unavailable (stage %s dispatch): ClickHouse client unavailable", decision.tool, stage)
+            success = False
+            resp = AskResponse(
+                answer=_chat_str("service_unavailable", locale, name=decision.tool),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result=None,
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
+        except clickhouse_connect.driver.exceptions.Error:
+            # A real ClickHouse client was created, but the query itself
+            # failed mid-flight (network blip, server error, etc.) — distinct
+            # from the stand-in above, but the same graceful degrade applies.
+            _log.exception("Tool %s failed (stage %s dispatch): ClickHouse query error", decision.tool, stage)
+            success = False
+            resp = AskResponse(
+                answer=_chat_str("service_unavailable", locale, name=decision.tool),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result=None,
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
+        else:
+            success = result.kind != "empty"
+            resp = AskResponse(
+                answer=render_tool_result(result, locale=locale),
+                tool_call={"name": decision.tool, "arguments": decision.args},
+                result={
+                    "kind": result.kind,
+                    "summary": result.summary,
+                    "rows": result.rows,
+                    "columns": result.columns,
+                    "series": result.series,
+                    "pairs": result.pairs,
+                },
+                ctx=ctx_dict,
+                router_stage=stage,
+            )
     else:
         payload = await chat_with_tools(
             body.question,
@@ -218,6 +269,7 @@ async def ask(
             locale=locale,
             rag_examples=examples,
             history=history,
+            ch=ch,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")

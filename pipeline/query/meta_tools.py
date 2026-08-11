@@ -16,10 +16,14 @@ all DB queries are scoped to the request's ``agency_id`` except
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from api.range import RangeCtx
 from pipeline.query.results import ToolResult
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 VALID_KINDS = (
     "routes",
@@ -36,12 +40,23 @@ def _summary(text_jp: str, text_en: str, locale: str) -> str:
     return text_en if locale == "en" else text_jp
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Attach UTC tzinfo to a ClickHouse-returned naive datetime — see
+    api/routers/map.py's ``_as_utc`` for the full rationale (ClickHouse's
+    `updates.captured_at` is UTC, but clickhouse-connect returns naive
+    values, unlike asyncpg's tz-aware `timestamptz`)."""
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=timezone.utc)
+
+
 async def describe_data(
     args: dict[str, Any],
     ctx: RangeCtx,
     conn,
     agency_id: int,
     locale: str = "ja",
+    ch=None,
 ) -> ToolResult:
     kind = args.get("kind")
     # Defensive coercion: the LLM occasionally hands back ``limit`` as a
@@ -221,30 +236,67 @@ async def describe_data(
         )
 
     if kind == "date_range":
-        row = await conn.fetchrow(
-            "SELECT MIN(captured_at) AS first_obs, "
-            "       MAX(captured_at) AS last_obs, "
-            "       COUNT(DISTINCT captured_at::date) AS days, "
-            "       COUNT(*) AS rows_n "
-            "FROM updates WHERE agency_id = $1",
-            agency_id,
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
+                summary=_summary(
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
+                    locale,
+                ),
+            )
+        # `updates`' ORDER BY key is (agency_id, captured_at, ...), so a plain
+        # agency-scoped ORDER BY captured_at ASC/DESC LIMIT 1 is index-served.
+        # A combined minOrNull/maxOrNull aggregate can't use that index and
+        # forces a full-table scan; a single query also can't get both the
+        # index-served min AND max at once, so this is split into two cheap
+        # probes instead, combined in Python.
+        first_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
+            parameters={"agency_id": agency_id},
         )
-        if row is None or row["first_obs"] is None:
+        if not first_result.result_rows:
             return ToolResult(
                 kind="empty",
                 summary=_summary("観測データがありません。", "no observations.", locale),
             )
+        first_obs = first_result.result_rows[0][0]
+        last_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        last_obs = last_result.result_rows[0][0]
+        # toDate(captured_at, 'Asia/Tokyo') — NOT a bare toDate(captured_at) —
+        # matches the JST civil day every Postgres connection touching
+        # `updates` has always bucketed by (SET TIME ZONE 'Asia/Tokyo').
+        # COUNT(DISTINCT ...) / COUNT(*) still need a full scan (unrelated to
+        # the min/max sort-key optimization above), so they stay one query.
+        counts_result = await ch.query(
+            "SELECT COUNT(DISTINCT toDate(captured_at, 'Asia/Tokyo')) AS days, "
+            "       COUNT(*) AS rows_n "
+            "FROM updates WHERE agency_id = {agency_id:UInt16}",
+            parameters={"agency_id": agency_id},
+        )
+        days, rows_n = counts_result.result_rows[0]
+        first_obs = _as_utc(first_obs)
+        last_obs = _as_utc(last_obs)
+        assert first_obs is not None and last_obs is not None  # first_obs None-check above guards both
         pairs = [
-            ("first_observed", row["first_obs"].isoformat()),
-            ("last_observed", row["last_obs"].isoformat()),
-            ("distinct_days", str(row["days"])),
-            ("total_rows", str(row["rows_n"])),
+            ("first_observed", first_obs.isoformat()),
+            ("last_observed", last_obs.isoformat()),
+            ("distinct_days", str(days)),
+            ("total_rows", str(rows_n)),
         ]
         return ToolResult(
             kind="kv",
             summary=_summary(
-                f"観測期間: {row['first_obs'].date()} 〜 {row['last_obs'].date()}",
-                f"observation window: {row['first_obs'].date()} – {row['last_obs'].date()}",
+                f"観測期間: {first_obs.date()} 〜 {last_obs.date()}",
+                f"observation window: {first_obs.date()} – {last_obs.date()}",
                 locale,
             ),
             pairs=pairs,
@@ -278,6 +330,20 @@ async def describe_data(
         )
 
     if kind == "sample_counts":
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
+                summary=_summary(
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
+                    locale,
+                ),
+            )
         # "サンプルが少ない路線" wants the least-sampled routes, so allow an
         # ascending order. Validate against an allowlist — never interpolate
         # raw LLM input into the ORDER BY clause.
@@ -285,20 +351,28 @@ async def describe_data(
         if order not in ("desc", "asc"):
             order = "desc"
         direction = "ASC" if order == "asc" else "DESC"
-        rows = await conn.fetch(
-            "SELECT route_code, COUNT(*) AS samples "
-            "FROM updates "
-            "WHERE agency_id = $1 "
-            "  AND captured_at::date BETWEEN $2 AND $3 "
-            "GROUP BY route_code "
-            f"ORDER BY samples {direction}, route_code "
-            "LIMIT $4 OFFSET $5",
-            agency_id,
-            ctx.from_date,
-            ctx.to_date,
-            limit,
-            offset,
+        # toDate(captured_at, 'Asia/Tokyo') — the JST civil day, matching
+        # every Postgres connection's `captured_at::date` under
+        # SET TIME ZONE 'Asia/Tokyo'.
+        ch_result = await ch.query(
+            f"""
+            SELECT route_code, count() AS samples
+            FROM updates
+            WHERE agency_id = {{agency_id:UInt16}}
+              AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {{from_date:Date}} AND {{to_date:Date}}
+            GROUP BY route_code
+            ORDER BY samples {direction}, route_code
+            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
+            """,
+            parameters={
+                "agency_id": agency_id,
+                "from_date": ctx.from_date,
+                "to_date": ctx.to_date,
+                "limit": limit,
+                "offset": offset,
+            },
         )
+        rows = [{"route_code": rc, "samples": n} for rc, n in ch_result.result_rows]
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -310,23 +384,28 @@ async def describe_data(
             )
         # Clamp the DISPLAYED window so the summary never claims coverage past
         # where data actually exists. The BETWEEN above is unchanged; we only
-        # adjust the text. MAX(captured_at) is over the requested window so a
-        # NULL means no data fell in range.
-        data_end = await conn.fetchval(
-            "SELECT MAX(captured_at)::date FROM updates WHERE agency_id = $1 AND captured_at::date BETWEEN $2 AND $3",
-            agency_id,
-            ctx.from_date,
-            ctx.to_date,
+        # adjust the text. Only the max bound is needed here, so this reads
+        # off the sort key (agency_id, captured_at, ...) via ORDER BY ...
+        # DESC LIMIT 1 instead of a full-scan maxOrNull() aggregate; an empty
+        # result set (no data in range) means no data fell in range.
+        data_end_ch = await ch.query(
+            "SELECT captured_at FROM updates "
+            "WHERE agency_id = {agency_id:UInt16} "
+            "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
         )
+        data_end_ts = _as_utc(data_end_ch.result_rows[0][0]) if data_end_ch.result_rows else None
+        data_end = data_end_ts.astimezone(_JST).date() if data_end_ts is not None else None
         window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
         if offset > 0:
-            total = await conn.fetchval(
+            total_ch = await ch.query(
                 "SELECT COUNT(DISTINCT route_code) FROM updates "
-                "WHERE agency_id = $1 AND captured_at::date BETWEEN $2 AND $3",
-                agency_id,
-                ctx.from_date,
-                ctx.to_date,
+                "WHERE agency_id = {agency_id:UInt16} "
+                "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date}",
+                parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
             )
+            total = total_ch.result_rows[0][0]
             shown_from = offset + 1
             shown_to = offset + len(rows)
             if order == "asc":
@@ -361,24 +440,56 @@ async def describe_data(
         )
 
     if kind == "overview":
+        if ch is None:
+            return ToolResult(
+                kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
+                summary=_summary(
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
+                    locale,
+                ),
+            )
         route_count = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         stop_count = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
-        obs_row = await conn.fetchrow(
-            "SELECT COUNT(*) AS n, MIN(captured_at) AS first_obs, MAX(captured_at) AS last_obs "
-            "FROM updates WHERE agency_id = $1",
-            agency_id,
+        count_result = await ch.query(
+            "SELECT COUNT(*) AS n FROM updates WHERE agency_id = {agency_id:UInt16}",
+            parameters={"agency_id": agency_id},
         )
+        obs_n = count_result.result_rows[0][0]
+        # `updates`' ORDER BY key is (agency_id, captured_at, ...) — a plain
+        # agency-scoped ORDER BY captured_at ASC/DESC LIMIT 1 is index-served,
+        # unlike a combined minOrNull/maxOrNull aggregate (full scan). A
+        # single query can't get both bounds at once, so this is split into
+        # two cheap probes, combined in Python; an empty result set (no rows
+        # for this agency) means "no observations" for that bound.
+        first_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        obs_first = first_result.result_rows[0][0] if first_result.result_rows else None
+        last_result = await ch.query(
+            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id},
+        )
+        obs_last = last_result.result_rows[0][0] if last_result.result_rows else None
+        obs_first = _as_utc(obs_first)
+        obs_last = _as_utc(obs_last)
         pairs = [
             ("routes", str(route_count)),
             ("stops", str(stop_count)),
-            ("observations", str(obs_row["n"])),
+            ("observations", str(obs_n)),
             (
                 "first_observed",
-                obs_row["first_obs"].isoformat() if obs_row["first_obs"] else "—",
+                obs_first.isoformat() if obs_first else "—",
             ),
             (
                 "last_observed",
-                obs_row["last_obs"].isoformat() if obs_row["last_obs"] else "—",
+                obs_last.isoformat() if obs_last else "—",
             ),
         ]
         return ToolResult(
@@ -443,6 +554,7 @@ async def capabilities(
     conn,
     agency_id: int,
     locale: str = "ja",
+    ch=None,
 ) -> ToolResult:
     table = _CAPABILITY_EXAMPLES_EN if locale == "en" else _CAPABILITY_EXAMPLES_JP
     requested = args.get("category")

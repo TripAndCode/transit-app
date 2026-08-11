@@ -45,6 +45,7 @@ def _run_ingest_and_analyze() -> None:
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
     from pipeline.analyze import analyze
+    from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
 
@@ -53,6 +54,7 @@ def _run_ingest_and_analyze() -> None:
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
 
+    ch_client = get_client()
     conn = psycopg2.connect(db_url)
     # Pin JST so analyze() buckets `captured_at::date` on the same civil day the
     # read API serves under (api/main + gtfs_pipeline._get_conn both pin JST);
@@ -73,17 +75,17 @@ def _run_ingest_and_analyze() -> None:
 
         for aid in agency_ids:
             try:
-                ingest_live(aid, conn)
+                ingest_live(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: ingest_live failed for agency %s", aid)
             try:
-                analyze(aid, conn)
+                analyze(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
-        stale = check_agg_freshness(conn, agency_ids)
+        stale = check_agg_freshness(conn, ch_client, agency_ids)
         if stale:
             _log.error(
                 "cron: %d agency(ies) have stale aggregates after analyze: %s",
@@ -93,7 +95,19 @@ def _run_ingest_and_analyze() -> None:
         else:
             _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
-        conn.close()
+        # Nested try/finally: if conn.close() raises, ch_client.close() must
+        # still run — an unguarded `conn.close(); ch_client.close()` would
+        # skip the ClickHouse close on a Postgres close error, silently
+        # reintroducing the client + HTTP pool leak this block exists to fix.
+        try:
+            conn.close()
+        finally:
+            # Close the sync ClickHouse client's underlying HTTP connection
+            # pool. This job runs as a BackgroundTask inside the long-lived
+            # API process, so a missing close() here leaks one client + pool
+            # per invocation of this endpoint instead of one per short-lived
+            # CLI run.
+            ch_client.close()
 
 
 @router.post("/ingest", status_code=202)

@@ -117,6 +117,19 @@ async def conn_with_observations(conn_with_seed):
     yield pool, agency_id
 
 
+@pytest.fixture
+async def conn_with_observations_ch(conn_with_observations, ch_client, ch_async_client):
+    """`conn_with_observations` plus the same rows mirrored into ClickHouse
+    and a wired async client — needed by describe_data's `date_range` /
+    `sample_counts` / `overview` kinds, which now read live `updates` from
+    ClickHouse instead of Postgres (Task 8)."""
+    pool, agency_id = conn_with_observations
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    yield pool, agency_id, ch_async_client
+
+
 @pytest.mark.asyncio
 async def test_describe_data_stops(conn_with_observations):
     pool, agency_id = conn_with_observations
@@ -128,15 +141,41 @@ async def test_describe_data_stops(conn_with_observations):
 
 
 @pytest.mark.asyncio
-async def test_describe_data_date_range(conn_with_observations):
-    pool, agency_id = conn_with_observations
+async def test_describe_data_date_range(conn_with_observations_ch):
+    pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:
-        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja")
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch)
     assert result.kind == "kv"
     keys = dict(result.pairs)
     assert "first_observed" in keys
     assert "last_observed" in keys
     assert "distinct_days" in keys
+
+
+@pytest.mark.asyncio
+async def test_describe_data_date_range_empty_agency(conn_with_seed, ch_async_client):
+    """Fix D regression: date_range's min/max split (two index-served
+    ORDER BY captured_at ASC/DESC LIMIT 1 probes instead of one full-scan
+    minOrNull/maxOrNull) must still report 'no observations' — not crash on
+    an empty result_rows list — when the agency has zero ClickHouse rows."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "date_range"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert result.kind == "empty"
+
+
+@pytest.mark.asyncio
+async def test_describe_data_overview_empty_agency(conn_with_seed, ch_async_client):
+    """Fix D regression: overview's min/max split must degrade to '—' (not
+    crash) when the agency has zero ClickHouse rows."""
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as conn:
+        result = await describe_data({"kind": "overview"}, _ctx(), conn, agency_id, locale="ja", ch=ch_async_client)
+    assert result.kind == "kv"
+    keys = dict(result.pairs)
+    assert keys["observations"] == "0"
+    assert keys["first_observed"] == "—"
+    assert keys["last_observed"] == "—"
 
 
 @pytest.mark.asyncio
@@ -191,10 +230,10 @@ async def test_describe_data_agencies_own_deleted_returns_empty(conn_with_observ
 
 
 @pytest.mark.asyncio
-async def test_describe_data_sample_counts(conn_with_observations):
-    pool, agency_id = conn_with_observations
+async def test_describe_data_sample_counts(conn_with_observations_ch):
+    pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:
-        result = await describe_data({"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja")
+        result = await describe_data({"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja", ch=ch)
     assert result.kind == "table"
     assert result.columns == ["route_code", "samples"]
     assert result.rows[0][0] == "1021"
@@ -202,11 +241,11 @@ async def test_describe_data_sample_counts(conn_with_observations):
 
 
 @pytest.mark.asyncio
-async def test_sample_counts_ascending(conn_with_observations):
-    pool, agency_id = conn_with_observations
+async def test_sample_counts_ascending(conn_with_observations_ch):
+    pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:
         result = await describe_data(
-            {"kind": "sample_counts", "order": "asc", "limit": 5}, _ctx(), conn, agency_id, locale="ja"
+            {"kind": "sample_counts", "order": "asc", "limit": 5}, _ctx(), conn, agency_id, locale="ja", ch=ch
         )
     assert result.kind == "table"
     # ascending → smallest sample count first
@@ -215,10 +254,10 @@ async def test_sample_counts_ascending(conn_with_observations):
 
 
 @pytest.mark.asyncio
-async def test_describe_data_overview(conn_with_observations):
-    pool, agency_id = conn_with_observations
+async def test_describe_data_overview(conn_with_observations_ch):
+    pool, agency_id, ch = conn_with_observations_ch
     async with pool.acquire() as conn:
-        result = await describe_data({"kind": "overview"}, _ctx(), conn, agency_id, locale="ja")
+        result = await describe_data({"kind": "overview"}, _ctx(), conn, agency_id, locale="ja", ch=ch)
     assert result.kind == "kv"
     keys = dict(result.pairs)
     assert keys.get("routes")

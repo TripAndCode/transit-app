@@ -9,44 +9,77 @@ change: ``route_dow_breakdown`` always reads from the deduped
 service), where the old executor's by_dow path silently preferred the
 all-time ``agg_route_dow`` aggregate when present, ignoring the
 requested window.
+
+``route_dow_breakdown`` / ``route_compare_service`` always read the live
+``updates`` table (there is no agg-table fast path for either), which now
+lives in ClickHouse — both take a ``ch`` client. ``conn`` (asyncpg) is kept
+in the signature for call-site stability even though these two no longer
+use it for their own query. ``ch`` defaults to ``None`` (returning an empty
+result rather than raising) for callers/tests that exercise routing logic
+(alias resolution, unsupported-tool handling, ...) without a real
+ClickHouse client attached.
+
+That ``ch is None`` fallback is presently unreachable from real HTTP
+dispatch: ``api.deps.get_ch`` never hands out a bare ``None`` — when
+ClickHouse didn't come up at startup it returns a ``_ClickHouseUnavailable``
+stand-in that raises ``HTTPException(503)`` on first use instead (see
+api/deps.py). So a real request either gets a working client or 503s before
+ever reaching this ``is None`` check; the guard is kept only for direct
+unit-test callers that construct these functions' args by hand without
+wiring a client at all.
 """
 
-from api.range import RangeCtx, build_updates_filter
-from pipeline.db import build_dedup_inner_sql
+from api.range import RangeCtx
+from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.rankings import _round2
 
 
 async def route_dow_breakdown(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
     *,
     route: str,
 ) -> list[tuple]:
     """Per-DOW delay summary for one route over ctx.
 
     Returns rows: (route_code, service_type, dow_iso, avg_min, samples)
-    sorted by avg_min DESC. dow_iso is ISODOW (Mon=1..Sun=7) per
-    migration 0011. Backs tools._tool_route_stats.
+    sorted by avg_min DESC. dow_iso is ISODOW (Mon=1..Sun=7) —
+    ``toDayOfWeek``'s default mode matches Postgres's ``EXTRACT(ISODOW ...)``
+    numbering (see api.range.dow_clause_ch's docstring). Backs
+    tools._tool_route_stats. Every group has >= 1 row (no HAVING gate here,
+    matching the original query), so avg() is never NaN.
     """
-    where_frag, params, _ = build_updates_filter(ctx, next_param=3)
-    sql = (
-        f"WITH deduped AS ({build_dedup_inner_sql(placeholder='$1', extra_where=where_frag)}) "
-        "SELECT route_code, service_type, "
-        "       EXTRACT(ISODOW FROM date::date)::smallint AS dow, "
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min, "
-        "       COUNT(*) AS samples "
-        "FROM deduped WHERE route_code = $2 "
-        "GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date) "
-        "ORDER BY avg_min DESC NULLS LAST"
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT route_code, service_type,\n"
+        "       toDayOfWeek(date) AS dow,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
+        "WHERE route_code = {rdb_route:String}\n"
+        "GROUP BY route_code, service_type, toDayOfWeek(date)\n"
+        "ORDER BY avg_min DESC",
+        parameters={"agency_id": agency_id, "rdb_route": str(route), **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, str(route), *params)
-    return [tuple(r) for r in rows]
+    # ClickHouse's round() is round-half-to-even; round in Python (half-up) to
+    # match Postgres ROUND() and this codebase's other ClickHouse live-path
+    # roundings — see pipeline.reports.rankings._ranking_live.
+    return [
+        (route_code, service_type, dow, _round2(avg_min), samples)
+        for route_code, service_type, dow, avg_min, samples in result.result_rows
+    ]
 
 
 async def route_compare_service(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    ch=None,
     *,
     route: str,
 ) -> list[tuple]:
@@ -54,19 +87,25 @@ async def route_compare_service(
 
     Returns rows: (service_type, avg_min, samples) — typically two rows
     ('平日' and '土日祝'). Backs tools._tool_compare_segments
-    (dimension='service_type').
+    (dimension='service_type'). Every group has >= 1 row, so avg() is
+    never NaN.
     """
-    where_frag, params, _ = build_updates_filter(ctx, next_param=3)
-    sql = (
-        f"WITH deduped AS ({build_dedup_inner_sql(placeholder='$1', extra_where=where_frag)}) "
-        "SELECT service_type, "
-        "       ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min, "
-        "       COUNT(*) AS samples "
-        "FROM deduped WHERE route_code = $2 "
-        "GROUP BY service_type"
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT service_type,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
+        "WHERE route_code = {rcs_route:String}\n"
+        "GROUP BY service_type",
+        parameters={"agency_id": agency_id, "rcs_route": str(route), **ch_params},
     )
-    rows = await conn.fetch(sql, agency_id, str(route), *params)
-    return [tuple(r) for r in rows]
+    # Round in Python (half-up) to match Postgres ROUND() — see
+    # route_dow_breakdown / pipeline.reports.rankings._ranking_live.
+    return [(service_type, _round2(avg_min), samples) for service_type, avg_min, samples in result.result_rows]
 
 
 async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:

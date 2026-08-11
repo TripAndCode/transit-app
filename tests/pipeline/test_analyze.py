@@ -1,6 +1,20 @@
 from datetime import time
 
 from pipeline.analyze import analyze
+from tests.conftest import mirror_updates_to_ch
+
+
+def _analyze(agency_id, pg_conn, ch_client):
+    """Mirror this agency's Postgres `updates` rows into ClickHouse (the
+    dedup materialization's source as of Task 6) and run analyze().
+
+    Every fixture in this file seeds Postgres `updates` directly (pre-dating
+    the ClickHouse migration); mirroring right before analyze() lets those
+    seeds keep driving the ClickHouse-sourced aggregates without duplicating
+    each one. See tests.conftest.mirror_updates_to_ch.
+    """
+    mirror_updates_to_ch(ch_client, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
 
 
 def _seed_updates(pg_conn, agency_id):
@@ -28,9 +42,9 @@ def _seed_updates(pg_conn, agency_id):
     pg_conn.commit()
 
 
-def test_analyze_creates_agg_route_stats(pg_conn, agency_id):
+def test_analyze_creates_agg_route_stats(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT route_code, service_type, avg_min FROM agg_route_stats WHERE agency_id = %s",
@@ -42,9 +56,9 @@ def test_analyze_creates_agg_route_stats(pg_conn, agency_id):
     assert rows[0][2] is not None
 
 
-def test_analyze_creates_agg_route_hour(pg_conn, agency_id):
+def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM agg_route_hour WHERE agency_id = %s",
@@ -54,9 +68,9 @@ def test_analyze_creates_agg_route_hour(pg_conn, agency_id):
     assert count > 0
 
 
-def test_analyze_creates_agg_route_dow(pg_conn, agency_id):
+def test_analyze_creates_agg_route_dow(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT dow FROM agg_route_dow WHERE agency_id = %s",
@@ -67,9 +81,9 @@ def test_analyze_creates_agg_route_dow(pg_conn, agency_id):
     assert len(dows) > 0
 
 
-def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id):
+def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s LIMIT 1",
@@ -80,7 +94,7 @@ def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id):
     assert "番停留所" in stop_name
 
 
-def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id):
+def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -93,7 +107,7 @@ def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id):
             (agency_id, "平日_11時37分_系統44372", 1, "S1", "11:37"),
         )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s AND stop_sequence = 1",
@@ -104,9 +118,9 @@ def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id):
     assert row[0] == "青森駅"
 
 
-def test_analyze_creates_agg_daily_trend(pg_conn, agency_id):
+def test_analyze_creates_agg_daily_trend(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM agg_daily_trend WHERE agency_id = %s",
@@ -116,10 +130,10 @@ def test_analyze_creates_agg_daily_trend(pg_conn, agency_id):
     assert count > 0
 
 
-def test_analyze_creates_agg_hour_daily(pg_conn, agency_id):
+def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
     # _seed_updates schedules every row at 11:37 → all land in hour 11.
     _seed_updates(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT hour FROM agg_hour_daily WHERE agency_id = %s",
@@ -135,7 +149,7 @@ def test_analyze_creates_agg_hour_daily(pg_conn, agency_id):
     assert well_formed
 
 
-def test_analyze_buckets_dates_in_jst(pg_conn, agency_id):
+def test_analyze_buckets_dates_in_jst(pg_conn, agency_id, ch_client):
     """`captured_at::date` must bucket on the JST civil day the API reads under,
     not UTC. A 23:30 UTC observation is 08:30 the NEXT day in JST, so it must
     land on that next date in agg_hour_daily — guards the analyze-connection TZ
@@ -158,7 +172,7 @@ def test_analyze_buckets_dates_in_jst(pg_conn, agency_id):
             ),
         )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT date FROM agg_hour_daily WHERE agency_id = %s",
@@ -168,7 +182,7 @@ def test_analyze_buckets_dates_in_jst(pg_conn, agency_id):
     assert dates == ["2026-05-20"]  # JST date, not the 2026-05-19 UTC date
 
 
-def test_analyze_agency_isolated(pg_conn):
+def test_analyze_agency_isolated(pg_conn, ch_client):
     """analyze() only touches rows for its own agency_id."""
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -204,8 +218,8 @@ def test_analyze_agency_isolated(pg_conn):
                 )
         pg_conn.commit()
 
-    analyze(aid_a, pg_conn)
-    analyze(aid_b, pg_conn)
+    _analyze(aid_a, pg_conn, ch_client)
+    _analyze(aid_b, pg_conn, ch_client)
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT avg_min FROM agg_route_stats WHERE agency_id = %s", (aid_a,))
@@ -217,7 +231,7 @@ def test_analyze_agency_isolated(pg_conn):
     assert round(float(avg_b), 1) == round(600 / 60, 1)
 
 
-def test_analyze_purges_stale_rows(pg_conn, agency_id):
+def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
     """A row that the current analyze SELECT would NOT produce (e.g. a
     fabricated GHOST route) must be removed from every agg_* table by the
     next analyze run. Pins the wipe-and-rewrite semantics across all the
@@ -273,7 +287,7 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id):
             cur.execute(f"INSERT INTO {table} {cols} VALUES {values}", (agency_id,))
         pg_conn.commit()
 
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
 
     # Tables keyed by route_code use GHOST; stop tables use GHOST_STOP;
     # agg_hour_daily has neither, so its ghost is the 2099 date.
@@ -327,7 +341,7 @@ def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
     pg_conn.commit()
 
 
-def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id):
+def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id, ch_client):
     """Rows with a NULL service_type (failed static_join) must not abort analyze.
 
     Regression for the agency-9 case: a NULL service_type group violated the
@@ -338,7 +352,7 @@ def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id):
     _seed_route_group(pg_conn, agency_id, "R1", "平日")
     _seed_route_group(pg_conn, agency_id, "R1", None)
 
-    analyze(agency_id, pg_conn)  # must not raise NotNullViolation
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
 
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -374,11 +388,10 @@ def _seed_for_stop_agg(pg_conn, agency_id):
     pg_conn.commit()
 
 
-def test_analyze_builds_agg_stop_daily(pg_conn, agency_id):
-    from pipeline.analyze import analyze
+def test_analyze_builds_agg_stop_daily(pg_conn, agency_id, ch_client):
 
     _seed_for_stop_agg(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT stop_id, service_type, time_band, delay_sum, samples FROM agg_stop_daily WHERE agency_id=%s",
@@ -393,25 +406,91 @@ def test_analyze_builds_agg_stop_daily(pg_conn, agency_id):
     assert delay_sum == 180 and samples == 1
 
 
-def test_analyze_builds_agg_stop_routes(pg_conn, agency_id):
-    from pipeline.analyze import analyze
+def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
     _seed_for_stop_agg(pg_conn, agency_id)
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s1'", (agency_id,))
         assert cur.fetchone()[0] == "R1"
 
 
-def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id):
+def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
+    """A stop served by 2+ distinct routes must comma-join them, alphabetically
+    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path, not
+    just the single-route case test_analyze_builds_agg_stop_routes already
+    covers."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s2','二番停留所',ST_SetSRID(ST_MakePoint(140.75,40.83),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES "
+            "(%s,'TA',1,'s2'),(%s,'TB',1,'s2')",
+            (agency_id, agency_id),
+        )
+        for trip, route, delay in [("TA", "R_A", 60), ("TB", "R_B", 90)]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES (%s,%s,'2026-06-09T08:10:00',%s,'平日',%s,%s,1,%s)",
+                (agency_id, f"{trip}.pb", trip, time(8, 10), route, delay),
+            )
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s2'", (agency_id,))
+        route_codes = cur.fetchone()[0]
+    assert route_codes == "R_A,R_B"  # comma-joined, alphabetically ordered
+
+
+def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(pg_conn, agency_id, ch_client):
+    """A (route_code, trip_id, stop_sequence) whose every observed dep_delay
+    is NULL (arrival-only StopTimeUpdates — common at a route's last stop in
+    GTFS-RT, or a degraded poll) must still show up in agg_stop_routes: this
+    table is about which routes serve a stop, independent of whether any
+    observation happened to carry a numeric delay.
+
+    Regression: agg_stop_routes was derived from _analyze_deduped for one
+    perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
+    silently dropped this exact case (measured on real data: ~3.7% of keys,
+    39 stops losing all route coverage). Restored to the ClickHouse-sourced
+    _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
+    only and never touches dep_delay."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s3','三番停留所',ST_SetSRID(ST_MakePoint(140.75,40.83),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'TC',1,'s3')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'TC.pb','2026-06-09T08:10:00','TC','平日',%s,'R_NULL_DELAY',1,NULL)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s3'", (agency_id,))
+        row = cur.fetchone()
+    assert row is not None, "stop s3 lost all route coverage — the NULL-delay row was dropped"
+    assert row[0] == "R_NULL_DELAY"
+
+
+def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id, ch_client):
     """NULL service_type rows (agency-9 case) must not abort the agg build,
     and — matching agg_route_stop_daily's '' sentinel treatment — must not be
     silently dropped either: a stop whose traffic is entirely NULL-service
     would otherwise read as zero activity on the default (no route filter)
     heatmap while still showing up on the route-filtered view."""
     from datetime import time
-
-    from pipeline.analyze import analyze
 
     _seed_for_stop_agg(pg_conn, agency_id)  # 3 valid rows, stop s1, service 平日
     with pg_conn.cursor() as cur:
@@ -423,7 +502,7 @@ def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id):
             (agency_id, time(8, 10)),
         )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)  # must NOT raise NotNullViolation
+    _analyze(agency_id, pg_conn, ch_client)  # must NOT raise NotNullViolation
     with pg_conn.cursor() as cur:
         cur.execute("SELECT service_type, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
         rows = cur.fetchall()
@@ -432,12 +511,10 @@ def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id):
     assert by_svc[""] == 1  # NULL service KEPT as '' sentinel, not dropped
 
 
-def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
+def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id, ch_client):
     """Route-stop aggregate keeps route_code in the key and, unlike agg_stop_daily,
     KEEPS NULL service_type as '' sentinel (parity with the live route heatmap)."""
     from datetime import time
-
-    from pipeline.analyze import analyze
 
     _seed_for_stop_agg(pg_conn, agency_id)  # R1, service 平日, 3 rows on s1 (delay 60/120/180)
     with pg_conn.cursor() as cur:
@@ -449,7 +526,7 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
             (agency_id, time(8, 10)),
         )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT route_code, service_type, time_band, delay_sum, samples "
@@ -463,13 +540,13 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id):
     assert by_svc[""] == (240, 1)  # NULL service KEPT as '' sentinel, not dropped
 
 
-def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
+def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id, ch_client):
     """A frozen-feed spike (|delay| > MAX_PLAUSIBLE_DELAY_SEC) is excluded from
     BOTH heatmap aggregates, so it can't hijack the per-stop mean. Regression for
     the 2026-06-07 馬木料金所前 72-min false reading."""
     from datetime import time
 
-    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC, analyze
+    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC
 
     _seed_for_stop_agg(pg_conn, agency_id)  # 3 plausible rows (60/120/180s), stop s1, route R1, 平日
     with pg_conn.cursor() as cur:
@@ -481,7 +558,7 @@ def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
             (agency_id, time(8, 10), MAX_PLAUSIBLE_DELAY_SEC + 1),
         )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute("SELECT delay_sum, samples FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
         # spike clamped out; the 3 valid polls dedup to one observation (latest 180s)
@@ -493,10 +570,10 @@ def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id):
         assert cur.fetchone() == (180, 1)  # spike excluded + deduped here too
 
 
-def test_analyze_builds_agg_feed_health(pg_conn, agency_id):
+def test_analyze_builds_agg_feed_health(pg_conn, agency_id, ch_client):
     """agg_feed_health persists per-day raw vs implausible-delay counts as a
     data-quality signal (agency-wide; does not require static data)."""
-    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC, analyze
+    from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC
 
     seed = [
         ("2026-06-09T08:10:00", 120),  # normal
@@ -513,7 +590,7 @@ def test_analyze_builds_agg_feed_health(pg_conn, agency_id):
                 (agency_id, f"f{i}.pb", ts, f"T{i}", time(8, 10), d),
             )
     pg_conn.commit()
-    analyze(agency_id, pg_conn)
+    _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT date, raw_samples, clamp_count FROM agg_feed_health WHERE agency_id=%s ORDER BY date",

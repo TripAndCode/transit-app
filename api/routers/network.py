@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from api.deps import get_conn
+from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.reports.network import compute_network_summary
@@ -33,13 +33,18 @@ class NetworkSummary(BaseModel):
 
 @router.get("/summary", response_model=NetworkSummary)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def network_summary(request: Request, conn=Depends(get_conn), ctx: RangeCtx = Depends(get_range_ctx)):
+async def network_summary(
+    request: Request,
+    conn=Depends(get_conn),
+    ch=Depends(get_ch),
+    ctx: RangeCtx = Depends(get_range_ctx),
+):
     """Per-agency network health board over [from, to], ranked worst-avg-delay first.
 
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
     """
-    rows = await compute_network_summary(conn, ctx.from_date, ctx.to_date)
+    rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
     return NetworkSummary(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),

@@ -22,6 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
 from api.aggregate_errors import aggregate_not_ready_handler
+from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
@@ -141,6 +142,30 @@ async def lifespan(app: FastAPI):
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
+    # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
+    # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+    # heatmap, any time_band="all" report path reading agg_* tables) have
+    # nothing to do with ClickHouse and must keep working even if it's down
+    # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
+    # client that raises a clean 503 lazily, only if something actually
+    # tries to use it.
+    try:
+        app.state.ch_client = await get_ch_client()
+    except KeyError as exc:
+        _log.warning(
+            "ClickHouse client not started — missing required env var %s. "
+            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+            exc,
+        )
+        app.state.ch_client = None
+    except Exception:
+        _log.warning(
+            "ClickHouse client not started — connection failed. "
+            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+            exc_info=True,
+        )
+        app.state.ch_client = None
+
     # Break-glass local-admin account (independent of the OAuth env block
     # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
     # are both set. See api.routers.auth.seed_local_admin.
@@ -156,6 +181,8 @@ async def lifespan(app: FastAPI):
         _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
 
     yield
+    if app.state.ch_client is not None:
+        await app.state.ch_client.close()
     await app.state.pool.close()
 
 

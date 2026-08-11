@@ -1,10 +1,54 @@
 """DB-backed tests for build_digest."""
 
 from datetime import date
+from unittest.mock import patch
+
+import pytest
 
 from pipeline.digest.build import build_digest
 
 DAY = date(2026, 4, 2)
+
+
+class _EmptyChClient:
+    """Stub ClickHouse client: every query behaves like an agency with no
+    `updates` rows at all (max_captured_at → None), matching this file's old
+    Postgres-only fixtures which never seeded the live `updates` table
+    either — so is_stale stays False, same as before the ClickHouse port.
+
+    `result_rows = []` (not `[(None,)]`): `pipeline.clickhouse.max_captured_at`
+    /`max_captured_at_before` now query `ORDER BY captured_at DESC LIMIT 1`
+    instead of `maxOrNull(captured_at)` (index-served off the `updates` sort
+    key instead of a full aggregate scan) — a query with no matching rows
+    returns an EMPTY result set under `ORDER BY ... LIMIT 1`, unlike a
+    no-GROUP-BY aggregate like `maxOrNull`, which always returns exactly one
+    row (value `NULL`) even over zero input rows."""
+
+    def query(self, *_args, **_kwargs):
+        class _Result:
+            result_rows = []
+
+        return _Result()
+
+
+class _FailingChClient:
+    """Stub ClickHouse client whose query() always raises — simulates
+    check_agg_freshness's live-day probe failing mid-query (ClickHouse
+    unreachable, timeout, etc.)."""
+
+    def query(self, *_args, **_kwargs):
+        raise RuntimeError("simulated ClickHouse failure")
+
+
+@pytest.fixture(autouse=True)
+def _stub_ch_client():
+    """build_digest() now builds its own ClickHouse client (via
+    pipeline.clickhouse.get_client()) to feed check_agg_freshness's live-day
+    lookup. This test file is Postgres-only and pre-dates ClickHouse, so
+    stub the client out rather than requiring `make ch-test` for every
+    digest test — none of them assert on ClickHouse-sourced staleness."""
+    with patch("pipeline.digest.build.get_client", return_value=_EmptyChClient()):
+        yield
 
 
 def _seed(pg_conn, agency_id):
@@ -221,6 +265,65 @@ def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):
     assert section.avg_delay_min == 10.0  # unchanged: still the full-population headline
     assert section.baseline_avg_min == 5.0
     assert section.delta_min == 0.0  # NOT +5.0 - route A (the only one with a baseline) shows no drift
+
+
+def test_build_digest_survives_ch_query_failure(pg_conn, agency_id):
+    """A ClickHouse outage during check_agg_freshness's live-day probe must
+    not kill the whole (Postgres-only) digest — only the advisory staleness
+    flag should degrade to "not stale", every other (Postgres-sourced) field
+    must still come through. staleness_known must flip to False so the
+    renderer can tell "known fresh" apart from "staleness unknown" — see
+    test_build_digest_ch_failure_does_not_render_as_fresh."""
+    _seed(pg_conn, agency_id)
+
+    with patch("pipeline.digest.build.get_client", return_value=_FailingChClient()):
+        data = build_digest(pg_conn, DAY)
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.is_stale is False
+    assert section.has_data is True
+    assert section.avg_delay_min == 5.0
+    assert data.network_avg_delay_min == 5.0
+    assert data.staleness_known is False
+
+
+def test_build_digest_survives_get_client_failure(pg_conn, agency_id):
+    """get_client() itself raising (e.g. a missing ClickHouse env var) must
+    not kill the whole digest either."""
+    _seed(pg_conn, agency_id)
+
+    def boom():
+        raise KeyError("CLICKHOUSE_HOST")
+
+    with patch("pipeline.digest.build.get_client", side_effect=boom):
+        data = build_digest(pg_conn, DAY)
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.is_stale is False
+    assert data.staleness_known is False
+
+
+def test_build_digest_ch_failure_does_not_render_as_fresh(pg_conn, agency_id):
+    """End-to-end: a ClickHouse outage must not produce an affirmative "all
+    fresh" claim in the rendered Markdown — that's the digest's only output
+    surface (gtfs_pipeline.cmd_digest just writes it to stdout; the
+    _log.warning goes to logs a human digest-reader never sees). The
+    rendered text must instead honestly signal that staleness is unknown."""
+    from pipeline.digest.render import render_digest
+
+    _seed(pg_conn, agency_id)
+
+    with patch("pipeline.digest.build.get_client", return_value=_FailingChClient()):
+        data = build_digest(pg_conn, DAY)
+
+    for locale, fresh_phrase in (("ja", "全事業者最新"), ("en", "all agencies current")):
+        out = render_digest(data, locale)
+        assert fresh_phrase not in out
+        assert "鮮度警告" not in out  # also not a false stale-warning
+        assert "Freshness: aggregates lagging" not in out
+
+    section = next(s for s in data.sections if s.agency_id == agency_id)
+    assert section.avg_delay_min == 5.0  # Postgres-sourced field still comes through
 
 
 def test_cmd_digest_prints_markdown(pg_conn, agency_id, capsys):

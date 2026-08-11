@@ -1,7 +1,7 @@
 """Internal cron endpoint — secret enforcement and 202-fast-return."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import asyncpg
 import httpx
@@ -101,6 +101,7 @@ def test_run_ingest_and_analyze_skips_deleted_agency(two_agencies, monkeypatch):
         patch("pipeline.ingest.ingest_live") as fake_ingest,
         patch("pipeline.analyze.analyze") as fake_analyze,
         patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
     ):
         _run_ingest_and_analyze()
 

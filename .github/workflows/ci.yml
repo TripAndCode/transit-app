@@ -59,6 +59,20 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.3
+        env:
+          CLICKHOUSE_USER: transit
+          CLICKHOUSE_PASSWORD: transit
+          CLICKHOUSE_DB: transit_test
+        ports:
+          - 8124:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -143,6 +157,23 @@ jobs:
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
 
+      # Equivalent of `make ch-bootstrap`. The service container above isn't
+      # started via docker compose/the Makefile, so this creates the
+      # `updates` table directly (CREATE TABLE IF NOT EXISTS — idempotent).
+      - name: Apply ClickHouse schema
+        run: |
+          poetry run python -c "import clickhouse_connect, os; from db.clickhouse.bootstrap import apply_schema; \
+          client = clickhouse_connect.get_client(host=os.environ['CLICKHOUSE_HOST'], \
+            port=int(os.environ['CLICKHOUSE_PORT']), username=os.environ['CLICKHOUSE_USER'], \
+            password=os.environ['CLICKHOUSE_PASSWORD'], database=os.environ['CLICKHOUSE_DATABASE']); \
+          apply_schema(client)"
+        env:
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: 8124
+          CLICKHOUSE_USER: transit
+          CLICKHOUSE_PASSWORD: transit
+          CLICKHOUSE_DATABASE: transit_test
+
       - name: Lint and format check
         run: |
           poetry run ruff check .
@@ -155,4 +186,10 @@ jobs:
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
           GROQ_API_KEY: test-key
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: 8124
+          CLICKHOUSE_USER: transit
+          CLICKHOUSE_PASSWORD: transit
+          CLICKHOUSE_DATABASE: transit_test
+          RUN_CH_INTEGRATION: 1
         run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.query.formatter import format_result, format_trend_text
@@ -307,6 +307,7 @@ async def get_report(
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ):
@@ -319,30 +320,30 @@ async def get_report(
     rows: list
 
     if report_type == "ranking":
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order="desc", limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="desc", limit=n)
         intent = {"query_type": "ranking", "limit": n}
     elif report_type == "ranking_best":
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order="asc", limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="asc", limit=n)
         intent = {"query_type": "ranking", "limit": n, "sort_order": "asc"}
     elif report_type == "on_time":
-        rows = await compute_on_time(agency_id, ctx, conn, limit=n)
+        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n)
         intent = {"query_type": "on_time", "limit": n}
     elif report_type == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
-        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n)
+        rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n, ch=ch)
         intent = {"query_type": "compare_ranking", "limit": n}
     elif report_type == "dow_weekend":
-        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n)
+        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekend", limit=n, ch=ch)
         intent = {"query_type": "dow_ranking", "dow_group": "weekend", "limit": n}
     elif report_type == "dow_weekday":
-        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n)
+        rows = await compute_dow_ranking(agency_id, ctx, conn, dow_group="weekday", limit=n, ch=ch)
         intent = {"query_type": "dow_ranking", "dow_group": "weekday", "limit": n}
     elif report_type == "trend":
         # Daily series + hour-of-day heatmap for the granular Trend tab.
-        series = await compute_trend_series(agency_id, ctx, conn)
-        hourly = await compute_hourly_heatmap(agency_id, ctx, conn)
+        series = await compute_trend_series(agency_id, ctx, conn, ch=ch)
+        hourly = await compute_hourly_heatmap(agency_id, ctx, conn, ch=ch)
         dow_band = hourly_cells_to_dow_band(hourly, locale=locale)
         days = series["days"]
         if format == "csv":

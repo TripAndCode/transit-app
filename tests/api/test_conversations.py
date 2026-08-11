@@ -24,6 +24,10 @@ async def conv_app(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # append_message_endpoint now declares ch=Depends(get_ch) alongside conn
+    # (Task 8); tests in this file mock dispatch so the real client is never
+    # touched, but FastAPI still resolves the dependency — None is fine here.
+    app.state.ch_client = None
 
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_conversations")
@@ -208,7 +212,7 @@ async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatc
 
     captured = {}
 
-    async def _fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja"):
+    async def _fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
         captured["ctx"] = ctx
         from pipeline.query.results import ToolResult
 
@@ -292,3 +296,281 @@ async def test_migrate_anon_idempotent(conv_app):
         assert r2.json()["inserted"] == 0
         r3 = await c.get(f"/api/{agency}/conversations")
         assert len(r3.json()) == 2
+
+
+# ─── Error-leakage regression (Fix-9i) ─────────────────────────────────────
+#
+# A dispatch() failure during append_message_endpoint used to render
+# f"ツール {tool} の実行に失敗しました: {exc}" straight into rendered_summary,
+# which is PERSISTED to ask_conversation_messages — so a leaked ClickHouse
+# error string (SQL fragment / server version / query endpoint URL) would
+# resurface every time the conversation is reloaded, not just once. These
+# tests pin: (a) the ClickHouse-unavailable and (b) generic-exception paths
+# both degrade to the safe locale strings, never the raw exception text,
+# in BOTH the HTTP response and the row actually written to the DB; (c) a
+# non-503 HTTPException still propagates untouched; (d) the real error is
+# still logged server-side.
+
+_SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT * FROM updates"
+
+
+@pytest.mark.asyncio
+async def test_append_message_clickhouse_unavailable_hides_exception_text(conv_app, monkeypatch):
+    """dispatch() raising the _ClickHouseUnavailable stand-in's HTTPException(503)
+    must persist+return the generic service_unavailable text, never the raw detail."""
+    from fastapi import HTTPException
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_503(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise HTTPException(status_code=503, detail=_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_503)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("service_unavailable", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+    assert row["rendered_summary"] == rendered
+
+
+@pytest.mark.asyncio
+async def test_append_message_clickhouse_query_error_hides_exception_text(conv_app, monkeypatch):
+    """A mid-query clickhouse_connect error (real client, query failed) gets
+    the same graceful degrade as the client-unavailable stand-in."""
+    import clickhouse_connect
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_ch_error(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise clickhouse_connect.driver.exceptions.DatabaseError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_ch_error)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("service_unavailable", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+
+
+@pytest.mark.asyncio
+async def test_append_message_non_503_http_exception_propagates(conv_app, monkeypatch):
+    """A non-503 HTTPException from dispatch (a real 4xx tool error) must
+    propagate untouched, not be swallowed into a graceful 200 answer."""
+    from fastapi import HTTPException
+
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_400(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise HTTPException(status_code=400, detail="bad tool args")
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_400)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_append_message_generic_exception_does_not_leak_text(conv_app, monkeypatch):
+    """A genuinely unexpected exception (not ClickHouse, not HTTPException)
+    must still degrade gracefully without echoing its raw message into the
+    persisted rendered_summary."""
+    import api.routers.conversations as conv_router
+    from pipeline.query.chat import _chat_str
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_generic(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise ValueError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_generic)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        rendered = r.json()["assistant"]["rendered_summary"]
+        assert _SECRET not in rendered
+        assert rendered == _chat_str("tool_error", "ja", name="describe_data")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT rendered_summary FROM ask_conversation_messages WHERE conversation_id = $1 AND role = 'assistant'",
+            conv_id,
+        )
+    assert row is not None
+    assert _SECRET not in row["rendered_summary"]
+
+
+@pytest.mark.asyncio
+async def test_append_message_logs_full_exception_server_side(conv_app, monkeypatch, caplog):
+    """Even though the user-facing/persisted text is now generic, the real
+    error must still be captured server-side via logger.exception."""
+    import logging
+
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_generic(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise ValueError(_SECRET)
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_generic)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        with caplog.at_level(logging.ERROR, logger="api.routers.conversations"):
+            r = await c.post(
+                f"/api/{agency}/conversations/{conv_id}/messages",
+                json={"tool": "describe_data", "args": {}},
+                headers=_CSRF,
+            )
+        assert r.status_code == 200, r.text
+
+    assert any(rec.exc_info and _SECRET in str(rec.exc_info[1]) for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_append_message_undefined_table_error_propagates(conv_app, monkeypatch):
+    """Fix-9i regression: dispatch() raising asyncpg.exceptions.UndefinedTableError
+    (an agg_* table missing on a migration-lagged environment) must propagate
+    out of append_message_endpoint so FastAPI's registered
+    aggregate_not_ready_handler (api/main.py + api/aggregate_errors.py) turns
+    it into the machine-readable {"code": "aggregate_not_ready"} 503 the
+    frontend reacts to — mirroring api/routers/ask.py's Fix-8f.
+
+    Before this fix, the blanket `except Exception` swallowed this into a
+    generic 200 tool_error. Worse, dispatch() runs inside this endpoint's
+    `async with conn.transaction():`, so if the except block had gone on to
+    run another query on the same (now-aborted) connection — as the
+    'except Exception' branch here does, via _conv.append_message(conn, ...)
+    — Postgres would raise asyncpg.exceptions.InFailedSQLTransactionError
+    instead, surfacing as an unhandled bare 500. This test pins that neither
+    happens: the response is the clean 503 aggregate_not_ready shape."""
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, _pool = conv_app
+
+    async def _raise_undefined_table(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_undefined_table)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 503, f"expected 503 aggregate_not_ready, got {r.status_code}: {r.text[:200]}"
+        data = r.json()
+        assert data["code"] == "aggregate_not_ready"
+        # The internal relation name is server-log-only, never client-visible.
+        assert "agg_route_daily_dist" not in data["detail"]
+
+        # And the conversation itself is left usable — no half-written user
+        # message with no matching assistant reply, no poisoned connection
+        # leaking into the next request on this same conversation.
+        ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
+        assert ml.status_code == 200
+        assert ml.json() == []
+
+
+@pytest.mark.asyncio
+async def test_append_message_postgres_error_in_dispatch_does_not_poison_transaction(conv_app, monkeypatch):
+    """A Postgres error raised by dispatch() OTHER than UndefinedTableError
+    (e.g. a real statement failure/timeout) must still degrade to the
+    generic tool_error message, not crash.
+
+    Unlike the mocked-exception tests above, this dispatch stub runs a real
+    failing statement on `conn` — the same connection append_message_endpoint
+    holds inside its `async with conn.transaction():` — so the connection's
+    transaction genuinely aborts, reproducing what a real asyncpg.PostgresError
+    (anything but UndefinedTableError) does. Before the fix, the generic
+    `except Exception` branch went on to call `_conv.append_message(conn, ...)`
+    on that same aborted connection, which raises
+    asyncpg.exceptions.InFailedSQLTransactionError — an unhandled 500 instead
+    of the intended graceful tool_error response. The fix nests dispatch in
+    its own SAVEPOINT (conn.transaction() called again while already inside
+    one), confining the abort so the outer transaction stays writable."""
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_after_aborting_conn(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        await conn.execute("SELECT 1/0")
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_after_aborting_conn)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT role, rendered_summary FROM ask_conversation_messages "
+            "WHERE conversation_id = $1 ORDER BY created_at",
+            conv_id,
+        )
+    assert [r["role"] for r in rows] == ["user", "assistant"]

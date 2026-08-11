@@ -10,8 +10,9 @@ Public surface:
 
 * :data:`TOOLS` — Groq-style function specs to pass as ``tools=`` on the
   chat-completions call.
-* :func:`dispatch` — execute a tool call against Postgres and return a
-  :class:`ToolResult`.
+* :func:`dispatch` — execute a tool call against Postgres (and, for the
+  handful of handlers that read the live ``updates`` table, ClickHouse) and
+  return a :class:`ToolResult`.
 * :func:`render_tool_result` — produce a locale-appropriate summary
   string the frontend can show in the assistant bubble.
 
@@ -440,7 +441,7 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     return replace(ctx, from_date=new_from, to_date=new_to)
 
 
-async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
+async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None) -> bool:
     """Is the route_code listed in the agency's static GTFS at all?
 
     This is the long-lived registry check: it asks "does the agency operate
@@ -450,6 +451,10 @@ async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
     surfaced "登録されていない" whenever the chosen window happened to be
     empty (e.g. right after a TRUNCATE). Keep registry separate from period
     data so the user sees the correct guidance.
+
+    ``ch`` defaults to ``None`` for tests that never exercise the ClickHouse
+    fallback (the static_routes / agg_route_daily checks above already cover
+    them); real dispatch always passes the real ClickHouse client.
     """
     if not route:
         return False
@@ -463,27 +468,53 @@ async def _is_route_registered(route: str | None, conn, agency_id: int) -> bool:
     )
     if row is not None:
         return True
-    # Fallback: some agencies may not have static_routes loaded yet but do
+    # Fast path: some agencies may not have static_routes loaded yet but do
     # have observations. Treat any historical observation as proof the route
-    # exists, even outside the selected window.
-    row = await conn.fetchrow(
-        "SELECT 1 FROM updates WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
+    # exists, even outside the selected window. Checked first against
+    # Postgres's agg_route_daily (small, indexed on
+    # agency_id/date/route_code/service_type) rather than going straight to a
+    # live ClickHouse scan of `updates`: route_code there is the 3rd sort-key
+    # column behind an unconstrained captured_at, so proving a route was
+    # never observed forces a full-column scan — measured at 336M rows read /
+    # 400-1500ms on real data. Most Ask-tab queries name a route that HAS
+    # been analyzed at least once, so this fast path resolves the common case
+    # without ever touching ClickHouse.
+    fast_row = await conn.fetchrow(
+        "SELECT 1 FROM agg_route_daily WHERE agency_id=$1 AND route_code=$2 LIMIT 1",
         agency_id,
         str(route),
     )
-    return row is not None
+    if fast_row is not None:
+        return True
+    # agg_route_daily is only as fresh as the last successful analyze() run
+    # for this agency — api/routers/internal.py's cron loop deliberately
+    # tolerates per-agency analyze() failures (so one broken agency doesn't
+    # starve the rest), so a brand-new agency/route can have live
+    # observations sitting in ClickHouse before agg_route_daily ever picks
+    # them up. Fall back to the raw scan ONLY on a Postgres "not found" —
+    # this bounds the expensive scan to true negatives (a route genuinely
+    # never observed, the rare case), preserving almost all of the fast
+    # path's win while never returning a false "not registered" for a route
+    # analyze() simply hasn't caught up to yet.
+    if ch is None:
+        return False
+    result = await ch.query(
+        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
+        parameters={"agency_id": agency_id, "route": str(route)},
+    )
+    return bool(result.result_rows)
 
 
-async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id):
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
         return ToolResult(
             kind="empty",
             summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
         )
-    rows = await route_dow_breakdown(agency_id, ctx, conn, route=str(route))
+    rows = await route_dow_breakdown(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(
             kind="empty",
@@ -512,7 +543,7 @@ _SERVICE_TYPE_MAP: dict[str, ServiceType] = {
 }
 
 
-async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     metric = args.get("metric", "avg_delay")
     # BUG-2 fix: card chips send "k" (matches gold eval canonical form); LLM
     # direct calls use "n" (matches the TOOLS JSON schema).  Accept both, with
@@ -528,7 +559,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
 
     if metric == "avg_delay":
         sort_order = "asc" if best_first else "desc"
-        rows = await compute_ranking(agency_id, ctx, conn, sort_order=sort_order, limit=n)
+        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order=sort_order, limit=n)
         cols = ["route_code", "service_type", "avg_min", "p50_min", "p90_min", "samples"]
         label = _summary(
             "label_ranking_ontime" if best_first else "label_ranking_delay",
@@ -537,11 +568,11 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     elif metric == "on_time_rate":
         # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
         sort_order = "desc" if best_first else "asc"
-        rows = await compute_on_time(agency_id, ctx, conn, limit=n, sort_order=sort_order)
+        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
         cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
         cols = ["route_code", "service_type", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
     else:
@@ -561,7 +592,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     )
 
 
-async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     dimension = args.get("dimension", "dow")
     route = args.get("route")
 
@@ -570,7 +601,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
-        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50)
+        rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=50, ch=ch)
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -589,7 +620,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
                 kind="empty",
                 summary=_summary("compare_service_needs_route", lang=locale),
             )
-        rows = await route_compare_service(agency_id, ctx, conn, route=str(route))
+        rows = await route_compare_service(agency_id, ctx, conn, ch, route=str(route))
         if not rows:
             return ToolResult(
                 kind="empty",
@@ -625,7 +656,7 @@ def _weighted_avg_min(days: list[dict]) -> float | None:
     return num / den if den else None
 
 
-async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     # When the LLM scopes to a single route, push it into ctx so the
     # compute function narrows the trend to that route only. Without this
     # the dispatch shim resolves the route alias but the compute call
@@ -634,7 +665,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
     # BUG-4 fix: read granularity from args (default "day") and forward it.
     granularity = args.get("granularity", "day")
-    series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity)
+    series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity, ch=ch)
     days = series.get("days") or []
     if not days:
         return ToolResult(kind="empty", summary=_summary("trend_no_data", lang=locale))
@@ -654,12 +685,12 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     )
 
 
-async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     threshold_min = int(args.get("threshold_min", 1))
     threshold_sec = max(0, threshold_min) * 60
     # BUG-2 fix: card chips send "k"; LLM direct calls send "n".  Accept both.
     n = int(args.get("k", args.get("n", 20)))
-    rows = await compute_on_time(agency_id, ctx, conn, threshold_sec=threshold_sec, limit=n)
+    rows = await compute_on_time(agency_id, ctx, conn, ch=ch, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
     return ToolResult(
@@ -675,7 +706,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     )
 
 
-async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str) -> ToolResult:
+async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
@@ -725,6 +756,7 @@ async def dispatch(
     conn,
     agency_id: int,
     locale: str = "ja",
+    ch=None,
 ) -> ToolResult:
     """Run the named tool. Unknown tool → empty ToolResult with explanation.
 
@@ -733,6 +765,12 @@ async def dispatch(
     consume. The original UI ctx is otherwise preserved (DOW / time_band /
     routes / service still apply). ``locale`` selects the language for the
     human-readable ``summary`` field on the returned :class:`ToolResult`.
+
+    ``ch`` is the ClickHouse client for handlers that read the live
+    `updates` table (Task 8) — ``route_stats``/``describe_data``'s
+    ClickHouse-backed kinds. Defaults to ``None`` so callers/tests that never
+    exercise those specific paths don't need to construct a client; real
+    request-serving callers always pass the real one.
     """
     # BUG-1 fix: card-alias tools sent by the frontend map to canonical handler
     # names. Keep aliases explicit here so the eval gold file can use the short
@@ -788,7 +826,7 @@ async def dispatch(
                     )
 
         effective_ctx = _apply_date_overrides(ctx, arguments)
-        return await handler(arguments, effective_ctx, conn, agency_id, locale)
+        return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
 
 
 # ---------------------------------------------------------------------------

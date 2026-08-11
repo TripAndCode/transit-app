@@ -82,11 +82,12 @@ async def test_heatmap_p90_null_when_no_data(hmap_client):
 
 
 @pytest.fixture
-async def stop_profile_client(apply_schema):
+async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    app.state.ch_client = ch_async_client
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "StopCohortAgency",
@@ -121,6 +122,19 @@ async def stop_profile_client(apply_schema):
             seq,
             stop_id,
         )
+    # agg_route_daily existence row: route_stop_profile prechecks this table
+    # (agency_id, route_code) before touching ClickHouse at all — checks
+    # agg_route_daily, not agg_route_stats, since the latter is a lossy
+    # existence oracle (built with a >20-lifetime-sample threshold and a NOT
+    # NULL service_type filter — see map.py's route_trips docstring). Real
+    # avg/worst/trips/samples figures don't matter here, only that a row
+    # exists.
+    await pool.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'K31', '平日', 0, 0, 1, 1, NOW())",
+        aid,
+    )
     # Raw updates for today (K31 with big delay at S1)
     today = date.today()
     jst = timezone(timedelta(hours=9))
@@ -183,6 +197,10 @@ async def stop_profile_client(apply_schema):
         60,
         1,
     )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aid)
+
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
     async with pool.acquire() as conn:

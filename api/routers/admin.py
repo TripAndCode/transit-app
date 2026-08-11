@@ -28,7 +28,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from api.deps import get_conn
+from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
@@ -325,6 +325,7 @@ class OpsHealth(BaseModel):
 async def admin_ops(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    ch=Depends(get_ch),
 ):
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
     from pipeline.health import aggregate_freshness, migration_status
@@ -339,7 +340,7 @@ async def admin_ops(
     agencies_out: list[AgencyFreshnessOut] = []
     agencies_ok = True
     try:
-        for af in await aggregate_freshness(conn):
+        for af in await aggregate_freshness(conn, ch):
             agencies_out.append(
                 AgencyFreshnessOut(
                     agency_id=af.agency_id,

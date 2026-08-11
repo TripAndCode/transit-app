@@ -16,6 +16,11 @@ async def ask_app(apply_schema):
 
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
+    # `ask()` now declares ch=Depends(get_ch) alongside conn (Task 8); every
+    # test in this file mocks chat_with_tools/dispatch so the real client is
+    # never touched, but FastAPI still resolves the dependency, so something
+    # must be present at app.state.ch_client — None is fine here.
+    app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "Test Agency",
@@ -45,7 +50,9 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     """v2 ask uses tool-use; mock chat_with_tools so the test is offline."""
     client, agency_id = ask_client
 
-    async def mock_chat(question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None):
+    async def mock_chat(
+        question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None, ch=None
+    ):
         return {
             "answer": "テスト回答",
             "tool_call": {"name": "top_n", "arguments": {"metric": "avg_delay", "n": 5}},
@@ -147,13 +154,82 @@ async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client):
+    """Fix B follow-up regression: a rule-hit question routed to a
+    ClickHouse-backed describe_data kind (date_range/overview/sample_counts)
+    must return 200 with a graceful tool_error answer when ClickHouse is
+    unavailable, not 503 the whole request.
+
+    `ask_app`'s fixture sets `app.state.ch_client = None`, which `api.deps
+    .get_ch` now turns into the always-raising `_ClickHouseUnavailable`
+    stand-in (Fix A) rather than a bare `None` — exercising the real
+    dispatch path end-to-end, no mocking needed. Before this fix, Stage 1/2
+    had no try/except around `dispatch(...)` (unlike chat.py's Stage 3,
+    which already degrades this way), so the stand-in's HTTPException(503)
+    propagated all the way up and 503'd the endpoint.
+    """
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "いつからのデータ?"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_call"]["name"] == "describe_data"
+    assert data["tool_call"]["arguments"]["kind"] == "date_range"
+    assert data.get("router_stage") == "rules"
+    assert data["result"] is None
+    assert "describe_data" in data["answer"]
+    # Fix 8f: the degraded answer must come from a fixed locale string, never
+    # from the exception's raw text (the _ClickHouseUnavailable stand-in's
+    # HTTPException.detail is "ClickHouse is unavailable") — that text must
+    # never reach an unauthenticated client.
+    assert "ClickHouse is unavailable" not in data["answer"]
+
+
+@pytest.mark.asyncio
+async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, monkeypatch):
+    """Fix 8f regression: Stage 1/2's dispatch(...) raising
+    ``asyncpg.exceptions.UndefinedTableError`` (an ``agg_*`` table missing on a
+    migration-lagged environment) must propagate out of the router body so
+    FastAPI's registered ``aggregate_not_ready_handler`` (see api/main.py and
+    api/aggregate_errors.py) catches it and returns the machine-readable
+    ``{"code": "aggregate_not_ready"}`` 503 the frontend is built to react to.
+
+    Before this fix, the blanket ``except Exception`` around ``dispatch(...)``
+    in api/routers/ask.py swallowed this and answered a generic 200
+    ``tool_error`` instead — exactly the regression this fix closes.
+    """
+    client, agency_id = ask_client
+
+    async def raise_undefined_table(*args, **kwargs):
+        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
+
+    monkeypatch.setattr("api.routers.ask.dispatch", raise_undefined_table)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "いつからのデータ?"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 503, f"expected 503 aggregate_not_ready, got {resp.status_code}: {resp.text[:200]}"
+    data = resp.json()
+    assert data["code"] == "aggregate_not_ready"
+    # The internal relation name is server-log-only, never client-visible.
+    assert "agg_route_daily_dist" not in data["detail"]
+
+
+@pytest.mark.asyncio
 async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
     """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""
     client, agency_id = ask_client
 
     captured = {}
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         captured["rag_examples"] = rag_examples
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
@@ -175,7 +251,9 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     client, agency_id = ask_client
     captured = {}
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         captured["history"] = history
         return {
             "answer": "stub",
@@ -232,7 +310,9 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 
-    async def fake_chat(question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None):
+    async def fake_chat(
+        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+    ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
     async def no_decision(*a, **k):

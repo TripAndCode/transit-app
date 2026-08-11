@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
 
 # Default target — first-run setup.
 all: bootstrap
@@ -60,10 +60,16 @@ doctor:
 		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
 		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
 		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
+	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); \
+		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
+		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
 	@echo "── db ──"
 	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-pg' \
 		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-pg \
 		|| echo "  transit-pg NOT running — \`make db\`"
+	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-ch' \
+		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-ch \
+		|| echo "  transit-ch NOT running — \`make db\`"
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \
@@ -100,10 +106,24 @@ serve:
 db:
 	docker compose up -d --build
 	docker compose exec db sh -c 'until pg_isready -U transit -d transit; do sleep 1; done'
+	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
+	@$(MAKE) ch-bootstrap
 
 db-down:
 	docker compose down
+
+ch-test:
+	docker run -d --rm --name transit-test-ch \
+	  -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
+	  -p 8124:8123 clickhouse/clickhouse-server:26.3
+
+ch-bootstrap:
+	poetry run python -c "import clickhouse_connect, os; from db.clickhouse.bootstrap import apply_schema; \
+	client = clickhouse_connect.get_client(host=os.environ.get('CLICKHOUSE_HOST','localhost'), \
+	  port=int(os.environ.get('CLICKHOUSE_PORT','8123')), username=os.environ['CLICKHOUSE_USER'], \
+	  password=os.environ['CLICKHOUSE_PASSWORD'], database=os.environ['CLICKHOUSE_DATABASE']); \
+	apply_schema(client)"
 
 migrate:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up

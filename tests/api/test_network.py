@@ -66,7 +66,7 @@ async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
             )
 
 
-async def test_compute_rollups_ranking_and_freshness(net_pool):
+async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_async_client):
     pool, a, b, cc = net_pool
     await _seed(
         pool,
@@ -84,9 +84,13 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
         updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc),
     )
     # Agency C: no data in range at all.
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, a)
+    mirror_updates_to_ch(ch_client, b)
 
     async with pool.acquire() as conn:
-        rows = await compute_network_summary(conn, date(2026, 4, 1), date(2026, 4, 7))
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
 
     by = {r["agency_id"]: r for r in rows}
     assert by[a]["avg_delay_min"] == 10.0
@@ -109,13 +113,59 @@ async def test_compute_rollups_ranking_and_freshness(net_pool):
     assert order.index(a) < order.index(b) < order.index(cc)
 
 
-async def test_compute_network_summary_excludes_deleted_agency(net_pool):
+async def test_compute_network_summary_falls_back_to_latest_completed_day_when_today_has_rows(
+    net_pool, ch_client, ch_async_client
+):
+    """Regression: an agency ingesting continuously (a completed day AFTER
+    its agg's newest day, PLUS a row from right now) must still be flagged
+    stale — is_stale must not silently flip to False just because the
+    unconditional MAX(captured_at) happens to land on today (the normal,
+    healthy, continuously-ingesting case in production).
+
+    A prior version computed MAX(captured_at) over the whole table and only
+    accepted it in Python if it was already before today's JST midnight —
+    so it never fell back to the latest prior completed day when today also
+    had rows, defeating staleness detection under normal conditions.
+    """
+    pool, a, _b, _cc = net_pool
+    # agg only knows about 2026-04-01 ...
+    await _seed(pool, a, dist=[("2026-04-01", 100, 6000, 50)])
+    async with pool.acquire() as c:
+        # ... but live `updates` has a LATER completed day (04-03) the agg
+        # hasn't caught up to yet, plus a row from right now (still-ingesting).
+        await c.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'f1.pb',$2,'T1','平日',$3,'R1',1,60)",
+            a,
+            datetime(2026, 4, 3, 2, 37, tzinfo=timezone.utc),
+            time(11, 37),
+        )
+        await c.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1,'f_now.pb',now(),'T2','平日',$2,'R1',1,60)",
+            a,
+            time(11, 37),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, a)
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["is_stale"] is True  # agg (04-01) lags the true latest completed day (04-03)
+
+
+async def test_compute_network_summary_excludes_deleted_agency(net_pool, ch_async_client):
     pool, a, b, cc = net_pool
     async with pool.acquire() as conn:
         await conn.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
 
     async with pool.acquire() as conn:
-        rows = await compute_network_summary(conn, date(2026, 4, 1), date(2026, 4, 7))
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 7))
 
     ids = [r["agency_id"] for r in rows]
     assert cc not in ids
@@ -124,22 +174,26 @@ async def test_compute_network_summary_excludes_deleted_agency(net_pool):
 
 
 @pytest.fixture
-async def net_client(net_pool):
+async def net_client(net_pool, ch_async_client):
     pool, a, b, cc = net_pool
     from api.main import app
 
     app.state.pool = pool
+    app.state.ch_client = ch_async_client
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, pool, a, b, cc
 
 
-async def test_network_summary_endpoint(net_client):
+async def test_network_summary_endpoint(net_client, ch_client):
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
     # Agency B: dist lags its completed updates day, NO feed → clamp_pct None, stale.
     await _seed(
         pool, b, dist=[("2026-04-01", 100, 12000, 100)], updates_at=datetime(2026, 4, 2, 2, 37, tzinfo=timezone.utc)
     )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, b)
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert r.status_code == 200
     body = r.json()
@@ -160,3 +214,33 @@ async def test_network_summary_endpoint(net_client):
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
     assert brow["is_stale"] is True
+
+
+async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
+    """Fix 8a regression: ClickHouse backs ONLY the ``is_stale`` field here —
+    every other field (avg_delay_min, on_time_pct, samples, raw_samples,
+    clamp_pct, data_from, data_to) comes from Postgres agg_* tables. A
+    ClickHouse hiccup on the per-agency freshness probe must degrade that
+    agency's ``is_stale`` (via a None live_max — see is_stale's docstring:
+    "no completed day / can't determine -> not stale"), not 500/503 the whole
+    /api/network/summary response (mirrors api.routers.map's
+    today_route_summary freshness try/except; no real ClickHouse needed — a
+    client whose `.query` always raises is enough to simulate the hiccup)."""
+    pool, a, _b, _cc = net_pool
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+
+    class _BrokenCh:
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("simulated ClickHouse outage")
+
+    from api.main import app
+
+    app.state.pool = pool
+    app.state.ch_client = _BrokenCh()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    body = r.json()
+    arow = next(x for x in body["agencies"] if x["agency_id"] == a)
+    assert arow["avg_delay_min"] == 10.0  # Postgres-backed field unaffected by the CH outage
+    assert arow["is_stale"] is False  # degraded live_max=None -> is_stale(agg_day, None) is False

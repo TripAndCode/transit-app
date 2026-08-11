@@ -52,7 +52,7 @@ def parse_feed(
     agency_id: int,
     conn,
 ) -> list:
-    """Return rows shaped for UPDATE_INSERT_SQL.
+    """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
                 route_code, stop_sequence, dep_delay).
@@ -107,6 +107,19 @@ def parse_feed(
             )
             skipped_extended += 1
             continue
+        if sched is not None:
+            # GTFS's departure_time is raw, unpadded text — "7:05:00" is as
+            # valid as "07:05:00". Postgres's old TIME column normalized
+            # this for free; ClickHouse's plain String does not. Every hour
+            # extraction downstream (api/range.py's time_band_clause_ch,
+            # pipeline/reports/rankings.py, overview.py) reads a fixed
+            # substring assuming a 2-digit hour, so an unpadded single-digit
+            # hour would either sort into the wrong time band or crash
+            # toUInt8() outright. Zero-pad once, here, rather than at every
+            # read site.
+            hour_str, sep, rest = sched.partition(":")
+            if sep:
+                sched = f"{int(hour_str):02d}:{rest}"
         rows.append(
             (
                 file_name,

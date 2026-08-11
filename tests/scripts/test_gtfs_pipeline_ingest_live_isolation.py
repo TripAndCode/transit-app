@@ -21,10 +21,22 @@ def _mock_conn_with_agency_ids(ids):
     return conn
 
 
+@pytest.fixture(autouse=True)
+def _mock_ch_client():
+    """cmd_ingest_live now constructs a ClickHouse client via
+    pipeline.clickhouse.get_client() before threading it into ingest_live().
+    This module is DB-free (mocked psycopg2 connection/cursor only, per the
+    file docstring), so get_client()'s real network call is stubbed out too -
+    its return value is irrelevant here since pipeline.ingest.ingest_live is
+    itself mocked in every test below."""
+    with patch("pipeline.clickhouse.get_client", return_value=MagicMock()):
+        yield
+
+
 def test_ingest_live_all_agencies_continues_past_one_failure():
     conn = _mock_conn_with_agency_ids([1, 2, 3])
 
-    def fake_ingest_live(aid, c):
+    def fake_ingest_live(aid, c, ch):
         if aid == 2:
             raise ValueError("boom")
         return 1
@@ -44,7 +56,7 @@ def test_ingest_live_all_agencies_rolls_back_after_a_failure():
     transaction until a rollback, since ingest_live doesn't do its own)."""
     conn = _mock_conn_with_agency_ids([1, 2])
 
-    def fake_ingest_live(aid, c):
+    def fake_ingest_live(aid, c, ch):
         if aid == 1:
             raise ValueError("boom")
         return 1

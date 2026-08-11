@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+import asyncpg
+import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
-from api.deps import get_agency, get_conn, get_current_user, get_current_user_optional, get_locale
+from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
+from pipeline.query.chat import _chat_str
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["conversations"])
 
@@ -206,6 +212,7 @@ async def append_message_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user),
     conn=Depends(get_conn),
+    ch=Depends(get_ch),
     locale: str = Depends(get_locale),
 ):
     """Dispatch a {tool, args} question and persist user + assistant rows atomically."""
@@ -283,17 +290,78 @@ async def append_message_endpoint(
             can_args = dict(resolved_args)
         sig_hash = signature_hash(resolved_tool, can_args)
         try:
-            await _intent_cache.upsert(
+            # Nested transaction (asyncpg emits a SAVEPOINT here since we're
+            # already inside conn.transaction()). Any Postgres error raised by
+            # dispatch() below — not just the UndefinedTableError case — would
+            # otherwise abort the OUTER transaction, poisoning `conn` so the
+            # append_message() calls in the except branches below raise
+            # asyncpg.exceptions.InFailedSQLTransactionError instead of writing
+            # the intended graceful tool_error/service_unavailable message.
+            # The savepoint confines that abort to the upsert+dispatch scope,
+            # leaving the outer transaction (holding user_msg) writable.
+            async with conn.transaction():
+                await _intent_cache.upsert(
+                    conn,
+                    sig_hash,
+                    IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+                    can_args,
+                    agency_id,
+                    question=user_summary,
+                )
+                result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            _log.warning("Tool %s unavailable: %s", resolved_tool, exc.detail)
+            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
+            assistant_msg = await _conv.append_message(
                 conn,
-                sig_hash,
-                IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
-                can_args,
-                agency_id,
-                question=user_summary,
+                conversation_id,
+                role="assistant",
+                chip_id=resolved_chip_id,
+                tool=resolved_tool,
+                args=can_args,
+                signature_hash=sig_hash,
+                result=None,
+                rendered_summary=rendered,
             )
-            result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale)
-        except Exception as exc:
-            rendered = f"ツール {resolved_tool} の実行に失敗しました: {exc}"
+            return {"user": user_msg, "assistant": assistant_msg}
+        except clickhouse_connect.driver.exceptions.Error:
+            _log.exception("Tool %s failed: ClickHouse query error", resolved_tool)
+            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=resolved_chip_id,
+                tool=resolved_tool,
+                args=can_args,
+                signature_hash=sig_hash,
+                result=None,
+                rendered_summary=rendered,
+            )
+            return {"user": user_msg, "assistant": assistant_msg}
+        except asyncpg.exceptions.UndefinedTableError:
+            # A missing agg_* table (migration/analyze behind) must propagate to
+            # FastAPI's registered aggregate_not_ready_handler (api/main.py +
+            # api/aggregate_errors.py) so the frontend gets the machine-readable
+            # {"code": "aggregate_not_ready"} 503 it reacts to — not a generic
+            # tool_error that masks it (mirrors api/routers/ask.py's Fix-8f
+            # convention). Re-raising immediately, before any further query runs
+            # on this `conn`, also avoids poisoning the still-open
+            # `conn.transaction()` above with a second failing statement (which
+            # would otherwise surface as an unhandled
+            # asyncpg.exceptions.InFailedSQLTransactionError instead of this
+            # error) — the transaction context manager rolls back cleanly once
+            # this propagates out of it.
+            raise
+        except Exception:
+            # Never interpolate raw exception text into a persisted message —
+            # it can carry internal details (SQL fragments, relation names,
+            # endpoint URLs) that would resurface every time this conversation
+            # is reloaded. Full detail still goes to the server-side log.
+            _log.exception("Tool %s failed", resolved_tool)
+            rendered = _chat_str("tool_error", locale, name=resolved_tool)
             assistant_msg = await _conv.append_message(
                 conn,
                 conversation_id,

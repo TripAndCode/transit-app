@@ -10,11 +10,18 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
 """
 
-from datetime import date
+import logging
+from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from api.clickhouse import max_captured_at_before
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+
+_log = logging.getLogger(__name__)
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 _PERF_SQL = """
     SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd, SUM(on_time_count) AS ot,
@@ -33,17 +40,9 @@ _FEED_SQL = """
 
 _AGG_MAX_SQL = "SELECT agency_id, MAX(date) AS d FROM agg_route_daily_dist GROUP BY agency_id"
 
-_LIVE_MAX_ONE_SQL = """
-    SELECT (MAX(captured_at) AT TIME ZONE 'Asia/Tokyo')::date AS d
-    FROM updates
-    WHERE agency_id = $1
-      AND captured_at < (date_trunc('day', now() AT TIME ZONE 'Asia/Tokyo'))
-                        AT TIME ZONE 'Asia/Tokyo'
-"""
-
 
 @async_lru_cache(maxsize=64, ttl_seconds=300)
-async def compute_network_summary(conn, from_date: date, to_date: date) -> list[dict[str, Any]]:
+async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> list[dict[str, Any]]:
     """Per-agency rollups over [from_date, to_date], ranked worst-avg-delay first."""
     agencies = await conn.fetch(
         "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
@@ -52,10 +51,39 @@ async def compute_network_summary(conn, from_date: date, to_date: date) -> list[
     feed = {r["agency_id"]: r for r in await conn.fetch(_FEED_SQL, from_date, to_date)}
     agg_max = {r["agency_id"]: r["d"] for r in await conn.fetch(_AGG_MAX_SQL)}
 
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
+    # One indexed read per agency (api.clickhouse.max_captured_at_before —
+    # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
+    # sync sibling; see its docstring) instead of `maxOrNull`, which is a
+    # full per-agency scan (measured ~24s total for 4 agencies vs ~4s for the
+    # indexed form on real dev data).
+    #
+    # This probe backs ONLY the `is_stale` field below — every other field in
+    # this function's result (avg_delay_min, on_time_pct, samples,
+    # raw_samples, clamp_pct, data_from, data_to) comes from Postgres agg_*
+    # tables. So a ClickHouse hiccup here must not fail the whole network
+    # summary — degrade this agency's live_max to None instead (same
+    # "one non-critical sub-check shouldn't sink an otherwise-fine response"
+    # shape as api.routers.map.today_route_summary's freshness try/except).
+    # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
+    # no completed day / can't determine → nothing owed), which is the
+    # correct degrade here.
     live_max: dict[int, "date | None"] = {}
     for a in agencies:
-        row = await conn.fetchrow(_LIVE_MAX_ONE_SQL, a["agency_id"])
-        live_max[a["agency_id"]] = row["d"] if row else None
+        aid = a["agency_id"]
+        try:
+            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
+        except Exception:
+            _log.warning("ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True)
+            live_max[aid] = None
+            continue
+        if mx is None:
+            live_max[aid] = None
+            continue
+        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
+        live_max[aid] = mx_utc.astimezone(_JST).date()
 
     rows: list[dict[str, Any]] = []
     for a in agencies:

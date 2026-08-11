@@ -34,6 +34,8 @@ _DIGEST_LOCALES: dict[tuple[str, str], str] = {
     ("stale", "en"): "Freshness: aggregates lagging for {names}",
     ("fresh", "ja"): "鮮度: 全事業者最新",
     ("fresh", "en"): "Freshness: all agencies current",
+    ("stale_unknown", "ja"): "鮮度: 確認できませんでした",
+    ("stale_unknown", "en"): "Freshness: could not be checked",
 }
 
 
@@ -92,6 +94,17 @@ def render_digest(data: DigestData, locale: str = "ja") -> str:
         if s.raw_samples == 0:
             continue
         lines.append(_t("feed_health", locale, name=s.agency_name, clamp=s.clamp_count, raw=s.raw_samples))
-    stale = [s.agency_name for s in data.sections if s.is_stale]
-    lines.append(_t("stale", locale, names=", ".join(stale)) if stale else _t("fresh", locale))
+    # staleness_known=False means the ClickHouse probe backing every
+    # section's is_stale failed (see build_digest) — every section's
+    # is_stale is False in that case too (probe never ran), which is
+    # indistinguishable from "probe ran, found nothing stale" unless this
+    # flag is checked first. Falling through to "fresh" here would render an
+    # affirmative "all agencies current" claim at exactly the moment
+    # freshness is actually unknown — worse than saying nothing, since this
+    # rendered Markdown is the digest's only output surface.
+    if not data.staleness_known:
+        lines.append(_t("stale_unknown", locale))
+    else:
+        stale = [s.agency_name for s in data.sections if s.is_stale]
+        lines.append(_t("stale", locale, names=", ".join(stale)) if stale else _t("fresh", locale))
     return "\n".join(lines)

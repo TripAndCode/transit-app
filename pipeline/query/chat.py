@@ -33,6 +33,10 @@ import json
 import logging
 import os
 
+import asyncpg
+import clickhouse_connect
+from fastapi import HTTPException
+
 from api.range import RangeCtx
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
@@ -135,8 +139,25 @@ _CHAT_STRINGS = {
     ("llm_unconfigured", "en"): "No AI provider is configured.",
     ("refusal_fallback", "ja"): "ご質問の内容を理解できませんでした。",
     ("refusal_fallback", "en"): "I couldn't understand your question.",
-    ("tool_error", "ja"): "ツール {name} の実行中にエラーが発生しました: {exc}",
-    ("tool_error", "en"): "Error while running tool {name}: {exc}",
+    # Deliberately does NOT interpolate the exception text (same rationale as
+    # service_unavailable below): any exception surfacing here — ClickHouse,
+    # asyncpg, or a tool-handler bug — can carry internal details (SQL
+    # fragments, relation names, endpoint URLs) that must never reach an
+    # unauthenticated client. Full detail is still captured server-side via
+    # logger.exception at every call site.
+    ("tool_error", "ja"): "ツール {name} の実行中にエラーが発生しました。",
+    ("tool_error", "en"): "An error occurred while running tool {name}.",
+    # Used when a tool fails due to a backend being unavailable (ClickHouse
+    # down at startup, or a mid-query ClickHouse error) rather than a normal
+    # tool-logic error. Deliberately does NOT interpolate the exception text —
+    # that text can contain internal details (e.g. an asyncpg relation name)
+    # that must never reach an unauthenticated client (see api/aggregate_errors.py).
+    ("service_unavailable", "ja"): (
+        "ツール {name} を実行できませんでした（一時的にサービスに接続できません）。しばらくしてから再度お試しください。"
+    ),
+    ("service_unavailable", "en"): (
+        "Could not run tool {name} right now (temporary service issue). Please retry later."
+    ),
 }
 
 
@@ -167,8 +188,14 @@ async def chat_with_tools(
     locale: str = "ja",
     rag_examples: list | None = None,
     history: list | None = None,
+    ch=None,
 ) -> dict:
     """Run one round-trip Ask flow.
+
+    ``ch`` is the ClickHouse client threaded through to every internal
+    :func:`dispatch` call (Task 8 — handlers reading the live `updates`
+    table read it from ClickHouse). Defaults to ``None`` for callers/tests
+    that never exercise those specific tool paths.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -216,11 +243,44 @@ async def chat_with_tools(
                 can_args = dict(build_args)
             sig_hash = signature_hash(build_tool, can_args)
             try:
-                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale)
-            except Exception as exc:
+                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale, ch=ch)
+            except HTTPException as exc:
+                if exc.status_code != 503:
+                    raise
+                _log.warning("Build-mode dispatch for %s unavailable: %s", build_tool, exc.detail)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
+                    "tool_call": {"name": build_tool, "arguments": can_args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash,
+                    "confidence": 1.0,
+                    "canonical_args": can_args,
+                    "cache_outcome": "bypass",
+                }
+            except clickhouse_connect.driver.exceptions.Error:
+                _log.exception("Build-mode dispatch for %s: ClickHouse query error", build_tool)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
+                    "tool_call": {"name": build_tool, "arguments": can_args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash,
+                    "confidence": 1.0,
+                    "canonical_args": can_args,
+                    "cache_outcome": "bypass",
+                }
+            except asyncpg.exceptions.UndefinedTableError:
+                # An agg_* table missing (migration/analyze behind) must propagate
+                # to FastAPI's registered aggregate_not_ready_handler so the
+                # frontend gets the machine-readable {"code": "aggregate_not_ready"}
+                # 503 it reacts to — not a generic 200 tool_error that masks it
+                # (mirrors api/routers/ask.py's Fix-8f convention).
+                raise
+            except Exception:
                 _log.exception("Build-mode dispatch failed for %s", build_tool)
                 return {
-                    "answer": _chat_str("tool_error", locale, name=build_tool, exc=exc),
+                    "answer": _chat_str("tool_error", locale, name=build_tool),
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
@@ -348,11 +408,41 @@ async def chat_with_tools(
             nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
             final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
             try:
-                result_pre: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
-            except Exception as exc:
+                result_pre: ToolResult = await dispatch(name, args, ctx, conn, agency_id, locale=locale, ch=ch)
+            except HTTPException as exc:
+                if exc.status_code != 503:
+                    raise
+                _log.warning("Tool %s unavailable (cache pre-hit): %s", name, exc.detail)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=name),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash_pre,
+                    "confidence": final_conf_pre,
+                    "canonical_args": args,
+                    "cache_outcome": "hit",
+                }
+            except clickhouse_connect.driver.exceptions.Error:
+                _log.exception("Tool %s failed (cache pre-hit): ClickHouse query error", name)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=name),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": sig_hash_pre,
+                    "confidence": final_conf_pre,
+                    "canonical_args": args,
+                    "cache_outcome": "hit",
+                }
+            except asyncpg.exceptions.UndefinedTableError:
+                # Missing agg_* table must propagate to aggregate_not_ready_handler,
+                # not be swallowed into a generic tool_error (see Site 1 comment).
+                raise
+            except Exception:
                 _log.exception("Tool %s failed (cache pre-hit)", name)
                 return {
-                    "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                    "answer": _chat_str("tool_error", locale, name=name),
                     "tool_call": {"name": name, "arguments": args},
                     "result": None,
                     "success": False,
@@ -436,11 +526,41 @@ async def chat_with_tools(
             if not isinstance(args, dict):
                 args = {}
             try:
-                result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
-            except Exception as exc:
+                result = await dispatch(name, args, ctx, conn, agency_id, locale=locale, ch=ch)
+            except HTTPException as exc:
+                if exc.status_code != 503:
+                    raise
+                _log.warning("Tool %s unavailable: %s", name, exc.detail)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=name),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": None,
+                    "confidence": None,
+                    "canonical_args": None,
+                    "cache_outcome": None,
+                }
+            except clickhouse_connect.driver.exceptions.Error:
+                _log.exception("Tool %s failed: ClickHouse query error", name)
+                return {
+                    "answer": _chat_str("service_unavailable", locale, name=name),
+                    "tool_call": {"name": name, "arguments": args},
+                    "result": None,
+                    "success": False,
+                    "signature_hash": None,
+                    "confidence": None,
+                    "canonical_args": None,
+                    "cache_outcome": None,
+                }
+            except asyncpg.exceptions.UndefinedTableError:
+                # Missing agg_* table must propagate to aggregate_not_ready_handler,
+                # not be swallowed into a generic tool_error (see Site 1 comment).
+                raise
+            except Exception:
                 _log.exception("Tool %s failed", name)
                 return {
-                    "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                    "answer": _chat_str("tool_error", locale, name=name),
                     "tool_call": {"name": name, "arguments": args},
                     "result": None,
                     "success": False,
@@ -498,11 +618,41 @@ async def chat_with_tools(
         final_conf = derive_confidence(nn_dist, sig.confidence)
 
         try:
-            result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
-        except Exception as exc:
+            result = await dispatch(name, args, ctx, conn, agency_id, locale=locale, ch=ch)
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            _log.warning("Tool %s unavailable: %s", name, exc.detail)
+            return {
+                "answer": _chat_str("service_unavailable", locale, name=name),
+                "tool_call": {"name": name, "arguments": args},
+                "result": None,
+                "success": False,
+                "signature_hash": sig_hash,
+                "confidence": final_conf,
+                "canonical_args": can_args,
+                "cache_outcome": cache_outcome,
+            }
+        except clickhouse_connect.driver.exceptions.Error:
+            _log.exception("Tool %s failed: ClickHouse query error", name)
+            return {
+                "answer": _chat_str("service_unavailable", locale, name=name),
+                "tool_call": {"name": name, "arguments": args},
+                "result": None,
+                "success": False,
+                "signature_hash": sig_hash,
+                "confidence": final_conf,
+                "canonical_args": can_args,
+                "cache_outcome": cache_outcome,
+            }
+        except asyncpg.exceptions.UndefinedTableError:
+            # Missing agg_* table must propagate to aggregate_not_ready_handler,
+            # not be swallowed into a generic tool_error (see Site 1 comment).
+            raise
+        except Exception:
             _log.exception("Tool %s failed", name)
             return {
-                "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+                "answer": _chat_str("tool_error", locale, name=name),
                 "tool_call": {"name": name, "arguments": args},
                 "result": None,
                 "success": False,
@@ -584,12 +734,35 @@ async def chat_with_tools(
         args = {}
 
     try:
-        result = await dispatch(name, args, ctx, conn, agency_id, locale=locale)
-    except Exception as exc:
+        result = await dispatch(name, args, ctx, conn, agency_id, locale=locale, ch=ch)
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        # A ClickHouse-unavailable stand-in raise, not a deliberate decline.
+        _log.warning("Tool %s unavailable: %s", name, exc.detail)
+        return {
+            "answer": _chat_str("service_unavailable", locale, name=name),
+            "tool_call": {"name": name, "arguments": args},
+            "result": None,
+            "success": False,
+        }
+    except clickhouse_connect.driver.exceptions.Error:
+        _log.exception("Tool %s failed: ClickHouse query error", name)
+        return {
+            "answer": _chat_str("service_unavailable", locale, name=name),
+            "tool_call": {"name": name, "arguments": args},
+            "result": None,
+            "success": False,
+        }
+    except asyncpg.exceptions.UndefinedTableError:
+        # Missing agg_* table must propagate to aggregate_not_ready_handler,
+        # not be swallowed into a generic tool_error (see Site 1 comment).
+        raise
+    except Exception:
         _log.exception("Tool %s failed", name)
         # A tool blowing up is a hard failure, not a deliberate decline.
         return {
-            "answer": _chat_str("tool_error", locale, name=name, exc=exc),
+            "answer": _chat_str("tool_error", locale, name=name),
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,

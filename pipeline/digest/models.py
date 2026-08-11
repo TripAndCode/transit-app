@@ -33,3 +33,11 @@ class DigestData:
     target_day: date
     network_avg_delay_min: float | None
     sections: list[AgencySection]
+    # False iff the ClickHouse freshness probe backing every section's
+    # `is_stale` failed (see build_digest) — distinct from "probe ran, found
+    # nothing stale" (every section's is_stale is False either way, so this
+    # flag is the only signal render_digest has to tell "known fresh" apart
+    # from "staleness unknown"). Defaults True so existing callers/tests that
+    # construct DigestData directly (with a real or no-op freshness check)
+    # don't need to know about this failure mode.
+    staleness_known: bool = True

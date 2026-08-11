@@ -11,11 +11,15 @@ they'd get no baseline and never become movers.
 Adds feed-health (agg_feed_health) and freshness (check_agg_freshness).
 """
 
+import logging
 from datetime import date
 
 from api.triage import classify_route
+from pipeline.clickhouse import get_client
 from pipeline.digest.models import AgencySection, DigestData, Mover
 from pipeline.freshness import check_agg_freshness
+
+_log = logging.getLogger(__name__)
 
 TOP_MOVERS = 5
 
@@ -87,7 +91,28 @@ def build_digest(conn, target_day: date) -> DigestData:
         cur.execute(_AGENCIES_SQL)
         agencies = cur.fetchall()
     agency_ids = [a[0] for a in agencies]
-    stale_ids = {s.agency_id for s in check_agg_freshness(conn, agency_ids)}
+    # Every other field in the digest comes from Postgres agg_* tables; this
+    # ClickHouse probe backs ONLY the advisory `is_stale` flag per section. A
+    # ClickHouse hiccup here (get_client() raising on a missing env var, or
+    # check_agg_freshness's live-day query failing mid-run) must not kill the
+    # whole (otherwise Postgres-only) digest — degrade and keep going, same
+    # shape as pipeline.health.aggregate_freshness and
+    # pipeline.reports.network.compute_network_summary's per-probe try/except.
+    #
+    # `staleness_known` is threaded through to DigestData/render_digest
+    # separately from `stale_ids`: an empty `stale_ids` is ambiguous between
+    # "probe ran, found nothing stale" and "probe failed" (every section's
+    # is_stale ends up False either way), and render_digest's footer must not
+    # collapse a failed probe into the affirmative "all agencies current"
+    # line — this is the digest's only output surface, so that would be an
+    # honestly-wrong claim, not just a missing one.
+    staleness_known = True
+    try:
+        stale_ids = {s.agency_id for s in check_agg_freshness(conn, get_client(), agency_ids)}
+    except Exception:
+        _log.warning("ClickHouse freshness probe failed — digest staleness is unknown", exc_info=True)
+        stale_ids = set()
+        staleness_known = False
 
     sections: list[AgencySection] = []
     net_delay_weighted = 0.0
@@ -184,4 +209,9 @@ def build_digest(conn, target_day: date) -> DigestData:
         net_samples += samples_sum
 
     network_avg = round((net_delay_weighted / net_samples) / 60, 1) if net_samples else None
-    return DigestData(target_day=target_day, network_avg_delay_min=network_avg, sections=sections)
+    return DigestData(
+        target_day=target_day,
+        network_avg_delay_min=network_avg,
+        sections=sections,
+        staleness_known=staleness_known,
+    )

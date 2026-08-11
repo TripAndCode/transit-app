@@ -82,6 +82,38 @@ def test_static_join_handles_repeated_calls_same_transaction(pg_conn):
     assert rows1[0][5] == "R1"  # route_code from RT
 
 
+def test_static_join_zero_pads_single_digit_hour_scheduled_time(pg_conn):
+    """GTFS's departure_time is raw, unpadded text — "7:05:00" is as valid
+    as "07:05:00" per spec. Postgres's old TIME column normalized this for
+    free; ClickHouse's plain String does not, and every hour-extraction
+    read site downstream assumes a 2-digit hour. Regression: static_join
+    must zero-pad at write time so a single-digit-hour departure_time
+    doesn't sort into the wrong time band or crash toUInt8() reads."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            ("static_join_padding_test", "http://padding-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+            (aid, "uuid-A", "R1", "平日"),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (aid, "uuid-A", 1, "S1", "7:05:00"),
+        )
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-A")
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert len(rows) == 1
+    assert rows[0][4] == "07:05:00"
+
+
 # ---------------------------------------------------------------------------
 # Integration tests against captured fixtures
 # ---------------------------------------------------------------------------
