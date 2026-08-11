@@ -179,7 +179,9 @@ def parse_pb(
 def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
-    Dispatches to the agency's ingest strategy. Returns total rows attempted.
+    Dispatches to the agency's ingest strategy. Returns the number of rows
+    actually written to ClickHouse (post intra-batch dedup; a failed batch
+    contributes 0).
     """
     root = pathlib.Path(folder)
     n_errors = 0
@@ -220,9 +222,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # same operation that successfully inserted them. If the whole-batch
     # insert_updates call raises a clickhouse_connect DataError — a
     # client-side columnar serialization failure (e.g. a None in a
-    # non-Nullable column, see db/clickhouse/schema.sql's
-    # route_code/stop_sequence) that provably never reached the server, so
-    # retrying is safe — _flush() retries file-by-file (see below) so only
+    # non-Nullable column, see db/clickhouse/schema.sql's stop_sequence/
+    # trip_id) that provably never reached the server, so retrying is safe
+    # — _flush() retries file-by-file (see below) so only
     # the actually-offending file(s), not every file that happened to share
     # a batch with them, end up uncounted/undone.
     #

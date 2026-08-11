@@ -213,16 +213,16 @@ async def ch_async_client(ch_client):
 def mirror_updates_to_ch(ch_client, agency_id) -> None:
     """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
 
-    Task 6 moved analyze()'s dedup materialization to read from ClickHouse
-    instead of Postgres. Many fixtures across this suite pre-date that
-    migration and still seed Postgres `updates` directly (often via asyncpg,
-    in ways that would be invasive to rewrite one-for-one into ClickHouse
-    inserts). Rather than duplicate every such seed, mirror whatever Postgres
-    already has for this agency into ClickHouse right before calling
-    analyze() — analyze()'s three still-Postgres-reading blocks
-    (agg_feed_health, agg_stop_routes, agg_meta's max_updates_captured_at;
-    see pipeline/analyze.py) keep reading the original Postgres rows
-    unchanged, so both sources agree on the same fixture data.
+    analyze() now reads ALL of its `updates` access from ClickHouse (dedup
+    materialization, agg_feed_health, agg_stop_routes' _analyze_raw_keys,
+    agg_meta's max_updates_captured_at — see pipeline/analyze.py); nothing
+    in it reads Postgres `updates` any more. Many fixtures across this
+    suite pre-date that migration and still seed Postgres `updates` directly
+    (often via asyncpg, in ways that would be invasive to rewrite one-for-one
+    into ClickHouse inserts). Rather than duplicate every such seed, mirror
+    whatever Postgres already has for this agency into ClickHouse right
+    before calling analyze() — calling this first is required, not optional,
+    for any test that seeds via Postgres and then calls analyze().
     """
     from pipeline.clickhouse import insert_updates
 

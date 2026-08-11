@@ -117,6 +117,7 @@ def build_dedup_ch_sql(
     substitution rule doesn't match, so the WHERE clause still sees the
     plain row-level column. Confirmed against a live ClickHouse instance.
     """
+    # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
     return (
