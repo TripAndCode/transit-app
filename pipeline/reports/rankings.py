@@ -148,24 +148,33 @@ async def compute_ranking(
 async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str, limit: int) -> list[tuple]:
     """Live raw-scan ranking — fallback for time_band-filtered queries.
 
-    p50/p90 use ClickHouse's `quantileExact` aggregate instead of the
-    Postgres version's `PERCENT_RANK() OVER (...)` window + boundary-row
-    pick — ClickHouse's window-function support doesn't cover
-    `PERCENT_RANK`, and `quantileExact` is the more idiomatic ClickHouse way
-    to get an exact per-group percentile directly, with no window/CTE
-    indirection needed. Every group here has > 20 rows (the HAVING gate),
-    so `avg`/`quantileExact` are never NULL/NaN — no empty-input guard needed.
+    p50/p90 reproduce the Postgres version's `PERCENT_RANK() OVER (...)`
+    window + boundary-row pick (min-rank ties: the smallest value whose
+    fraction-strictly-below is >= q) via `rank()`/`count()` window
+    functions instead — NOT ClickHouse's `quantileExact`, which is a pure
+    positional pick (`sorted[floor(q*n)]`) that silently disagrees with
+    PERCENT_RANK whenever `dep_delay` has ties (common: exact-zero delays
+    and clamped/rounded values dominate this column). E.g. sorted
+    `[0]*95 + [600]*5`: PERCENT_RANK's p90 is 600s, quantileExact's is 0s.
+    Every group here has > 20 rows (the HAVING gate), so `avg` is never
+    NULL/NaN — no empty-input guard needed.
     """
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     result = await ch.query(
-        f"WITH {cte_sql}\n"
+        f"WITH {cte_sql},\n"
+        "deduped_ranked AS (\n"
+        "    SELECT route_code, service_type, dep_delay,\n"
+        "        (rank() OVER (PARTITION BY route_code, service_type ORDER BY dep_delay) - 1)\n"
+        "        / (count() OVER (PARTITION BY route_code, service_type) - 1) AS pct\n"
+        "    FROM deduped\n"
+        ")\n"
         "SELECT route_code, service_type,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
-        "       quantileExact(0.5)(dep_delay) / 60.0 AS p50_min,\n"
-        "       quantileExact(0.9)(dep_delay) / 60.0 AS p90_min,\n"
+        "       minIf(dep_delay, pct >= 0.5) / 60.0 AS p50_min,\n"
+        "       minIf(dep_delay, pct >= 0.9) / 60.0 AS p90_min,\n"
         "       count(*) AS samples\n"
-        "FROM deduped\n"
+        "FROM deduped_ranked\n"
         "GROUP BY route_code, service_type\n"
         "HAVING count(*) > 20\n"
         f"ORDER BY avg_min {order}\n"
@@ -174,8 +183,20 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
     )
     # ClickHouse's round() is round-half-to-even; round in Python (half-up)
     # to match Postgres ROUND() and the agg fast path's _avg_min/_sec_to_min.
+    # p50/p90 can legitimately be None: PERCENT_RANK's min-rank tie handling
+    # gives every row in an all-tied (or heavily-tied) partition the SAME
+    # rank, so `minIf(dep_delay, pct >= q)` matches zero rows once every
+    # row's pct sits below q — exactly what the pre-migration Postgres
+    # PERCENT_RANK query did too (MIN() of an empty CASE-filtered set).
     return [
-        (route_code, service_type, _round2(avg_min), _round2(p50_min), _round2(p90_min), samples)
+        (
+            route_code,
+            service_type,
+            _round2(avg_min),
+            _round2(p50_min) if p50_min is not None else None,
+            _round2(p90_min) if p90_min is not None else None,
+            samples,
+        )
         for route_code, service_type, avg_min, p50_min, p90_min, samples in result.result_rows
     ]
 
@@ -573,7 +594,12 @@ async def compute_hourly_heatmap(
         if ch is None:
             raise RuntimeError("compute_hourly_heatmap's live fallback requires a ClickHouse client")
         cte_sql, ch_params = _dedup_cte_ch(ctx)
-        hour_expr = "toUInt8(substring(scheduled_time, 1, 2))"
+        # OrNull, not a bare cast: ingest now zero-pads every scheduled_time's
+        # hour (pipeline/strategies/static_join.py), but this degrades any
+        # already-ingested pre-fix row (or any future malformed value) out of
+        # the histogram instead of raising CANNOT_PARSE_TEXT and 500ing the
+        # whole /reports/trend heatmap over a handful of bad rows.
+        hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
         result = await ch.query(
             f"WITH {cte_sql}\n"
             f"SELECT date, {hour_expr} AS hour,\n"
@@ -582,7 +608,7 @@ async def compute_hourly_heatmap(
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
             f"GROUP BY date, {hour_expr}\n"
-            "HAVING count(*) >= 3\n"
+            "HAVING count(*) >= 3 AND hour IS NOT NULL\n"
             "ORDER BY date, hour",
             parameters={"agency_id": agency_id, **ch_params},
         )
