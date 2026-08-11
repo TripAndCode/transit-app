@@ -42,10 +42,22 @@ async def get_ch_client():
         username=os.environ["CLICKHOUSE_USER"],
         password=os.environ["CLICKHOUSE_PASSWORD"],
         database=os.environ["CLICKHOUSE_DATABASE"],
+        secure=os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes"),
         settings={
             "max_execution_time": 30,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
+            # This process only ever SELECTs from `updates` — every write/DDL
+            # path (ingest, analyze, bootstrap) goes through pipeline/clickhouse.py's
+            # sync client instead. `readonly=2` (not 1) restricts this
+            # connection to read queries while still allowing the settings
+            # above to be applied per-query; `readonly=1` would reject those
+            # settings outright. Session-level, so it holds regardless of
+            # what the underlying CLICKHOUSE_USER credential is grantable
+            # for — a defense-in-depth floor under this specific client, not
+            # a substitute for a real read-only CH user if one is
+            # provisioned later.
+            "readonly": 2,
         },
     )
 

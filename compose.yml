@@ -27,8 +27,12 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
       CLICKHOUSE_DB: transit
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      # Loopback-bound: `docker -p` bypasses host firewalls on Linux, and
+      # nothing in this codebase speaks ClickHouse's native protocol (both
+      # clients are clickhouse-connect over HTTP) -- 9000 was published with
+      # nothing using it. Drop to 127.0.0.1:9000:9000 locally if you need
+      # `clickhouse-client` directly.
+      - "127.0.0.1:8123:8123"
     ulimits:
       nofile:
         soft: 262144

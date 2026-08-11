@@ -116,7 +116,7 @@ db-down:
 ch-test:
 	docker run -d --rm --name transit-test-ch \
 	  -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
-	  -p 8124:8123 clickhouse/clickhouse-server:26.3
+	  -p 127.0.0.1:8124:8123 clickhouse/clickhouse-server:26.3
 
 ch-bootstrap:
 	poetry run python -c "import clickhouse_connect, os; from db.clickhouse.bootstrap import apply_schema; \

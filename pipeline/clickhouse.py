@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 import clickhouse_connect
 
 # Column order matches every ingest strategy's row-tuple shape (see
-# pipeline/strategies/*.py parse_feed docstrings) plus the schema in
-# db/clickhouse/schema.sql, minus agency_id which insert_updates prepends.
+# pipeline/strategies/*.py parse_feed docstrings), minus agency_id which
+# insert_updates prepends. Does NOT need to match db/clickhouse/schema.sql's
+# column order (it doesn't: schema.sql declares captured_at before
+# file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
+# explicitly, so clickhouse-connect maps by name, not position.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -32,6 +35,11 @@ def get_client():
         username=os.environ["CLICKHOUSE_USER"],
         password=os.environ["CLICKHOUSE_PASSWORD"],
         database=os.environ["CLICKHOUSE_DATABASE"],
+        # Explicit knob rather than relying on clickhouse-connect's port-based
+        # https inference (only triggers on port 443/8443): without either,
+        # this client sends CLICKHOUSE_PASSWORD as HTTP Basic auth in
+        # cleartext on every ingest/analyze/bootstrap request.
+        secure=os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes"),
     )
 
 
