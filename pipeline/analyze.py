@@ -539,7 +539,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES %s",
                     [(agency_id, *row) for row in ch_feed_health.result_rows],
                 )
-            logger.info(f"  agg_feed_health: {cur.rowcount} rows")
+            # len(result_rows), not cur.rowcount: when ClickHouse returns no
+            # rows, no statement runs on this cursor, so cur.rowcount is the
+            # psycopg2 "nothing executed" sentinel -1 -- misleading in the
+            # one operational log line that confirms this builder ran.
+            logger.info(f"  agg_feed_health: {len(ch_feed_health.result_rows)} rows")
             cur.execute(
                 "SELECT COALESCE(SUM(clamp_count), 0) FROM agg_feed_health WHERE agency_id = %(agency_id)s",
                 p,

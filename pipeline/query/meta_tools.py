@@ -239,9 +239,14 @@ async def describe_data(
         if ch is None:
             return ToolResult(
                 kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
                 summary=_summary(
-                    "ClickHouseに接続できないため取得できません。",
-                    "unable to fetch — ClickHouse is unavailable.",
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
                     locale,
                 ),
             )
@@ -328,9 +333,14 @@ async def describe_data(
         if ch is None:
             return ToolResult(
                 kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
                 summary=_summary(
-                    "ClickHouseに接続できないため取得できません。",
-                    "unable to fetch — ClickHouse is unavailable.",
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
                     locale,
                 ),
             )
@@ -433,9 +443,14 @@ async def describe_data(
         if ch is None:
             return ToolResult(
                 kind="empty",
+                # Deliberately doesn't name the backend: pipeline.query.chat's
+                # service_unavailable string (the convention every other
+                # ClickHouse-unreachable path in the Ask flow uses) was
+                # written the same way, precisely so internal infrastructure
+                # never reaches an unauthenticated /ask client.
                 summary=_summary(
-                    "ClickHouseに接続できないため取得できません。",
-                    "unable to fetch — ClickHouse is unavailable.",
+                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+                    "Temporary service issue. Please retry later.",
                     locale,
                 ),
             )

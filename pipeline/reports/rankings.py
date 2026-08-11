@@ -261,9 +261,8 @@ async def _on_time_live(
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       sum(CASE WHEN dep_delay <= "
-        f"{threshold_sec}"
-        " THEN 1.0 ELSE 0 END) * 100.0 / count(*) AS on_time_pct,\n"
+        "       sum(CASE WHEN dep_delay <= {ot_threshold:Int32} THEN 1.0 ELSE 0 END)\n"
+        "           * 100.0 / count(*) AS on_time_pct,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
@@ -271,7 +270,7 @@ async def _on_time_live(
         "HAVING count(*) > 20\n"
         f"ORDER BY on_time_pct {order}\n"
         "LIMIT {ot_limit:UInt32}",
-        parameters={"agency_id": agency_id, "ot_limit": limit, **ch_params},
+        parameters={"agency_id": agency_id, "ot_threshold": threshold_sec, "ot_limit": limit, **ch_params},
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     return [
@@ -547,8 +546,12 @@ async def _compare_ranking_live(agency_id: int, ctx: RangeCtx, ch, limit: int) -
             )
         )
     # Sort by the UNROUNDED delta (matches the original SQL's ORDER BY
-    # ABS(wd.avg_min - we.avg_min), computed before the display-only ROUND).
-    out.sort(key=lambda r: -abs(stats[r[0]][0] - stats[r[0]][2]))
+    # ABS(wd.avg_min - we.avg_min), computed before the display-only ROUND),
+    # route_code as an explicit tie-break: `stats` is built from ClickHouse's
+    # arbitrary GROUP BY output order, so two routes tied on delta would
+    # otherwise keep whatever order they happened to arrive in — the same
+    # bug class already fixed for movers ranking in overview.py.
+    out.sort(key=lambda r: (-abs(stats[r[0]][0] - stats[r[0]][2]), r[0]))
     return out[:limit]
 
 
