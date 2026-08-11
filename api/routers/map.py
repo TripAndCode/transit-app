@@ -19,7 +19,7 @@ the same filter.
 
 import json
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -144,6 +144,12 @@ async def live_delays(
     for r in rows_result.result_rows:
         row = dict(zip(rows_result.column_names, r, strict=True))
         row["captured_at"] = _as_utc(row["captured_at"])
+        # scheduled_time's wire format used to be uniform (Postgres TIME ->
+        # "HH:MM:SS" for every agency); now it's whatever the ingest strategy
+        # stored ("HH:MM" for aomori_regex, "HH:MM:SS" for static_join).
+        # Restore the original "HH:MM:SS" contract for every agency.
+        if row["scheduled_time"] is not None and len(row["scheduled_time"]) < 8:
+            row["scheduled_time"] = f"{row['scheduled_time']}:00"
         out_rows.append(row)
     return {
         "latest_captured_at": latest_ts.isoformat(),
@@ -217,31 +223,27 @@ async def route_shape(
     # one variant — without this pin, multi-shape routes (e.g. Hiroshima
     # express bus with several variants) showed stops off the line.
     #
-    # `updates` now lives in ClickHouse. The shape-vote and the per-stop
-    # delay dedup both scan the identical agency/route/ctx-bounded slice of
-    # `updates`, so run the dedup query FIRST — WITHOUT any shape filter,
-    # since chosen_shape_id isn't known yet — and derive the shape-vote's
-    # per-trip counts from its own deduped rows in Python instead of paying
-    # for a second ClickHouse scan. "Which trips appear, and how many
+    # `updates` now lives in ClickHouse. The shape-vote runs FIRST — WITHOUT
+    # any shape filter, since chosen_shape_id isn't known yet — as a per-trip
+    # roll-up of the same dedup subquery the per-stop stats query (below,
+    # once a shape is chosen) also uses. "Which trips appear, and how many
     # deduped stop-events each contributes" is a valid (arguably better)
-    # proxy for shape-vote weight than the raw per-trip observation count,
-    # since both are counted off the same dedup set.
+    # proxy for shape-vote weight than the raw per-trip observation count.
     #
     # Trade-off (deliberate, not proven bit-for-bit equivalent to the old
-    # two-query version): `dedup_rows` is filtered by `dep_delay IS NOT
-    # NULL` below, so a trip whose every observed StopTimeUpdate is
-    # arrival-only (no `dep_delay` — common at a route's last stop in
-    # GTFS-RT) contributes ZERO weight to the vote here, where the old raw
-    # `COUNT(*)` query counted it in full. We accept this: it reuses the
-    # dedup scan's own established definition of "counted observation" (see
-    # `pipeline/db.py::build_dedup_ch_sql` for the same filter-before-dedup
-    # ordering elsewhere in this codebase) rather than inventing a second,
-    # looser one just for the vote. A route where every trip on one shape
-    # variant happens to be arrival-only everywhere could in principle tip
-    # the vote toward a less-observed variant — accepted as a corner case,
-    # not chased further; see the regression test asserting the vote stays
-    # sensible (lands on the shape with real weighted support) when some
-    # trips are entirely NULL-delay.
+    # two-query version): the dedup subquery is filtered by `dep_delay IS NOT
+    # NULL`, so a trip whose every observed StopTimeUpdate is arrival-only (no
+    # `dep_delay` — common at a route's last stop in GTFS-RT) contributes
+    # ZERO weight to the vote here, where the old raw `COUNT(*)` query counted
+    # it in full. We accept this: it reuses the dedup scan's own established
+    # definition of "counted observation" (see `pipeline/db.py::build_dedup_ch_sql`
+    # for the same filter-before-dedup ordering elsewhere in this codebase)
+    # rather than inventing a second, looser one just for the vote. A route
+    # where every trip on one shape variant happens to be arrival-only
+    # everywhere could in principle tip the vote toward a less-observed
+    # variant — accepted as a corner case, not chased further; see the
+    # regression test asserting the vote stays sensible (lands on the shape
+    # with real weighted support) when some trips are entirely NULL-delay.
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
     # / service) honored by every other analytical endpoint — an earlier
@@ -255,14 +257,24 @@ async def route_shape(
     # single argMax suffices; base-table columns are qualified with the `u.`
     # alias per that same docstring's convention, in case ch_where_frag (built
     # by api.range.build_updates_filter_ch) ever references an output alias.
+    # The per-stop stats query below (once a shape is chosen) keeps
     # `ORDER BY u.trip_id, u.stop_sequence` (matching route_trips' equivalent
-    # dedup query) makes the row order deterministic: a bare GROUP BY has no
-    # defined output order, and `lon`/`lat` below are float means accumulated
-    # by summing `dedup_rows` in whatever order they arrive — without a fixed
-    # order, floating-point summation is order-dependent and could produce a
-    # last-bit-different average across otherwise-identical requests.
-    dedup_result = await ch.query(
-        f"""
+    # dedup query) for the same reason that query needs it: `lon`/`lat` are
+    # float means accumulated by summing `dedup_rows` in whatever order they
+    # arrive, and a bare GROUP BY has no defined output order — without a
+    # fixed order, floating-point summation is order-dependent and could
+    # produce a last-bit-different average across otherwise-identical
+    # requests. This vote query has no such float accumulation, so it needs
+    # no ORDER BY.
+    # Bounded by trip count, not trip x stop count: the vote only needs
+    # "how many deduped stop-events did each trip contribute", so the
+    # per-(trip_id, stop_sequence) dedup runs as a subquery and only its
+    # per-trip roll-up crosses into Python. A prior version transferred every
+    # (trip_id, stop_sequence, dep_delay) row for the whole ctx window here —
+    # for a busy route over a wide window that's easily >200k rows, past the
+    # async client's result_overflow_mode="throw" cap (api/clickhouse.py),
+    # 500ing the endpoint instead of degrading.
+    dedup_cte_sql = f"""
         SELECT u.trip_id, u.stop_sequence,
             argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
         FROM updates AS u
@@ -270,12 +282,12 @@ async def route_shape(
           AND u.dep_delay IS NOT NULL
           AND {ch_where_frag}
         GROUP BY u.trip_id, u.stop_sequence
-        ORDER BY u.trip_id, u.stop_sequence
-        """,
+    """
+    vote_result = await ch.query(
+        f"WITH dedup AS ({dedup_cte_sql}) SELECT trip_id, count() AS n FROM dedup GROUP BY trip_id",
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
     )
-    dedup_rows: list[tuple[str, int, int]] = list(dedup_result.result_rows)
-    trip_counts: dict[str, int] = dict(Counter(tid for tid, _, _ in dedup_rows))
+    trip_counts: dict[str, int] = dict(vote_result.result_rows)
 
     # If the ctx window has zero observations for this route (e.g. it only
     # runs on days outside the selected range, or a time_band excludes every
@@ -341,15 +353,20 @@ async def route_shape(
         raw = geom_row["geom_json"] if geom_row else None
         geometry = json.loads(raw) if raw is not None else None
 
-    # When a shape is chosen, restrict `dedup_rows` to trips on that shape
-    # (in Python — `dedup_rows` already carries every ctx-bounded trip for
-    # this route, filtering it a second time via ClickHouse would be another
-    # redundant scan) so the per-stop delay stats rendered align with the
-    # polyline; falls back to all-trips when the route has no shape data at
-    # all. In the empty-ctx-window fallback case above, `dedup_rows` is
-    # already empty, so this filter is a no-op and `stops` stays empty while
-    # `geometry`/`unobserved_stops` still render from the fallback shape.
-    shape_trip_ids: list[str] | None = None
+    # Once a shape is chosen, fetch the per-stop delay stats scoped to ONLY
+    # that shape's trips — bounded by (trips on one shape variant x its
+    # stops), not by the whole route's trip count over the ctx window, so a
+    # multi-variant route (e.g. the Hiroshima express case the shape-vote
+    # comment above discusses) doesn't pay for other variants' rows. This is
+    # a second ClickHouse scan (the vote query above no longer returns
+    # per-stop rows to filter in Python), but it's the one that must stay
+    # bounded, so the extra round trip is the right trade. In the
+    # empty-ctx-window fallback case above, `{ch_where_frag}` still encodes
+    # the real (empty) ctx window, so this query naturally comes back empty —
+    # `stops` stays empty while `geometry`/`unobserved_stops` still render
+    # from the fallback shape, matching pre-fix behavior. Falls back to no
+    # stats when the route has no shape data at all.
+    dedup_rows: list[tuple[str, int, int]] = []
     if chosen_shape_id is not None:
         shape_trip_rows = await conn.fetch(
             "SELECT trip_id FROM static_trips WHERE agency_id = $1 AND shape_id = $2",
@@ -357,8 +374,27 @@ async def route_shape(
             chosen_shape_id,
         )
         shape_trip_ids = [r["trip_id"] for r in shape_trip_rows]
-        shape_trip_id_set = set(shape_trip_ids)
-        dedup_rows = [row for row in dedup_rows if row[0] in shape_trip_id_set]
+        if shape_trip_ids:
+            stats_result = await ch.query(
+                f"""
+                SELECT u.trip_id, u.stop_sequence,
+                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+                FROM updates AS u
+                WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+                  AND u.dep_delay IS NOT NULL
+                  AND u.trip_id IN {{shape_trip_ids:Array(String)}}
+                  AND {ch_where_frag}
+                GROUP BY u.trip_id, u.stop_sequence
+                ORDER BY u.trip_id, u.stop_sequence
+                """,
+                parameters={
+                    "agency_id": agency_id,
+                    "route": str(route),
+                    "shape_trip_ids": shape_trip_ids,
+                    **ch_params,
+                },
+            )
+            dedup_rows = list(stats_result.result_rows)
 
     static_join_rows: list = []
     if dedup_rows:

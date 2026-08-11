@@ -139,6 +139,32 @@ async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_
 
 
 @pytest.mark.asyncio
+async def test_live_delays_normalizes_5char_scheduled_time_to_hhmmss(map_app_ch, ch_client):
+    """aomori_regex-strategy agencies write a 5-char "HH:MM" scheduled_time
+    (no seconds) to ClickHouse, unlike static_join's 8-char "HH:MM:SS" (see
+    pipeline/strategies/aomori_regex.py). Before Postgres's TIME column was
+    replaced by a plain ClickHouse String, every agency's wire format was
+    uniform "HH:MM:SS" regardless of ingest strategy. This pins that
+    /delays/live restores that uniform contract rather than exposing the
+    per-strategy storage format to API consumers."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    insert_updates(
+        ch_client,
+        agency_id=agency_id,
+        rows=[("aomori.pb", "2026-05-09T10:00:00Z", "T_5CHAR", "weekday", "10:05", "R_5CHAR", 1, 45)],
+    )
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    row = next(r for r in rows if r["trip_id"] == "T_5CHAR")
+    assert row["scheduled_time"] == "10:05:00"
+
+
+@pytest.mark.asyncio
 async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_client):
     """Regression for a 500: the freshness probe (`latest_ts`) has no
     `dep_delay` filter, but the rows query adds `AND dep_delay IS NOT NULL`.
