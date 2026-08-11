@@ -109,13 +109,13 @@ async def max_captured_at_before(ch, agency_id: int, before: datetime) -> dateti
     `(agency_id, captured_at, route_code, trip_id, stop_sequence)`, so a
     single-agency, filtered-then-limited read is served off the sort index
     (reads ~thousands of rows) instead of scanning every row for the agency
-    (or, worse, the whole table). Used by the async API call sites —
+    (or, worse, the whole table). Called per-agency by
+    `max_captured_at_before_by_agency` below (used by
     `pipeline.health.aggregate_freshness` and
-    `pipeline.reports.network.compute_network_summary` — that need one
-    agency's latest-completed-day max at a time, looping over agencies in
-    Python rather than a cross-agency `GROUP BY` (ClickHouse has no LATERAL
-    join, and an unfiltered `GROUP BY agency_id` over `updates` reads the
-    `captured_at` column for the entire table).
+    `pipeline.reports.network.compute_network_summary`) rather than a
+    cross-agency `GROUP BY` (ClickHouse has no LATERAL join, and an
+    unfiltered `GROUP BY agency_id` over `updates` reads the `captured_at`
+    column for the entire table).
     """
     result = await ch.query(
         "SELECT captured_at FROM updates "

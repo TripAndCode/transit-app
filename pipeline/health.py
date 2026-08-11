@@ -105,12 +105,10 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # This probe backs ONLY the CH-derived fields below (is_stale/data_to/
     # agg_behind_days) — every other field (last_analyzed_at, analyze_age_hours,
     # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
-    # must not fail the whole call: degrade that agency's live_max to None and
-    # keep going, same shape as pipeline.reports.network.compute_network_summary's
-    # try/except around this same per-agency probe. is_stale(agg_day, None) is
-    # "not stale" (see its docstring), which is the correct degrade here.
+    # must not fail the whole call: is_stale(agg_day, None) is "not stale"
+    # (see its docstring), which is the correct degrade here.
     # max_captured_at_before_by_agency runs the per-agency probes concurrently
-    # and preserves the try/except degrade described above; shared with
+    # and degrades a failing agency's probe to None internally; shared with
     # pipeline.reports.network.compute_network_summary's identical shape.
     probed = await max_captured_at_before_by_agency(
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log

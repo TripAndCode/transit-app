@@ -38,11 +38,17 @@ become Nullable.
 - ClickHouse route-scoped probes MUST be date-bounded. `route_code` is the 3rd
   sort-key column behind an unconstrained `captured_at`, so an unbounded
   `WHERE route_code = ...` forces a full-partition scan (336M rows / 400-1500ms
-  measured for agency 8) even for a route that doesn't exist. Bound to
-  `max_captured_at(ch, agency_id) - 30 days` (see `api/routers/map.py`'s
-  route_trips/route_stop_profile/route_shape, `pipeline/query/tools.py`'s
-  `_is_route_registered`) — a route ingested but not yet analyzed is by
-  definition within the last cron cycle, so 30 days loses nothing real.
+  measured for agency 8) even for a route that doesn't exist. `api/routers/map.py`'s
+  route_trips/route_stop_profile/route_shape bound to
+  `max_captured_at(ch, agency_id) - 30 days` — a route ingested but not yet
+  analyzed is by definition within the last cron cycle, so 30 days loses
+  nothing real for those. `pipeline/query/tools.py`'s `_is_route_registered`
+  needs a DIFFERENT bound: a fixed 30-day window there would report a real,
+  merely-idle route as unregistered (see its docstring), so it derives the
+  bound from `agg_route_daily`'s own analyze horizon for the agency instead —
+  and when the agency has no `agg_route_daily` rows at all yet (no horizon to
+  derive), it scans unbounded with an execution-time cap and fails OPEN on
+  timeout rather than bounding by a guessed constant.
 - Prefer `ORDER BY captured_at DESC LIMIT 1` over `maxOrNull(captured_at)` for a
   single-agency max: `captured_at` is the 2nd sort-key column, so the `LIMIT 1`
   form is index-served (~20-40ms) while the aggregate form is a full per-agency
