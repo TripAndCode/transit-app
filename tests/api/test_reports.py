@@ -325,14 +325,18 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
 
     25 samples inside the 'morning' band (05:00-09:00) clear the ranking's
     HAVING count(*) > 20 gate; a same-route sample outside the band must be
-    excluded from both the average and the sample count.
+    excluded from both the average and the sample count. Values are spread
+    (240..360s, mean 300s) rather than identical: an all-tied partition
+    makes PERCENT_RANK's min-rank tie handling give p50/p90 both None (see
+    _ranking_live's docstring) — a real, correct edge case, just not the one
+    this test is checking.
     """
     from api.main import app
 
     client, agency_id, pool = reports_client
     app.state.ch_client = ch_async_client
     day = "2026-05-10"
-    await _seed_route_at(pool, agency_id, "R_TB", "平日", day, "08:00", [300] * 25)  # 5.0 min, in-band
+    await _seed_route_at(pool, agency_id, "R_TB", "平日", day, "08:00", list(range(240, 361, 5)))  # mean 5.0 min
     await _seed_route_at(pool, agency_id, "R_TB", "平日", day, "13:00", [6000])  # way outside the band
     from tests.conftest import mirror_updates_to_ch
 
@@ -344,8 +348,42 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
     # (route, service, avg_min, p50_min, p90_min, samples)
     assert float(r[2]) == 5.0
     assert r[5] == 25
-    assert 2.0 <= float(r[3]) < 8.0  # p50 within the uniform-300s cluster
-    assert 2.0 <= float(r[4]) < 8.0  # p90 within the uniform-300s cluster
+    assert 2.0 <= float(r[3]) < 8.0  # p50 within the 240-360s spread
+    assert 2.0 <= float(r[4]) < 8.0  # p90 within the 240-360s spread
+
+
+@pytest.mark.asyncio
+async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantics(
+    reports_client, ch_client, ch_async_client
+):
+    """Regression: ClickHouse's `quantileExact` is a pure positional pick
+    (`sorted[floor(q*n)]`) that silently disagrees with Postgres's
+    `PERCENT_RANK()` (min-rank ties) whenever `dep_delay` has ties — common,
+    since exact-zero delays and clamped/rounded values dominate this column.
+
+    95 rows at 0s + 5 at 600s (n=100): PERCENT_RANK's min-rank tie handling
+    gives every 0s row rank=1 (pct=0) and every 600s row rank=96
+    (pct=95/99≈0.960). That's the only group clearing >=0.5 AND >=0.9, so
+    both p50 and p90 must read 10.0 (600s/60). quantileExact(0.5)/(0.9)
+    would instead pick position floor(0.5*100)=50 and floor(0.9*100)=90 —
+    both still inside the 95-row 0s run — giving 0.0 for both.
+    """
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-12"
+    await _seed_route_at(pool, agency_id, "R_TIE_PR", "平日", day, "08:00", [0] * 95 + [600] * 5)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "R_TIE_PR")
+    assert r[5] == 100
+    assert float(r[3]) == 10.0  # p50 — quantileExact would have given 0.0
+    assert float(r[4]) == 10.0  # p90 — quantileExact would have given 0.0
 
 
 @pytest.mark.asyncio
