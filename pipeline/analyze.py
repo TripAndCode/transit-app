@@ -608,20 +608,36 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # to carry a numeric delay — the extra ClickHouse round-trip
             # (measured ~113s on agency 8's 336M rows) is the correctness-over-
             # perf trade this table's semantics require.
-            ch_keys = ch_client.query(
-                "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates WHERE agency_id = {agency_id:UInt16}",
-                parameters={"agency_id": agency_id},
-            )
             with conn.cursor() as cur:
                 cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
                 cur.execute(
                     "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
                     "ON COMMIT DROP"
                 )
-                if ch_keys.result_rows:
-                    psycopg2.extras.execute_values(
-                        cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows, page_size=10_000
-                    )
+                # `query_row_block_stream` (not `query`), same rationale as
+                # _analyze_deduped above: this key set is ~3.7% LARGER than
+                # _analyze_deduped by design (that's the correctness fix this
+                # block exists for), so buffering the whole thing in
+                # `.query()`'s result_rows would be the same 5.3M-row /
+                # 1.6-3.4GB-for-agency-8 shape that streaming was introduced
+                # to eliminate 40 lines up, just for a bigger set.
+                ch_keys_sql = (
+                    "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
+                    "WHERE agency_id = {agency_id:UInt16}"
+                )
+                with ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream:
+                    for block in stream:
+                        if not block:
+                            continue
+                        psycopg2.extras.execute_values(
+                            cur, "INSERT INTO _analyze_raw_keys VALUES %s", block, page_size=10_000
+                        )
+                # The planner sizes a freshly created temp table at a few
+                # thousand rows (reltuples=0) regardless of how many rows it
+                # actually holds, and this table drives the join below against
+                # static_stop_times -- ANALYZE gives the planner real stats to
+                # pick a join strategy from, same as _analyze_deduped gets.
+                cur.execute("ANALYZE _analyze_raw_keys")
                 sql = """
                     INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
                     SELECT %(agency_id)s, sst.stop_id,

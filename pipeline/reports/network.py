@@ -10,6 +10,7 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
 """
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 from typing import Any
@@ -54,6 +55,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     today_jst_midnight_utc = (
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
+
     # One indexed read per agency (api.clickhouse.max_captured_at_before —
     # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
     # sync sibling; see its docstring) instead of `maxOrNull`, which is a
@@ -70,20 +72,22 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
     # no completed day / can't determine → nothing owed), which is the
     # correct degrade here.
-    live_max: dict[int, "date | None"] = {}
-    for a in agencies:
-        aid = a["agency_id"]
+    async def _probe(aid: int) -> "tuple[int, date | None]":
         try:
             mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
         except Exception:
             _log.warning("ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True)
-            live_max[aid] = None
-            continue
-        if mx is None:
-            live_max[aid] = None
-            continue
-        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
-        live_max[aid] = mx_utc.astimezone(_JST).date()
+            return aid, None
+        # max_captured_at_before always returns a tz-aware value (or None) —
+        # no tzinfo-is-None fixup needed here, unlike the raw ClickHouse
+        # driver return this helper wraps.
+        return aid, None if mx is None else mx.astimezone(_JST).date()
+
+    # Independent per-agency probes on the same async client — no reason to
+    # pay N round trips serially (measured ~4s for 4 agencies) when they can
+    # overlap. The per-agency try/except degrade above is preserved: gather
+    # never raises here, each probe catches its own failure internally.
+    live_max: dict[int, "date | None"] = dict(await asyncio.gather(*(_probe(a["agency_id"]) for a in agencies)))
 
     rows: list[dict[str, Any]] = []
     for a in agencies:

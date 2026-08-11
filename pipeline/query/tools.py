@@ -32,6 +32,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any, Literal
 
+from api.clickhouse import max_captured_at
 from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
@@ -498,9 +499,23 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # analyze() simply hasn't caught up to yet.
     if ch is None:
         return False
+    # Bounded the same way api/routers/map.py's route-scoped fallback probes
+    # are: route_code sits behind an unconstrained captured_at in the sort
+    # key, so an unbounded scan for a route that genuinely doesn't exist
+    # reads the whole agency partition (336M rows / 400-1500ms measured on
+    # real data) — and this path is reached on arbitrary, LLM/user-supplied
+    # route strings from the anonymous /ask endpoint, the cheapest input for
+    # a client to produce repeatedly. 30 days off the agency's own latest
+    # captured_at (not wall-clock "now", so it stays meaningful against old/
+    # replayed data too): a route ingested but not yet analyzed is by
+    # definition within the last cron cycle, so this loses nothing real.
+    agency_latest = await max_captured_at(ch, agency_id)
+    if agency_latest is None:
+        return False
     result = await ch.query(
-        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
-        parameters={"agency_id": agency_id, "route": str(route)},
+        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+        "AND captured_at >= {bound:DateTime64} LIMIT 1",
+        parameters={"agency_id": agency_id, "route": str(route), "bound": agency_latest - timedelta(days=30)},
     )
     return bool(result.result_rows)
 
