@@ -119,17 +119,24 @@ def parse_feed(
             # toUInt8() outright. Zero-pad once, here, rather than at every
             # read site.
             hour_str, sep, rest = sched.partition(":")
-            if sep:
-                # GTFS's departure_time is free-text (empty is legal for a
-                # non-timepoint stop, and nothing guarantees the hour is
-                # numeric) -- int() raising ValueError here would take out
-                # the whole file's insert_updates batch over one bad static
-                # row, not just this one. Degrade: leave sched unchanged for
-                # this row rather than crash the batch.
-                try:
-                    sched = f"{int(hour_str):02d}:{rest}"
-                except ValueError:
+            if sep and hour_str.isdigit():
+                sched = f"{int(hour_str):02d}:{rest}"
+            else:
+                # Not a parseable "H:MM[:SS]" shape -- either an empty
+                # string (legal GTFS for a non-timepoint stop) or genuinely
+                # malformed static data. NULL, not the raw text: NULL is
+                # already a first-class value on this column (the JOIN-miss
+                # branch above produces it, and every downstream read site
+                # already handles it -- WHERE scheduled_time IS NOT NULL /
+                # toUInt8OrNull). Keeping the raw text would insert a value
+                # analyze()'s `_analyze_deduped.scheduled_time time` column
+                # can't cast (`'ab:05:00'::time` raises) -- since ClickHouse
+                # accepts anything and this row is now durably stored there,
+                # that would fail analyze() for this ENTIRE agency on every
+                # subsequent run, not just drop this one row.
+                if sched != "":
                     bad_sched += 1
+                sched = None
         rows.append(
             (
                 file_name,
