@@ -90,6 +90,7 @@ def parse_feed(
     rows = []
     miss = 0
     skipped_extended = 0
+    bad_sched = 0
     for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
@@ -119,7 +120,16 @@ def parse_feed(
             # read site.
             hour_str, sep, rest = sched.partition(":")
             if sep:
-                sched = f"{int(hour_str):02d}:{rest}"
+                # GTFS's departure_time is free-text (empty is legal for a
+                # non-timepoint stop, and nothing guarantees the hour is
+                # numeric) -- int() raising ValueError here would take out
+                # the whole file's insert_updates batch over one bad static
+                # row, not just this one. Degrade: leave sched unchanged for
+                # this row rather than crash the batch.
+                try:
+                    sched = f"{int(hour_str):02d}:{rest}"
+                except ValueError:
+                    bad_sched += 1
         rows.append(
             (
                 file_name,
@@ -137,4 +147,6 @@ def parse_feed(
         _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
     if skipped_extended:
         _log.warning(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
+    if bad_sched:
+        _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
     return rows
