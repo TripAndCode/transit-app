@@ -23,6 +23,20 @@ router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema
 
 _log = logging.getLogger(__name__)
 
+# Postgres advisory lock key for _run_ingest_and_analyze. BackgroundTasks runs
+# on a thread pool, so two rapid POST /internal/cron/ingest calls (a double
+# cron poke, or a caller retrying on a slow response while the first request
+# still completed server-side) schedule two independently-running tasks. Both
+# would otherwise: (a) run analyze() concurrently on what would be two
+# separate psycopg2 connections anyway (safe on that front), but (b) both
+# call ingest_live for every agency, and ClickHouse has no ON CONFLICT DO
+# NOTHING to absorb the resulting duplicate poll (see pipeline/clickhouse.py's
+# insert_updates docstring) beyond the single-file bounded check
+# recent_file_name_exists already does. An arbitrary fixed key, chosen once —
+# only needs to be distinct from any other advisory lock this codebase takes,
+# and there are none as of this writing.
+_CRON_LOCK_KEY = 72710001
+
 
 def _check_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET")
@@ -64,7 +78,21 @@ def _run_ingest_and_analyze() -> None:
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        # Session-scoped advisory lock (not txn-scoped: this connection stays
+        # autocommit=False for the ingest/analyze work below, and the lock
+        # must hold across every one of those transactions, not just one).
+        # A concurrently-running invocation of this same job gets `False`
+        # back immediately rather than blocking -- BackgroundTasks has no
+        # caller to report failure to, so skipping is the right behavior,
+        # not queuing.
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
+        got_lock = cur.fetchone()[0]
     conn.autocommit = False
+    if not got_lock:
+        _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
+        conn.close()
+        ch_client.close()
+        return
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
@@ -95,6 +123,14 @@ def _run_ingest_and_analyze() -> None:
         else:
             _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
     finally:
+        # No explicit pg_advisory_unlock call: Postgres releases every
+        # session-level advisory lock automatically when the backend's
+        # session ends, and conn.close() ends it. Session-level (not
+        # transaction-level) was the right choice for _CRON_LOCK_KEY in the
+        # first place -- it must hold across every transaction in the loop
+        # above, not just one -- so relying on the same session-teardown
+        # semantics to release it is consistent, not a shortcut.
+        #
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
         # skip the ClickHouse close on a Postgres close error, silently

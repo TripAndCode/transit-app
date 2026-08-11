@@ -111,3 +111,39 @@ def test_run_ingest_and_analyze_skips_deleted_agency(two_agencies, monkeypatch):
     assert deleted_id not in ingested_ids
     assert active_id in analyzed_ids
     assert deleted_id not in analyzed_ids
+
+
+def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeypatch):
+    """A concurrently-running invocation (a double cron poke, or a retried
+    BackgroundTask on POST /internal/cron/ingest) must skip entirely rather
+    than ingest_live-ing every agency's feed twice -- ClickHouse has no
+    ON CONFLICT DO NOTHING to absorb the resulting duplicate poll beyond the
+    single-file bounded check ingest_live already does on its own file_name.
+
+    Holds the same advisory lock _run_ingest_and_analyze takes, on a
+    separate connection, to simulate the concurrent run."""
+    _active_id, _deleted_id = two_agencies
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+
+    from api.routers.internal import _CRON_LOCK_KEY, _run_ingest_and_analyze
+
+    holder = psycopg2.connect(DATABASE_URL)
+    holder.autocommit = True
+    with holder.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
+        assert cur.fetchone()[0] is True
+
+    try:
+        with (
+            patch("pipeline.ingest.ingest_live") as fake_ingest,
+            patch("pipeline.analyze.analyze") as fake_analyze,
+            patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        ):
+            _run_ingest_and_analyze()
+
+        fake_ingest.assert_not_called()
+        fake_analyze.assert_not_called()
+    finally:
+        with holder.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (_CRON_LOCK_KEY,))
+        holder.close()
