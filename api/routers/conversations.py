@@ -290,15 +290,25 @@ async def append_message_endpoint(
             can_args = dict(resolved_args)
         sig_hash = signature_hash(resolved_tool, can_args)
         try:
-            await _intent_cache.upsert(
-                conn,
-                sig_hash,
-                IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
-                can_args,
-                agency_id,
-                question=user_summary,
-            )
-            result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+            # Nested transaction (asyncpg emits a SAVEPOINT here since we're
+            # already inside conn.transaction()). Any Postgres error raised by
+            # dispatch() below — not just the UndefinedTableError case — would
+            # otherwise abort the OUTER transaction, poisoning `conn` so the
+            # append_message() calls in the except branches below raise
+            # asyncpg.exceptions.InFailedSQLTransactionError instead of writing
+            # the intended graceful tool_error/service_unavailable message.
+            # The savepoint confines that abort to the upsert+dispatch scope,
+            # leaving the outer transaction (holding user_msg) writable.
+            async with conn.transaction():
+                await _intent_cache.upsert(
+                    conn,
+                    sig_hash,
+                    IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+                    can_args,
+                    agency_id,
+                    question=user_summary,
+                )
+                result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
         except HTTPException as exc:
             if exc.status_code != 503:
                 raise

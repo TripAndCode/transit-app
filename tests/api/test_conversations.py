@@ -529,3 +529,48 @@ async def test_append_message_undefined_table_error_propagates(conv_app, monkeyp
         ml = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
         assert ml.status_code == 200
         assert ml.json() == []
+
+
+@pytest.mark.asyncio
+async def test_append_message_postgres_error_in_dispatch_does_not_poison_transaction(conv_app, monkeypatch):
+    """A Postgres error raised by dispatch() OTHER than UndefinedTableError
+    (e.g. a real statement failure/timeout) must still degrade to the
+    generic tool_error message, not crash.
+
+    Unlike the mocked-exception tests above, this dispatch stub runs a real
+    failing statement on `conn` — the same connection append_message_endpoint
+    holds inside its `async with conn.transaction():` — so the connection's
+    transaction genuinely aborts, reproducing what a real asyncpg.PostgresError
+    (anything but UndefinedTableError) does. Before the fix, the generic
+    `except Exception` branch went on to call `_conv.append_message(conn, ...)`
+    on that same aborted connection, which raises
+    asyncpg.exceptions.InFailedSQLTransactionError — an unhandled 500 instead
+    of the intended graceful tool_error response. The fix nests dispatch in
+    its own SAVEPOINT (conn.transaction() called again while already inside
+    one), confining the abort so the outer transaction stays writable."""
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, pool = conv_app
+
+    async def _raise_after_aborting_conn(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        await conn.execute("SELECT 1/0")
+
+    monkeypatch.setattr(conv_router, "dispatch", _raise_after_aborting_conn)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT role, rendered_summary FROM ask_conversation_messages "
+            "WHERE conversation_id = $1 ORDER BY created_at",
+            conv_id,
+        )
+    assert [r["role"] for r in rows] == ["user", "assistant"]
