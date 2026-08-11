@@ -1287,6 +1287,31 @@ async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch
 
 
 @pytest.mark.asyncio
+async def test_slow_path_movers_excludes_null_route_code(aconn, aagency_id, ch_client, ch_async_client):
+    """A NULL route_code (both ingest strategies can produce a row with no
+    resolvable route — see db/clickhouse/schema.sql) must not reach
+    `_route_weekly_history`'s `route_code IN {rw_route_codes:Array(String)}`
+    parameter: a `None` element there isn't valid `Array(String)` and raises
+    a ClickHouse DatabaseError, 500ing the whole /overview/summary request.
+    `_per_route_avg`'s slow path must drop it before it becomes a mover."""
+    cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv_day = cur_day - timedelta(days=7)
+    for i in range(10):
+        await _seed_update(aconn, aagency_id, prv_day + timedelta(minutes=i), None, 60, seq=i + 1)
+        await _seed_update(aconn, aagency_id, cur_day + timedelta(minutes=i), None, 600, seq=i + 1)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    assert out["movers"]["worse"] == []
+    assert out["movers"]["better"] == []
+
+
+@pytest.mark.asyncio
 async def test_slow_path_movers_rank_on_raw_not_rounded_delta(aconn, aagency_id, ch_client, ch_async_client):
     """Two routes whose deltas both round to the same 2dp value must still be
     ordered by their TRUE deltas, not tie-broken by route_code.

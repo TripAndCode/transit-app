@@ -403,8 +403,19 @@ async def _per_route_avg(
     # unlike _headline_stats there's no empty-input case to guard here. Values
     # stay UNROUNDED: _movers derives its deltas from them and does its own
     # rounding.
+    #
+    # `route_code is not None` guard: ClickHouse's `route_code` is Nullable
+    # (both ingest strategies can produce a row with no resolvable route —
+    # see db/clickhouse/schema.sql), so a NULL-route group is reachable here.
+    # `_movers` feeds this dict's keys straight into `_route_weekly_history`'s
+    # `route_code IN {rw_route_codes:Array(String)}` parameter — a `None`
+    # element there isn't valid `Array(String)` and raises a ClickHouse
+    # DatabaseError, 500ing the whole /overview/summary request. There's no
+    # meaningful "route" to attribute a NULL-route mover to anyway.
     by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1)
-    return {route_code: ((total / n) / 60.0, n) for route_code, (n, total) in by_route.items()}
+    return {
+        route_code: ((total / n) / 60.0, n) for route_code, (n, total) in by_route.items() if route_code is not None
+    }
 
 
 async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> dict[str, str | None]:
@@ -835,7 +846,12 @@ async def _peak_hour_by_dow(
     # scheduled_time is a zero-padded 'HH:MM:SS' String in ClickHouse (not a
     # native TIME column) — see api.range.time_band_clause_ch's docstring —
     # so the hour is read off the first two characters rather than EXTRACT().
-    hour_expr = "toUInt8(substring(scheduled_time, 1, 2))"
+    # OrNull, not a bare cast: ingest now zero-pads every scheduled_time's
+    # hour (pipeline/strategies/static_join.py), but this degrades any
+    # already-ingested pre-fix row out of the histogram instead of raising
+    # CANNOT_PARSE_TEXT — matching the same OrNull already used a few lines
+    # up in this file's time_band != 'all' branch and in rankings.py.
+    hour_expr = "toUInt8OrNull(substring(scheduled_time, 1, 2))"
     try:
         result = await ch.query(
             f"WITH {cte_sql}\n"
@@ -843,7 +859,8 @@ async def _peak_hour_by_dow(
             "       avg(dep_delay) / 60.0 AS avg_min\n"
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
-            f"GROUP BY {hour_expr}",
+            f"GROUP BY {hour_expr}\n"
+            "HAVING h IS NOT NULL",
             parameters={"agency_id": agency_id, **ch_params},
         )
     except Exception:
