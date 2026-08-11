@@ -29,17 +29,27 @@ UPDATE_COLUMNS = [
 
 
 def get_client():
+    secure = os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes")
+    # An explicit port always wins (CLICKHOUSE_PORT set) -- but when it's
+    # NOT set, default by `secure` rather than always falling back to 8123:
+    # clickhouse-connect only infers https from the port itself (443/8443),
+    # so passing an always-present "8123" default defeats that inference the
+    # moment CLICKHOUSE_SECURE=true is set without also setting a matching
+    # port, silently attempting TLS against a plaintext listener.
+    port = int(os.environ.get("CLICKHOUSE_PORT") or (8443 if secure else 8123))
     return clickhouse_connect.get_client(
         host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
-        port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
+        port=port,
         username=os.environ["CLICKHOUSE_USER"],
         password=os.environ["CLICKHOUSE_PASSWORD"],
         database=os.environ["CLICKHOUSE_DATABASE"],
-        # Explicit knob rather than relying on clickhouse-connect's port-based
-        # https inference (only triggers on port 443/8443): without either,
-        # this client sends CLICKHOUSE_PASSWORD as HTTP Basic auth in
-        # cleartext on every ingest/analyze/bootstrap request.
-        secure=os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes"),
+        # Explicit knob rather than relying solely on the port-based
+        # inference above: without it, this client sends CLICKHOUSE_PASSWORD
+        # as HTTP Basic auth in cleartext on every ingest/analyze/bootstrap
+        # request. This is also the factory `make ch-bootstrap` and CI's
+        # schema-apply step use (see Makefile), so the DDL/bootstrap path
+        # gets the same TLS coverage as ingest/analyze.
+        secure=secure,
     )
 
 

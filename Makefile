@@ -119,11 +119,8 @@ ch-test:
 	  -p 127.0.0.1:8124:8123 clickhouse/clickhouse-server:26.3
 
 ch-bootstrap:
-	poetry run python -c "import clickhouse_connect, os; from db.clickhouse.bootstrap import apply_schema; \
-	client = clickhouse_connect.get_client(host=os.environ.get('CLICKHOUSE_HOST','localhost'), \
-	  port=int(os.environ.get('CLICKHOUSE_PORT','8123')), username=os.environ['CLICKHOUSE_USER'], \
-	  password=os.environ['CLICKHOUSE_PASSWORD'], database=os.environ['CLICKHOUSE_DATABASE']); \
-	apply_schema(client)"
+	poetry run python -c "from pipeline.clickhouse import get_client; \
+	from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
 
 migrate:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
