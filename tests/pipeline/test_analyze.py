@@ -417,8 +417,9 @@ def test_analyze_builds_agg_stop_routes(pg_conn, agency_id, ch_client):
 
 def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, agency_id, ch_client):
     """A stop served by 2+ distinct routes must comma-join them, alphabetically
-    ordered — guards the distinct-key-from-_analyze_deduped JOIN path, not just
-    the single-route case test_analyze_builds_agg_stop_routes already covers."""
+    ordered — guards the ClickHouse-sourced _analyze_raw_keys JOIN path, not
+    just the single-route case test_analyze_builds_agg_stop_routes already
+    covers."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
@@ -443,6 +444,44 @@ def test_analyze_builds_agg_stop_routes_comma_joins_multiple_routes(pg_conn, age
         cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s2'", (agency_id,))
         route_codes = cur.fetchone()[0]
     assert route_codes == "R_A,R_B"  # comma-joined, alphabetically ordered
+
+
+def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(pg_conn, agency_id, ch_client):
+    """A (route_code, trip_id, stop_sequence) whose every observed dep_delay
+    is NULL (arrival-only StopTimeUpdates — common at a route's last stop in
+    GTFS-RT, or a degraded poll) must still show up in agg_stop_routes: this
+    table is about which routes serve a stop, independent of whether any
+    observation happened to carry a numeric delay.
+
+    Regression: agg_stop_routes was derived from _analyze_deduped for one
+    perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
+    silently dropped this exact case (measured on real data: ~3.7% of keys,
+    39 stops losing all route coverage). Restored to the ClickHouse-sourced
+    _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
+    only and never touches dep_delay."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s3','三番停留所',ST_SetSRID(ST_MakePoint(140.75,40.83),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'TC',1,'s3')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'TC.pb','2026-06-09T08:10:00','TC','平日',%s,'R_NULL_DELAY',1,NULL)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id=%s AND stop_id='s3'", (agency_id,))
+        row = cur.fetchone()
+    assert row is not None, "stop s3 lost all route coverage — the NULL-delay row was dropped"
+    assert row[0] == "R_NULL_DELAY"
 
 
 def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id, ch_client):

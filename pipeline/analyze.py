@@ -585,41 +585,44 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
 
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
-            # Needs a JOIN against Postgres static_stop_times. This used to run a
-            # SEPARATE ClickHouse `SELECT DISTINCT route_code, trip_id,
-            # stop_sequence FROM updates` — a full-partition scan of the same
-            # magnitude as the dedup query itself (measured 113.5s / 336M rows
-            # for agency 8, ~77% the cost of the dedup) — just to re-derive a
-            # distinct key set that _analyze_deduped (materialised above) already
-            # contains. Deriving it with a plain Postgres DISTINCT over the temp
-            # table needs no ClickHouse round-trip at all.
+            # Needs a JOIN against Postgres static_stop_times, so — mirroring the
+            # _analyze_deduped pattern — fetch the distinct raw keys from
+            # ClickHouse and bulk-load them into a small Postgres TEMP TABLE,
+            # then run the JOIN against that instead of raw `updates`. It's a
+            # DISTINCT route_code set, unaffected by poll duplication, and
+            # doesn't read dep_delay, so no clamp/dedup is needed on this side.
             #
-            # Semantic note — DELIBERATE, DISCLOSED behavior change, not a
-            # silent regression: this key set is now restricted to rows that
-            # passed the dedup's clamp (`dep_delay IS NOT NULL AND BETWEEN
-            # -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`), whereas
-            # the old raw-`updates` scan included every row regardless of
-            # dep_delay. A (route_code, trip_id, stop_sequence) whose EVERY
-            # observation ever recorded was NULL/implausible delay is now
-            # absent from this stop's route_codes. Measured against real dev
-            # data (agency 8, 2026-08): NOT negligible — 10,260 of 277,552
-            # keys (~3.7%) are affected: 39 of ~2,414 stops (~1.6%) lose all
-            # route-code coverage entirely, and a further 86 (stop,
-            # route_code) pairs are lost from 49 OTHER stops that otherwise
-            # keep at least one route (see fix-8b-report.md for the full
-            # breakdown). Every one of the sampled lost keys had 100%
-            # NULL dep_delay (no implausible-spike contribution) — routes/
-            # trips whose realtime feed never produced a numeric delay
-            # estimate for that stop. Disclosed here rather than silently
-            # patched over by re-adding the raw scan; not fixed further
-            # without a product decision on whether stop coverage should
-            # include delay-less observations.
+            # Deliberately NOT derived from _analyze_deduped (a cheaper,
+            # single-scan alternative tried and reverted): _analyze_deduped is
+            # pre-filtered by the dedup's clamp (`dep_delay IS NOT NULL AND
+            # BETWEEN -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`),
+            # so a (route_code, trip_id, stop_sequence) whose every observation
+            # was NULL/implausible would silently drop out of stop coverage —
+            # measured on real agency-8 data at ~3.7% of keys, 39 stops losing
+            # ALL route coverage. `agg_stop_routes` is about which routes serve
+            # a stop, independent of whether any of those observations happened
+            # to carry a numeric delay — the extra ClickHouse round-trip
+            # (measured ~113s on agency 8's 336M rows) is the correctness-over-
+            # perf trade this table's semantics require.
+            ch_keys = ch_client.query(
+                "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates WHERE agency_id = {agency_id:UInt16}",
+                parameters={"agency_id": agency_id},
+            )
             with conn.cursor() as cur:
+                cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
+                cur.execute(
+                    "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
+                    "ON COMMIT DROP"
+                )
+                if ch_keys.result_rows:
+                    psycopg2.extras.execute_values(
+                        cur, "INSERT INTO _analyze_raw_keys VALUES %s", ch_keys.result_rows, page_size=10_000
+                    )
                 sql = """
                     INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
                     SELECT %(agency_id)s, sst.stop_id,
                            string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
-                    FROM (SELECT DISTINCT route_code, trip_id, stop_sequence FROM _analyze_deduped) k
+                    FROM _analyze_raw_keys k
                     JOIN static_stop_times sst
                       ON sst.agency_id = %(agency_id)s
                      AND sst.trip_id = k.trip_id
