@@ -81,4 +81,19 @@ become Nullable.
   PostGIS+pgvector+pg_trgm) AND throwaway ClickHouse `:8124` (`make ch-test`).
   `RUN_CH_INTEGRATION=1` + the `CLICKHOUSE_*` env vars gate the ClickHouse-touching
   tests — see `transit-app-gotchas` for the exact env block.
+- The API's async ClickHouse client (`api/clickhouse.py::get_ch_client`) runs
+  `readonly=2` — it only ever `SELECT`s, every write/DDL path goes through
+  `pipeline/clickhouse.py`'s sync client instead. It's a per-request default on
+  that client object, not server-side enforcement — a future call site passing
+  its own `settings={...}` to `ch.query(...)` can still lift it; a genuinely
+  read-only CH user/profile is the only thing that would survive that.
+- Both client factories take a `CLICKHOUSE_SECURE` env var (default `false`,
+  plaintext HTTP) — set it for any non-local ClickHouse, and move
+  `CLICKHOUSE_PORT` to match (e.g. 8443) since an explicit port defeats
+  clickhouse-connect's own port-based TLS inference.
+- `api/routers/internal.py`'s cron ingest+analyze job takes a Postgres
+  advisory lock (`_CRON_LOCK_KEY`) so a double poke can't double-`ingest_live`
+  every agency (ClickHouse has no `ON CONFLICT DO NOTHING`). Scoped to that
+  one endpoint — `gtfs_pipeline.py`'s CLI ingest/analyze commands take no
+  equivalent lock yet.
 - Benchmark via `PERF_DEBUG_ENABLED` + `scripts/perf_bench.py`.
