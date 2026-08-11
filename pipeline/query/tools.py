@@ -29,8 +29,9 @@ because the frontend i18n layer translates display names client-side.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at
 from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
@@ -51,6 +52,9 @@ from pipeline.reports import (
 )
 
 TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
+
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 
 # ---------------------------------------------------------------------------
@@ -505,17 +509,48 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # reads the whole agency partition (336M rows / 400-1500ms measured on
     # real data) — and this path is reached on arbitrary, LLM/user-supplied
     # route strings from the anonymous /ask endpoint, the cheapest input for
-    # a client to produce repeatedly. 30 days off the agency's own latest
-    # captured_at (not wall-clock "now", so it stays meaningful against old/
-    # replayed data too): a route ingested but not yet analyzed is by
-    # definition within the last cron cycle, so this loses nothing real.
-    agency_latest = await max_captured_at(ch, agency_id)
-    if agency_latest is None:
-        return False
+    # a client to produce repeatedly.
+    #
+    # The bound must NOT be derived from a fixed window or from the user's
+    # ctx: this fallback exists ONLY to catch observations analyze() hasn't
+    # consumed yet for THIS agency (the comment above: "a route ingested but
+    # not yet analyzed"), not to re-scope registry membership to a time
+    # window — that is the exact conflation this function's docstring
+    # documents fixing once already ("a perfectly valid route surfaced
+    # 登録されていない whenever the chosen window happened to be empty"). A
+    # fixed 30-day bound reintroduces it for any real route that simply
+    # hasn't run in the last 30 days: still absent from agg_route_daily (this
+    # code only runs on that miss) but now also excluded from the ClickHouse
+    # scan, reporting a legitimate route as unregistered.
+    #
+    # Deriving the bound from agg_route_daily's own analyze horizon for this
+    # agency avoids that: it doesn't depend on which route or which window
+    # was asked about, so it can't reintroduce the conflation, and it's
+    # tighter than a fixed constant (typically "yesterday", not 30 days
+    # back). Residual gap, same shape as agg_stop_routes' documented ~3.7%
+    # trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # recorded was NULL/implausible delay (permanently invisible to
+    # agg_route_daily's dedup filter, regardless of recency) still reads as
+    # unregistered if its last observation predates the horizon. Accepted —
+    # narrower than the fixed-window regression it replaces, and any
+    # currently-running route (even all-NULL-delay) has captured_at near the
+    # horizon regardless of its delay values.
+    horizon_row = await conn.fetchrow("SELECT max(date) AS d FROM agg_route_daily WHERE agency_id=$1", agency_id)
+    horizon = horizon_row["d"] if horizon_row else None
+    if horizon is not None:
+        bound = datetime.combine(horizon, time.min, tzinfo=_JST).astimezone(timezone.utc)
+    else:
+        # Brand-new agency: no agg_route_daily rows at all yet, so there's no
+        # analyze horizon to anchor to. Fall back to a bounded scan off
+        # ClickHouse's own latest data instead of leaving this unbounded.
+        agency_latest = await max_captured_at(ch, agency_id)
+        if agency_latest is None:
+            return False
+        bound = agency_latest - timedelta(days=30)
     result = await ch.query(
         "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
         "AND captured_at >= {bound:DateTime64} LIMIT 1",
-        parameters={"agency_id": agency_id, "route": str(route), "bound": agency_latest - timedelta(days=30)},
+        parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
     )
     return bool(result.result_rows)
 
