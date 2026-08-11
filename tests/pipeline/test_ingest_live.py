@@ -70,8 +70,38 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
 
     with patch("pipeline.ingest.safe_urlopen", return_value=mock_resp) as mock_safe_urlopen:
         with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_strategy_row]):
-            with patch("pipeline.ingest.insert_updates", return_value=1):
-                result = ingest_live(1, mock_conn, MagicMock())
+            with patch("pipeline.ingest.recent_file_name_exists", return_value=False):
+                with patch("pipeline.ingest.insert_updates", return_value=1):
+                    result = ingest_live(1, mock_conn, MagicMock())
 
     mock_safe_urlopen.assert_called_once_with("https://8.8.8.8/feed.pb", timeout=30)
     assert result == 1
+
+
+def test_ingest_live_skips_duplicate_poll_within_same_second(tmp_path):
+    """Two invocations landing in the same second (a double cron poke, or a
+    retried BackgroundTask on the cron endpoint) would produce the identical
+    second-granularity file_name. Postgres's UNIQUE(agency_id, file_name,
+    trip_id, stop_sequence) + ON CONFLICT DO NOTHING used to absorb this
+    for free; ClickHouse has no equivalent, so ingest_live must check first
+    and skip entirely rather than double-insert the same poll."""
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
+        ("https://8.8.8.8/feed.pb",),
+        (None,),
+    ]
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b"fake protobuf data"
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("pipeline.ingest.safe_urlopen", return_value=mock_resp):
+        with patch("pipeline.ingest.recent_file_name_exists", return_value=True) as mock_exists:
+            with patch("pipeline.strategies.aomori_regex.parse_feed") as mock_parse:
+                with patch("pipeline.ingest.insert_updates") as mock_insert:
+                    result = ingest_live(1, mock_conn, MagicMock())
+
+    mock_exists.assert_called_once()
+    mock_parse.assert_not_called()
+    mock_insert.assert_not_called()
+    assert result == 0

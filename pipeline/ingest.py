@@ -10,12 +10,12 @@ import pathlib
 import re
 import tarfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 from clickhouse_connect.driver.exceptions import DataError
 
-from pipeline.clickhouse import distinct_file_names, insert_updates
+from pipeline.clickhouse import distinct_file_names, insert_updates, recent_file_name_exists
 from pipeline.strategies import get_ingest_strategy
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
@@ -446,6 +446,21 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
 
     captured_at = datetime.now(timezone.utc).isoformat()
     file_name = f"live_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+    # `file_name` is second-granularity, so two invocations within the same
+    # second — a double cron poke, or a retried BackgroundTask (the cron
+    # endpoint's worker, api/routers/internal.py) — would otherwise insert
+    # the same poll twice with no guard: unlike ingest(), this path has no
+    # done/seen check at all. Postgres's UNIQUE(agency_id, file_name,
+    # trip_id, stop_sequence) + ON CONFLICT DO NOTHING used to absorb this
+    # for free; ClickHouse has no equivalent. A bounded single-file check
+    # (not distinct_file_names' unbounded full-partition scan, which would
+    # be wasteful to pay on every ~30s poll) mirrors ingest()'s file-level
+    # idempotency at this path's much smaller grain.
+    since = datetime.now(timezone.utc) - timedelta(minutes=5)
+    if recent_file_name_exists(ch_client, agency_id, file_name, since):
+        logger.info(f"Skipping duplicate live poll: {file_name} already ingested")
+        return 0
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
 
