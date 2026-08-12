@@ -34,21 +34,27 @@ def _get_conn():
     return conn
 
 
-def _require_ingest_analyze_lock(conn) -> None:
-    """Exit(1) if another ingest/analyze process already holds the lock.
+def _acquire_ingest_analyze_lock(conn) -> bool:
+    """Returns True if acquired. Logs + closes `conn` and returns False if
+    another ingest/analyze process already holds it -- callers must return
+    immediately on False, without exiting nonzero.
 
     ingest/ingest_live/analyze/analyze_all all take this (pipeline/locks.py) --
     the same lock api/routers/internal.py's cron fallback endpoint takes, so
-    a scheduled CLI run and a cron poke can't collide either. Unlike that
-    endpoint's BackgroundTask (no caller to report failure to, so it logs
-    and skips silently), a CLI invocation has a real exit code its caller --
-    a systemd timer, the Railway job runner -- can alert on, so this fails
-    loudly instead of silently no-op-ing.
+    a scheduled CLI run and a cron poke can't collide either. Matches that
+    endpoint's skip-not-fail degrade rather than exiting nonzero: production
+    invokes ingest/load_static/analyze as separate per-agency processes under
+    `set -euo pipefail` (scripts/fetch_and_ingest.sh) -- a nonzero exit on
+    lock contention for agency 3 would abort the whole remaining loop and
+    skip ingest for every agency after it, a worse outcome than the
+    collision this lock exists to prevent. A skipped run self-heals on the
+    next scheduled invocation.
     """
-    if not try_lock_ingest_analyze(conn):
-        logger.error("Another ingest/analyze process is already running; refusing to start.")
-        conn.close()
-        sys.exit(1)
+    if try_lock_ingest_analyze(conn):
+        return True
+    logger.warning("Another ingest/analyze process is already running; skipping this run.")
+    conn.close()
+    return False
 
 
 def _require_agency(args, conn) -> int:
@@ -181,7 +187,8 @@ def cmd_ingest(args):
     from pipeline.ingest import ingest
 
     conn = _get_conn()
-    _require_ingest_analyze_lock(conn)
+    if not _acquire_ingest_analyze_lock(conn):
+        return
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     ingest(args.folder, agency_id, conn, ch_client)
@@ -227,7 +234,8 @@ def cmd_analyze(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _require_ingest_analyze_lock(conn)
+    if not _acquire_ingest_analyze_lock(conn):
+        return
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     analyze(agency_id, conn, ch_client)
@@ -245,7 +253,8 @@ def cmd_analyze_all(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _require_ingest_analyze_lock(conn)
+    if not _acquire_ingest_analyze_lock(conn):
+        return
     ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
@@ -343,7 +352,8 @@ def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
-    _require_ingest_analyze_lock(conn)
+    if not _acquire_ingest_analyze_lock(conn):
+        return
     ch_client = get_client()
     if args.agency_id is not None:
         ingest_live(int(args.agency_id), conn, ch_client)

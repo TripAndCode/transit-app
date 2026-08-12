@@ -9,14 +9,21 @@ double-insert the same ClickHouse poll (insert_updates' intra-batch dedup
 and ingest_live's recent_file_name_exists guard only protect within one
 process's own batch, not across two processes racing the same feed).
 
-Deliberately ONE global key, not per-agency: api/routers/internal.py's
-cron endpoint already treats "ingest+analyze every agency" as one
-all-or-nothing job, and this module's callers (that endpoint, plus
-gtfs_pipeline.py's ingest/ingest_live/analyze/analyze_all commands) are
-the production Railway job and its documented fallback -- a per-agency
-lock would let those two interleave through their own agency loops,
-which is a more complex primitive for a collision (two whole-fleet jobs
-running at once) that a single lock already prevents correctly.
+Deliberately ONE global key, not per-agency: a per-agency lock would let
+two whole-fleet jobs (the cron endpoint and a scheduled CLI run)
+interleave through their own agency loops, which is a more complex
+primitive for a collision this single lock already prevents correctly.
+
+Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh)
+invokes ingest/load_static/analyze as separate per-agency CLI processes, each
+independently acquiring and releasing this lock -- so a cron poke can still
+land *between* two of those per-agency commands and run its own full
+ingest+analyze in the gap. Callers (this module's docstring above notwithstanding
+in older revisions) must treat a lock miss as ordinary, self-healing contention:
+log and skip, never abort a larger loop over it -- see gtfs_pipeline.py's
+_acquire_ingest_analyze_lock. Closing the interleave gap fully would need a
+lock held for an entire multi-command job, not per CLI invocation; accepted
+as a known trade-off rather than solved here.
 """
 
 # Arbitrary, fixed -- only needs to be distinct from any other advisory

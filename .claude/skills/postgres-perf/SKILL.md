@@ -97,9 +97,13 @@ become Nullable.
   plaintext HTTP) — set it for any non-local ClickHouse, and move
   `CLICKHOUSE_PORT` to match (e.g. 8443) since an explicit port defeats
   clickhouse-connect's own port-based TLS inference.
-- `api/routers/internal.py`'s cron ingest+analyze job takes a Postgres
-  advisory lock (`_CRON_LOCK_KEY`) so a double poke can't double-`ingest_live`
-  every agency (ClickHouse has no `ON CONFLICT DO NOTHING`). Scoped to that
-  one endpoint — `gtfs_pipeline.py`'s CLI ingest/analyze commands take no
-  equivalent lock yet.
+- `api/routers/internal.py`'s cron ingest+analyze job and `gtfs_pipeline.py`'s
+  CLI ingest/ingest_live/analyze/analyze_all commands all take the same
+  shared Postgres advisory lock (`pipeline.locks.INGEST_ANALYZE_LOCK_KEY`) so
+  a double poke, or a poke overlapping a scheduled CLI run, can't
+  double-`ingest_live` every agency (ClickHouse has no `ON CONFLICT DO
+  NOTHING`). Non-blocking, best-effort: a miss logs and skips rather than
+  failing loudly, since production runs ingest/load_static/analyze as
+  separate per-agency CLI processes and a hard exit on contention would
+  abort the whole remaining agency loop.
 - Benchmark via `PERF_DEBUG_ENABLED` + `scripts/perf_bench.py`.
