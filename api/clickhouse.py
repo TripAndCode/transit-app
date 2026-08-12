@@ -5,10 +5,13 @@ connections internally), opened in api.main's lifespan and closed on
 shutdown, same lifecycle shape as app.state.pool for Postgres.
 """
 
-import os
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 import clickhouse_connect
+
+from pipeline.clickhouse import ch_conn_kwargs
 
 
 async def get_ch_client():
@@ -37,15 +40,25 @@ async def get_ch_client():
     fine as written.
     """
     return await clickhouse_connect.get_async_client(
-        host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
-        port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
-        username=os.environ["CLICKHOUSE_USER"],
-        password=os.environ["CLICKHOUSE_PASSWORD"],
-        database=os.environ["CLICKHOUSE_DATABASE"],
+        **ch_conn_kwargs(),
         settings={
             "max_execution_time": 30,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
+            # This process only ever SELECTs from `updates` — every write/DDL
+            # path (ingest, analyze, bootstrap) goes through pipeline/clickhouse.py's
+            # sync client instead. `readonly=2` (not 1) so the settings above
+            # can still be applied per-query; `readonly=1` would reject those
+            # settings outright. Applied as a query-level setting on every
+            # request THIS CLIENT OBJECT issues (clickhouse-connect's async
+            # client is sessionless by default, so there's no server-side
+            # session to attach it to) -- it holds for all traffic through
+            # this object, but a call site that explicitly passes its own
+            # `readonly` in `settings={...}` to `ch.query(...)` can still
+            # lift it (an override only wins for keys it actually contains).
+            # A defense-in-depth default, not a substitute for a genuinely
+            # read-only CH user/profile if one is provisioned later.
+            "readonly": 2,
         },
     )
 
@@ -85,13 +98,13 @@ async def max_captured_at_before(ch, agency_id: int, before: datetime) -> dateti
     `(agency_id, captured_at, route_code, trip_id, stop_sequence)`, so a
     single-agency, filtered-then-limited read is served off the sort index
     (reads ~thousands of rows) instead of scanning every row for the agency
-    (or, worse, the whole table). Used by the async API call sites —
+    (or, worse, the whole table). Called per-agency by
+    `max_captured_at_before_by_agency` below (used by
     `pipeline.health.aggregate_freshness` and
-    `pipeline.reports.network.compute_network_summary` — that need one
-    agency's latest-completed-day max at a time, looping over agencies in
-    Python rather than a cross-agency `GROUP BY` (ClickHouse has no LATERAL
-    join, and an unfiltered `GROUP BY agency_id` over `updates` reads the
-    `captured_at` column for the entire table).
+    `pipeline.reports.network.compute_network_summary`) rather than a
+    cross-agency `GROUP BY` (ClickHouse has no LATERAL join, and an
+    unfiltered `GROUP BY agency_id` over `updates` reads the `captured_at`
+    column for the entire table).
     """
     result = await ch.query(
         "SELECT captured_at FROM updates "
@@ -103,3 +116,30 @@ async def max_captured_at_before(ch, agency_id: int, before: datetime) -> dateti
         return None
     value = result.result_rows[0][0]
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+async def max_captured_at_before_by_agency(
+    ch, agency_ids: list[int], before: datetime, log: logging.Logger
+) -> dict[int, datetime | None]:
+    """Per-agency `max_captured_at_before`, run concurrently.
+
+    Shared by `pipeline.health.aggregate_freshness` and
+    `pipeline.reports.network.compute_network_summary`, which both need this
+    exact shape: N independent per-agency freshness probes on one shared
+    async client, backing only ONE non-critical field in a larger response —
+    so a failing agency's probe must degrade that agency to `None` rather
+    than fail the whole batch (`is_stale(agg_day, None)` is defined as "not
+    stale" — the correct degrade). Concurrent because these are independent
+    round trips on the same client (measured ~4s serial for 4 agencies vs
+    ~1 for the slowest single probe); `gather` never raises here since each
+    probe catches its own failure internally.
+    """
+
+    async def _probe(aid: int) -> tuple[int, datetime | None]:
+        try:
+            return aid, await max_captured_at_before(ch, aid, before)
+        except Exception:
+            log.warning("ClickHouse freshness probe failed for agency %s — degrading", aid, exc_info=True)
+            return aid, None
+
+    return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))

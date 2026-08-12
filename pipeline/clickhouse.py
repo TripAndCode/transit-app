@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 import clickhouse_connect
 
 # Column order matches every ingest strategy's row-tuple shape (see
-# pipeline/strategies/*.py parse_feed docstrings) plus the schema in
-# db/clickhouse/schema.sql, minus agency_id which insert_updates prepends.
+# pipeline/strategies/*.py parse_feed docstrings), minus agency_id which
+# insert_updates prepends. Does NOT need to match db/clickhouse/schema.sql's
+# column order (it doesn't: schema.sql declares captured_at before
+# file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
+# explicitly, so clickhouse-connect maps by name, not position.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -25,14 +28,42 @@ UPDATE_COLUMNS = [
 ]
 
 
+def ch_conn_kwargs() -> dict:
+    """host/port/username/password/database/secure kwargs shared by both
+    ClickHouse client factories (this module's sync `get_client` and
+    `api.clickhouse.get_ch_client`'s async client).
+
+    Kept in exactly one place: an earlier version of this logic was
+    duplicated verbatim between the two factories, which risked silently
+    desyncing the async API client's TLS/port defaulting from the sync
+    pipeline client's the next time either one changed.
+    """
+    secure = os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes")
+    # An explicit port always wins (CLICKHOUSE_PORT set) -- but when it's
+    # NOT set, default by `secure` rather than always falling back to 8123:
+    # clickhouse-connect only infers https from the port itself (443/8443),
+    # so passing an always-present "8123" default defeats that inference the
+    # moment CLICKHOUSE_SECURE=true is set without also setting a matching
+    # port, silently attempting TLS against a plaintext listener.
+    port = int(os.environ.get("CLICKHOUSE_PORT") or (8443 if secure else 8123))
+    return {
+        "host": os.environ.get("CLICKHOUSE_HOST", "localhost"),
+        "port": port,
+        "username": os.environ["CLICKHOUSE_USER"],
+        "password": os.environ["CLICKHOUSE_PASSWORD"],
+        "database": os.environ["CLICKHOUSE_DATABASE"],
+        # Explicit knob rather than relying solely on the port-based
+        # inference above: without it, a client sends CLICKHOUSE_PASSWORD as
+        # HTTP Basic auth in cleartext on every request.
+        "secure": secure,
+    }
+
+
 def get_client():
-    return clickhouse_connect.get_client(
-        host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
-        port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
-        username=os.environ["CLICKHOUSE_USER"],
-        password=os.environ["CLICKHOUSE_PASSWORD"],
-        database=os.environ["CLICKHOUSE_DATABASE"],
-    )
+    # This is also the factory `make ch-bootstrap` and CI's schema-apply
+    # step use (see Makefile), so the DDL/bootstrap path gets the same TLS
+    # coverage as ingest/analyze.
+    return clickhouse_connect.get_client(**ch_conn_kwargs())
 
 
 def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:

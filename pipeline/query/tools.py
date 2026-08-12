@@ -29,8 +29,11 @@ because the frontend i18n layer translates display names client-side.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
+
+import clickhouse_connect
 
 from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
@@ -50,6 +53,9 @@ from pipeline.reports import (
 )
 
 TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
+
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 
 # ---------------------------------------------------------------------------
@@ -498,10 +504,75 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # analyze() simply hasn't caught up to yet.
     if ch is None:
         return False
-    result = await ch.query(
-        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
-        parameters={"agency_id": agency_id, "route": str(route)},
-    )
+    # Bounded the same way api/routers/map.py's route-scoped fallback probes
+    # are: route_code sits behind an unconstrained captured_at in the sort
+    # key, so an unbounded scan for a route that genuinely doesn't exist
+    # reads the whole agency partition (336M rows / 400-1500ms measured on
+    # real data) — and this path is reached on arbitrary, LLM/user-supplied
+    # route strings from the anonymous /ask endpoint, the cheapest input for
+    # a client to produce repeatedly.
+    #
+    # The bound must NOT be derived from a fixed window or from the user's
+    # ctx: this fallback exists ONLY to catch observations analyze() hasn't
+    # consumed yet for THIS agency (the comment above: "a route ingested but
+    # not yet analyzed"), not to re-scope registry membership to a time
+    # window — that is the exact conflation this function's docstring
+    # documents fixing once already ("a perfectly valid route surfaced
+    # 登録されていない whenever the chosen window happened to be empty"). A
+    # fixed 30-day bound reintroduces it for any real route that simply
+    # hasn't run in the last 30 days: still absent from agg_route_daily (this
+    # code only runs on that miss) but now also excluded from the ClickHouse
+    # scan, reporting a legitimate route as unregistered.
+    #
+    # Deriving the bound from agg_route_daily's own analyze horizon for this
+    # agency avoids that: it doesn't depend on which route or which window
+    # was asked about, so it can't reintroduce the conflation, and it's
+    # tighter than a fixed constant (typically "yesterday", not 30 days
+    # back). Residual gap, same shape as agg_stop_routes' documented ~3.7%
+    # trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # recorded was NULL/implausible delay (permanently invisible to
+    # agg_route_daily's dedup filter, regardless of recency) still reads as
+    # unregistered if its last observation predates the horizon. Accepted —
+    # narrower than the fixed-window regression it replaces, and any
+    # currently-running route (even all-NULL-delay) has captured_at near the
+    # horizon regardless of its delay values.
+    horizon = await conn.fetchval("SELECT max(date) FROM agg_route_daily WHERE agency_id=$1", agency_id)
+    if horizon is not None:
+        bound = datetime.combine(horizon, time.min, tzinfo=_JST).astimezone(timezone.utc)
+        # Same fail-open rationale as the no-horizon branch below: a
+        # transient ClickHouse hiccup or hitting the client's execution-time
+        # cap here must not surface as a false "not registered" either --
+        # this branch covers the common case (agency already has
+        # agg_route_daily rows), so it's reached far more often than the
+        # no-horizon fallback.
+        try:
+            result = await ch.query(
+                "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+                "AND captured_at >= {bound:DateTime64} LIMIT 1",
+                parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
+            )
+        except clickhouse_connect.driver.exceptions.Error:
+            return True
+        return bool(result.result_rows)
+    # No agg_route_daily rows for this agency AT ALL -- not a rare corner:
+    # it's the normal state right after a bulk historical backfill, before
+    # analyze() has ever completed. There is no "not yet analyzed" window to
+    # bound against here (unlike the horizon branch above), so a fixed
+    # constant would reintroduce the exact conflation this function exists
+    # to avoid -- a route that ran anywhere in the backfilled history except
+    # the last 30 days would read as unregistered. Scan unbounded, but cap
+    # execution time and fail OPEN (assume registered) on a timeout/error
+    # rather than fail closed: "couldn't prove it in 5s" is not evidence the
+    # route doesn't exist, and asserting a false "not registered" to the
+    # user is worse than one extra no-data reply from a false "registered".
+    try:
+        result = await ch.query(
+            "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} LIMIT 1",
+            parameters={"agency_id": agency_id, "route": str(route)},
+            settings={"max_execution_time": 5},
+        )
+    except clickhouse_connect.driver.exceptions.Error:
+        return True
     return bool(result.result_rows)
 
 

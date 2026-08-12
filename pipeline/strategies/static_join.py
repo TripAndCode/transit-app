@@ -11,6 +11,7 @@ route_code is taken straight from the RT trip.route_id and is always non-null.
 import logging
 
 from pipeline.strategies._pb import _dec, _fields
+from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
@@ -90,36 +91,39 @@ def parse_feed(
     rows = []
     miss = 0
     skipped_extended = 0
+    bad_sched = 0
     for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             miss += 1
-        elif sched and sched[:2].isdigit() and int(sched[:2]) >= 24:
+        # Single parse drives both the extended-hour drop and the zero-pad
+        # (see pipeline/strategies/_time.py's module docstring for why: two
+        # independent parses of the same field -- this used to check
+        # sched[:2] for the >=24 decision and hour_str.isdigit() for padding
+        # separately -- can disagree on malformed multi-digit input, e.g. a
+        # 3-digit hour like "125:30:00" had a fine 2-char prefix but a
+        # broken zero-pad, storing an uncastable value). GTFS's
+        # departure_time is raw, unpadded, unvalidated text -- "7:05:00" is
+        # as valid as "07:05:00" per spec, and nothing guarantees the rest
+        # is even numeric. Postgres's old TIME column validated and
+        # normalized this for free; ClickHouse's plain String does not, so
+        # analyze()'s `_analyze_deduped.scheduled_time time` column is now
+        # the only place format errors surface -- and once a bad value is
+        # durably stored in ClickHouse, it fails analyze() for this ENTIRE
+        # agency on every subsequent run, not just drops one row. NULL is
+        # already a first-class value on this column (every downstream read
+        # site handles it -- WHERE scheduled_time IS NOT NULL / toUInt8OrNull).
+        sched, status = normalize_departure_time(sched)
+        if status == "extended":
             # GTFS allows departure_time like "25:30:00" for trips spanning
-            # midnight as continuation of the previous service day. Migration
-            # 0011 makes scheduled_time a TIME column which can't hold those;
-            # drop the row + log.
-            _log.warning(
-                "static_join: skipping trip_id=%r seq=%s extended departure_time=%r",
-                trip_id,
-                stop_seq,
-                sched,
-            )
+            # midnight as continuation of the previous service day, with no
+            # representation this column (Nullable(String), but read
+            # everywhere as a same-day HH:MM[:SS]) can hold; drop the row + log.
+            _log.warning("static_join: skipping trip_id=%r seq=%s extended departure_time", trip_id, stop_seq)
             skipped_extended += 1
             continue
-        if sched is not None:
-            # GTFS's departure_time is raw, unpadded text — "7:05:00" is as
-            # valid as "07:05:00". Postgres's old TIME column normalized
-            # this for free; ClickHouse's plain String does not. Every hour
-            # extraction downstream (api/range.py's time_band_clause_ch,
-            # pipeline/reports/rankings.py, overview.py) reads a fixed
-            # substring assuming a 2-digit hour, so an unpadded single-digit
-            # hour would either sort into the wrong time band or crash
-            # toUInt8() outright. Zero-pad once, here, rather than at every
-            # read site.
-            hour_str, sep, rest = sched.partition(":")
-            if sep:
-                sched = f"{int(hour_str):02d}:{rest}"
+        if status == "bad":
+            bad_sched += 1
         rows.append(
             (
                 file_name,
@@ -137,4 +141,6 @@ def parse_feed(
         _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
     if skipped_extended:
         _log.warning(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
+    if bad_sched:
+        _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
     return rows

@@ -1,6 +1,7 @@
 """Strategies reject scheduled_time hour >= 24 so a strict TIME column
 (migration 0011) can't be crashed by an extended-hours trip_id."""
 
+from pipeline.strategies._time import normalize_departure_time
 from pipeline.strategies.aomori_regex import _TRIP_RE_DEFAULT, parse_trip_id
 
 
@@ -16,7 +17,14 @@ def test_static_join_loop_drops_extended_hour_row():
     """Mirror of the inner loop in static_join.parse_feed: rows whose
     joined departure_time has hour >= 24 are skipped, normal rows are
     kept. This is a logic-level pin, not a wire-level fixture — the
-    full protobuf path is exercised by the ingest smoke suite."""
+    full protobuf path is exercised by the ingest smoke suite.
+
+    Calls the actual normalize_departure_time() rather than
+    re-implementing its logic inline: an earlier version of this test
+    hand-rolled the sched[:2].isdigit() check production used at the time,
+    and silently stopped reflecting production once static_join.py moved
+    to the shared helper -- this test kept passing against its own stale
+    copy while production's validation logic diverged underneath it."""
     raw_rows = [
         ("trip_a", "route10", 1, 60),
         ("trip_b", "route10", 1, 60),
@@ -31,7 +39,8 @@ def test_static_join_loop_drops_extended_hour_row():
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             continue
-        if sched and sched[:2].isdigit() and int(sched[:2]) >= 24:
+        sched, status = normalize_departure_time(sched)
+        if status == "extended":
             skipped += 1
             continue
         kept.append((trip_id, svc, sched, dep_delay))

@@ -73,7 +73,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
     """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
-    from api.clickhouse import max_captured_at_before
+    from api.clickhouse import max_captured_at_before_by_agency
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
@@ -105,26 +105,17 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # This probe backs ONLY the CH-derived fields below (is_stale/data_to/
     # agg_behind_days) — every other field (last_analyzed_at, analyze_age_hours,
     # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
-    # must not fail the whole call: degrade that agency's live_max to None and
-    # keep going, same shape as pipeline.reports.network.compute_network_summary's
-    # try/except around this same per-agency probe. is_stale(agg_day, None) is
-    # "not stale" (see its docstring), which is the correct degrade here.
-    live_max: dict[int, date | None] = {}
-    for a in agencies:
-        aid = a["agency_id"]
-        try:
-            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
-        except Exception:
-            _log.warning(
-                "ClickHouse freshness probe failed for agency %s — degrading is_stale/data_to", aid, exc_info=True
-            )
-            live_max[aid] = None
-            continue
-        if mx is None:
-            live_max[aid] = None
-            continue
-        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
-        live_max[aid] = mx_utc.astimezone(_JST).date()
+    # must not fail the whole call: is_stale(agg_day, None) is "not stale"
+    # (see its docstring), which is the correct degrade here.
+    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # and degrades a failing agency's probe to None internally; shared with
+    # pipeline.reports.network.compute_network_summary's identical shape.
+    probed = await max_captured_at_before_by_agency(
+        ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
+    )
+    live_max: dict[int, date | None] = {
+        aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
+    }
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

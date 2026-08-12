@@ -12,6 +12,7 @@ import logging
 import re
 
 from pipeline.strategies._pb import _dec, _fields
+from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
@@ -74,18 +75,25 @@ def parse_feed(
         service = parsed.get("service")
         hour = parsed.get("hour", "")
         minute = parsed.get("minute", "")
-        if (hour and int(hour) >= 24) or (minute and int(minute) >= 60):
-            # Strict TIME column (migration 0011) rejects extended-hour and
-            # invalid-minute values; skip the whole trip's stop_time_updates
-            # so cron doesn't abort the entire feed's batch INSERT.
-            _log.warning(
-                "aomori: skipping trip_id %r with invalid time %s:%s",
-                trip_id,
-                hour,
-                minute,
-            )
-            continue
-        sched = f"{hour.zfill(2)}:{minute.zfill(2)}" if hour and minute else None
+        sched = None
+        if hour and minute:
+            # trip_id_pattern is per-agency, admin-editable (agencies.trip_id_
+            # pattern) -- an unguarded int(hour)/int(minute) on its named
+            # groups raises ValueError for a pattern whose hour/minute group
+            # can match non-digits, taking out the whole feed's batch. Route
+            # through the same validator static_join.py uses: zfill first
+            # (regex groups aren't guaranteed 2 digits, e.g. hour="9"), then
+            # let normalize_departure_time reject anything that still isn't
+            # a clean "HH:MM" shape rather than crash on it.
+            sched, status = normalize_departure_time(f"{hour.zfill(2)}:{minute.zfill(2)}")
+            if status in ("extended", "bad"):
+                # Strict TIME column (migration 0011) rejected extended-hour
+                # and invalid-minute values; the column is Nullable(String)
+                # now, but every downstream read site still assumes a
+                # same-day HH:MM shape, so skip the whole trip's
+                # stop_time_updates rather than store something meaningless.
+                _log.warning("aomori: skipping trip_id %r with invalid time %s:%s", trip_id, hour, minute)
+                continue
         route = parsed.get("route")
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)

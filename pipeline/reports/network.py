@@ -15,7 +15,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before
+from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
 
@@ -54,6 +54,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     today_jst_midnight_utc = (
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
+
     # One indexed read per agency (api.clickhouse.max_captured_at_before —
     # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
     # sync sibling; see its docstring) instead of `maxOrNull`, which is a
@@ -70,20 +71,15 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
     # no completed day / can't determine → nothing owed), which is the
     # correct degrade here.
-    live_max: dict[int, "date | None"] = {}
-    for a in agencies:
-        aid = a["agency_id"]
-        try:
-            mx = await max_captured_at_before(ch, aid, today_jst_midnight_utc)
-        except Exception:
-            _log.warning("ClickHouse freshness probe failed for agency %s — degrading is_stale", aid, exc_info=True)
-            live_max[aid] = None
-            continue
-        if mx is None:
-            live_max[aid] = None
-            continue
-        mx_utc = mx.replace(tzinfo=timezone.utc) if mx.tzinfo is None else mx
-        live_max[aid] = mx_utc.astimezone(_JST).date()
+    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # and preserves the try/except degrade described above; shared with
+    # pipeline.health.aggregate_freshness's identical shape.
+    probed = await max_captured_at_before_by_agency(
+        ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
+    )
+    live_max: dict[int, "date | None"] = {
+        aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
+    }
 
     rows: list[dict[str, Any]] = []
     for a in agencies:

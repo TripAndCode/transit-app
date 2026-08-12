@@ -111,3 +111,59 @@ def test_run_ingest_and_analyze_skips_deleted_agency(two_agencies, monkeypatch):
     assert deleted_id not in ingested_ids
     assert active_id in analyzed_ids
     assert deleted_id not in analyzed_ids
+
+
+def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeypatch):
+    """A concurrently-running invocation (a double cron poke, or a retried
+    BackgroundTask on POST /internal/cron/ingest) must skip entirely rather
+    than ingest_live-ing every agency's feed twice -- ClickHouse has no
+    ON CONFLICT DO NOTHING to absorb the resulting duplicate poll beyond the
+    single-file bounded check ingest_live already does on its own file_name.
+
+    Holds the same advisory lock _run_ingest_and_analyze takes, on a
+    separate connection, to simulate the concurrent run."""
+    _active_id, _deleted_id = two_agencies
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+
+    from api.routers.internal import _CRON_LOCK_KEY, _run_ingest_and_analyze
+
+    holder = psycopg2.connect(DATABASE_URL)
+    holder.autocommit = True
+    with holder.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
+        assert cur.fetchone()[0] is True
+
+    try:
+        with (
+            patch("pipeline.ingest.ingest_live") as fake_ingest,
+            patch("pipeline.analyze.analyze") as fake_analyze,
+            patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        ):
+            _run_ingest_and_analyze()
+
+        fake_ingest.assert_not_called()
+        fake_analyze.assert_not_called()
+    finally:
+        with holder.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (_CRON_LOCK_KEY,))
+        holder.close()
+
+    # The lock must actually be released once the holder is gone -- not
+    # wedged forever, which would silently skip every subsequent cron poke.
+    # check_agg_freshness patched explicitly (matching
+    # test_run_ingest_and_analyze_skips_deleted_agency above) rather than
+    # left to run for real against a bare MagicMock ch_client: it currently
+    # limps through only because MagicMock's auto-generated attributes
+    # happen to satisfy every access in pipeline.clickhouse.max_captured_at_before
+    # and is_stale, a fragile coincidence unrelated to what this test
+    # actually verifies (lock release).
+    with (
+        patch("pipeline.ingest.ingest_live") as fake_ingest,
+        patch("pipeline.analyze.analyze") as fake_analyze,
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+    ):
+        _run_ingest_and_analyze()
+
+    assert fake_ingest.call_count > 0
+    assert fake_analyze.call_count > 0
