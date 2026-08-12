@@ -8,9 +8,18 @@ import sys
 
 import psycopg2
 
+from pipeline.locks import try_lock_ingest_analyze
+
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+
+# sysexits.h EX_TEMPFAIL -- distinct from a genuine failure's exit(1), so a
+# per-agency shell loop (scripts/fetch_and_ingest.sh, docs/deploy-railway.md's
+# Railway sketch) can tell "lock busy, will resolve on the next scheduled
+# run" apart from "broken" and `continue` to the next agency instead of
+# aborting the whole remaining loop under `set -euo pipefail`.
+EX_TEMPFAIL = 75
 
 # Shared by every all-agencies loop below (analyze-all, check-aggs, ingest-live)
 # so a test can assert against the query as actually executed, not a hand-typed
@@ -30,6 +39,40 @@ def _get_conn():
         cur.execute("SET TIME ZONE 'Asia/Tokyo'")
     conn.autocommit = False
     return conn
+
+
+def _lock_or_skip_agency(conn, cmd: str) -> None:
+    """Exit(EX_TEMPFAIL) if another ingest/analyze process holds the lock.
+
+    For `ingest` and `analyze` -- the single-agency commands
+    scripts/fetch_and_ingest.sh and docs/deploy-railway.md's Railway sketch
+    both invoke inside a per-agency `for` loop. EX_TEMPFAIL (not exit 1) lets
+    that loop distinguish transient, self-healing contention from a genuine
+    failure and skip just this agency this run, instead of the whole
+    remaining loop aborting under `set -euo pipefail`.
+    """
+    if try_lock_ingest_analyze(conn):
+        return
+    logger.warning("%s: another ingest/analyze process is already running; skipping this agency this run.", cmd)
+    conn.close()
+    sys.exit(EX_TEMPFAIL)
+
+
+def _lock_or_exit(conn, cmd: str) -> None:
+    """Exit(1) if another ingest/analyze process holds the lock.
+
+    For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
+    shell script loops over (docs/deploy-railway.md calls each exactly once,
+    after -- not inside -- the per-agency `ingest` loop), so the abort-risk
+    that justifies skipping in _lock_or_skip_agency doesn't apply here. Both
+    are documented as fail-loud ("partial run can't pass silently" --
+    CLAUDE.md); a silent no-op would violate that contract for no benefit.
+    """
+    if try_lock_ingest_analyze(conn):
+        return
+    logger.error("%s: another ingest/analyze process is already running; refusing to start.", cmd)
+    conn.close()
+    sys.exit(1)
 
 
 def _require_agency(args, conn) -> int:
@@ -162,6 +205,7 @@ def cmd_ingest(args):
     from pipeline.ingest import ingest
 
     conn = _get_conn()
+    _lock_or_skip_agency(conn, "ingest")
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     ingest(args.folder, agency_id, conn, ch_client)
@@ -207,6 +251,7 @@ def cmd_analyze(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
+    _lock_or_skip_agency(conn, "analyze")
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     analyze(agency_id, conn, ch_client)
@@ -224,6 +269,7 @@ def cmd_analyze_all(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
+    _lock_or_exit(conn, "analyze-all")
     ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
@@ -321,6 +367,7 @@ def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
+    _lock_or_exit(conn, "ingest-live")
     ch_client = get_client()
     if args.agency_id is not None:
         ingest_live(int(args.agency_id), conn, ch_client)
