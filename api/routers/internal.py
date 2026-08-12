@@ -19,32 +19,20 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+from pipeline.locks import try_lock_ingest_analyze
+
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
 
 _log = logging.getLogger(__name__)
 
-# Postgres advisory lock key for _run_ingest_and_analyze. BackgroundTasks runs
-# on a thread pool, so two rapid POST /internal/cron/ingest calls (a double
-# cron poke, or a caller retrying on a slow response while the first request
-# still completed server-side) schedule two independently-running tasks. Both
-# would otherwise: (a) run analyze() concurrently on separate psycopg2
-# connections -- NOT safe: each does DELETE FROM agg_* WHERE agency_id=...
-# then re-INSERTs the same PKs in its own transaction, so the loser hits a
-# unique-violation once the winner commits, not a harmless no-op; and
-# (b) both call ingest_live for every agency, and ClickHouse has no ON
-# CONFLICT DO NOTHING to absorb the resulting duplicate poll (see
-# pipeline/clickhouse.py's insert_updates docstring) beyond the single-file
-# bounded check recent_file_name_exists already does. An arbitrary fixed
-# key, chosen once — only needs to be distinct from any other advisory lock
-# this codebase takes, and there are none as of this writing.
-#
-# Scope note: this lock only covers THIS endpoint. gtfs_pipeline.py's CLI
-# commands (cmd_ingest_live, cmd_analyze_all) -- the primary production
-# ingest path per this module's docstring above -- take no equivalent lock,
-# so a cron poke overlapping a scheduled CLI run is still unprotected.
-# Extending the lock there is a reasonable follow-up, not done here to keep
-# this fix scoped to the endpoint that motivated it.
-_CRON_LOCK_KEY = 72710001
+# BackgroundTasks runs on a thread pool, so two rapid POST /internal/cron/
+# ingest calls (a double cron poke, or a caller retrying on a slow response
+# while the first request still completed server-side) schedule two
+# independently-running tasks. try_lock_ingest_analyze (pipeline/locks.py)
+# is the same lock gtfs_pipeline.py's CLI ingest/ingest_live/analyze/
+# analyze_all commands take -- the primary production ingest path per this
+# module's docstring above -- so a cron poke overlapping a scheduled CLI
+# run is covered too, not just cron-vs-cron.
 
 
 def _check_secret(request: Request) -> None:
@@ -97,15 +85,11 @@ def _run_ingest_and_analyze() -> None:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-            # Session-scoped advisory lock (not txn-scoped: this connection
-            # stays autocommit=False for the ingest/analyze work below, and
-            # the lock must hold across every one of those transactions, not
-            # just one). A concurrently-running invocation of this same job
-            # gets `False` back immediately rather than blocking --
-            # BackgroundTasks has no caller to report failure to, so
-            # skipping is the right behavior, not queuing.
-            cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
-            got_lock = cur.fetchone()[0]
+        # A concurrently-running invocation of this same job (or the CLI
+        # commands try_lock_ingest_analyze also guards) gets `False` back
+        # immediately rather than blocking -- BackgroundTasks has no caller
+        # to report failure to, so skipping is the right behavior, not queuing.
+        got_lock = try_lock_ingest_analyze(conn)
         conn.autocommit = False
         if not got_lock:
             _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")

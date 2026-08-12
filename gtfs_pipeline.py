@@ -8,6 +8,8 @@ import sys
 
 import psycopg2
 
+from pipeline.locks import try_lock_ingest_analyze
+
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
@@ -30,6 +32,23 @@ def _get_conn():
         cur.execute("SET TIME ZONE 'Asia/Tokyo'")
     conn.autocommit = False
     return conn
+
+
+def _require_ingest_analyze_lock(conn) -> None:
+    """Exit(1) if another ingest/analyze process already holds the lock.
+
+    ingest/ingest_live/analyze/analyze_all all take this (pipeline/locks.py) --
+    the same lock api/routers/internal.py's cron fallback endpoint takes, so
+    a scheduled CLI run and a cron poke can't collide either. Unlike that
+    endpoint's BackgroundTask (no caller to report failure to, so it logs
+    and skips silently), a CLI invocation has a real exit code its caller --
+    a systemd timer, the Railway job runner -- can alert on, so this fails
+    loudly instead of silently no-op-ing.
+    """
+    if not try_lock_ingest_analyze(conn):
+        logger.error("Another ingest/analyze process is already running; refusing to start.")
+        conn.close()
+        sys.exit(1)
 
 
 def _require_agency(args, conn) -> int:
@@ -162,6 +181,7 @@ def cmd_ingest(args):
     from pipeline.ingest import ingest
 
     conn = _get_conn()
+    _require_ingest_analyze_lock(conn)
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     ingest(args.folder, agency_id, conn, ch_client)
@@ -207,6 +227,7 @@ def cmd_analyze(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
+    _require_ingest_analyze_lock(conn)
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
     analyze(agency_id, conn, ch_client)
@@ -224,6 +245,7 @@ def cmd_analyze_all(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
+    _require_ingest_analyze_lock(conn)
     ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
@@ -321,6 +343,7 @@ def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
+    _require_ingest_analyze_lock(conn)
     ch_client = get_client()
     if args.agency_id is not None:
         ingest_live(int(args.agency_id), conn, ch_client)

@@ -120,17 +120,19 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
     ON CONFLICT DO NOTHING to absorb the resulting duplicate poll beyond the
     single-file bounded check ingest_live already does on its own file_name.
 
-    Holds the same advisory lock _run_ingest_and_analyze takes, on a
-    separate connection, to simulate the concurrent run."""
+    Holds the same advisory lock _run_ingest_and_analyze takes (now shared
+    with gtfs_pipeline.py's CLI commands via pipeline.locks), on a separate
+    connection, to simulate the concurrent run."""
     _active_id, _deleted_id = two_agencies
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
 
-    from api.routers.internal import _CRON_LOCK_KEY, _run_ingest_and_analyze
+    from api.routers.internal import _run_ingest_and_analyze
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
 
     holder = psycopg2.connect(DATABASE_URL)
     holder.autocommit = True
     with holder.cursor() as cur:
-        cur.execute("SELECT pg_try_advisory_lock(%s)", (_CRON_LOCK_KEY,))
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
         assert cur.fetchone()[0] is True
 
     try:
@@ -145,7 +147,7 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
         fake_analyze.assert_not_called()
     finally:
         with holder.cursor() as cur:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (_CRON_LOCK_KEY,))
+            cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
         holder.close()
 
     # The lock must actually be released once the holder is gone -- not
