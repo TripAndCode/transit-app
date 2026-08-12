@@ -7,10 +7,11 @@ shutdown, same lifecycle shape as app.state.pool for Postgres.
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timezone
 
 import clickhouse_connect
+
+from pipeline.clickhouse import ch_conn_kwargs
 
 
 async def get_ch_client():
@@ -38,21 +39,8 @@ async def get_ch_client():
     when posting settings over HTTP, so plain Python int/str values here are
     fine as written.
     """
-    secure = os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes")
-    # An explicit port always wins (CLICKHOUSE_PORT set) -- but when it's
-    # NOT set, default by `secure` rather than always falling back to 8123:
-    # clickhouse-connect only infers https from the port itself (443/8443),
-    # so passing an always-present "8123" default defeats that inference the
-    # moment CLICKHOUSE_SECURE=true is set without also setting a matching
-    # port, silently attempting TLS against a plaintext listener.
-    port = int(os.environ.get("CLICKHOUSE_PORT") or (8443 if secure else 8123))
     return await clickhouse_connect.get_async_client(
-        host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
-        port=port,
-        username=os.environ["CLICKHOUSE_USER"],
-        password=os.environ["CLICKHOUSE_PASSWORD"],
-        database=os.environ["CLICKHOUSE_DATABASE"],
-        secure=secure,
+        **ch_conn_kwargs(),
         settings={
             "max_execution_time": 30,
             "max_result_rows": 200_000,
@@ -65,8 +53,9 @@ async def get_ch_client():
             # request THIS CLIENT OBJECT issues (clickhouse-connect's async
             # client is sessionless by default, so there's no server-side
             # session to attach it to) -- it holds for all traffic through
-            # this object, but a future call site passing its own
-            # `settings={...}` override to `ch.query(...)` can still lift it.
+            # this object, but a call site that explicitly passes its own
+            # `readonly` in `settings={...}` to `ch.query(...)` can still
+            # lift it (an override only wins for keys it actually contains).
             # A defense-in-depth default, not a substitute for a genuinely
             # read-only CH user/profile if one is provisioned later.
             "readonly": 2,

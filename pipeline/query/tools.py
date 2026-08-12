@@ -539,11 +539,20 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     horizon = await conn.fetchval("SELECT max(date) FROM agg_route_daily WHERE agency_id=$1", agency_id)
     if horizon is not None:
         bound = datetime.combine(horizon, time.min, tzinfo=_JST).astimezone(timezone.utc)
-        result = await ch.query(
-            "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-            "AND captured_at >= {bound:DateTime64} LIMIT 1",
-            parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
-        )
+        # Same fail-open rationale as the no-horizon branch below: a
+        # transient ClickHouse hiccup or hitting the client's execution-time
+        # cap here must not surface as a false "not registered" either --
+        # this branch covers the common case (agency already has
+        # agg_route_daily rows), so it's reached far more often than the
+        # no-horizon fallback.
+        try:
+            result = await ch.query(
+                "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+                "AND captured_at >= {bound:DateTime64} LIMIT 1",
+                parameters={"agency_id": agency_id, "route": str(route), "bound": bound},
+            )
+        except clickhouse_connect.driver.exceptions.Error:
+            return True
         return bool(result.result_rows)
     # No agg_route_daily rows for this agency AT ALL -- not a rare corner:
     # it's the normal state right after a bulk historical backfill, before

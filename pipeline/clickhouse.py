@@ -28,7 +28,16 @@ UPDATE_COLUMNS = [
 ]
 
 
-def get_client():
+def ch_conn_kwargs() -> dict:
+    """host/port/username/password/database/secure kwargs shared by both
+    ClickHouse client factories (this module's sync `get_client` and
+    `api.clickhouse.get_ch_client`'s async client).
+
+    Kept in exactly one place: an earlier version of this logic was
+    duplicated verbatim between the two factories, which risked silently
+    desyncing the async API client's TLS/port defaulting from the sync
+    pipeline client's the next time either one changed.
+    """
     secure = os.environ.get("CLICKHOUSE_SECURE", "false").lower() in ("1", "true", "yes")
     # An explicit port always wins (CLICKHOUSE_PORT set) -- but when it's
     # NOT set, default by `secure` rather than always falling back to 8123:
@@ -37,20 +46,24 @@ def get_client():
     # moment CLICKHOUSE_SECURE=true is set without also setting a matching
     # port, silently attempting TLS against a plaintext listener.
     port = int(os.environ.get("CLICKHOUSE_PORT") or (8443 if secure else 8123))
-    return clickhouse_connect.get_client(
-        host=os.environ.get("CLICKHOUSE_HOST", "localhost"),
-        port=port,
-        username=os.environ["CLICKHOUSE_USER"],
-        password=os.environ["CLICKHOUSE_PASSWORD"],
-        database=os.environ["CLICKHOUSE_DATABASE"],
+    return {
+        "host": os.environ.get("CLICKHOUSE_HOST", "localhost"),
+        "port": port,
+        "username": os.environ["CLICKHOUSE_USER"],
+        "password": os.environ["CLICKHOUSE_PASSWORD"],
+        "database": os.environ["CLICKHOUSE_DATABASE"],
         # Explicit knob rather than relying solely on the port-based
-        # inference above: without it, this client sends CLICKHOUSE_PASSWORD
-        # as HTTP Basic auth in cleartext on every ingest/analyze/bootstrap
-        # request. This is also the factory `make ch-bootstrap` and CI's
-        # schema-apply step use (see Makefile), so the DDL/bootstrap path
-        # gets the same TLS coverage as ingest/analyze.
-        secure=secure,
-    )
+        # inference above: without it, a client sends CLICKHOUSE_PASSWORD as
+        # HTTP Basic auth in cleartext on every request.
+        "secure": secure,
+    }
+
+
+def get_client():
+    # This is also the factory `make ch-bootstrap` and CI's schema-apply
+    # step use (see Makefile), so the DDL/bootstrap path gets the same TLS
+    # coverage as ingest/analyze.
+    return clickhouse_connect.get_client(**ch_conn_kwargs())
 
 
 def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
