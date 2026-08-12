@@ -203,6 +203,32 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 5. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    `OBJECT_STORE_*` creds and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
 
+> **Lock contention in the sketch above is not free to ignore.** `ingest`
+> exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
+> `pipeline.locks`' advisory lock (e.g. this job overlapping a manual
+> `POST /internal/cron/ingest` poke) — the sketch has no `set -e`, so a
+> failed iteration is swallowed and the loop moves to the next `$id`
+> automatically, same effect as `scripts/fetch_and_ingest.sh`'s explicit
+> `continue` on exit 75. But unlike that script's local replay, this job's
+> `/tmp/zips` is on **ephemeral** compute and the bucket pull is
+> **date-partitioned** (`$(date -u +%F)`) — a skipped agency isn't
+> retried tomorrow, because tomorrow's sync only pulls tomorrow's prefix.
+> That day's archive for that agency is gone. Given a lock collision is
+> the one failure mode in this loop that's known to be transient, add a
+> short bounded retry around each `ingest` call (the zips are still local
+> for the rest of this job's run) rather than relying on "next scheduled
+> run" to recover it, e.g.:
+> ```bash
+> for id in $AGENCY_IDS; do
+>   for attempt in 1 2 3; do
+>     python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id" && break
+>     code=$?
+>     [ "$code" -eq 75 ] || { exit "$code"; }
+>     sleep 60
+>   done
+> done
+> ```
+
 > **Fallback path.** If object storage isn't wired yet, the app also exposes
 > `POST /internal/cron/ingest` (gated by `CRON_SECRET`), which runs
 > `ingest_live` + `analyze` in a background task — poke it from any external

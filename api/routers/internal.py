@@ -25,15 +25,6 @@ router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema
 
 _log = logging.getLogger(__name__)
 
-# BackgroundTasks runs on a thread pool, so two rapid POST /internal/cron/
-# ingest calls (a double cron poke, or a caller retrying on a slow response
-# while the first request still completed server-side) schedule two
-# independently-running tasks. try_lock_ingest_analyze (pipeline/locks.py)
-# is the same lock gtfs_pipeline.py's CLI ingest/ingest_live/analyze/
-# analyze_all commands take -- the primary production ingest path per this
-# module's docstring above -- so a cron poke overlapping a scheduled CLI
-# run is covered too, not just cron-vs-cron.
-
 
 def _check_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET")
@@ -85,10 +76,13 @@ def _run_ingest_and_analyze() -> None:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-        # A concurrently-running invocation of this same job (or the CLI
-        # commands try_lock_ingest_analyze also guards) gets `False` back
-        # immediately rather than blocking -- BackgroundTasks has no caller
-        # to report failure to, so skipping is the right behavior, not queuing.
+        # BackgroundTasks runs on a thread pool, so two rapid POSTs (a double
+        # cron poke, or a retry while the first request already completed
+        # server-side) schedule two independently-running tasks; this also
+        # guards a cron poke overlapping a scheduled gtfs_pipeline.py CLI
+        # run, since both take the same lock (pipeline/locks.py). Non-blocking
+        # `False` rather than queuing -- BackgroundTasks has no caller to
+        # report failure to, so skipping is the right behavior here.
         got_lock = try_lock_ingest_analyze(conn)
         conn.autocommit = False
         if not got_lock:

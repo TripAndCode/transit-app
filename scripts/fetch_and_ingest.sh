@@ -26,8 +26,23 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
     AGENCY_IDS="${AGENCY_IDS:-$(awk -F, 'NR>1 && $3 != "" {print $1}' "$SCRIPT_DIR/../agencies.csv" | tr '\n' ' ')}"
     for id in $AGENCY_IDS; do
         echo "==> [a$id] Ingesting RT archives"
-        poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest \
-            "$SCRIPT_DIR/../raw_archives/$id" --agency-id "$id"
+        # gtfs_pipeline.py's ingest/analyze exit 75 (EX_TEMPFAIL) on ingest/
+        # analyze lock contention -- transient, self-healing on the next
+        # scheduled run -- rather than a genuine failure. Caught here (an
+        # `if` condition is `set -e`-safe) and treated as "skip this agency
+        # this run", not a script-ending error: a hard `exit` on contention
+        # would abort every agency after this one under `set -euo pipefail`.
+        if poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" ingest \
+            "$SCRIPT_DIR/../raw_archives/$id" --agency-id "$id"; then
+            :
+        else
+            code=$?
+            if [ "$code" -eq 75 ]; then
+                echo "==> [a$id] ingest lock busy, skipping this agency this run"
+                continue
+            fi
+            exit "$code"
+        fi
 
         STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
         if compgen -G "$STATIC_DIR/*.zip" > /dev/null; then
@@ -37,7 +52,16 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
         fi
 
         echo "==> [a$id] Running analysis"
-        poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" analyze --agency-id "$id"
+        if poetry run python "$SCRIPT_DIR/../gtfs_pipeline.py" analyze --agency-id "$id"; then
+            :
+        else
+            code=$?
+            if [ "$code" -eq 75 ]; then
+                echo "==> [a$id] analyze lock busy, skipping this agency this run"
+                continue
+            fi
+            exit "$code"
+        fi
     done
 else
     # ── legacy single-agency path (unchanged) ────────────────────────────

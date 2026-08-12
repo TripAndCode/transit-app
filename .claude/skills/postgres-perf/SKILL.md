@@ -99,11 +99,15 @@ become Nullable.
   clickhouse-connect's own port-based TLS inference.
 - `api/routers/internal.py`'s cron ingest+analyze job and `gtfs_pipeline.py`'s
   CLI ingest/ingest_live/analyze/analyze_all commands all take the same
-  shared Postgres advisory lock (`pipeline.locks.INGEST_ANALYZE_LOCK_KEY`) so
-  a double poke, or a poke overlapping a scheduled CLI run, can't
-  double-`ingest_live` every agency (ClickHouse has no `ON CONFLICT DO
-  NOTHING`). Non-blocking, best-effort: a miss logs and skips rather than
-  failing loudly, since production runs ingest/load_static/analyze as
-  separate per-agency CLI processes and a hard exit on contention would
-  abort the whole remaining agency loop.
+  shared Postgres advisory lock (`pipeline.locks.INGEST_ANALYZE_LOCK_KEY`),
+  narrowing (not closing) the window for a double poke, or a poke
+  overlapping a scheduled CLI run, to double-`ingest_live` every agency
+  (ClickHouse has no `ON CONFLICT DO NOTHING`). Per-CLI-invocation, not
+  job-level: production runs `ingest`/`load_static`/`analyze` as separate
+  per-agency processes, each independently acquiring/releasing the lock, so
+  a poke can still land *between* two of them. On a miss, `ingest`/`analyze`
+  log a warning and exit `EX_TEMPFAIL` (75) — self-healing, since a hard
+  exit(1) there would abort the whole remaining per-agency shell loop —
+  while `analyze_all`/`ingest_live` (nothing shell-loops over those) still
+  fail loudly with exit 1, per their documented contract.
 - Benchmark via `PERF_DEBUG_ENABLED` + `scripts/perf_bench.py`.

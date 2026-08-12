@@ -5,7 +5,6 @@ gtfs_pipeline.py's ingest/ingest_live/analyze/analyze_all CLI commands."""
 import os
 
 import psycopg2
-import pytest
 
 from pipeline.locks import INGEST_ANALYZE_LOCK_KEY, try_lock_ingest_analyze
 
@@ -48,19 +47,15 @@ def test_try_lock_ingest_analyze_releases_on_connection_close(pg_conn):
     assert try_lock_ingest_analyze(pg_conn) is True
 
 
-@pytest.fixture
-def _unlock_after(pg_conn):
-    yield
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
-
-
-def test_try_lock_ingest_analyze_survives_txn_rollback(pg_conn, _unlock_after):
+def test_try_lock_ingest_analyze_survives_txn_rollback(pg_conn):
     """The lock is session-scoped, not transaction-scoped: it must still be
     held after the acquiring transaction rolls back -- this is exactly the
     shape callers rely on (pg_try_advisory_lock is called, then later
     statements in other transactions on the same connection run, some of
-    which may roll back without releasing the lock)."""
+    which may roll back without releasing the lock). No explicit unlock
+    needed: pg_conn's own teardown closes the connection, which releases
+    every session-level advisory lock it holds -- the same property
+    test_try_lock_ingest_analyze_releases_on_connection_close asserts."""
     assert try_lock_ingest_analyze(pg_conn) is True
     with pg_conn.cursor() as cur:
         cur.execute("SELECT 1")
