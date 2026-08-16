@@ -1,9 +1,18 @@
 services:
   dekart:
-    image: dekartxyz/dekart:latest
+    image: dekartxyz/dekart:0.23.2
     container_name: geosql-dekart
     ports:
       - "127.0.0.1:8080:8080"
     environment:
       DEKART_DATASOURCE: USER
       DO_NOT_TRACK: "1"
+    volumes:
+      - geosql_dekart_data:/dekart/data
+    extra_hosts:
+      # host.docker.internal resolves automatically on Docker Desktop
+      # (macOS/Windows); on native Linux this mapping is required instead.
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  geosql_dekart_data:
