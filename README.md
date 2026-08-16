@@ -210,20 +210,21 @@ Migrations are self-describing by filename; browse `db/migrations/` for the full
 [GeoSQL](https://github.com/dekart-xyz/geosql) is a third-party Claude Code
 skill for ad hoc geospatial SQL with a map-in-the-loop agent flow. `make
 geosql-up` brings up a local, self-hosted
-[Dekart](https://github.com/dekart-xyz/dekart) + LocalStack stack
+[Dekart](https://github.com/dekart-xyz/dekart) container
 (`tools/geosql/compose.yml`) so `/geosql` prompts can query and render maps
-from this repo's dev data — Postgres/PostGIS (`static_stops.geom`,
-`static_shapes.geom`) and ClickHouse (`updates`). Fully local — no data
-leaves the machine, no Dekart Cloud.
+from this repo's dev Postgres/PostGIS data (`static_stops.geom`,
+`static_shapes.geom`). Fully local — no data leaves the machine, no Dekart
+Cloud. (ClickHouse isn't wired in: it has no spatial columns to render, and
+Dekart's connection-management mode doesn't support ClickHouse queries.)
 
 Setup: `pipx install geosql && geosql` (installs the `/geosql` skill), then
-`make geosql-up` followed by `tools/geosql/bootstrap.sh` (creates the local
-S3 bucket LocalStack needs for Dekart's ClickHouse query job, and prints the
-two connection strings to paste into the Dekart UI at `localhost:8080`).
+`make geosql-up` followed by `tools/geosql/bootstrap.sh` (waits for Dekart to
+be ready and prints the connection string to paste into the Dekart UI at
+`localhost:8080`).
 
-**Both connections point at the same real, read-only dev Postgres/ClickHouse
-instances documented above — never run write/DDL queries through
-GeoSQL/Dekart.** `make geosql-down` tears the stack down.
+**This connection points at the same real, read-only dev Postgres instance
+documented above — never run write/DDL queries through GeoSQL/Dekart.**
+`make geosql-down` tears the stack down.
 
 ---
 

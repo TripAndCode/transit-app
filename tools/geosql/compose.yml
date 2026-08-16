@@ -6,28 +6,4 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       DEKART_DATASOURCE: USER
-      DEKART_STORAGE: S3
-      DEKART_CLOUD_STORAGE_BUCKET: dekart-geosql-local
-      AWS_ENDPOINT: http://localstack:4566
-      AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      AWS_INSECURE: "true"
       DO_NOT_TRACK: "1"
-    depends_on:
-      localstack:
-        condition: service_healthy
-
-  localstack:
-    image: localstack/localstack:2.3.0
-    container_name: geosql-localstack
-    ports:
-      - "127.0.0.1:4566:4566"
-    environment:
-      SERVICES: s3
-      PERSISTENCE: 0
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 10

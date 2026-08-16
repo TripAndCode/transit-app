@@ -119,7 +119,7 @@ db-down:
 
 geosql-up:
 	docker compose -f tools/geosql/compose.yml up -d
-	@echo "→ Dekart UI: http://localhost:8080 — run tools/geosql/bootstrap.sh once, then add connections."
+	@echo "→ Dekart UI: http://localhost:8080 — run tools/geosql/bootstrap.sh once, then add the connection."
 
 geosql-down:
 	docker compose -f tools/geosql/compose.yml down
