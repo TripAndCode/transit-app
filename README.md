@@ -205,6 +205,26 @@ Each schema change ships as a numbered up/down pair under `db/migrations/`. Run 
 
 Migrations are self-describing by filename; browse `db/migrations/` for the full list (currently through `0024_agg_route_hour_dow`).
 
+### Optional: GeoSQL / Dekart (local spatial analysis)
+
+[GeoSQL](https://github.com/dekart-xyz/geosql) is a third-party Claude Code
+skill for ad hoc geospatial SQL with a map-in-the-loop agent flow. `make
+geosql-up` brings up a local, self-hosted
+[Dekart](https://github.com/dekart-xyz/dekart) + LocalStack stack
+(`tools/geosql/compose.yml`) so `/geosql` prompts can query and render maps
+from this repo's dev data — Postgres/PostGIS (`static_stops.geom`,
+`static_shapes.geom`) and ClickHouse (`updates`). Fully local — no data
+leaves the machine, no Dekart Cloud.
+
+Setup: `pipx install geosql && geosql` (installs the `/geosql` skill), then
+`make geosql-up` followed by `tools/geosql/bootstrap.sh` (creates the local
+S3 bucket LocalStack needs for Dekart's ClickHouse query job, and prints the
+two connection strings to paste into the Dekart UI at `localhost:8080`).
+
+**Both connections point at the same real, read-only dev Postgres/ClickHouse
+instances documented above — never run write/DDL queries through
+GeoSQL/Dekart.** `make geosql-down` tears the stack down.
+
 ---
 
 ## Pipeline
