@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down
 
 # Default target — first-run setup.
 all: bootstrap
@@ -112,6 +112,17 @@ db:
 
 db-down:
 	docker compose down
+
+# ── GeoSQL / Dekart (optional, local-only) ──────────────────────────────────
+# Self-hosted map-rendering spatial-SQL tool. Never wired into check/test/serve.
+# See README "Optional: GeoSQL / Dekart" for the read-only usage rule.
+
+geosql-up:
+	docker compose -f tools/geosql/compose.yml up -d
+	@echo "→ Dekart UI: http://localhost:8080 — run tools/geosql/bootstrap.sh once, then add the connection."
+
+geosql-down:
+	docker compose -f tools/geosql/compose.yml down
 
 ch-test:
 	docker run -d --rm --name transit-test-ch \
