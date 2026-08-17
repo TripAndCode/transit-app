@@ -533,7 +533,8 @@ _CAPABILITY_EXAMPLES_JP = {
     "comparison": "平日と土日祝の比較 / 22171の種別比較 / 路線間の差",
     "trend": "直近2週間の傾向 / 日次トレンド / 推移を見せて",
     "on_time": "5分以内の定時率 / 定時率ランキング / しきい値別の率",
-    "stop_level": "(現状未対応:Phase 3) 停留所単位の集計",
+    "stop_level": "区間別の遅延ホットスポット / どの停留所で遅延が蓄積 / 停留所ごとの遅れ",
+    "causal": "なぜ遅れる？どこで発生 / 時間帯・曜日パターン / 時刻表の妥当性・余裕時間 / 慢性的か最近悪化か",
     "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い路線",
 }
 
@@ -543,7 +544,8 @@ _CAPABILITY_EXAMPLES_EN = {
     "comparison": "weekday vs weekend / service-type split for 22171 / route deltas",
     "trend": "last-14d trend / daily series / show the trend",
     "on_time": "on-time rate within 5min / on-time ranking / by threshold",
-    "stop_level": "(not yet supported: Phase 3) per-stop aggregation",
+    "stop_level": "per-segment delay hotspots / which stop the delay builds up at / delay by stop",
+    "causal": "why is it late / time-of-day and dow pattern / schedule padding realism / chronic vs recent shift",
     "meta": "what routes exist? / since when do we have data? / top routes by samples",
 }
 
@@ -648,6 +650,7 @@ META_TOOLS: list[dict] = [
                             "trend",
                             "on_time",
                             "stop_level",
+                            "causal",
                             "meta",
                         ],
                     },

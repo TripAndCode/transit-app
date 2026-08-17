@@ -516,7 +516,12 @@
       "heijitsu_min": "Weekday (min)",
       "kyujitsu_min": "Weekend (min)",
       "abs_delta": "Δ (abs)",
-      "signed_delta": "Δ (signed)"
+      "signed_delta": "Δ (signed)",
+      "stop_sequence": "Stop #",
+      "stop_name": "Stop",
+      "hour": "Hour",
+      "next_stop_sequence": "Next Stop #",
+      "avg_added_min": "Added (min)"
     },
     "more_rows": "…and {{count}} more",
     "chips": {

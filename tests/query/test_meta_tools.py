@@ -326,6 +326,7 @@ async def test_capabilities_all_categories(conn_with_seed):
         "trend",
         "on_time",
         "stop_level",
+        "causal",
         "meta",
     }
 
@@ -347,7 +348,7 @@ async def test_capabilities_unknown_category_returns_all(conn_with_seed):
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
         result = await capabilities({"category": "nope"}, _ctx(), conn, agency_id, locale="ja")
-    assert len(result.pairs) >= 7
+    assert len(result.pairs) >= 8
 
 
 @pytest.mark.asyncio

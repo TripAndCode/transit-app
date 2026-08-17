@@ -27,6 +27,10 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "compare_segments": {"dimension": "dow"},
     "route_stats": {},
     "route_meta": {},
+    "segment_hotspots": {},
+    "time_pattern": {},
+    "schedule_realism": {},
+    "trend_shift": {},
     "on_time_rate": {"threshold_min": 1, "n": 20},
     "capabilities": {},
     # Card-surface aliases (Phase ③.5): frontend dispatches these tool names
