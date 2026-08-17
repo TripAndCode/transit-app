@@ -44,6 +44,7 @@ from pipeline.query.tool_queries import (
     route_dow_breakdown,
     route_hour_dow_pattern,
     route_info,
+    route_trend_shift,
     schedule_realism_segments,
     segment_hotspots,
 )
@@ -141,6 +142,16 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("schedule_realism_summary", "en"): "Schedule realism — route {route}",
     ("schedule_realism_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
     ("schedule_realism_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("trend_shift_summary", "ja"): "路線{route} トレンド変化",
+    ("trend_shift_summary", "en"): "Trend shift — route {route}",
+    ("trend_shift_no_data", "ja"): "路線{route} のトレンドデータが選択期間にありません。",
+    ("trend_shift_no_data", "en"): "No trend data for route {route} in the selected window.",
+    ("trend_shift_first_half", "ja"): "前半平均",
+    ("trend_shift_first_half", "en"): "First-half avg",
+    ("trend_shift_second_half", "ja"): "後半平均",
+    ("trend_shift_second_half", "en"): "Second-half avg",
+    ("trend_shift_delta", "ja"): "変化幅",
+    ("trend_shift_delta", "en"): "Delta",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -375,6 +386,25 @@ TOOLS: list[dict] = [
                 "stop-to-stop segments systematically ADD delay (not just have "
                 "high absolute delay). Use for '時刻表がおかしい', "
                 "'余裕時間が足りない', 'なぜ悪化し続ける'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
+                },
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trend_shift",
+            "description": (
+                "Whether a route's delay is a chronic, longstanding pattern or "
+                "a recent regime shift (something changed partway through the "
+                "window). Use for '最近悪化した?', 'ずっとこうなの?', 'いつから遅れてる'."
             ),
             "parameters": {
                 "type": "object",
@@ -937,6 +967,29 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
     )
 
 
+async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    result = await route_trend_shift(agency_id, ctx, conn, ch, route=str(route))
+    if result is None:
+        return ToolResult(kind="empty", summary=_summary("trend_shift_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="kv",
+        summary=_summary("trend_shift_summary", lang=locale, route=route),
+        pairs=[
+            (_summary("trend_shift_first_half", lang=locale), f"{result['first_half_avg_min']:.2f}"),
+            (_summary("trend_shift_second_half", lang=locale), f"{result['second_half_avg_min']:.2f}"),
+            (_summary("trend_shift_delta", lang=locale), f"{result['delta_min']:+.2f}"),
+        ],
+    )
+
+
 _HANDLERS = {
     "route_stats": _tool_route_stats,
     "top_n": _tool_top_n,
@@ -947,6 +1000,7 @@ _HANDLERS = {
     "segment_hotspots": _tool_segment_hotspots,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,
+    "trend_shift": _tool_trend_shift,
 }
 
 # Same identity-preserving pattern as TOOLS above: mutate the existing
@@ -1018,6 +1072,7 @@ async def dispatch(
             "segment_hotspots",
             "time_pattern",
             "schedule_realism",
+            "trend_shift",
         }:
             raw_route = arguments.get("route")
             if raw_route:

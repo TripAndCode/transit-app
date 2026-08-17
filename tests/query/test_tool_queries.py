@@ -429,3 +429,36 @@ async def test_route_hour_dow_pattern_returns_empty_for_unknown_route(aconn, aag
 
     result = await route_hour_dow_pattern(aagency_id, aconn, route="NOPE")
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_route_trend_shift_detects_regime_change(aconn, aagency_id):
+    """4 days of agg_daily_trend for one route: first two days low delay,
+    last two days high delay — must report a large positive delta_min."""
+    from pipeline.query.tool_queries import route_trend_shift
+
+    today = date.today()
+    days = [today - timedelta(days=3), today - timedelta(days=2), today - timedelta(days=1), today]
+    avgs = [1.0, 1.2, 5.0, 5.5]
+    for d, avg in zip(days, avgs, strict=True):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            aagency_id,
+            d.isoformat(),
+            avg,
+        )
+    ctx = RangeCtx(from_date=days[0], to_date=days[-1])
+    result = await route_trend_shift(aagency_id, ctx, aconn, route="R1")
+    assert result is not None
+    assert result["first_half_avg_min"] < result["second_half_avg_min"]
+    assert result["delta_min"] == pytest.approx(4.15, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_route_trend_shift_returns_none_without_data(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_trend_shift
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await route_trend_shift(aagency_id, ctx, aconn, route="NOPE")
+    assert result is None

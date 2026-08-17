@@ -29,9 +29,11 @@ unit-test callers that construct these functions' args by hand without
 wiring a client at all.
 """
 
+from dataclasses import replace
+
 from api.range import RangeCtx
 from pipeline.reports.filters import _dedup_cte_ch
-from pipeline.reports.rankings import _round2
+from pipeline.reports.rankings import _round2, compute_trend_series
 
 
 async def route_dow_breakdown(
@@ -298,3 +300,53 @@ async def schedule_realism_segments(
         (stop_sequence, next_stop_sequence, _round2(avg_added_min), samples)
         for stop_sequence, next_stop_sequence, avg_added_min, samples in result.result_rows
     ]
+
+
+async def route_trend_shift(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+) -> dict | None:
+    """Chronic pattern vs regime-shift check for one route over ctx.
+
+    Reuses compute_trend_series (the same helper backing the Trend chart),
+    scoped to the one route via ctx.routes, then splits the returned
+    per-day series into first-half / second-half and compares their
+    sample-weighted means. A large delta_min means something changed partway
+    through the window (regime shift); a small delta_min means the pattern
+    has been consistent throughout (chronic). Backs tools._tool_trend_shift.
+
+    Returns None when there are no daily buckets for the route in ctx.
+    """
+    route_ctx = replace(ctx, routes=(str(route),))
+    series = await compute_trend_series(agency_id, route_ctx, conn, ch=ch)
+    days = [d for d in series.get("days", []) if d.get("samples")]
+    if not days:
+        return None
+    midpoint = len(days) // 2
+    if midpoint == 0:
+        midpoint = 1
+    first_half, second_half = days[:midpoint], days[midpoint:] or days[midpoint - 1 :]
+
+    def _weighted_mean(bucket: list[dict]) -> float:
+        total_samples = sum(d["samples"] for d in bucket)
+        if total_samples == 0:
+            return 0.0
+        return sum(d["avg_min"] * d["samples"] for d in bucket) / total_samples
+
+    first_avg = _weighted_mean(first_half)
+    second_avg = _weighted_mean(second_half)
+    # float(...) wrap matches the established convention for dict-shaped
+    # (as opposed to row-tuple) return values elsewhere in this codebase —
+    # see compute_trend_series / pipeline.reports.overview — since _round2
+    # alone returns a Decimal, which pytest.approx (and plain arithmetic)
+    # can't safely mix with float.
+    return {
+        "first_half_avg_min": float(_round2(first_avg)),
+        "second_half_avg_min": float(_round2(second_avg)),
+        "delta_min": float(_round2(second_avg - first_avg)),
+        "days": len(days),
+    }

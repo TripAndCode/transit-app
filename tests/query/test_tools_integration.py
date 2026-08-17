@@ -492,3 +492,41 @@ async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     assert len(result.rows) == 2
     hours = {row[1] for row in result.rows}
     assert hours == {8, 18}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
+    """dispatch('trend_shift', ...) reads agg_daily_trend directly (pure
+    Postgres, no ClickHouse involved, same as time_pattern) and must report
+    a large positive delta_min for a route whose delay jumps partway
+    through the window (Task 4: chronic pattern vs regime shift).
+
+    Registers R1 via agg_route_daily (the _is_route_registered fast path),
+    same convention as test_dispatch_time_pattern_returns_table.
+    """
+    today = date.today()
+    days = [today - timedelta(days=3), today - timedelta(days=2), today - timedelta(days=1), today]
+    avgs = [1.0, 1.2, 5.0, 5.5]
+    await aconn.execute(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        " trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        aagency_id,
+    )
+    for d, avg in zip(days, avgs, strict=True):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            aagency_id,
+            d.isoformat(),
+            avg,
+        )
+    ctx = RangeCtx(from_date=days[0], to_date=days[-1])
+    result = await dispatch("trend_shift", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja")
+    assert result.kind == "kv"
+    labels = [p[0] for p in result.pairs]
+    values = [p[1] for p in result.pairs]
+    assert labels == ["前半平均", "後半平均", "変化幅"]
+    assert float(values[0]) < float(values[1])
+    assert float(values[2]) == pytest.approx(4.15, abs=0.1)
