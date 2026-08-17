@@ -208,3 +208,257 @@ async def test_route_info_returns_static_metadata(aconn, aagency_id):
 async def test_route_info_returns_none_when_route_missing(aconn, aagency_id):
     result = await route_info(aagency_id, aconn, route="NOPE")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_client, ch_async_client):
+    """Two stop_sequences with different delay levels, six observations each
+    (over the `samples > 5` gate) at stop_sequence=2. stop_sequence=1 stays
+    below the gate (3 samples) and must not appear in the result."""
+    from pipeline.query.tool_queries import segment_hotspots
+
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 2, $5)",
+            aagency_id,
+            f"pb_hot_{i}",
+            now + timedelta(minutes=i),
+            f"trip_hot_{i}",
+            300,  # 5 min
+        )
+    for i in range(3):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 1, $5)",
+            aagency_id,
+            f"pb_cold_{i}",
+            now + timedelta(minutes=i),
+            f"trip_cold_{i}",
+            30,  # 0.5 min
+        )
+    # Real static-schedule data for the stop_sequence=2 hotspot, so the
+    # assertion below exercises the actual Postgres stop-name-resolution
+    # join (the whole reason this is a two-step query, not a single
+    # ClickHouse aggregate) rather than only its SQL-side fallback
+    # ('{stop_sequence}番停留所'). ClickHouse's any(trip_id) picks an
+    # arbitrary one of the 6 seeded "hot" trips as the representative row
+    # for the group, so a static_stop_times row is inserted for ALL 6 (not
+    # just trip_hot_0) -- otherwise whichever trip any() happens to pick
+    # could miss the join and the test would flake between the real name
+    # and the fallback depending on ClickHouse's internal row order.
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_hot', 'テスト停留所')",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1, $2, 2, 'stop_hot')",
+        [(aagency_id, f"trip_hot_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    result = await segment_hotspots(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert [r[0] for r in result] == [2]
+    assert result[0][1] == "テスト停留所"
+    assert result[0][2] == 5.0
+    assert result[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_segment_hotspots_returns_empty_without_ch(aconn, aagency_id):
+    from pipeline.query.tool_queries import segment_hotspots
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await segment_hotspots(aagency_id, ctx, aconn, None, route="R1")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, ch_client, ch_async_client):
+    """Same 6 trips: stop_sequence=1 has near-zero delay, stop_sequence=2 has
+    ~5 min more delay on every one of them — segment (1,2) must be flagged
+    with avg_added_min close to 5.0."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert result[0][:2] == (1, 2)
+    assert result[0][2] == pytest.approx(5.0, abs=0.01)
+    assert result[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """Regression guard: `trip_id` in this feed is a recurring GTFS schedule
+    identifier (e.g. "平日_8時15分_系統3", see pipeline/strategies/aomori_regex.py),
+    NOT a per-day run identifier — the same trip_id recurs on every day that
+    service pattern operates. The window function must partition by
+    (trip_id, date), not trip_id alone, or same-stop_sequence rows from
+    different days become adjacent ties in unspecified order and
+    leadInFrame can pair one day's stop against another day's stop,
+    corrupting avg_added_min and undercounting samples.
+
+    5 distinct one-off trips grow by a uniform 5 min on segment (1,2). One
+    further trip_id, "trip_recur", recurs on two distinct calendar days
+    within the ctx window with a DIFFERENT growth each day (2 min, then 8
+    min) — average of those two on their own is also 5 min, so the overall
+    (5*5 + 2 + 8) / 7 == 5.0 average and samples == 7 is only reproduced
+    when each day's run of "trip_recur" is windowed independently.
+
+    Confirmed empirically (ad hoc ClickHouse query against this exact
+    fixture shape) that partitioning by trip_id alone — the pre-fix
+    behaviour — instead yields samples == 6 and avg_added_min == 4.50 for
+    this fixture: one of the two correct (2 min, 8 min) trip_recur
+    observations is lost/miscounted when the two calendar days' rows share
+    one partition ordered only by stop_sequence.
+    """
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    # "trip_recur" recurs on two distinct JST calendar days (2 days apart,
+    # well clear of any midnight-boundary ambiguity) with a different
+    # dep_delay growth pattern on each: +2 min on the earlier day, +8 min
+    # on the later one.
+    day_a = now - timedelta(days=2)
+    day_b = now
+    await aconn.execute(
+        "INSERT INTO updates "
+        "(agency_id, file_name, captured_at, trip_id, service_type, "
+        " scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES "
+        "($1, 'pb_recur_a1', $2, 'trip_recur', '平日', '10:00', 'R1', 1, 10), "
+        "($1, 'pb_recur_a2', $3, 'trip_recur', '平日', '10:05', 'R1', 2, 130)",
+        aagency_id,
+        day_a,
+        day_a + timedelta(seconds=30),
+    )
+    await aconn.execute(
+        "INSERT INTO updates "
+        "(agency_id, file_name, captured_at, trip_id, service_type, "
+        " scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES "
+        "($1, 'pb_recur_b1', $2, 'trip_recur', '平日', '10:00', 'R1', 1, 10), "
+        "($1, 'pb_recur_b2', $3, 'trip_recur', '平日', '10:05', 'R1', 2, 490)",
+        aagency_id,
+        day_b,
+        day_b + timedelta(seconds=30),
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=day_a.date() - timedelta(days=1), to_date=day_b.date() + timedelta(days=1))
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert result[0][:2] == (1, 2)
+    assert result[0][3] == 7, (
+        f"expected 7 correctly-partitioned samples (5 one-off + 2 trip_recur days), got {result[0]}"
+    )
+    assert result[0][2] == pytest.approx(5.0, abs=0.01), f"expected avg_added_min 5.0, got {result[0]}"
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency_id):
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, None, route="R1")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "VALUES ($1, 'R1', '平日', 1, 8, 2.0, 20), ($1, 'R1', '平日', 5, 18, 6.5, 40)",
+        aagency_id,
+    )
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="R1")
+    assert result[0][:2] == (5, 18)
+    assert result[0][2] == 6.5
+
+
+@pytest.mark.asyncio
+async def test_route_hour_dow_pattern_returns_empty_for_unknown_route(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="NOPE")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_route_trend_shift_detects_regime_change(aconn, aagency_id):
+    """4 days of agg_daily_trend for one route: first two days low delay,
+    last two days high delay — must report a large positive delta_min."""
+    from pipeline.query.tool_queries import route_trend_shift
+
+    today = date.today()
+    days = [today - timedelta(days=3), today - timedelta(days=2), today - timedelta(days=1), today]
+    avgs = [1.0, 1.2, 5.0, 5.5]
+    for d, avg in zip(days, avgs, strict=True):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            aagency_id,
+            d.isoformat(),
+            avg,
+        )
+    ctx = RangeCtx(from_date=days[0], to_date=days[-1])
+    result = await route_trend_shift(aagency_id, ctx, aconn, route="R1")
+    assert result is not None
+    assert result["first_half_avg_min"] < result["second_half_avg_min"]
+    assert result["delta_min"] == pytest.approx(4.15, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_route_trend_shift_returns_none_without_data(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_trend_shift
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await route_trend_shift(aagency_id, ctx, aconn, route="NOPE")
+    assert result is None

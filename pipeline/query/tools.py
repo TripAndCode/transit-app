@@ -1,6 +1,6 @@
 """LLM tool-use surface for the Ask tab (v2).
 
-Replaces the v1 single-intent classifier. The LLM now picks one of six
+Replaces the v1 single-intent classifier. The LLM now picks one of several
 generic tools, each scoped to the request's :class:`~api.range.RangeCtx`.
 Anything outside the tool surface (weather, fares, accidents) prompts the
 model to refuse naturally and suggest 2–3 supported alternatives instead
@@ -42,7 +42,11 @@ from pipeline.query.results import ToolResult
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
+    route_hour_dow_pattern,
     route_info,
+    route_trend_shift,
+    schedule_realism_segments,
+    segment_hotspots,
 )
 from pipeline.reports import (
     compute_compare_ranking,
@@ -126,6 +130,28 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
     ("route_meta_summary", "ja"): "路線{route} 路線情報",
     ("route_meta_summary", "en"): "Route info — {route}",
+    ("segment_hotspots_summary", "ja"): "路線{route} 遅延ホットスポット",
+    ("segment_hotspots_summary", "en"): "Delay hotspots — route {route}",
+    ("segment_hotspots_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
+    ("segment_hotspots_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("time_pattern_summary", "ja"): "路線{route} 時間帯・曜日パターン",
+    ("time_pattern_summary", "en"): "Time-of-day/day-of-week pattern — route {route}",
+    ("time_pattern_no_data", "ja"): "路線{route} の時間帯別データがありません。",
+    ("time_pattern_no_data", "en"): "No time-of-day pattern data for route {route}.",
+    ("schedule_realism_summary", "ja"): "路線{route} 時刻表の妥当性",
+    ("schedule_realism_summary", "en"): "Schedule realism — route {route}",
+    ("schedule_realism_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
+    ("schedule_realism_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("trend_shift_summary", "ja"): "路線{route} トレンド変化",
+    ("trend_shift_summary", "en"): "Trend shift — route {route}",
+    ("trend_shift_no_data", "ja"): "路線{route} のトレンドデータが選択期間にありません。",
+    ("trend_shift_no_data", "en"): "No trend data for route {route} in the selected window.",
+    ("trend_shift_first_half", "ja"): "前半平均",
+    ("trend_shift_first_half", "en"): "First-half avg",
+    ("trend_shift_second_half", "ja"): "後半平均",
+    ("trend_shift_second_half", "en"): "Second-half avg",
+    ("trend_shift_delta", "ja"): "変化幅",
+    ("trend_shift_delta", "en"): "Delta",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -315,6 +341,81 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "segment_hotspots",
+            "description": (
+                "Returns the worst stop_sequences by average delay for a route — "
+                "WHERE along the route delay accumulates most. Use for "
+                "'どこで遅延が発生している', 'どの停留所が悪い'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
+                },
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "time_pattern",
+            "description": (
+                "WHEN (which hour and day-of-week) a route is worst, pooled "
+                "across all observed history — a seasonal pattern, not scoped "
+                "to the request's date window. Use for 'いつ一番遅れる', "
+                "'何曜日/何時が悪い'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"route": {"type": "string"}},
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_realism",
+            "description": (
+                "Flags stop-to-stop segments on a route that systematically ADD "
+                "delay (not just have high absolute delay) — whether the "
+                "SCHEDULE itself is unrealistic. Use for '時刻表がおかしい', "
+                "'余裕時間が足りない'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
+                },
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trend_shift",
+            "description": (
+                "Whether a route's delay is a chronic, longstanding pattern or "
+                "a recent regime shift (something changed partway through the "
+                "window). Use for '最近悪化した?', 'ずっとこうなの?', 'いつから遅れてる'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
+                },
+                "required": ["route"],
+            },
+        },
+    },
 ]
 
 
@@ -361,6 +462,10 @@ SYSTEM_PROMPT = """\
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
 - route_meta(route): 路線の路線情報
+- segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット(どの区間で遅延が発生・蓄積しているか)
+- time_pattern(route): 路線の時間帯・曜日別パターン(いつ一番悪化するか。全期間集計で期間指定は効かない)
+- schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性(区間ごとの遅延加算。余裕時間不足の判定)
+- trend_shift(route, days_back?, from?, to?): 慢性的な遅延か、期間内で最近悪化したか(トレンドの変化)の判定
 - describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
   例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
@@ -374,6 +479,10 @@ SYSTEM_PROMPT = """\
 - "直近2週間の傾向" → time_series(days_back=14)
 - "路線22171の先週の遅延" → route_stats(route='22171', days_back=7)
 - "過去3日で5分超が一番多い路線" → top_n(metric='worst_5min', n=10, days_back=3)
+- "22171はなぜ遅れる?どこで遅延が発生している?" → segment_hotspots(route='22171')
+- "22171は何時頃・何曜日が一番悪い?" → time_pattern(route='22171')
+- "22171の時刻表は妥当?余裕時間は足りてる?" → schedule_realism(route='22171')
+- "22171の遅延は最近悪化した?それとも前からずっとこう?" → trend_shift(route='22171')
 - "雨天時の比較" → ツール呼ばず、「天気データはありません。
   代わりに『22171の平日と土日祝の比較』が答えられます」と返す
 - "どんな路線がある?" → describe_data(kind='routes')
@@ -382,7 +491,20 @@ SYSTEM_PROMPT = """\
 - "データセット全体の概要" → describe_data(kind='overview')
 - "何ができる?" / "やばい路線" → capabilities()
 - "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
+"""
 
+
+# Appended to SYSTEM_PROMPT only for the JSON-mode (intent-cache) request —
+# never for the native tool_calls request. Kept as a separate constant
+# (rather than baked into SYSTEM_PROMPT unconditionally) because a shared
+# prompt describing BOTH response shapes measurably confused native
+# tool-calling on some tools: with both formats visible, the model would
+# occasionally echo this JSON shape as plain message content instead of
+# issuing a real tool_calls entry — reproduced deterministically at
+# temperature=0 for segment_hotspots/schedule_realism specifically before
+# this split (see pipeline/query/chat.py's ``use_cache`` branch for where
+# this is conditionally appended).
+JSON_MODE_ADDENDUM = """\
 == Output format (when asked for JSON) ==
 When the request specifies JSON output, return ONLY a JSON object of this shape:
 {"tool": "<one of the tools>", "args": {<tool args>}, "confidence": <0..1>, "rationale": "<short reason>"}
@@ -805,6 +927,90 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
     )
 
 
+async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await segment_hotspots(agency_id, ctx, conn, ch, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("segment_hotspots_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="table",
+        summary=_summary("segment_hotspots_summary", lang=locale, route=route),
+        rows=[list(r) for r in rows],
+        columns=["stop_sequence", "stop_name", "avg_min", "samples"],
+    )
+
+
+async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await route_hour_dow_pattern(agency_id, conn, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("time_pattern_no_data", lang=locale, route=route))
+    rendered = [[dow_label(r[0], lang=locale), r[1], r[2], r[3]] for r in rows]
+    return ToolResult(
+        kind="table",
+        summary=_summary("time_pattern_summary", lang=locale, route=route),
+        rows=rendered,
+        columns=["dow", "hour", "avg_min", "samples"],
+    )
+
+
+async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("schedule_realism_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="table",
+        summary=_summary("schedule_realism_summary", lang=locale, route=route),
+        rows=[list(r) for r in rows],
+        columns=["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"],
+    )
+
+
+async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    result = await route_trend_shift(agency_id, ctx, conn, ch, route=str(route))
+    if result is None:
+        return ToolResult(kind="empty", summary=_summary("trend_shift_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="kv",
+        summary=_summary("trend_shift_summary", lang=locale, route=route),
+        pairs=[
+            (_summary("trend_shift_first_half", lang=locale), f"{result['first_half_avg_min']:.2f}"),
+            (_summary("trend_shift_second_half", lang=locale), f"{result['second_half_avg_min']:.2f}"),
+            (_summary("trend_shift_delta", lang=locale), f"{result['delta_min']:+.2f}"),
+        ],
+    )
+
+
 _HANDLERS = {
     "route_stats": _tool_route_stats,
     "top_n": _tool_top_n,
@@ -812,6 +1018,10 @@ _HANDLERS = {
     "time_series": _tool_time_series,
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
+    "segment_hotspots": _tool_segment_hotspots,
+    "time_pattern": _tool_time_pattern,
+    "schedule_realism": _tool_schedule_realism,
+    "trend_shift": _tool_trend_shift,
 }
 
 # Same identity-preserving pattern as TOOLS above: mutate the existing
@@ -875,7 +1085,16 @@ async def dispatch(
 
         from pipeline.query.schema_linker import resolve_route
 
-        if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
+        if tool_name in {
+            "route_stats",
+            "compare_segments",
+            "route_meta",
+            "time_series",
+            "segment_hotspots",
+            "time_pattern",
+            "schedule_realism",
+            "trend_shift",
+        }:
             raw_route = arguments.get("route")
             if raw_route:
                 resolution = await resolve_route(str(raw_route), conn, agency_id)

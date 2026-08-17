@@ -516,7 +516,12 @@
       "heijitsu_min": "平日(分)",
       "kyujitsu_min": "土日祝(分)",
       "abs_delta": "遅延差（絶対値）",
-      "signed_delta": "遅延差（符号付き）"
+      "signed_delta": "遅延差（符号付き）",
+      "stop_sequence": "停留所順",
+      "stop_name": "停留所名",
+      "hour": "時",
+      "next_stop_sequence": "次の停留所順",
+      "avg_added_min": "追加遅延(分)"
     },
     "more_rows": "…他{{count}}件",
     "chips": {

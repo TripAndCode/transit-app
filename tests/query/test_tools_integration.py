@@ -368,3 +368,165 @@ async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
 
     result = await _is_route_registered("LAGROUTE", aconn, aagency_id, ch=ch_async_client)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_client, ch_async_client):
+    """dispatch('segment_hotspots', ...) with live ClickHouse data for a
+    registered-by-observation route must return a table with the worst
+    stop_sequence(s) by average delay (Task 1: WHERE delay accumulates)."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 2, $5)",
+            aagency_id,
+            f"pb_hot_{i}",
+            now + timedelta(minutes=i),
+            f"trip_hot_{i}",
+            300,  # 5 min
+        )
+    # Real static-schedule data so the assertion below exercises the actual
+    # Postgres stop-name-resolution join, not just its fallback -- see the
+    # matching comment in test_tool_queries.py's
+    # test_segment_hotspots_ranks_stops_by_avg_delay for why every seeded
+    # trip (not just one) gets a static_stop_times row.
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_hot', 'テスト停留所')",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1, $2, 2, 'stop_hot')",
+        [(aagency_id, f"trip_hot_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "segment_hotspots", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert result.columns == ["stop_sequence", "stop_name", "avg_min", "samples"]
+    assert result.rows[0][0] == 2
+    assert result.rows[0][1] == "テスト停留所"
+    assert result.rows[0][2] == 5.0
+    assert result.rows[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_client, ch_async_client):
+    """dispatch('schedule_realism', ...) with live ClickHouse data for a
+    registered-by-observation route must return a table flagging the
+    stop-to-stop segment where delay is systematically ADDED (Task 3: is
+    the timetable itself too tight)."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert result.columns == ["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"]
+    assert result.rows[0][0] == 1
+    assert result.rows[0][1] == 2
+    assert result.rows[0][2] == pytest.approx(5.0, abs=0.01)
+    assert result.rows[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
+    """dispatch('time_pattern', ...) reads agg_route_hour_dow directly (pure
+    Postgres, no ClickHouse involved) and must sort the worst hour x
+    day-of-week combination first (Task 2: WHEN delay is worst).
+
+    Registers R1 via agg_route_daily (the _is_route_registered fast path)
+    rather than seeding static_routes, since this tool's own data source
+    (agg_route_hour_dow) is otherwise unrelated to route registration.
+    An unrelated route (R2) with only 3 samples per cell (below the
+    ``HAVING SUM(samples) > 5`` gate) must not appear in the result.
+    """
+    await aconn.execute(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        " trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "VALUES "
+        "  ($1, 'R1', '平日', 1, 8, 2.0, 20),"
+        "  ($1, 'R1', '平日', 5, 18, 6.5, 40),"
+        "  ($1, 'R1', '平日', 3, 9, 1.0, 3)",  # below the samples > 5 gate
+        aagency_id,
+    )
+    result = await dispatch("time_pattern", {"route": "R1"}, _ctx(), aconn, aagency_id, locale="ja")
+    assert result.kind == "table"
+    assert result.columns == ["dow", "hour", "avg_min", "samples"]
+    # Worst hour/dow (Fri 18:00, avg 6.5 min) must sort first.
+    assert result.rows[0][1] == 18
+    assert result.rows[0][2] == 6.5
+    assert result.rows[0][3] == 40
+    # Only the two cells that clear the samples > 5 gate are returned.
+    assert len(result.rows) == 2
+    hours = {row[1] for row in result.rows}
+    assert hours == {8, 18}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
+    """dispatch('trend_shift', ...) reads agg_daily_trend directly (pure
+    Postgres, no ClickHouse involved, same as time_pattern) and must report
+    a large positive delta_min for a route whose delay jumps partway
+    through the window (Task 4: chronic pattern vs regime shift).
+
+    Registers R1 via agg_route_daily (the _is_route_registered fast path),
+    same convention as test_dispatch_time_pattern_returns_table.
+    """
+    today = date.today()
+    days = [today - timedelta(days=3), today - timedelta(days=2), today - timedelta(days=1), today]
+    avgs = [1.0, 1.2, 5.0, 5.5]
+    await aconn.execute(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        " trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        aagency_id,
+    )
+    for d, avg in zip(days, avgs, strict=True):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            aagency_id,
+            d.isoformat(),
+            avg,
+        )
+    ctx = RangeCtx(from_date=days[0], to_date=days[-1])
+    result = await dispatch("trend_shift", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja")
+    assert result.kind == "kv"
+    labels = [p[0] for p in result.pairs]
+    values = [p[1] for p in result.pairs]
+    assert labels == ["前半平均", "後半平均", "変化幅"]
+    assert float(values[0]) < float(values[1])
+    assert float(values[2]) == pytest.approx(4.15, abs=0.1)

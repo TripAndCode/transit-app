@@ -29,9 +29,11 @@ unit-test callers that construct these functions' args by hand without
 wiring a client at all.
 """
 
+from dataclasses import replace
+
 from api.range import RangeCtx
 from pipeline.reports.filters import _dedup_cte_ch
-from pipeline.reports.rankings import _round2
+from pipeline.reports.rankings import _round2, compute_trend_series
 
 
 async def route_dow_breakdown(
@@ -128,3 +130,223 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
         str(route),
     )
     return tuple(row) if row else None
+
+
+async def segment_hotspots(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+    limit: int = 5,
+) -> list[tuple]:
+    """Worst stop_sequences by average delay for one route over ctx.
+
+    Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
+    avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
+    are returned (matches agg_stop_seq's own noise gate in
+    pipeline/analyze.py). Backs tools._tool_segment_hotspots.
+
+    `updates` lives in ClickHouse; static_stop_times/static_stops live in
+    Postgres — no cross-database join, so this runs in two steps: (1) a
+    ctx-bounded ClickHouse aggregate grouped by stop_sequence, picking one
+    representative trip_id per group via any() to resolve a stop name from,
+    (2) a Postgres lookup for those (trip_id, stop_sequence) pairs.
+    """
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT stop_sequence, any(trip_id) AS sample_trip_id,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
+        "WHERE route_code = {sh_route:String} AND stop_sequence IS NOT NULL\n"
+        "GROUP BY stop_sequence\n"
+        "HAVING count(*) > 5\n"
+        "ORDER BY avg_min DESC\n"
+        "LIMIT {sh_limit:UInt32}",
+        parameters={"agency_id": agency_id, "sh_route": str(route), "sh_limit": limit, **ch_params},
+    )
+    ch_rows = result.result_rows
+    if not ch_rows:
+        return []
+    trip_ids = [r[1] for r in ch_rows]
+    stop_sequences = [r[0] for r in ch_rows]
+    name_rows = await conn.fetch(
+        "SELECT u.stop_sequence, COALESCE(MAX(ss.stop_name), u.stop_sequence::text || '番停留所') AS stop_name "
+        "FROM UNNEST($2::text[], $3::int[]) AS u(trip_id, stop_sequence) "
+        "LEFT JOIN static_stop_times sst "
+        "  ON sst.trip_id = u.trip_id AND sst.stop_sequence = u.stop_sequence AND sst.agency_id = $1 "
+        "LEFT JOIN static_stops ss ON ss.stop_id = sst.stop_id AND ss.agency_id = $1 "
+        "GROUP BY u.stop_sequence",
+        agency_id,
+        trip_ids,
+        stop_sequences,
+    )
+    name_by_seq = {r["stop_sequence"]: r["stop_name"] for r in name_rows}
+    return [
+        (stop_sequence, name_by_seq.get(stop_sequence, f"{stop_sequence}番停留所"), _round2(avg_min), samples)
+        for stop_sequence, _trip_id, avg_min, samples in ch_rows
+    ]
+
+
+async def route_hour_dow_pattern(
+    agency_id: int,
+    conn,
+    *,
+    route: str,
+    top_n: int = 3,
+) -> list[tuple]:
+    """Worst hour x day-of-week combinations for one route, pooled across
+    service types (sample-weighted mean, same formula as
+    api/routers/reports.py's expected-delay-heatmap endpoint).
+
+    agg_route_hour_dow has no date column — this is an all-time seasonal
+    pattern, not scoped to any ctx date range (by design, matches how the
+    existing Forecast heatmap endpoints already read this table). Backs
+    tools._tool_time_pattern.
+
+    Returns rows: (dow, hour, avg_min, samples), sorted by avg_min DESC,
+    limited to top_n.
+    """
+    rows = await conn.fetch(
+        "SELECT dow, hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour_dow "
+        "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY dow, hour "
+        "HAVING SUM(samples) > 5 "
+        "ORDER BY avg_min DESC "
+        "LIMIT $3",
+        agency_id,
+        str(route),
+        top_n,
+    )
+    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]
+
+
+async def schedule_realism_segments(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+    limit: int = 5,
+) -> list[tuple]:
+    """Stop-to-stop segments where delay is systematically ADDED, not just
+    present. For each trip, computes the change in dep_delay between each
+    pair of consecutive observed stop_sequences (using ClickHouse's
+    leadInFrame window function), then averages that change per
+    (stop_sequence, next_stop_sequence) pair across all trips in ctx.
+
+    A large positive average means the timetable's padding for that
+    specific gap is systematically too tight (delay grows crossing it on
+    most trips, not just outliers) — distinct from segment_hotspots, which
+    ranks absolute delay level and can't tell "high because it started high
+    upstream" apart from "high because this segment itself is the
+    bottleneck". Backs tools._tool_schedule_realism.
+
+    `trip_id` in this feed is a recurring GTFS *schedule* identifier (e.g.
+    "平日_8時15分_系統3" — see pipeline/strategies/aomori_regex.py), not a
+    per-day run identifier: the same trip_id recurs on every day that
+    service pattern operates. Partitioning the window function by
+    `trip_id` alone would throw every day's rows for a recurring trip_id
+    into one partition ordered only by `stop_sequence` — same-stop_sequence
+    rows from different days become adjacent ties in unspecified order, so
+    `leadInFrame` can pair one day's stop k against another day's stop k+1,
+    silently corrupting avg_added_min and undercounting samples. Partition
+    by `(trip_id, date)` instead — `date` is already selected by `deduped`
+    (see pipeline/db.py's build_dedup_ch_sql) — so each calendar day's run
+    of a recurring trip_id is windowed independently.
+
+    Returns rows: (stop_sequence, next_stop_sequence, avg_added_min, samples),
+    sorted by avg_added_min DESC, samples > 5 only, limited to `limit`.
+    """
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql},\n"
+        "     with_next AS (\n"
+        "         SELECT trip_id, date, stop_sequence, dep_delay,\n"
+        "                leadInFrame(dep_delay) OVER (\n"
+        "                    PARTITION BY trip_id, date ORDER BY stop_sequence\n"
+        "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
+        "                ) AS next_dep_delay,\n"
+        "                leadInFrame(stop_sequence) OVER (\n"
+        "                    PARTITION BY trip_id, date ORDER BY stop_sequence\n"
+        "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
+        "                ) AS next_stop_sequence\n"
+        "         FROM deduped\n"
+        "         WHERE route_code = {sr_route:String} AND stop_sequence IS NOT NULL\n"
+        "     )\n"
+        "SELECT stop_sequence, next_stop_sequence,\n"
+        "       avg(next_dep_delay - dep_delay) / 60.0 AS avg_added_min,\n"
+        "       count(*) AS samples\n"
+        "FROM with_next\n"
+        "WHERE next_stop_sequence = stop_sequence + 1\n"
+        "GROUP BY stop_sequence, next_stop_sequence\n"
+        "HAVING count(*) > 5\n"
+        "ORDER BY avg_added_min DESC\n"
+        "LIMIT {sr_limit:UInt32}",
+        parameters={"agency_id": agency_id, "sr_route": str(route), "sr_limit": limit, **ch_params},
+    )
+    return [
+        (stop_sequence, next_stop_sequence, _round2(avg_added_min), samples)
+        for stop_sequence, next_stop_sequence, avg_added_min, samples in result.result_rows
+    ]
+
+
+async def route_trend_shift(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+) -> dict | None:
+    """Chronic pattern vs regime-shift check for one route over ctx.
+
+    Reuses compute_trend_series (the same helper backing the Trend chart),
+    scoped to the one route via ctx.routes, then splits the returned
+    per-day series into first-half / second-half and compares their
+    sample-weighted means. A large delta_min means something changed partway
+    through the window (regime shift); a small delta_min means the pattern
+    has been consistent throughout (chronic). Backs tools._tool_trend_shift.
+
+    Returns None when there are no daily buckets for the route in ctx.
+    """
+    route_ctx = replace(ctx, routes=(str(route),))
+    series = await compute_trend_series(agency_id, route_ctx, conn, ch=ch)
+    days = [d for d in series.get("days", []) if d.get("samples")]
+    if not days:
+        return None
+    midpoint = len(days) // 2
+    if midpoint == 0:
+        midpoint = 1
+    first_half, second_half = days[:midpoint], days[midpoint:] or days[midpoint - 1 :]
+
+    def _weighted_mean(bucket: list[dict]) -> float:
+        total_samples = sum(d["samples"] for d in bucket)
+        if total_samples == 0:
+            return 0.0
+        return sum(d["avg_min"] * d["samples"] for d in bucket) / total_samples
+
+    first_avg = _weighted_mean(first_half)
+    second_avg = _weighted_mean(second_half)
+    # float(...) wrap matches the established convention for dict-shaped
+    # (as opposed to row-tuple) return values elsewhere in this codebase —
+    # see compute_trend_series / pipeline.reports.overview — since _round2
+    # alone returns a Decimal, which pytest.approx (and plain arithmetic)
+    # can't safely mix with float.
+    return {
+        "first_half_avg_min": float(_round2(first_avg)),
+        "second_half_avg_min": float(_round2(second_avg)),
+        "delta_min": float(_round2(second_avg - first_avg)),
+        "days": len(days),
+    }
