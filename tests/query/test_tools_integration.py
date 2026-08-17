@@ -414,3 +414,43 @@ async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_cli
     assert result.rows[0][1] == "テスト停留所"
     assert result.rows[0][2] == 5.0
     assert result.rows[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
+    """dispatch('time_pattern', ...) reads agg_route_hour_dow directly (pure
+    Postgres, no ClickHouse involved) and must sort the worst hour x
+    day-of-week combination first (Task 2: WHEN delay is worst).
+
+    Registers R1 via agg_route_daily (the _is_route_registered fast path)
+    rather than seeding static_routes, since this tool's own data source
+    (agg_route_hour_dow) is otherwise unrelated to route registration.
+    An unrelated route (R2) with only 3 samples per cell (below the
+    ``HAVING SUM(samples) > 5`` gate) must not appear in the result.
+    """
+    await aconn.execute(
+        "INSERT INTO agg_route_daily "
+        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        " trips_observed, samples, last_seen_at) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "VALUES "
+        "  ($1, 'R1', '平日', 1, 8, 2.0, 20),"
+        "  ($1, 'R1', '平日', 5, 18, 6.5, 40),"
+        "  ($1, 'R1', '平日', 3, 9, 1.0, 3)",  # below the samples > 5 gate
+        aagency_id,
+    )
+    result = await dispatch("time_pattern", {"route": "R1"}, _ctx(), aconn, aagency_id, locale="ja")
+    assert result.kind == "table"
+    assert result.columns == ["dow", "hour", "avg_min", "samples"]
+    # Worst hour/dow (Fri 18:00, avg 6.5 min) must sort first.
+    assert result.rows[0][1] == 18
+    assert result.rows[0][2] == 6.5
+    assert result.rows[0][3] == 40
+    # Only the two cells that clear the samples > 5 gate are returned.
+    assert len(result.rows) == 2
+    hours = {row[1] for row in result.rows}
+    assert hours == {8, 18}

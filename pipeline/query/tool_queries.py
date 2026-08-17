@@ -189,3 +189,39 @@ async def segment_hotspots(
         (stop_sequence, name_by_seq.get(stop_sequence, f"{stop_sequence}番停留所"), _round2(avg_min), samples)
         for stop_sequence, _trip_id, avg_min, samples in ch_rows
     ]
+
+
+async def route_hour_dow_pattern(
+    agency_id: int,
+    conn,
+    *,
+    route: str,
+    top_n: int = 3,
+) -> list[tuple]:
+    """Worst hour x day-of-week combinations for one route, pooled across
+    service types (sample-weighted mean, same formula as
+    api/routers/reports.py's expected-delay-heatmap endpoint).
+
+    agg_route_hour_dow has no date column — this is an all-time seasonal
+    pattern, not scoped to any ctx date range (by design, matches how the
+    existing Forecast heatmap endpoints already read this table). Backs
+    tools._tool_time_pattern.
+
+    Returns rows: (dow, hour, avg_min, samples), sorted by avg_min DESC,
+    limited to top_n.
+    """
+    rows = await conn.fetch(
+        "SELECT dow, hour, "
+        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "SUM(samples)::int AS samples "
+        "FROM agg_route_hour_dow "
+        "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
+        "GROUP BY dow, hour "
+        "HAVING SUM(samples) > 5 "
+        "ORDER BY avg_min DESC "
+        "LIMIT $3",
+        agency_id,
+        str(route),
+        top_n,
+    )
+    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]

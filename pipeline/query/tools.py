@@ -42,6 +42,7 @@ from pipeline.query.results import ToolResult
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
+    route_hour_dow_pattern,
     route_info,
     segment_hotspots,
 )
@@ -131,6 +132,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("segment_hotspots_summary", "en"): "Delay hotspots — route {route}",
     ("segment_hotspots_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
     ("segment_hotspots_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("time_pattern_summary", "ja"): "路線{route} 時間帯・曜日パターン",
+    ("time_pattern_summary", "en"): "Time-of-day/day-of-week pattern — route {route}",
+    ("time_pattern_no_data", "ja"): "路線{route} の時間帯別データがありません。",
+    ("time_pattern_no_data", "en"): "No time-of-day pattern data for route {route}.",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -335,6 +340,23 @@ TOOLS: list[dict] = [
                     "route": {"type": "string"},
                     **_DATE_OVERRIDE_PROPS,
                 },
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "time_pattern",
+            "description": (
+                "WHEN (which hour and day-of-week) a route is worst, pooled "
+                "across all observed history — a seasonal pattern, not scoped "
+                "to the request's date window. Use for 'いつ一番遅れる', "
+                "'何曜日/何時が悪い'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"route": {"type": "string"}},
                 "required": ["route"],
             },
         },
@@ -849,6 +871,27 @@ async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int
     )
 
 
+async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await route_hour_dow_pattern(agency_id, conn, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("time_pattern_no_data", lang=locale, route=route))
+    rendered = [[dow_label(r[0], lang=locale), r[1], r[2], r[3]] for r in rows]
+    return ToolResult(
+        kind="table",
+        summary=_summary("time_pattern_summary", lang=locale, route=route),
+        rows=rendered,
+        columns=["dow", "hour", "avg_min", "samples"],
+    )
+
+
 _HANDLERS = {
     "route_stats": _tool_route_stats,
     "top_n": _tool_top_n,
@@ -857,6 +900,7 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    "time_pattern": _tool_time_pattern,
 }
 
 # Same identity-preserving pattern as TOOLS above: mutate the existing
@@ -920,7 +964,14 @@ async def dispatch(
 
         from pipeline.query.schema_linker import resolve_route
 
-        if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series", "segment_hotspots"}:
+        if tool_name in {
+            "route_stats",
+            "compare_segments",
+            "route_meta",
+            "time_series",
+            "segment_hotspots",
+            "time_pattern",
+        }:
             raw_route = arguments.get("route")
             if raw_route:
                 resolution = await resolve_route(str(raw_route), conn, agency_id)

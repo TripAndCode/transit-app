@@ -278,3 +278,25 @@ async def test_segment_hotspots_returns_empty_without_ch(aconn, aagency_id):
     ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
     result = await segment_hotspots(aagency_id, ctx, aconn, None, route="R1")
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "VALUES ($1, 'R1', '平日', 1, 8, 2.0, 20), ($1, 'R1', '平日', 5, 18, 6.5, 40)",
+        aagency_id,
+    )
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="R1")
+    assert result[0][:2] == (5, 18)
+    assert result[0][2] == 6.5
+
+
+@pytest.mark.asyncio
+async def test_route_hour_dow_pattern_returns_empty_for_unknown_route(aconn, aagency_id):
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="NOPE")
+    assert result == []
