@@ -323,6 +323,7 @@ async def route_shape(
             trip_counts = {tid: n for tid, n in fallback_vote_result.result_rows}
 
     chosen_shape_id = None
+    shape_counts: dict[str, int] = defaultdict(int)
     if trip_counts:
         shape_link_rows = await conn.fetch(
             "SELECT trip_id, shape_id FROM static_trips "
@@ -331,7 +332,6 @@ async def route_shape(
             agency_id,
             list(trip_counts.keys()),
         )
-        shape_counts: dict[str, int] = defaultdict(int)
         for r in shape_link_rows:
             shape_counts[r["shape_id"]] += trip_counts.get(r["trip_id"], 0)
         if shape_counts:
@@ -343,15 +343,35 @@ async def route_shape(
             # class already fixed for movers ranking in overview.py.
             chosen_shape_id = max(shape_counts, key=lambda sid: (shape_counts[sid], sid))
 
+    # Render every observed shape variant (系統), not just the majority one
+    # `chosen_shape_id` above still pins for stops/unobserved_stops below —
+    # this repo's Japanese bus operators distinguish 路線 (route_code, the
+    # named line) from 系統 (a route's distinct stopping/geometry patterns,
+    # e.g. the Hiroshima express-bus variants the shape-vote comment above
+    # discusses), and collapsing to one shape here hid the others' road
+    # geometry entirely rather than just under-detailing their stop stats.
+    # `shape_counts` (built above from real observed trips, not static-only
+    # noise) is the natural variant set: every shape with at least one
+    # observed trip in the ctx window.
     geometry = None
-    if chosen_shape_id is not None:
-        geom_row = await conn.fetchrow(
-            "SELECT ST_AsGeoJSON(geom) AS geom_json FROM static_shapes WHERE agency_id = $1 AND shape_id = $2",
+    if shape_counts:
+        variant_geom_rows = await conn.fetch(
+            "SELECT shape_id, ST_AsGeoJSON(geom) AS geom_json FROM static_shapes "
+            "WHERE agency_id = $1 AND shape_id = ANY($2)",
             agency_id,
-            chosen_shape_id,
+            list(shape_counts.keys()),
         )
-        raw = geom_row["geom_json"] if geom_row else None
-        geometry = json.loads(raw) if raw is not None else None
+        # Order matches chosen_shape_id's own tie-break (highest vote weight
+        # first, ties broken by shape_id) so the MultiLineString's sub-line
+        # order — and which line is index 0 — is deterministic across
+        # requests, not whatever order this unordered Postgres query returns.
+        geom_by_shape_id = {r["shape_id"]: r["geom_json"] for r in variant_geom_rows if r["geom_json"] is not None}
+        ordered_shape_ids = sorted(geom_by_shape_id, key=lambda sid: (shape_counts[sid], sid), reverse=True)
+        lines = [json.loads(geom_by_shape_id[sid])["coordinates"] for sid in ordered_shape_ids]
+        if len(lines) == 1:
+            geometry = {"type": "LineString", "coordinates": lines[0]}
+        elif len(lines) > 1:
+            geometry = {"type": "MultiLineString", "coordinates": lines}
 
     # Fetch the per-stop delay stats, scoped to the chosen shape's trips WHEN
     # one was chosen — bounded by (trips on one shape variant x its stops),

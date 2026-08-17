@@ -94,11 +94,12 @@ export type RouteShapeResponse = {
   route: string;
   /**
    * Real road geometry from GTFS shapes when loaded; null otherwise.
-   * Always LineString for now (backend emits a single most-frequent shape per route).
-   * If the backend grows MultiLineString support, widen this to GeoJSON.LineString | GeoJSON.MultiLineString
-   * and flatten coords in MapTab before passing to MapLibre.
+   * LineString when the route has one observed shape variant (系統);
+   * MultiLineString when it has several (e.g. an express bus with multiple
+   * stopping patterns) — every observed variant renders, not just the
+   * most-frequent one. useRouteOverlay flattens coords for bounds-fitting.
    */
-  geometry: GeoJSON.LineString | null;
+  geometry: GeoJSON.LineString | GeoJSON.MultiLineString | null;
   stops: RouteShapeStop[];
   /** Stops on the chosen shape with no delay observations yet. Optional
    *  for back-compat with cached responses. */

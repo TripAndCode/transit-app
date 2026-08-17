@@ -75,11 +75,17 @@ export function useRouteOverlay(
         return;
       }
       clearOverlay();
-      const geomCoords = shape.geometry?.coordinates;
-      const coords: [number, number][] =
-        geomCoords && geomCoords.length >= 2
-          ? (geomCoords as [number, number][])
-          : shape.stops.map((s) => [s.lon, s.lat]);
+      // A route can have several observed shape variants (系統) — the
+      // backend returns MultiLineString when there's more than one so all
+      // of them render, not just the majority-observed one. Flatten every
+      // sub-line's points for bounds-fitting below regardless of type.
+      const routeGeometry: GeoJSON.LineString | GeoJSON.MultiLineString =
+        shape.geometry && shape.geometry.coordinates.length >= 1
+          ? shape.geometry
+          : { type: "LineString", coordinates: shape.stops.map((s) => [s.lon, s.lat]) };
+      const coords: [number, number][] = (
+        routeGeometry.type === "MultiLineString" ? routeGeometry.coordinates.flat() : routeGeometry.coordinates
+      ).map(([lon, lat]) => [lon, lat]);
 
       setDelayOverlayVisibility(m, "none");
 
@@ -87,7 +93,7 @@ export function useRouteOverlay(
         type: "geojson",
         data: {
           type: "Feature",
-          geometry: { type: "LineString", coordinates: coords },
+          geometry: routeGeometry,
           properties: {},
         },
       });

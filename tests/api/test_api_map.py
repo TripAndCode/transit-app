@@ -595,11 +595,13 @@ async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, 
 @pytest.mark.asyncio
 async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client):
     """Two shape variants with EQUAL vote weight (one trip each, same number
-    of deduped stop-events) must resolve to the same shape on every request,
-    not whichever `shape_link_rows`' unordered Postgres query happens to
-    return first. `chosen_shape_id = max(shape_counts, key=lambda sid:
-    (shape_counts[sid], sid))` breaks the tie on `shape_id` itself, so the
-    lexicographically LARGER id (`S_Z` > `S_A`) must always win here."""
+    of deduped stop-events) must render in the same deterministic order on
+    every request, not whichever `shape_link_rows`' unordered Postgres query
+    happens to return first. Both variants render as a MultiLineString
+    (each is a real observed 系統 for this route_code), ordered by the same
+    tie-break key used to pin `chosen_shape_id` for stops
+    (`(shape_counts[sid], sid)` descending) — the lexicographically LARGER
+    id (`S_Z` > `S_A`) must always sort first here."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
@@ -632,8 +634,13 @@ async def test_route_shape_vote_tie_break_is_deterministic(map_app_ch, ch_client
     assert resp.status_code == 200
     body = resp.json()
     assert body["geometry"] is not None, body
-    # S_Z's distinctive coordinates confirm it (not S_A) won the tie.
-    assert body["geometry"]["coordinates"][0] == [20.0, 20.0], body
+    # Both observed variants render; S_Z (winner of the tie-break) sorts
+    # first, S_A second — deterministic regardless of Postgres row order.
+    assert body["geometry"]["type"] == "MultiLineString", body
+    assert body["geometry"]["coordinates"] == [
+        [[20.0, 20.0], [20.1, 20.1]],
+        [[10.0, 10.0], [10.1, 10.1]],
+    ], body
 
 
 class _ExplodingChClient:
