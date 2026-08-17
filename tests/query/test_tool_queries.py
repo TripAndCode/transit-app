@@ -336,7 +336,7 @@ async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
 
     Confirmed empirically (ad hoc ClickHouse query against this exact
     fixture shape) that partitioning by trip_id alone — the pre-fix
-    behaviour — instead yields samples == 6 and avg_added_min == 5.5 for
+    behaviour — instead yields samples == 6 and avg_added_min == 4.50 for
     this fixture: one of the two correct (2 min, 8 min) trip_recur
     observations is lost/miscounted when the two calendar days' rows share
     one partition ordered only by stop_sequence.
