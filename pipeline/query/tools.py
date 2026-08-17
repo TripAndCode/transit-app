@@ -1,6 +1,6 @@
 """LLM tool-use surface for the Ask tab (v2).
 
-Replaces the v1 single-intent classifier. The LLM now picks one of six
+Replaces the v1 single-intent classifier. The LLM now picks one of several
 generic tools, each scoped to the request's :class:`~api.range.RangeCtx`.
 Anything outside the tool surface (weather, fares, accidents) prompts the
 model to refuse naturally and suggest 2–3 supported alternatives instead
@@ -346,9 +346,9 @@ TOOLS: list[dict] = [
         "function": {
             "name": "segment_hotspots",
             "description": (
-                "WHERE along a route delay accumulates most. Use for causal "
-                "questions like 'なぜこの路線は遅れる', 'どこで遅延が発生している'. "
-                "Returns the worst stop_sequences by average delay for the route."
+                "Returns the worst stop_sequences by average delay for a route — "
+                "WHERE along the route delay accumulates most. Use for "
+                "'どこで遅延が発生している', 'どの停留所が悪い'."
             ),
             "parameters": {
                 "type": "object",
@@ -382,10 +382,10 @@ TOOLS: list[dict] = [
         "function": {
             "name": "schedule_realism",
             "description": (
-                "Whether the SCHEDULE itself is unrealistic for a route: which "
-                "stop-to-stop segments systematically ADD delay (not just have "
-                "high absolute delay). Use for '時刻表がおかしい', "
-                "'余裕時間が足りない', 'なぜ悪化し続ける'."
+                "Flags stop-to-stop segments on a route that systematically ADD "
+                "delay (not just have high absolute delay) — whether the "
+                "SCHEDULE itself is unrealistic. Use for '時刻表がおかしい', "
+                "'余裕時間が足りない'."
             ),
             "parameters": {
                 "type": "object",
@@ -462,6 +462,10 @@ SYSTEM_PROMPT = """\
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
 - route_meta(route): 路線の路線情報
+- segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット(どの区間で遅延が発生・蓄積しているか)
+- time_pattern(route): 路線の時間帯・曜日別パターン(いつ一番悪化するか。全期間集計で期間指定は効かない)
+- schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性(区間ごとの遅延加算。余裕時間不足の判定)
+- trend_shift(route, days_back?, from?, to?): 慢性的な遅延か、期間内で最近悪化したか(トレンドの変化)の判定
 - describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
   例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
@@ -475,6 +479,10 @@ SYSTEM_PROMPT = """\
 - "直近2週間の傾向" → time_series(days_back=14)
 - "路線22171の先週の遅延" → route_stats(route='22171', days_back=7)
 - "過去3日で5分超が一番多い路線" → top_n(metric='worst_5min', n=10, days_back=3)
+- "22171はなぜ遅れる?どこで遅延が発生している?" → segment_hotspots(route='22171')
+- "22171は何時頃・何曜日が一番悪い?" → time_pattern(route='22171')
+- "22171の時刻表は妥当?余裕時間は足りてる?" → schedule_realism(route='22171')
+- "22171の遅延は最近悪化した?それとも前からずっとこう?" → trend_shift(route='22171')
 - "雨天時の比較" → ツール呼ばず、「天気データはありません。
   代わりに『22171の平日と土日祝の比較』が答えられます」と返す
 - "どんな路線がある?" → describe_data(kind='routes')
@@ -483,7 +491,20 @@ SYSTEM_PROMPT = """\
 - "データセット全体の概要" → describe_data(kind='overview')
 - "何ができる?" / "やばい路線" → capabilities()
 - "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
+"""
 
+
+# Appended to SYSTEM_PROMPT only for the JSON-mode (intent-cache) request —
+# never for the native tool_calls request. Kept as a separate constant
+# (rather than baked into SYSTEM_PROMPT unconditionally) because a shared
+# prompt describing BOTH response shapes measurably confused native
+# tool-calling on some tools: with both formats visible, the model would
+# occasionally echo this JSON shape as plain message content instead of
+# issuing a real tool_calls entry — reproduced deterministically at
+# temperature=0 for segment_hotspots/schedule_realism specifically before
+# this split (see pipeline/query/chat.py's ``use_cache`` branch for where
+# this is conditionally appended).
+JSON_MODE_ADDENDUM = """\
 == Output format (when asked for JSON) ==
 When the request specifies JSON output, return ONLY a JSON object of this shape:
 {"tool": "<one of the tools>", "args": {<tool args>}, "confidence": <0..1>, "rationale": "<short reason>"}

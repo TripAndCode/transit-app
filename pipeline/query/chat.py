@@ -44,6 +44,7 @@ from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_q
 from pipeline.query.intent_cache import upsert as _cache_upsert
 from pipeline.query.llm_client import get_client
 from pipeline.query.tools import (
+    JSON_MODE_ADDENDUM,
     LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
     TOOLS,
@@ -348,6 +349,12 @@ async def chat_with_tools(
         history_block = "\n".join(lines)
 
     use_cache = _cache_enabled()
+    if use_cache:
+        # Only the JSON-mode (intent-cache) request should see this format —
+        # see JSON_MODE_ADDENDUM's own docstring for why leaking it into the
+        # native tool_calls request measurably broke tool-calling for some
+        # tools.
+        system_prompt = system_prompt + "\n" + JSON_MODE_ADDENDUM
 
     def _sync():
         """Blocking LLM call executed via ``asyncio.to_thread``.

@@ -15,6 +15,9 @@ import asyncio
 import pytest
 
 from pipeline.query.tools import (
+    JSON_MODE_ADDENDUM,
+    SYSTEM_PROMPT,
+    TOOLS,
     ToolResult,
     _summary,
     dispatch,
@@ -91,3 +94,31 @@ def test_render_tool_result_series_en():
     assert "100 samples" in out
     assert "worst:" in out
     assert "route 16071" in out
+
+
+def test_every_tool_is_documented_in_system_prompt():
+    """Every tool in TOOLS must be named in SYSTEM_PROMPT's '利用可能なツール'
+    listing, or the LLM has no way to know it exists when calling in native
+    tool_calls mode (it only sees TOOLS' JSON schemas indirectly through the
+    provider's function-calling machinery, but this app's SYSTEM_PROMPT also
+    explicitly enumerates + gives examples for each tool — a tool missing
+    from that listing was found, in practice, to make native tool-calling
+    for it measurably less reliable, even though the tool's JSON schema in
+    TOOLS was itself complete and correct). Regression guard for exactly the
+    class of bug where a new tool is registered in TOOLS/_HANDLERS but the
+    prompt describing the tool surface to the model is never updated."""
+    tool_names = {t["function"]["name"] for t in TOOLS}
+    missing = {name for name in tool_names if name not in SYSTEM_PROMPT}
+    assert not missing, f"tools missing from SYSTEM_PROMPT: {missing}"
+
+
+def test_json_mode_addendum_is_not_baked_into_system_prompt():
+    """JSON_MODE_ADDENDUM must stay a separate constant, appended to the
+    prompt only for the JSON-mode (intent-cache) request in
+    pipeline.query.chat — never unconditionally part of SYSTEM_PROMPT, which
+    is also used for the native tool_calls request. Reproduced
+    deterministically (temperature=0) that leaking this into the native
+    tool_calls prompt made the model echo the JSON-mode shape as plain
+    message content instead of issuing a real tool_calls entry, for some
+    tools. Regression guard for that specific fix."""
+    assert JSON_MODE_ADDENDUM not in SYSTEM_PROMPT
