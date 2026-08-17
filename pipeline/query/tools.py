@@ -43,6 +43,7 @@ from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
     route_info,
+    segment_hotspots,
 )
 from pipeline.reports import (
     compute_compare_ranking,
@@ -126,6 +127,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
     ("route_meta_summary", "ja"): "路線{route} 路線情報",
     ("route_meta_summary", "en"): "Route info — {route}",
+    ("segment_hotspots_summary", "ja"): "路線{route} 遅延ホットスポット",
+    ("segment_hotspots_summary", "en"): "Delay hotspots — route {route}",
+    ("segment_hotspots_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
+    ("segment_hotspots_no_data", "en"): "No per-segment data for route {route} in the selected window.",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -310,6 +315,25 @@ TOOLS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "route": {"type": "string"},
+                },
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "segment_hotspots",
+            "description": (
+                "WHERE along a route delay accumulates most. Use for causal "
+                "questions like 'なぜこの路線は遅れる', 'どこで遅延が発生している'. "
+                "Returns the worst stop_sequences by average delay for the route."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
             },
@@ -805,6 +829,26 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
     )
 
 
+async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await segment_hotspots(agency_id, ctx, conn, ch, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("segment_hotspots_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="table",
+        summary=_summary("segment_hotspots_summary", lang=locale, route=route),
+        rows=[list(r) for r in rows],
+        columns=["stop_sequence", "stop_name", "avg_min", "samples"],
+    )
+
+
 _HANDLERS = {
     "route_stats": _tool_route_stats,
     "top_n": _tool_top_n,
@@ -812,6 +856,7 @@ _HANDLERS = {
     "time_series": _tool_time_series,
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
+    "segment_hotspots": _tool_segment_hotspots,
 }
 
 # Same identity-preserving pattern as TOOLS above: mutate the existing
@@ -875,7 +920,7 @@ async def dispatch(
 
         from pipeline.query.schema_linker import resolve_route
 
-        if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series"}:
+        if tool_name in {"route_stats", "compare_segments", "route_meta", "time_series", "segment_hotspots"}:
             raw_route = arguments.get("route")
             if raw_route:
                 resolution = await resolve_route(str(raw_route), conn, agency_id)

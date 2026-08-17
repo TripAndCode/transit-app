@@ -368,3 +368,49 @@ async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
 
     result = await _is_route_registered("LAGROUTE", aconn, aagency_id, ch=ch_async_client)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_client, ch_async_client):
+    """dispatch('segment_hotspots', ...) with live ClickHouse data for a
+    registered-by-observation route must return a table with the worst
+    stop_sequence(s) by average delay (Task 1: WHERE delay accumulates)."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 2, $5)",
+            aagency_id,
+            f"pb_hot_{i}",
+            now + timedelta(minutes=i),
+            f"trip_hot_{i}",
+            300,  # 5 min
+        )
+    # Real static-schedule data so the assertion below exercises the actual
+    # Postgres stop-name-resolution join, not just its fallback -- see the
+    # matching comment in test_tool_queries.py's
+    # test_segment_hotspots_ranks_stops_by_avg_delay for why every seeded
+    # trip (not just one) gets a static_stop_times row.
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_hot', 'テスト停留所')",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1, $2, 2, 'stop_hot')",
+        [(aagency_id, f"trip_hot_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "segment_hotspots", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert result.columns == ["stop_sequence", "stop_name", "avg_min", "samples"]
+    assert result.rows[0][0] == 2
+    assert result.rows[0][1] == "テスト停留所"
+    assert result.rows[0][2] == 5.0
+    assert result.rows[0][3] == 6

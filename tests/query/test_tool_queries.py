@@ -208,3 +208,73 @@ async def test_route_info_returns_static_metadata(aconn, aagency_id):
 async def test_route_info_returns_none_when_route_missing(aconn, aagency_id):
     result = await route_info(aagency_id, aconn, route="NOPE")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_client, ch_async_client):
+    """Two stop_sequences with different delay levels, six observations each
+    (over the `samples > 5` gate) at stop_sequence=2. stop_sequence=1 stays
+    below the gate (3 samples) and must not appear in the result."""
+    from pipeline.query.tool_queries import segment_hotspots
+
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 2, $5)",
+            aagency_id,
+            f"pb_hot_{i}",
+            now + timedelta(minutes=i),
+            f"trip_hot_{i}",
+            300,  # 5 min
+        )
+    for i in range(3):
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES ($1, $2, $3, $4, '平日', '10:00', 'R1', 1, $5)",
+            aagency_id,
+            f"pb_cold_{i}",
+            now + timedelta(minutes=i),
+            f"trip_cold_{i}",
+            30,  # 0.5 min
+        )
+    # Real static-schedule data for the stop_sequence=2 hotspot, so the
+    # assertion below exercises the actual Postgres stop-name-resolution
+    # join (the whole reason this is a two-step query, not a single
+    # ClickHouse aggregate) rather than only its SQL-side fallback
+    # ('{stop_sequence}番停留所'). ClickHouse's any(trip_id) picks an
+    # arbitrary one of the 6 seeded "hot" trips as the representative row
+    # for the group, so a static_stop_times row is inserted for ALL 6 (not
+    # just trip_hot_0) -- otherwise whichever trip any() happens to pick
+    # could miss the join and the test would flake between the real name
+    # and the fallback depending on ClickHouse's internal row order.
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'stop_hot', 'テスト停留所')",
+        aagency_id,
+    )
+    await aconn.executemany(
+        "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1, $2, 2, 'stop_hot')",
+        [(aagency_id, f"trip_hot_{i}") for i in range(6)],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    result = await segment_hotspots(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert [r[0] for r in result] == [2]
+    assert result[0][1] == "テスト停留所"
+    assert result[0][2] == 5.0
+    assert result[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_segment_hotspots_returns_empty_without_ch(aconn, aagency_id):
+    from pipeline.query.tool_queries import segment_hotspots
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await segment_hotspots(aagency_id, ctx, aconn, None, route="R1")
+    assert result == []

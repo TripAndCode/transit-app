@@ -128,3 +128,64 @@ async def route_info(agency_id: int, conn, *, route: str) -> tuple | None:
         str(route),
     )
     return tuple(row) if row else None
+
+
+async def segment_hotspots(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+    limit: int = 5,
+) -> list[tuple]:
+    """Worst stop_sequences by average delay for one route over ctx.
+
+    Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
+    avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
+    are returned (matches agg_stop_seq's own noise gate in
+    pipeline/analyze.py). Backs tools._tool_segment_hotspots.
+
+    `updates` lives in ClickHouse; static_stop_times/static_stops live in
+    Postgres — no cross-database join, so this runs in two steps: (1) a
+    ctx-bounded ClickHouse aggregate grouped by stop_sequence, picking one
+    representative trip_id per group via any() to resolve a stop name from,
+    (2) a Postgres lookup for those (trip_id, stop_sequence) pairs.
+    """
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT stop_sequence, any(trip_id) AS sample_trip_id,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
+        "WHERE route_code = {sh_route:String} AND stop_sequence IS NOT NULL\n"
+        "GROUP BY stop_sequence\n"
+        "HAVING count(*) > 5\n"
+        "ORDER BY avg_min DESC\n"
+        "LIMIT {sh_limit:UInt32}",
+        parameters={"agency_id": agency_id, "sh_route": str(route), "sh_limit": limit, **ch_params},
+    )
+    ch_rows = result.result_rows
+    if not ch_rows:
+        return []
+    trip_ids = [r[1] for r in ch_rows]
+    stop_sequences = [r[0] for r in ch_rows]
+    name_rows = await conn.fetch(
+        "SELECT u.stop_sequence, COALESCE(MAX(ss.stop_name), u.stop_sequence::text || '番停留所') AS stop_name "
+        "FROM UNNEST($2::text[], $3::int[]) AS u(trip_id, stop_sequence) "
+        "LEFT JOIN static_stop_times sst "
+        "  ON sst.trip_id = u.trip_id AND sst.stop_sequence = u.stop_sequence AND sst.agency_id = $1 "
+        "LEFT JOIN static_stops ss ON ss.stop_id = sst.stop_id AND ss.agency_id = $1 "
+        "GROUP BY u.stop_sequence",
+        agency_id,
+        trip_ids,
+        stop_sequences,
+    )
+    name_by_seq = {r["stop_sequence"]: r["stop_name"] for r in name_rows}
+    return [
+        (stop_sequence, name_by_seq.get(stop_sequence, f"{stop_sequence}番停留所"), _round2(avg_min), samples)
+        for stop_sequence, _trip_id, avg_min, samples in ch_rows
+    ]
