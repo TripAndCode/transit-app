@@ -225,3 +225,63 @@ async def route_hour_dow_pattern(
         top_n,
     )
     return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]
+
+
+async def schedule_realism_segments(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+    limit: int = 5,
+) -> list[tuple]:
+    """Stop-to-stop segments where delay is systematically ADDED, not just
+    present. For each trip, computes the change in dep_delay between each
+    pair of consecutive observed stop_sequences (using ClickHouse's
+    leadInFrame window function), then averages that change per
+    (stop_sequence, next_stop_sequence) pair across all trips in ctx.
+
+    A large positive average means the timetable's padding for that
+    specific gap is systematically too tight (delay grows crossing it on
+    most trips, not just outliers) — distinct from segment_hotspots, which
+    ranks absolute delay level and can't tell "high because it started high
+    upstream" apart from "high because this segment itself is the
+    bottleneck". Backs tools._tool_schedule_realism.
+
+    Returns rows: (stop_sequence, next_stop_sequence, avg_added_min, samples),
+    sorted by avg_added_min DESC, samples > 5 only, limited to `limit`.
+    """
+    if ch is None:
+        return []
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    result = await ch.query(
+        f"WITH {cte_sql},\n"
+        "     with_next AS (\n"
+        "         SELECT trip_id, stop_sequence, dep_delay,\n"
+        "                leadInFrame(dep_delay) OVER (\n"
+        "                    PARTITION BY trip_id ORDER BY stop_sequence\n"
+        "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
+        "                ) AS next_dep_delay,\n"
+        "                leadInFrame(stop_sequence) OVER (\n"
+        "                    PARTITION BY trip_id ORDER BY stop_sequence\n"
+        "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
+        "                ) AS next_stop_sequence\n"
+        "         FROM deduped\n"
+        "         WHERE route_code = {sr_route:String} AND stop_sequence IS NOT NULL\n"
+        "     )\n"
+        "SELECT stop_sequence, next_stop_sequence,\n"
+        "       avg(next_dep_delay - dep_delay) / 60.0 AS avg_added_min,\n"
+        "       count(*) AS samples\n"
+        "FROM with_next\n"
+        "WHERE next_stop_sequence = stop_sequence + 1\n"
+        "GROUP BY stop_sequence, next_stop_sequence\n"
+        "HAVING count(*) > 5\n"
+        "ORDER BY avg_added_min DESC\n"
+        "LIMIT {sr_limit:UInt32}",
+        parameters={"agency_id": agency_id, "sr_route": str(route), "sr_limit": limit, **ch_params},
+    )
+    return [
+        (stop_sequence, next_stop_sequence, _round2(avg_added_min), samples)
+        for stop_sequence, next_stop_sequence, avg_added_min, samples in result.result_rows
+    ]

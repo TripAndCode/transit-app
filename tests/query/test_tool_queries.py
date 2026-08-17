@@ -281,6 +281,49 @@ async def test_segment_hotspots_returns_empty_without_ch(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, ch_client, ch_async_client):
+    """Same 6 trips: stop_sequence=1 has near-zero delay, stop_sequence=2 has
+    ~5 min more delay on every one of them — segment (1,2) must be flagged
+    with avg_added_min close to 5.0."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert result[0][:2] == (1, 2)
+    assert result[0][2] == pytest.approx(5.0, abs=0.01)
+    assert result[0][3] == 6
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency_id):
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, None, route="R1")
+    assert result == []
+
+
+@pytest.mark.asyncio
 async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
     from pipeline.query.tool_queries import route_hour_dow_pattern
 

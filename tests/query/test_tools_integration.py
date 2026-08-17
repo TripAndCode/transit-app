@@ -417,6 +417,44 @@ async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_cli
 
 
 @pytest.mark.asyncio
+async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_client, ch_async_client):
+    """dispatch('schedule_realism', ...) with live ClickHouse data for a
+    registered-by-observation route must return a table flagging the
+    stop-to-stop segment where delay is systematically ADDED (Task 3: is
+    the timetable itself too tight)."""
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=(now.date() - timedelta(days=1)), to_date=(now.date() + timedelta(days=1)))
+    result = await dispatch(
+        "schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert result.columns == ["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"]
+    assert result.rows[0][0] == 1
+    assert result.rows[0][1] == 2
+    assert result.rows[0][2] == pytest.approx(5.0, abs=0.01)
+    assert result.rows[0][3] == 6
+
+
+@pytest.mark.asyncio
 async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     """dispatch('time_pattern', ...) reads agg_route_hour_dow directly (pure
     Postgres, no ClickHouse involved) and must sort the worst hour x

@@ -44,6 +44,7 @@ from pipeline.query.tool_queries import (
     route_dow_breakdown,
     route_hour_dow_pattern,
     route_info,
+    schedule_realism_segments,
     segment_hotspots,
 )
 from pipeline.reports import (
@@ -136,6 +137,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("time_pattern_summary", "en"): "Time-of-day/day-of-week pattern — route {route}",
     ("time_pattern_no_data", "ja"): "路線{route} の時間帯別データがありません。",
     ("time_pattern_no_data", "en"): "No time-of-day pattern data for route {route}.",
+    ("schedule_realism_summary", "ja"): "路線{route} 時刻表の妥当性",
+    ("schedule_realism_summary", "en"): "Schedule realism — route {route}",
+    ("schedule_realism_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
+    ("schedule_realism_no_data", "en"): "No per-segment data for route {route} in the selected window.",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -357,6 +362,26 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {"route": {"type": "string"}},
+                "required": ["route"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_realism",
+            "description": (
+                "Whether the SCHEDULE itself is unrealistic for a route: which "
+                "stop-to-stop segments systematically ADD delay (not just have "
+                "high absolute delay). Use for '時刻表がおかしい', "
+                "'余裕時間が足りない', 'なぜ悪化し続ける'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    **_DATE_OVERRIDE_PROPS,
+                },
                 "required": ["route"],
             },
         },
@@ -892,6 +917,26 @@ async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     )
 
 
+async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = args.get("route")
+    if not route:
+        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
+    if not await _is_route_registered(route, conn, agency_id, ch=ch):
+        return ToolResult(
+            kind="empty",
+            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
+        )
+    rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("schedule_realism_no_data", lang=locale, route=route))
+    return ToolResult(
+        kind="table",
+        summary=_summary("schedule_realism_summary", lang=locale, route=route),
+        rows=[list(r) for r in rows],
+        columns=["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"],
+    )
+
+
 _HANDLERS = {
     "route_stats": _tool_route_stats,
     "top_n": _tool_top_n,
@@ -901,6 +946,7 @@ _HANDLERS = {
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
     "time_pattern": _tool_time_pattern,
+    "schedule_realism": _tool_schedule_realism,
 }
 
 # Same identity-preserving pattern as TOOLS above: mutate the existing
@@ -971,6 +1017,7 @@ async def dispatch(
             "time_series",
             "segment_hotspots",
             "time_pattern",
+            "schedule_realism",
         }:
             raw_route = arguments.get("route")
             if raw_route:
