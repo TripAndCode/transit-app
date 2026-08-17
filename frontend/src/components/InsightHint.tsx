@@ -16,6 +16,7 @@ export function InsightHint({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [anchorRight, setAnchorRight] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,6 +26,13 @@ export function InsightHint({
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const popoverWidth = 320;
+    setAnchorRight(rect.left + popoverWidth > window.innerWidth);
   }, [open]);
 
   return (
@@ -52,9 +60,10 @@ export function InsightHint({
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
-            left: 0,
+            ...(anchorRight ? { right: 0 } : { left: 0 }),
             zIndex: 30,
             width: 320,
+            maxWidth: "calc(100vw - 24px)",
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
