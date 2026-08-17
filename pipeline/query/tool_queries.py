@@ -249,6 +249,19 @@ async def schedule_realism_segments(
     upstream" apart from "high because this segment itself is the
     bottleneck". Backs tools._tool_schedule_realism.
 
+    `trip_id` in this feed is a recurring GTFS *schedule* identifier (e.g.
+    "平日_8時15分_系統3" — see pipeline/strategies/aomori_regex.py), not a
+    per-day run identifier: the same trip_id recurs on every day that
+    service pattern operates. Partitioning the window function by
+    `trip_id` alone would throw every day's rows for a recurring trip_id
+    into one partition ordered only by `stop_sequence` — same-stop_sequence
+    rows from different days become adjacent ties in unspecified order, so
+    `leadInFrame` can pair one day's stop k against another day's stop k+1,
+    silently corrupting avg_added_min and undercounting samples. Partition
+    by `(trip_id, date)` instead — `date` is already selected by `deduped`
+    (see pipeline/db.py's build_dedup_ch_sql) — so each calendar day's run
+    of a recurring trip_id is windowed independently.
+
     Returns rows: (stop_sequence, next_stop_sequence, avg_added_min, samples),
     sorted by avg_added_min DESC, samples > 5 only, limited to `limit`.
     """
@@ -258,13 +271,13 @@ async def schedule_realism_segments(
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "     with_next AS (\n"
-        "         SELECT trip_id, stop_sequence, dep_delay,\n"
+        "         SELECT trip_id, date, stop_sequence, dep_delay,\n"
         "                leadInFrame(dep_delay) OVER (\n"
-        "                    PARTITION BY trip_id ORDER BY stop_sequence\n"
+        "                    PARTITION BY trip_id, date ORDER BY stop_sequence\n"
         "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
         "                ) AS next_dep_delay,\n"
         "                leadInFrame(stop_sequence) OVER (\n"
-        "                    PARTITION BY trip_id ORDER BY stop_sequence\n"
+        "                    PARTITION BY trip_id, date ORDER BY stop_sequence\n"
         "                    ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING\n"
         "                ) AS next_stop_sequence\n"
         "         FROM deduped\n"

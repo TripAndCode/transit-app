@@ -315,6 +315,92 @@ async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, 
 
 
 @pytest.mark.asyncio
+async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """Regression guard: `trip_id` in this feed is a recurring GTFS schedule
+    identifier (e.g. "平日_8時15分_系統3", see pipeline/strategies/aomori_regex.py),
+    NOT a per-day run identifier — the same trip_id recurs on every day that
+    service pattern operates. The window function must partition by
+    (trip_id, date), not trip_id alone, or same-stop_sequence rows from
+    different days become adjacent ties in unspecified order and
+    leadInFrame can pair one day's stop against another day's stop,
+    corrupting avg_added_min and undercounting samples.
+
+    5 distinct one-off trips grow by a uniform 5 min on segment (1,2). One
+    further trip_id, "trip_recur", recurs on two distinct calendar days
+    within the ctx window with a DIFFERENT growth each day (2 min, then 8
+    min) — average of those two on their own is also 5 min, so the overall
+    (5*5 + 2 + 8) / 7 == 5.0 average and samples == 7 is only reproduced
+    when each day's run of "trip_recur" is windowed independently.
+
+    Confirmed empirically (ad hoc ClickHouse query against this exact
+    fixture shape) that partitioning by trip_id alone — the pre-fix
+    behaviour — instead yields samples == 6 and avg_added_min == 5.5 for
+    this fixture: one of the two correct (2 min, 8 min) trip_recur
+    observations is lost/miscounted when the two calendar days' rows share
+    one partition ordered only by stop_sequence.
+    """
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        trip = f"trip_grow_{i}"
+        await aconn.execute(
+            "INSERT INTO updates "
+            "(agency_id, file_name, captured_at, trip_id, service_type, "
+            " scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES "
+            "($1, $2, $3, $4, '平日', '10:00', 'R1', 1, 10), "
+            "($1, $5, $6, $4, '平日', '10:05', 'R1', 2, 310)",
+            aagency_id,
+            f"pb_grow_a_{i}",
+            now + timedelta(minutes=i),
+            trip,
+            f"pb_grow_b_{i}",
+            now + timedelta(minutes=i, seconds=30),
+        )
+    # "trip_recur" recurs on two distinct JST calendar days (2 days apart,
+    # well clear of any midnight-boundary ambiguity) with a different
+    # dep_delay growth pattern on each: +2 min on the earlier day, +8 min
+    # on the later one.
+    day_a = now - timedelta(days=2)
+    day_b = now
+    await aconn.execute(
+        "INSERT INTO updates "
+        "(agency_id, file_name, captured_at, trip_id, service_type, "
+        " scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES "
+        "($1, 'pb_recur_a1', $2, 'trip_recur', '平日', '10:00', 'R1', 1, 10), "
+        "($1, 'pb_recur_a2', $3, 'trip_recur', '平日', '10:05', 'R1', 2, 130)",
+        aagency_id,
+        day_a,
+        day_a + timedelta(seconds=30),
+    )
+    await aconn.execute(
+        "INSERT INTO updates "
+        "(agency_id, file_name, captured_at, trip_id, service_type, "
+        " scheduled_time, route_code, stop_sequence, dep_delay) "
+        "VALUES "
+        "($1, 'pb_recur_b1', $2, 'trip_recur', '平日', '10:00', 'R1', 1, 10), "
+        "($1, 'pb_recur_b2', $3, 'trip_recur', '平日', '10:05', 'R1', 2, 490)",
+        aagency_id,
+        day_b,
+        day_b + timedelta(seconds=30),
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    ctx = RangeCtx(from_date=day_a.date() - timedelta(days=1), to_date=day_b.date() + timedelta(days=1))
+    from pipeline.query.tool_queries import schedule_realism_segments
+
+    result = await schedule_realism_segments(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert result[0][:2] == (1, 2)
+    assert result[0][3] == 7, (
+        f"expected 7 correctly-partitioned samples (5 one-off + 2 trip_recur days), got {result[0]}"
+    )
+    assert result[0][2] == pytest.approx(5.0, abs=0.01), f"expected avg_added_min 5.0, got {result[0]}"
+
+
+@pytest.mark.asyncio
 async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency_id):
     from pipeline.query.tool_queries import schedule_realism_segments
 
