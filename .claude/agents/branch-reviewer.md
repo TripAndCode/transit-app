@@ -24,7 +24,16 @@ Dimensions you may be asked for:
   parity is CI-linted); `_LOCALES` entries in `pipeline/query/tools.py` against the
   tests that pin exact strings.
 - perf: performance hits to other parts of the codebase (queries, renders, allocs).
-- practices: poor engineering, dead/redundant code, unsafe patterns.
+  For ClickHouse/Postgres queries or aggregates, check against the `postgres-perf`
+  skill's known traps (sentinel GROUP BY, unbounded route_code scans, quantileExact
+  vs PERCENT_RANK mismatch, etc.). For MapLibre layers/basemap code, check against
+  `maplibre-map`.
+- practices: poor engineering, dead/redundant code, unsafe patterns. Flag any
+  comment — new or pre-existing — that bakes a one-off measured number into
+  permanent code as if it were a durable fact (a timing/benchmark from one local
+  run, a sample-percentage from one measurement, a threshold picked from one
+  fixture); the code's actual invariant belongs in the comment, not the number
+  that justified it that one time.
 - security: hardcoded credentials/tokens/keys (`GROQ_API_KEY`, OAuth secrets,
   `SESSION_SIGNING_KEY`) or secrets in source/committed env; CSRF guard present on
   new state-changing admin routes; SSRF validation on any user-supplied URL (the
