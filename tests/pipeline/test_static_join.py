@@ -127,6 +127,54 @@ def test_static_join_reuses_schedule_table_across_two_different_trips(pg_conn):
     assert rows_b[0][3] == "土日祝" and rows_b[0][4] == "08:10:00"
 
 
+def test_static_join_isolates_schedule_tables_across_agencies_sharing_one_connection(pg_conn):
+    """Two different agencies' parse_feed calls on the SAME connection must
+    not share a schedule table. Regression for cmd_ingest_live's
+    all-agencies branch (gtfs_pipeline.py) and the production cron path
+    (api/routers/internal.py), both of which loop `ingest_live(aid, conn,
+    ...)` over every active agency using ONE psycopg2 connection. A
+    _sj_schedule cache keyed only by "does a table with this name exist"
+    (rather than by agency_id) would silently reuse agency A's rows for
+    agency B's per-file join, since `CREATE TABLE IF NOT EXISTS ... AS
+    SELECT` is a no-op once any agency has already created the table on
+    this connection. Both agencies below deliberately use the SAME trip_id
+    so that cross-agency contamination would produce a plausible-looking
+    (but wrong) match rather than an obvious miss.
+    """
+
+    def make_agency_with_trip(name, trip_id, service_id, departure_time):
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+                "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+                (name, f"http://{name}.example.com/feed.pb"),
+            )
+            aid = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, 'R1', %s)",
+                (aid, trip_id, service_id),
+            )
+            cur.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                "VALUES (%s, %s, 1, 'S1', %s)",
+                (aid, trip_id, departure_time),
+            )
+        return aid
+
+    aid1 = make_agency_with_trip("cross_agency_test_1", "uuid-shared", "平日", "07:05:00")
+    aid2 = make_agency_with_trip("cross_agency_test_2", "uuid-shared", "土日祝", "09:20:00")
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-shared", route_id="R1")
+
+    rows_1 = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid1, pg_conn)
+    rows_2 = static_join.parse_feed(pb, "2026-05-09T12:00:30", "f2.bin", aid2, pg_conn)
+
+    assert len(rows_1) == 1 and len(rows_2) == 1
+    assert rows_1[0][3] == "平日" and rows_1[0][4] == "07:05:00"
+    assert rows_2[0][3] == "土日祝" and rows_2[0][4] == "09:20:00"
+
+
 def test_static_join_zero_pads_single_digit_hour_scheduled_time(pg_conn):
     """GTFS's departure_time is raw, unpadded text — "7:05:00" is as valid
     as "07:05:00" per spec. Postgres's old TIME column normalized this for

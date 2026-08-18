@@ -10,6 +10,8 @@ route_code is taken straight from the RT trip.route_id and is always non-null.
 
 import logging
 
+from psycopg2 import sql
+
 from pipeline.strategies._pb import _dec, _fields
 from pipeline.strategies._time import normalize_departure_time
 
@@ -69,31 +71,46 @@ def parse_feed(
     trip_ids = [k[0] for k in keys]
     stop_seqs = [k[1] for k in keys]
 
+    # Table name is scoped per agency_id, not a single shared name: both
+    # cmd_ingest_live's all-agencies branch (gtfs_pipeline.py) and the
+    # production cron path (api/routers/internal.py) loop
+    # `ingest_live(aid, conn, ...)` over every active agency on ONE shared
+    # psycopg2 connection. A single shared table name would make
+    # `CREATE TABLE IF NOT EXISTS ... AS SELECT` a no-op for every agency
+    # after the first on that connection, silently reusing agency A's
+    # schedule rows for agency B's per-file join.
+    schedule_table = sql.Identifier(f"_sj_schedule_{int(agency_id)}")
+    schedule_idx = sql.Identifier(f"_sj_schedule_{int(agency_id)}_idx")
+
     with conn.cursor() as cur:
-        # No-op after the first call on this connection: temp tables persist
-        # for the whole session (default ON COMMIT PRESERVE ROWS), not just
-        # one transaction, and `CREATE TABLE IF NOT EXISTS ... AS SELECT`
-        # only runs the SELECT the first time the table doesn't yet exist.
-        # ingest() opens one connection per CLI `ingest` invocation (one
-        # agency per process, see cmd_ingest in gtfs_pipeline.py), so "once
-        # per connection" means "once per agency backfill run" -- this
-        # intentionally does NOT pick up a static schedule change made
-        # mid-run (accepted trade-off; static GTFS data doesn't change
-        # during a historical backfill in practice).
+        # No-op after the first call for this agency on this connection: temp
+        # tables persist for the whole session (default ON COMMIT PRESERVE
+        # ROWS), not just one transaction, and `CREATE TABLE IF NOT EXISTS
+        # ... AS SELECT` only runs the SELECT the first time the table
+        # doesn't yet exist. This intentionally does NOT pick up a static
+        # schedule change made mid-run for a given agency (accepted
+        # trade-off; static GTFS data doesn't change during a single ingest
+        # run in practice).
         cur.execute(
-            "CREATE TEMP TABLE IF NOT EXISTS _sj_schedule AS "
-            "SELECT t.trip_id, st.stop_sequence, t.service_id, st.departure_time "
-            "FROM static_stop_times st "
-            "JOIN static_trips t ON t.agency_id = st.agency_id AND t.trip_id = st.trip_id "
-            "WHERE st.agency_id = %s",
+            sql.SQL(
+                "CREATE TEMP TABLE IF NOT EXISTS {} AS "
+                "SELECT t.trip_id, st.stop_sequence, t.service_id, st.departure_time "
+                "FROM static_stop_times st "
+                "JOIN static_trips t ON t.agency_id = st.agency_id AND t.trip_id = st.trip_id "
+                "WHERE st.agency_id = %s"
+            ).format(schedule_table),
             (agency_id,),
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS _sj_schedule_idx ON _sj_schedule (trip_id, stop_sequence)")
         cur.execute(
-            "SELECT s.trip_id, s.stop_sequence, s.service_id, s.departure_time "
-            "FROM _sj_schedule s "
-            "JOIN unnest(%s::text[], %s::int[]) AS k(trip_id, stop_sequence) "
-            "  ON k.trip_id = s.trip_id AND k.stop_sequence = s.stop_sequence",
+            sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (trip_id, stop_sequence)").format(schedule_idx, schedule_table)
+        )
+        cur.execute(
+            sql.SQL(
+                "SELECT s.trip_id, s.stop_sequence, s.service_id, s.departure_time "
+                "FROM {} s "
+                "JOIN unnest(%s::text[], %s::int[]) AS k(trip_id, stop_sequence) "
+                "  ON k.trip_id = s.trip_id AND k.stop_sequence = s.stop_sequence"
+            ).format(schedule_table),
             (trip_ids, stop_seqs),
         )
         joined = {(tid, seq): (svc, dep) for (tid, seq, svc, dep) in cur.fetchall()}
