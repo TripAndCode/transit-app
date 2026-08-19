@@ -960,7 +960,8 @@ async def test_route_stop_profile_excludes_stale_route_beyond_bound(map_app_ch, 
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T_STALE', 'R_STALE_SP', 1, 600, NOW() - INTERVAL '60 days', 'stale.pb', 'weekday', '09:00:00')",
+            "VALUES ($1, 'T_STALE', 'R_STALE_SP', 1, 600, NOW() - INTERVAL '60 days', "
+            "'stale.pb', 'weekday', '09:00:00')",
             agency_id,
         )
     from tests.conftest import mirror_updates_to_ch
