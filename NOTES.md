@@ -148,3 +148,26 @@ a future pass doesn't have to re-derive the reasoning:
    `_raise_for_followup_error()`. All 7 new tests plus the rest of
    `tests/api/test_conversations.py` (26 total) and `tests/query/test_conversations.py`
    (10) pass unchanged post-refactor.
+
+## Comment-pass slice 10 — `pipeline/digest/build.py`
+
+Found while doing a comments-only documentation pass (not a refactor) over
+`db/migrate.py`, `db/clickhouse/bootstrap.py`, `pipeline/strategies/`, and
+`pipeline/digest/` — all of which turned out to already be exceptionally
+well-commented (WHY-focused, no redundant WHAT-comments found), so this
+pass made no source changes. One bug-shaped exception, flagged here rather
+than fixed, per this pass's comments-only scope:
+
+`build_digest()`'s `movers.sort(key=lambda m: m.deviation_min, reverse=True)`
+(`pipeline/digest/build.py` ~line 185) has no tie-break for movers with
+identical `deviation_min` — the same non-determinism bug class already found
+and fixed across `pipeline/reports/{rankings,overview}.py` in PR #196
+("make ranking tie-breaks deterministic"). Two routes tied on deviation would
+sort in whatever order Python's stable sort happens to preserve from
+`route_entries` (itself insertion-ordered from a dict keyed by `route_code`
+during `_aggregate_by_route`, which in turn depends on `_DAY_ROUTES_SQL`'s
+unordered `agg_route_daily` scan) — not necessarily unstable across runs in
+practice (Postgres's scan order for a small per-agency table may be
+incidentally stable), but not a guaranteed contract either, same caveat PR
+#196 documented for its own regression tests. Worth the same deliberate
+decision on whether to extend the `route_code` tie-break here.
