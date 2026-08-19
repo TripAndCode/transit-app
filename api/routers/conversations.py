@@ -28,6 +28,15 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/{agency_id}", tags=["conversations"])
 
 
+async def _owned_or_404(coro):
+    """Await ``coro``, masking PermissionDenied/LookupError as a 404 so a
+    caller can't distinguish "not owned" from "doesn't exist"."""
+    try:
+        return await coro
+    except (_conv.PermissionDenied, LookupError):
+        raise HTTPException(status_code=404, detail="not found") from None
+
+
 class CreateConversation(BaseModel):
     title: str = Field(..., max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
@@ -122,11 +131,7 @@ async def get_conversation(
     conn=Depends(get_conn),
 ):
     """Return one conversation with its messages; 404 unless the caller owns it."""
-    try:
-        return await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
-    except (_conv.PermissionDenied, LookupError):
-        # Mask non-owned threads as 404 (don't reveal existence)
-        raise HTTPException(status_code=404, detail="not found") from None
+    return await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
 
 @router.patch("/conversations/{conversation_id}")
@@ -142,12 +147,9 @@ async def update_conversation(
     """Patch title / pinned / filter_ctx on a conversation the caller owns."""
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
-    try:
-        return await _conv.update_conversation(
-            conn, conversation_id, user_id=user.user_id, agency_id=agency_id, **fields
-        )
-    except (_conv.PermissionDenied, LookupError):
-        raise HTTPException(status_code=404, detail="not found") from None
+    return await _owned_or_404(
+        _conv.update_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id, **fields)
+    )
 
 
 @router.delete("/conversations/{conversation_id}")
@@ -161,10 +163,7 @@ async def delete_conversation(
 ):
     """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
-    try:
-        await _conv.delete_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
-    except (_conv.PermissionDenied, LookupError):
-        raise HTTPException(status_code=404, detail="not found") from None
+    await _owned_or_404(_conv.delete_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
     return {"ok": True}
 
 
@@ -176,10 +175,7 @@ async def list_messages(
     conn=Depends(get_conn),
 ):
     """Return all messages of a conversation the caller owns."""
-    try:
-        return await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
-    except (_conv.PermissionDenied, LookupError):
-        raise HTTPException(status_code=404, detail="not found") from None
+    return await _owned_or_404(_conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
 
 @router.post("/conversations/migrate-anon")
@@ -227,10 +223,7 @@ async def append_message_endpoint(
     # transaction so a concurrent DELETE of this conversation between the
     # ownership check and the message inserts can't produce a 500 (the FK
     # cascade would otherwise tear out the rows we're trying to write).
-    try:
-        conv = await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
-    except (_conv.PermissionDenied, LookupError):
-        raise HTTPException(status_code=404, detail="not found") from None
+    conv = await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
     # ── Resolve tool + args (builder-direct path only) ────────────────────────
     if body.chip_id is not None:
