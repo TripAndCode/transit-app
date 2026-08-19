@@ -530,3 +530,27 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
     assert labels == ["前半平均", "後半平均", "変化幅"]
     assert float(values[0]) < float(values[1])
     assert float(values[2]) == pytest.approx(4.15, abs=0.1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name",
+    ["route_stats", "segment_hotspots", "time_pattern", "schedule_realism", "trend_shift"],
+)
+async def test_dispatch_missing_route_arg_returns_empty(aconn, aagency_id, tool_name):
+    """Route-required tools must short-circuit with the 'route_arg_required'
+    message (not attempt registration/data lookup) when no route arg is
+    given. Characterization test pinning this branch ahead of slice 2's
+    ``_resolve_and_check_route`` guard consolidation (REFACTOR_PLAN.md)."""
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
+    result = await dispatch(tool_name, {}, ctx, aconn, aagency_id, locale="ja")
+    assert result.kind == "empty"
+    assert result.summary == "route 引数が必要です。"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_missing_route_arg_en_locale(aconn, aagency_id):
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
+    result = await dispatch("segment_hotspots", {}, ctx, aconn, aagency_id, locale="en")
+    assert result.kind == "empty"
+    assert result.summary == "The route argument is required."
