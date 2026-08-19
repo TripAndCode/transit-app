@@ -103,3 +103,13 @@ a future pass doesn't have to re-derive the reasoning:
    piece of work than a mechanical dedupe — flagged here rather than either
    skipping silently or writing a new test suite as a side effect of a
    refactor pass.
+
+   **Resolved** — added 7 characterization tests covering
+   `followup_endpoint`'s kill-switch-disabled, ownership-404, `too_long`,
+   `llm_error`, authed-success, anon-inline-context-required, and
+   anon-success paths (LLM client mocked throughout, never called live),
+   confirmed passing pre-refactor, then deduped the ownership check onto
+   `_owned_or_404()` and consolidated the anon/authed error mapping into
+   `_raise_for_followup_error()`. All 7 new tests plus the rest of
+   `tests/api/test_conversations.py` (26 total) and `tests/query/test_conversations.py`
+   (10) pass unchanged post-refactor.

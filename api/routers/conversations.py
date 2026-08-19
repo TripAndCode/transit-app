@@ -37,6 +37,15 @@ async def _owned_or_404(coro):
         raise HTTPException(status_code=404, detail="not found") from None
 
 
+def _raise_for_followup_error(err: str | None) -> None:
+    """Map a ``pipeline.query.followup.answer_followup`` error code to the
+    matching HTTP error, shared by both the anon and authed followup paths."""
+    if err == "too_long":
+        raise HTTPException(status_code=400, detail="question_too_long")
+    if err is not None:
+        raise HTTPException(status_code=502, detail=f"llm_error:{err}")
+
+
 class CreateConversation(BaseModel):
     title: str = Field(..., max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
@@ -456,10 +465,7 @@ async def followup_endpoint(
             context_result=body.context_result,
             locale=locale,
         )
-        if err == "too_long":
-            raise HTTPException(status_code=400, detail="question_too_long")
-        if err is not None:
-            raise HTTPException(status_code=502, detail=f"llm_error:{err}")
+        _raise_for_followup_error(err)
 
         # Return synthetic messages — frontend persists them to localStorage.
         now = datetime.now(tz=timezone.utc).isoformat()
@@ -499,10 +505,7 @@ async def followup_endpoint(
         )
 
     # Ownership check (also confirms the conversation exists).
-    try:
-        await _conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
-    except (_conv.PermissionDenied, LookupError):
-        raise HTTPException(status_code=404, detail="not found") from None
+    await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
     # Fetch the context message (must belong to this conversation).
     messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
@@ -522,10 +525,7 @@ async def followup_endpoint(
         context_result=ctx_msg.get("result"),
         locale=locale,
     )
-    if err == "too_long":
-        raise HTTPException(status_code=400, detail="question_too_long")
-    if err is not None:
-        raise HTTPException(status_code=502, detail=f"llm_error:{err}")
+    _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
