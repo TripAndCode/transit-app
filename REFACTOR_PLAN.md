@@ -91,6 +91,30 @@ inline comments (measured costs, real-data trade-offs) made confirming
 duplication *is* sometimes real here (unlike slices 1-2) — worth reading
 closely rather than assuming either way.
 
+**Slice 4** (`pipeline/query/chat.py` + `router.py` + `llm_client.py`): a
+lopsided result — `router.py` and `llm_client.py` were both already tight and
+heavily documented (the embed-margin ambiguity guard, the provider fallback
+ladder with its retry/timeout/rate-limit distinctions) and had nothing worth
+touching. `chat.py` had the slice's real find: `chat_with_tools` repeated the
+same ~35-line try/except-around-`dispatch()` scaffold **five times**
+(build-mode, cache pre-hit, cache stage-2 JSON-fallback, cache stage-2 main
+dispatch, flag-off path) — same four exception classes, near-identical
+response-dict shaping, differing only in a few extra cache-bookkeeping keys
+and a log-message suffix. Extracted `_dispatch_and_respond()`, parameterized
+by `extra` (the differing dict keys) and `verb_suffix` (keeps per-site log
+text exactly as before — confirmed no test asserts exact log strings, only
+`exc_info` content). Left build-mode's block un-consolidated: its log
+phrasing ("Build-mode dispatch for %s...") differs in shape, not just a
+suffix, so folding it in would've added more parameterization than it saved.
+Net **-85 lines** in `chat.py`. Two of the five sites (cache stage-2
+JSON-fallback and main-dispatch) had no direct error-leakage characterization
+test despite the other three being thoroughly covered in
+`test_chat_error_leakage.py` — added both before refactoring. No `NOTES.md`
+addition this time. Takeaway: even within one "slice," some files are
+already clean (router.py, llm_client.py) while a sibling file in the same
+slice has a real, large win (chat.py) — read each file independently rather
+than extrapolating from one file's result to its neighbors.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
@@ -98,7 +122,7 @@ closely rather than assuming either way.
 | 1 | done | `pipeline/reports/overview.py` (1300L), `rankings.py` (733L), `forecast.py` (204L), `network.py` (113L), `filters.py` (128L) | Largest file in the repo; `rankings.py` has no dedicated test file; likely duplicated aggregation/rounding/filter-building across this "reports" family | Partial → good | Medium — feeds `agg_*`-backed report endpoints, not the live CH scan path |
 | 2 | done | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
 | 3 | done | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good → good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
-| 4 | pending | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
+| 4 | done | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good → good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
 | 5 | pending | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
 | 6 | pending | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
 | 7 | pending | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
