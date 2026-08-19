@@ -70,7 +70,7 @@ reverse — is a real design decision affecting every call site in
 `meta_tools.py` (~600 lines), not a mechanical dedupe. Not touched here, per
 the refactor's "no behavior changes, no unrequested redesigns" constraint.
 
-**Resolved in PR #<pending> — `refactor(query): unify Ask-tab locale-string
+**Resolved in PR #195 — `refactor(query): unify Ask-tab locale-string
 architecture`.** Per CLAUDE.md's explicit convention ("Server-side
 user-facing strings live in the `_LOCALES` table in `pipeline/query/tools.py`"),
 `tools.py`'s pattern became canonical: all 22 of `meta_tools.py`'s inline
