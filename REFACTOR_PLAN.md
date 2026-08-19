@@ -210,11 +210,85 @@ before starting, not an assumption that backend lessons transfer directly.
 | 5 | done | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good → good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
 | 6 | done | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good → good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
 | 7 | done | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak → good (ThreadSidebar) | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
-| 8 | pending | `api/routers/auth.py` (513L), `conversations.py` (570L) | Next tier of large routers after `map.py` | Good | Medium — auth-adjacent, be conservative |
+| 8 | done | `api/routers/auth.py` (513L), `conversations.py` (570L) | Next tier of large routers after `map.py` | Good | Medium — auth-adjacent, be conservative |
 
 Order is priority (complexity × duplication × value, discounted by risk).
 Starting at #1 — backend, deterministic outputs suit the golden-fixture diff
 approach well, and it's isolated from the live-scan and ingest paths.
+
+**Slice 8** (`api/routers/auth.py` + `conversations.py`, the last slice): the
+most auth-conservative slice by design. `auth.py` was read in full and left
+**byte-identical** — its one candidate duplication (session-row-insert +
+login-event sequence, repeated between the OAuth callback and local_login)
+sits inside the actual session-minting control flow, exactly the kind of
+"looks safe but touches session/token handling" case this slice's brief said
+to flag rather than judgment-call (see `NOTES.md`). `conversations.py` had a
+real, safe win outside the auth-sensitive core: `get_conversation`,
+`update_conversation`, `delete_conversation`, `list_messages`, and
+`append_message_endpoint`'s ownership check each repeated an identical
+`try: ... except (_conv.PermissionDenied, LookupError): raise
+HTTPException(404, "not found")` block — pure response-shaping around an
+exception already raised by `pipeline.query.conversations`, not an
+authorization decision itself. Consolidated into `_owned_or_404()`. Net **-7
+lines**. Two of the five call sites (get_conversation's 404 path) already had
+direct API-layer test coverage; the other four (update/delete/list_messages/
+append) didn't — added one consolidated characterization test covering all
+four before refactoring. `followup_endpoint` had the same two duplications
+(ownership-404, and a repeated `too_long`/`llm_error` mapping) but was left
+untouched: it has zero existing test coverage anywhere in `tests/` and is a
+kill-switch-gated LLM-adjacent feature, so touching it here would mean
+writing a new characterization-test suite from scratch as a refactor side
+effect rather than a mechanical dedupe — flagged in `NOTES.md` instead.
+Takeaway for future work on this codebase: "auth-adjacent" doesn't mean
+"nothing to simplify" — it means read closely enough to separate the actual
+authorization/session logic (untouchable here) from the response-shaping
+code that happens to sit next to it (fair game), and coverage gaps around a
+kill-switched feature are a real reason to defer a refactor, not just an
+excuse.
+
+## Final summary (Phase 4 report)
+
+All 8 planned slices are **done**, none blocked. Total across all slices:
+**8 PRs merged** (#185–#191, plus this slice's PR), **0 diff-harness
+divergences** on every slice that built one (slices 1, 5), **0 behavior
+changes** confirmed by the full relevant test suite on every slice. Rough
+net LOC delta by slice: #1 -9, #2 -5, #3 -32, #4 -85, #5 net reduction from
+a 9-way builder consolidation (see slice 5's finding above — exact delta in
+PR #189), #6 **+2** (a DRY win, not a size cut), #7 -22 (`ThreadSidebar.tsx`)
+plus a separate real dedup in `RouteForecastSection.tsx`, #8 -7. Total
+backend+frontend line reduction is modest (roughly 150-160 lines net across
+the whole pass) — this codebase had already been through real
+complexity/perf work (PRs #75-79, #184) before this pass started, so the
+honest finding across almost every slice was "verify before assuming
+duplication exists," not "big rewrite opportunity." Several slices (2's
+`router.py`/`llm_client.py`, 6 as a whole net-positive, 8's `auth.py`)
+correctly concluded "nothing worth changing" or "small/negative LOC delta"
+rather than forcing a change to show progress — that restraint is treated as
+a successful outcome of this process, not a failure to find work.
+
+**`NOTES.md` entries for human triage** (none were auto-fixed; all are
+flag-only per this refactor's "no behavior changes" rule):
+1. **Slice 1** — inconsistent tie-break on ranking sorts: `overview.py`'s
+   `_movers`/`_concentration` (slow path) and `rankings.py`'s
+   `_compare_ranking_live` explicitly break ties on `route_code` (citing a
+   previously-fixed non-determinism bug); `compute_ranking`,
+   `compute_on_time`, `compute_worst_5min`, `compute_dow_ranking`, and
+   `_concentration`'s fast path don't. Worth a deliberate decision on
+   whether to extend the fix.
+2. **Slice 2** — two coexisting localization-string architectures in one
+   merged tool-calling surface: `tools.py`'s central `_LOCALES` table vs.
+   `meta_tools.py`'s inline `_summary(text_jp, text_en, locale)`. Real
+   design decision (which becomes canonical), not a mechanical dedupe.
+3. **Slice 8** — two more real-but-untouched duplications: the auth.py
+   session+login-event sequence (left alone as in-scope-but-too-sensitive),
+   and `followup_endpoint`'s ownership-404 + error-mapping duplication
+   (left alone for lack of any existing test coverage on a kill-switched
+   LLM-adjacent endpoint — writing that coverage is a reasonable follow-up
+   task in its own right, separate from this mechanical refactor pass).
+
+No slices were blocked or reverted. Test containers (`transit-test-pg`
+`:5544`, `transit-test-ch` `:8124`) were reused across all 8 slices and are
+no longer needed now that the plan is complete.
 
 ## Entry points with weak/no dedicated test coverage (from initial survey)
 - `pipeline/reports/rankings.py` — only indirect coverage via `test_reports.py`/`test_tool_queries.py`

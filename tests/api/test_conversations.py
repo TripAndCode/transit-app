@@ -113,9 +113,7 @@ async def test_others_conversation_patch_delete_messages_are_404(conv_app):
             "INSERT INTO users (email, name, role) VALUES ('other@test', 'O', 'user') RETURNING user_id"
         )
     async with _authed_client(app, other["user_id"]) as c:
-        r_patch = await c.patch(
-            f"/api/{agency}/conversations/{conv_id}", json={"title": "Hijacked"}, headers=_CSRF
-        )
+        r_patch = await c.patch(f"/api/{agency}/conversations/{conv_id}", json={"title": "Hijacked"}, headers=_CSRF)
         assert r_patch.status_code == 404
         assert r_patch.json()["detail"] == "not found"
 
