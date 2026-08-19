@@ -137,7 +137,8 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     (c) => !isToday(c.updated_at) && !isYesterday(c.updated_at) && !isThisWeek(c.updated_at)
   );
 
-  const groups: { labelKey: string; items: Conversation[] }[] = [
+  const groups: { labelKey: string; emoji?: string; items: Conversation[] }[] = [
+    { labelKey: "ask.sidebar.pinned", emoji: "📌 ", items: pinned },
     { labelKey: "ask.sidebar.today", items: todayList },
     { labelKey: "ask.sidebar.yesterday", items: yesterdayList },
     { labelKey: "ask.sidebar.this_week", items: thisWeekList },
@@ -200,34 +201,11 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           </div>
         )}
 
-        {/* Pinned */}
-        {pinned.length > 0 && (
-          <section>
-            <div style={groupHeaderStyle}>📌 {t("ask.sidebar.pinned")}</div>
-            {pinned.map((conv) => (
-              <ConvItem
-                key={conv.conversation_id}
-                conv={conv}
-                isActive={conv.conversation_id === activeId}
-                isRenaming={renamingId === conv.conversation_id}
-                renameValue={renameValue}
-                renameInputRef={renameInputRef}
-                onRenameChange={setRenameValue}
-                onRenameCommit={commitRename}
-                onRenameBlur={commitRename}
-                onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
-                onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                filterSummaryText={filterSummary(conv.filter_ctx, t)}
-              />
-            ))}
-          </section>
-        )}
-
-        {/* Date-grouped */}
-        {groups.map(({ labelKey, items }) =>
+        {/* Pinned, then date-grouped */}
+        {groups.map(({ labelKey, emoji, items }) =>
           items.length === 0 ? null : (
             <section key={labelKey}>
-              <div style={groupHeaderStyle}>{t(labelKey)}</div>
+              <div style={groupHeaderStyle}>{emoji}{t(labelKey)}</div>
               {items.map((conv) => (
                 <ConvItem
                   key={conv.conversation_id}
