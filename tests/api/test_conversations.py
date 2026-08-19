@@ -100,6 +100,43 @@ async def test_get_others_conversation_is_404(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_others_conversation_patch_delete_messages_are_404(conv_app):
+    """Characterization test for the ownership-mask-as-404 pattern repeated
+    across update/delete/list_messages/append_message — pinned before
+    slice 8's dedup into a shared helper (REFACTOR_PLAN.md)."""
+    app, agency, uid, pool = conv_app
+    async with _authed_client(app, uid) as c:
+        r = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = r.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        other = await conn.fetchrow(
+            "INSERT INTO users (email, name, role) VALUES ('other@test', 'O', 'user') RETURNING user_id"
+        )
+    async with _authed_client(app, other["user_id"]) as c:
+        r_patch = await c.patch(
+            f"/api/{agency}/conversations/{conv_id}", json={"title": "Hijacked"}, headers=_CSRF
+        )
+        assert r_patch.status_code == 404
+        assert r_patch.json()["detail"] == "not found"
+
+        r_messages = await c.get(f"/api/{agency}/conversations/{conv_id}/messages")
+        assert r_messages.status_code == 404
+        assert r_messages.json()["detail"] == "not found"
+
+        r_append = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "route_stats", "args": {"route": "1"}},
+            headers=_CSRF,
+        )
+        assert r_append.status_code == 404
+        assert r_append.json()["detail"] == "not found"
+
+        r_delete = await c.delete(f"/api/{agency}/conversations/{conv_id}", headers=_CSRF)
+        assert r_delete.status_code == 404
+        assert r_delete.json()["detail"] == "not found"
+
+
+@pytest.mark.asyncio
 async def test_get_own_conversation_under_wrong_agency_path_is_404(conv_app):
     """A conversation owned by the caller but created under a different
     agency must 404 when accessed via another agency's URL path - the
