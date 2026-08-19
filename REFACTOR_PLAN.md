@@ -142,6 +142,34 @@ there, but they're narrower than in a less-hardened codebase, and extra
 verification rigor (a real golden-fixture harness, not just existing tests)
 is worth the added effort when the blast radius is this large.
 
+**Slice 6** (`pipeline/ingest.py`): another high-risk slice (raw `updates`
+ingestion, recent perf work in #184) that turned out very clean on close
+reading — every non-obvious choice (batch-flush sizing, the `seen`/`done`
+divergence for crash-safety, DataError-vs-other-exception retry semantics,
+SAVEPOINT scoping) is justified by dense, specific comments, several citing
+exact wall-clock numbers from a real backfill incident. The tarball-member
+loop and the loose-`.pb` loop are structurally parallel but deliberately not
+merged — they differ in how they obtain raw bytes (tar member extraction
+with a silent-skip for non-file members vs. a plain file read) and in commit
+cadence (every 300 vs. every 500 iterations), so forcing them into one loop
+would trade a real, working distinction for a marginal LOC savings, exactly
+the over-engineering direction this refactor is supposed to avoid. The one
+duplication found was narrower and later in each loop: both loops end with
+an identical 6-line "buffer this file's parsed rows, flush if batch-full"
+sequence, extracted into `_buffer_parsed()`. Net **+2 lines** (the extracted
+helper's docstring costs slightly more than the two call sites save) — a
+DRY/single-source-of-truth win, not a size reduction, and flagged here so
+nobody's surprised the LOC delta is positive. No new characterization tests
+were needed: 13 of `test_ingest.py`'s existing tests already directly
+exercise both loops' buffering/dedup/batching/failure paths (including
+DataError retry and non-DataError whole-batch-discard), so that suite itself
+served as the verification harness — a from-scratch golden-fixture script
+would have been redundant for a change this mechanical and already this
+tightly pinned. No `NOTES.md` addition — nothing bug-shaped found. Takeaway:
+"nothing worth changing" and "modest DRY win with a slightly positive LOC
+delta" are both fine, honest outcomes for a high-risk slice — the goal is
+verified safety, not a LOC count going down.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
@@ -151,7 +179,7 @@ is worth the added effort when the blast radius is this large.
 | 3 | done | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good → good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
 | 4 | done | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good → good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
 | 5 | done | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good → good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
-| 6 | pending | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
+| 6 | done | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good → good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
 | 7 | pending | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
 | 8 | pending | `api/routers/auth.py` (513L), `conversations.py` (570L) | Next tier of large routers after `map.py` | Good | Medium — auth-adjacent, be conservative |
 
