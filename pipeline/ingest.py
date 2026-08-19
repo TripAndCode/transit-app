@@ -246,6 +246,18 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # each file contributed, without re-parsing anything.
     pending_counts: list[int] = []
 
+    def _buffer_parsed(file_key: str, rows: list) -> None:
+        """Buffer one successfully-parsed file's rows for the next _flush(),
+        triggering an early flush once _BATCH_ROWS is reached. Identical
+        sequence shared by the tarball-member loop and the loose-.pb loop
+        below — both call this immediately after a successful parse_feed()."""
+        pending_rows.extend(rows)
+        pending_files.append(file_key)
+        pending_counts.append(len(rows))
+        seen.add(file_key)
+        if len(pending_rows) >= _BATCH_ROWS:
+            _flush()
+
     def _flush() -> None:
         nonlocal n_inserted, n_errors
         # Guard on pending_FILES, not pending_rows: a source file can
@@ -360,12 +372,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
                             continue
-                        pending_rows.extend(rows)
-                        pending_files.append(f"{d}/{pb_name}")
-                        pending_counts.append(len(rows))
-                        seen.add(f"{d}/{pb_name}")
-                        if len(pending_rows) >= _BATCH_ROWS:
-                            _flush()
+                        _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
                             conn.commit()
                             logger.info(f"    {j}/{len(new)}...")
@@ -405,12 +412,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
                     continue
-                pending_rows.extend(rows)
-                pending_files.append(f"{d}/{path.name}")
-                pending_counts.append(len(rows))
-                seen.add(f"{d}/{path.name}")
-                if len(pending_rows) >= _BATCH_ROWS:
-                    _flush()
+                _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
                     conn.commit()
                     logger.info(f"  {j}/{len(new_pb)}")
