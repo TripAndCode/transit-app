@@ -259,6 +259,45 @@ async def test_first_login_emits_account_created(auth_client, aconn, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_login_event_and_session_fields_on_successful_callback(auth_client, aconn, monkeypatch):
+    """Field-level characterization of the session-row-insert + login-event
+    sequence in callback() (see NOTES.md's Slice 8 entry), pinned before any
+    dedupe with local_login()'s identical sequence."""
+    from api.routers import auth as auth_mod
+
+    async def fake_userinfo(client, token, provider):
+        return {"sub": "field-sub", "email": "field@x", "email_verified": True, "name": "F", "avatar_url": None}
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            headers={"user-agent": "test-ua"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='field@x'")
+    row = await aconn.fetchrow(
+        "SELECT user_id, actor_id, kind, provider, user_agent, meta FROM login_events "
+        "WHERE user_id=$1 AND kind='login'",
+        uid,
+    )
+    assert row is not None
+    assert row["user_id"] == uid
+    assert row["actor_id"] == uid
+    assert row["provider"] == "google"
+    assert row["user_agent"] == "test-ua"
+    assert row["meta"] is None
+    sid = await aconn.fetchval("SELECT sid FROM sessions WHERE user_id=$1", uid)
+    assert sid is not None
+    assert f"sid={sid}" in resp.headers.get("set-cookie", "")
+
+
+@pytest.mark.asyncio
 async def test_repeat_login_skips_account_created(auth_client, aconn, monkeypatch):
     """Second login from the same provider only emits ``login``, not account_created."""
     uid = (await aconn.fetchrow("INSERT INTO users (email) VALUES ('repeat@x') RETURNING user_id"))["user_id"]

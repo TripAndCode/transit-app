@@ -351,6 +351,16 @@ async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str
     return sid
 
 
+async def _mint_session_and_log_login(conn, uid: int, ua: str | None, ip: str | None, provider: str) -> str:
+    """Session-row-insert + login-event sequence shared by the OAuth callback
+    and local_login — both mint a session and audit a ``kind="login"`` event
+    identically once they've settled on a user_id, differing only in which
+    ``provider`` label to record. Caller owns the transaction."""
+    sid = await _create_session(conn, uid, ua, ip)
+    await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider=provider, ip=ip, user_agent=ua)
+    return sid
+
+
 def _set_session_cookie(resp, sid: str) -> None:
     resp.set_cookie(
         SESSION_COOKIE_NAME,
@@ -427,8 +437,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     try:
         async with conn.transaction():
             uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
-            sid = await _create_session(conn, uid, ua, ip)
-            await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider=provider, ip=ip, user_agent=ua)
+            sid = await _mint_session_and_log_login(conn, uid, ua, ip, provider)
     except LocalAccountConflict:
         return await _fail_login(conn, request, provider, "local_account_conflict")
 
@@ -482,8 +491,7 @@ async def local_login(
 
     uid = row["user_id"]
     async with conn.transaction():
-        sid = await _create_session(conn, uid, ua, ip)
-        await record_event(conn, user_id=uid, actor_id=uid, kind="login", provider="local", ip=ip, user_agent=ua)
+        sid = await _mint_session_and_log_login(conn, uid, ua, ip, "local")
 
     resp = JSONResponse(status_code=200, content={"ok": True})
     _set_session_cookie(resp, sid)
