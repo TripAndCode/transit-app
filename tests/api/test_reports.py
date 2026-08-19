@@ -248,6 +248,103 @@ async def test_reports_compare_ranking_reads_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_ranking_ties_break_by_route_code(reports_client, ch_client):
+    """Two routes tied on avg_min (agg fast path) must sort by route_code,
+    ascending — regardless of `sort_order`. Ties used to fall back to
+    whatever order Postgres's GROUP BY happened to return them in. See
+    NOTES.md's "inconsistent tie-break on ranking sorts" entry.
+    """
+    client, agency_id, pool = reports_client
+    day = "2026-05-06"
+    await _seed_route(pool, agency_id, "RTIE_B", "平日", day, [300] * 25)  # avg=5.0
+    await _seed_route(pool, agency_id, "RTIE_A", "平日", day, [300] * 25)  # avg=5.0, tied
+    _run_analyze(agency_id, ch_client)
+    rows = await compute_ranking_rows(client, agency_id, day)
+    codes = [r[0] for r in rows if r[0] in ("RTIE_A", "RTIE_B")]
+    assert codes == ["RTIE_A", "RTIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_reports_ranking_live_ties_break_by_route_code(reports_client, ch_client, ch_async_client):
+    """Same tie-break, live path (time_band filter -> ClickHouse `_ranking_live`)."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-13"
+    await _seed_route_at(pool, agency_id, "RLTIE_B", "平日", day, "08:00", [300] * 25)
+    await _seed_route_at(pool, agency_id, "RLTIE_A", "平日", day, "08:00", [300] * 25)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    codes = [r[0] for r in rows if r[0] in ("RLTIE_A", "RLTIE_B")]
+    assert codes == ["RLTIE_A", "RLTIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_on_time_ties_break_by_route_code(reports_client, ch_client):
+    """Two routes tied on on_time_pct (agg fast path) must sort by
+    route_code, ascending. See NOTES.md."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-07"
+    await _seed_route(pool, agency_id, "OTIE_B", "平日", day, [30] * 25)
+    await _seed_route(pool, agency_id, "OTIE_A", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")
+    rows = resp.json()["rows"]
+    codes = [r[0] for r in rows if r[0] in ("OTIE_A", "OTIE_B")]
+    assert codes == ["OTIE_A", "OTIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_worst_5min_ties_break_by_route_code(reports_client, ch_client):
+    """Two routes tied on late5_count (agg fast path) must sort by
+    route_code, ascending. See NOTES.md."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-08"
+    await _seed_route(pool, agency_id, "WTIE_B", "平日", day, [600] * 25)
+    await _seed_route(pool, agency_id, "WTIE_A", "平日", day, [600] * 25)
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?from={day}&to={day}")
+    rows = resp.json()["rows"]
+    codes = [r[0] for r in rows if r[0] in ("WTIE_A", "WTIE_B")]
+    assert codes == ["WTIE_A", "WTIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_dow_ranking_ties_break_by_route_code(reports_client, ch_client):
+    """Two routes tied on avg_min (dow_weekend, agg fast path) must sort by
+    route_code, ascending. See NOTES.md."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "DTIE_B", "土日祝", "2026-05-23", [300] * 15)
+    await _seed_route(pool, agency_id, "DTIE_A", "土日祝", "2026-05-23", [300] * 15)
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekend?from=2026-05-18&to=2026-05-24")
+    rows = resp.json()["rows"]
+    codes = [r[0] for r in rows if r[0] in ("DTIE_A", "DTIE_B")]
+    assert codes == ["DTIE_A", "DTIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_compare_ranking_ties_break_by_route_code(reports_client, ch_client):
+    """Two routes tied on abs_delta (agg fast path) must sort by route_code,
+    ascending. See NOTES.md."""
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "CTIE_B", "平日", "2026-05-19", [120] * 15)
+    await _seed_route(pool, agency_id, "CTIE_B", "土日祝", "2026-05-23", [360] * 15)
+    await _seed_route(pool, agency_id, "CTIE_A", "平日", "2026-05-19", [120] * 15)
+    await _seed_route(pool, agency_id, "CTIE_A", "土日祝", "2026-05-23", [360] * 15)
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/compare_ranking?from=2026-05-18&to=2026-05-24")
+    rows = resp.json()["rows"]
+    codes = [r[0] for r in rows if r[0] in ("CTIE_A", "CTIE_B")]
+    assert codes == ["CTIE_A", "CTIE_B"]
+
+
+@pytest.mark.asyncio
 async def test_reports_trend_reads_agg(reports_client, ch_client):
     """trend reads agg_daily_trend (daily series) + agg_hour_daily (hourly cells)."""
     client, agency_id, pool = reports_client

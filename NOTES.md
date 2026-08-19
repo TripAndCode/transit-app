@@ -8,6 +8,10 @@ work. Each entry names the slice it came from.
 
 ### Ambiguous — needs human decision: inconsistent tie-break on ranking sorts
 
+**Resolved** in `fix/rankings-tie-break-consistency` (deterministic tie-break
+extended to every remaining ranking function, plus `_top_delayed_routes`'s
+fast path, found during the fix). Original text kept below for history.
+
 `pipeline/reports/overview.py`'s `_movers` (~line 1008, `deltas.sort(key=lambda
 x: (x[3], x[0]))`) and `_concentration`'s slow path (~line 647,
 `sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))`) both explicitly
