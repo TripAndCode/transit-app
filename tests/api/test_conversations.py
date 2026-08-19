@@ -69,6 +69,31 @@ async def _authed_client(app, user_id: int):
         app.dependency_overrides.pop(get_current_user, None)
 
 
+@asynccontextmanager
+async def _authed_optional_client(app, user_id: int):
+    """Like ``_authed_client``, but overrides ``get_current_user_optional``
+    instead — used by endpoints (e.g. ``followup_endpoint``) that accept both
+    authenticated and anonymous callers, so ``get_current_user`` is never
+    resolved for them."""
+    from api.deps import get_current_user_optional
+    from api.security import User
+
+    fake_user = User(
+        user_id=user_id,
+        email="t@test",
+        name="T",
+        avatar_url=None,
+        role="user",
+        suspended_at=None,
+    )
+    app.dependency_overrides[get_current_user_optional] = lambda: fake_user
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+
 @pytest.mark.asyncio
 async def test_create_and_list_conversation(conv_app):
     app, agency, uid, _ = conv_app
@@ -609,3 +634,242 @@ async def test_append_message_postgres_error_in_dispatch_does_not_poison_transac
             conv_id,
         )
     assert [r["role"] for r in rows] == ["user", "assistant"]
+
+
+# ─── followup_endpoint (kill-switch gated LLM follow-up) ──────────────────────
+#
+# Characterization tests written before deduping followup_endpoint's ownership
+# check onto _owned_or_404() and consolidating its too_long/llm_error mapping
+# (see NOTES.md "Slice 8"). These pin current behavior exactly; the LLM client
+# is never called live — pipeline.query.followup.answer_followup is mocked.
+
+
+@pytest.mark.asyncio
+async def test_followup_disabled_by_default_returns_503(conv_app, monkeypatch):
+    monkeypatch.delenv("ASK_FOLLOWUP_ENABLED", raising=False)
+    app, agency, uid, _pool = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": 1},
+            headers=_CSRF,
+        )
+    assert r.status_code == 503
+    assert r.json()["detail"] == "followup_disabled"
+
+
+@pytest.mark.asyncio
+async def test_followup_others_conversation_is_404(conv_app, monkeypatch):
+    """Authed path: accessing another user's conversation masquerades as 404,
+    same as the CRUD endpoints (via _owned_or_404)."""
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        other = await conn.fetchrow(
+            "INSERT INTO users (email, name, role) VALUES ('other@test', 'O', 'user') RETURNING user_id"
+        )
+    async with _authed_optional_client(app, other["user_id"]) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": 1},
+            headers=_CSRF,
+        )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "not found"
+
+
+@pytest.mark.asyncio
+async def test_followup_authed_too_long_maps_to_400(conv_app, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+        return None, "too_long"
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="describe_data",
+            args={},
+            signature_hash=None,
+            result={"ok": True},
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "question_too_long"
+
+
+@pytest.mark.asyncio
+async def test_followup_authed_llm_error_maps_to_502(conv_app, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+        return None, "provider_unavailable"
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="describe_data",
+            args={},
+            signature_hash=None,
+            result={"ok": True},
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 502
+    assert r.json()["detail"] == "llm_error:provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    captured = {}
+
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+        captured["context_tool"] = context_tool
+        captured["context_args"] = context_args
+        captured["context_result"] = context_result
+        return "the answer", None
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="describe_data",
+            args={"kind": "stops"},
+            signature_hash=None,
+            result={"ok": True},
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "what about X?", "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["rendered_summary"] == "what about X?"
+    assert body["assistant"]["rendered_summary"] == "the answer"
+    assert body["assistant"]["args"] == {"context_message_id": msg["message_id"]}
+    assert captured["context_tool"] == "describe_data"
+    assert captured["context_args"] == {"kind": "stops"}
+    assert captured["context_result"] == {"ok": True}
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT role, rendered_summary FROM ask_conversation_messages "
+            "WHERE conversation_id = $1 ORDER BY created_at",
+            conv_id,
+        )
+    assert [(r["role"], r["rendered_summary"]) for r in rows] == [
+        ("assistant", "prior answer"),
+        ("user", "what about X?"),
+        ("assistant", "the answer"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_followup_anon_requires_inline_context_400(conv_app, monkeypatch):
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, _pool = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q"},
+            headers=_CSRF,
+        )
+    assert r.status_code == 400
+    assert "inline context" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_followup_anon_success_returns_synthetic_messages(conv_app, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, _pool = conv_app
+
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+        return "anon answer", None
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={
+                "question": "anon q",
+                "context_tool": "describe_data",
+                "context_args": {"kind": "stops"},
+                "context_result": {"ok": True},
+            },
+            headers=_CSRF,
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["rendered_summary"] == "anon q"
+    assert body["assistant"]["rendered_summary"] == "anon answer"
+    assert body["user"]["message_id"] < 0  # synthetic, not persisted
+    # Anon path never persists — nothing was written to the DB for this conv.
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT 1 FROM ask_conversation_messages WHERE conversation_id = $1",
+            conv_id,
+        )
+    assert rows == []
