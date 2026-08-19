@@ -49,6 +49,30 @@ same treatment, rather than leaving the inconsistency unresolved by default.
 Not fixed here — flagged only, per the refactor's "no behavior changes"
 constraint.
 
+### Ambiguous — needs human decision: same unguarded-tie shape, three more sites
+
+Found while doing a comment-documentation pass (comments-only, no logic
+touched) on the `pipeline/reports/` family. `fix/rankings-tie-break-consistency`
+above fixed every ranking sort inside `rankings.py`/`overview.py`, but three
+more sorts with the identical shape (sort by a metric, no deterministic
+secondary key) exist just outside that fix's scope:
+
+- `pipeline/reports/network.py::compute_network_summary` — `rows.sort(key=lambda
+  r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))`. Ties
+  break on whatever order the four `agencies` rows came back in.
+- `pipeline/reports/forecast.py::summarize_agency_overview` — `routes.sort(key=
+  lambda x: (x["low_confidence"], -x["expected_avg_min"]))`. Ties break on
+  the caller-supplied `route_rows` order (a SQL result with no explicit
+  tie-break of its own).
+- `pipeline/reports/rankings.py::compute_trend_series` — the per-day
+  `top_offenders` sort (`key=lambda x: (x["avg_min"] is None, -(x["avg_min"]
+  or 0))`) has the same shape.
+
+Lower urgency than the original 10 (network.py only ever sorts ~4 agencies,
+so collision odds are low; forecast/trend are both display-truncated lists
+where a tied-route swap is cosmetic), but the same "is this intentional or
+an oversight" question applies. Not fixed here — flagged only.
+
 ## Slice 2 — `pipeline/query/tools.py` / `tool_queries.py` / `meta_tools.py`
 
 ### Ambiguous — needs human decision: two coexisting localization patterns

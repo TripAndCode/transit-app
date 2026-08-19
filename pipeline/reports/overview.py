@@ -890,6 +890,8 @@ def _peak_from_hour_rows(rows) -> dict | None:
     valid = [h for h in range(24) if by_hour[h] is not None]
     if not valid:
         return None
+    # `valid` is ascending, and max() keeps the first max on a tie, so a tie
+    # deterministically resolves to the earliest hour — not left to chance.
     peak_h = max(valid, key=lambda h: by_hour[h])  # type: ignore[arg-type, return-value]
     return {
         "by_hour": by_hour,

@@ -197,6 +197,9 @@ def summarize_agency_overview(
                 "recent_daily": trend_by_route.get(r["route_code"], []),
             }
         )
+    # Low-confidence routes sort last; among the rest, worst delay first.
+    # No tie-break on equal expected_avg_min (falls back to route_rows'
+    # incoming order) — see NOTES.md.
     routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
     if top_n is not None:
         routes = routes[:top_n]
