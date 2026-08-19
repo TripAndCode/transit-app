@@ -69,3 +69,37 @@ every `describe_data`/`capabilities` string to the shared table) — or the
 reverse — is a real design decision affecting every call site in
 `meta_tools.py` (~600 lines), not a mechanical dedupe. Not touched here, per
 the refactor's "no behavior changes, no unrequested redesigns" constraint.
+
+## Slice 8 — `api/routers/auth.py` / `conversations.py`
+
+### Not a bug, but explicitly skipped: two touchable-but-untouched duplications
+
+Two more mechanical-looking duplications were found and deliberately left
+alone, for reasons narrower than "ambiguous behavior" but worth recording so
+a future pass doesn't have to re-derive the reasoning:
+
+1. `api/routers/auth.py`: `callback()` and `local_login()` both do
+   `sid = await _create_session(conn, uid, ua, ip)` immediately followed by
+   `await record_event(conn, user_id=uid, actor_id=uid, kind="login", ...)`
+   inside a `conn.transaction()` block. This is real duplication, but it's
+   inside the actual session-minting control flow — this slice's scope
+   (REFACTOR_PLAN.md) is explicitly auth-conservative: "session/token
+   handling... must not change in any way, even superficially." Left
+   byte-identical rather than judgment-call it as "safe enough."
+
+2. `api/routers/conversations.py`: `followup_endpoint`'s ownership check
+   (`_conv.get_conversation` wrapped in the same PermissionDenied/LookupError
+   → 404 try/except consolidated elsewhere in this slice into
+   `_owned_or_404`) and its duplicated `if err == "too_long": ... elif err is
+   not None: ...` error-mapping (repeated once for the anon path, once for
+   the authed path) are both real, mechanical duplication of the same shape
+   already deduped in this slice. Not touched because `followup_endpoint`
+   and `followup_enabled_endpoint` have **zero existing test coverage** —
+   grepped all of `tests/` for `followup` and found only unrelated matches
+   (a different follow-up mechanism in `api/routers/ask.py`). This endpoint
+   is kill-switch gated (`ASK_FOLLOWUP_ENABLED`, disabled by default per
+   CLAUDE.md's LLM-features convention) and LLM-adjacent, so writing the
+   characterization tests needed to safely touch it is a bigger, separate
+   piece of work than a mechanical dedupe — flagged here rather than either
+   skipping silently or writing a new test suite as a side effect of a
+   refactor pass.
