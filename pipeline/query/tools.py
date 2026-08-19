@@ -698,7 +698,15 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     return bool(result.result_rows)
 
 
-async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+async def _require_registered_route(
+    args: dict, conn, agency_id: int, locale: str, ch=None
+) -> Any | ToolResult:
+    """Validate the common ``route`` arg shared by several handlers below.
+
+    Returns the raw ``route`` value from ``args`` on success, or a
+    ready-to-return empty :class:`ToolResult` (missing arg / not
+    registered) that the caller should return as-is.
+    """
     route = args.get("route")
     if not route:
         return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
@@ -707,6 +715,13 @@ async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             kind="empty",
             summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
         )
+    return route
+
+
+async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
     rows = await route_dow_breakdown(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(
@@ -928,14 +943,9 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
 
 
 async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    route = args.get("route")
-    if not route:
-        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id, ch=ch):
-        return ToolResult(
-            kind="empty",
-            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
-        )
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
     rows = await segment_hotspots(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("segment_hotspots_no_data", lang=locale, route=route))
@@ -948,14 +958,9 @@ async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int
 
 
 async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    route = args.get("route")
-    if not route:
-        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id, ch=ch):
-        return ToolResult(
-            kind="empty",
-            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
-        )
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
     rows = await route_hour_dow_pattern(agency_id, conn, route=str(route))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("time_pattern_no_data", lang=locale, route=route))
@@ -969,14 +974,9 @@ async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
 
 
 async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    route = args.get("route")
-    if not route:
-        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id, ch=ch):
-        return ToolResult(
-            kind="empty",
-            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
-        )
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
     rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("schedule_realism_no_data", lang=locale, route=route))
@@ -989,14 +989,9 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
 
 
 async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    route = args.get("route")
-    if not route:
-        return ToolResult(kind="empty", summary=_summary("route_arg_required", lang=locale))
-    if not await _is_route_registered(route, conn, agency_id, ch=ch):
-        return ToolResult(
-            kind="empty",
-            summary=_summary("route_not_registered", lang=locale, route=route, agency_id=agency_id),
-        )
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
     result = await route_trend_shift(agency_id, ctx, conn, ch, route=str(route))
     if result is None:
         return ToolResult(kind="empty", summary=_summary("trend_shift_no_data", lang=locale, route=route))
