@@ -8,12 +8,11 @@ from api.range import RangeCtx, build_updates_filter_ch
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import percentile_from_hist
-from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter
+from pipeline.reports.filters import _MIN, _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter, _round2
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
 # filter can't be served from it — those queries fall back to the live scan.
-_MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
 
 
 def _service_or_none(service_type: str) -> str | None:
@@ -33,15 +32,6 @@ def _avg_min(sum_delay_sec: int, samples: int) -> Decimal:
 def _sec_to_min(sec: float | None) -> Decimal | None:
     """Seconds → 2-dp minutes, or None for an empty histogram."""
     return None if sec is None else (Decimal(sec) / 60).quantize(_MIN, rounding=ROUND_HALF_UP)
-
-
-def _round2(x: float) -> Decimal:
-    """Round an already-in-minutes float to 2 dp, half-up — matches Postgres
-    ``ROUND(x::numeric, 2)``. Used to round ClickHouse live-path results in
-    Python instead of ClickHouse's own ``round()`` (round-half-to-even),
-    which would otherwise diverge from the agg fast path at exact .5
-    boundaries for the same metric."""
-    return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 def _round1(x: float) -> Decimal:
