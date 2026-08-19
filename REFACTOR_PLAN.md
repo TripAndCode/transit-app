@@ -70,13 +70,34 @@ Consolidating them is a real design decision (which pattern becomes
 canonical, and it touches every `meta_tools.py` call site), not a
 mechanical dedupe — left for a human call.
 
+**Slice 3** (`api/routers/map.py`): unlike slices 1-2, this one did have a
+real, confirmed win — `route_trips` and `route_stop_profile` each repeated an
+identical ~20-line "does route_code exist in agg_route_daily, and if so
+what's its most recent ClickHouse observation within 30 days of the
+agency's latest activity" block verbatim (same SQL, same bound, same
+None-checks), and `route_shape` repeated just the existence-check half of
+the same pattern (with the same agg_route_daily-vs-agg_route_stats
+rationale comment, in one case already saying "see route_trips above for
+why" — the authors had already partially deduped the *documentation* but
+not the code). Extracted into `_route_exists` + `_latest_route_observation`.
+Net -32 lines in `api/routers/map.py`. One coverage gap found and fixed:
+`route_stop_profile`'s "nonexistent route" and "stale route beyond 30-day
+bound" branches had no direct test, despite `route_trips` already covering
+the identical logic — added two characterization tests mirroring the
+existing `route_trips` ones before refactoring. No `NOTES.md` addition this
+time — nothing bug-shaped was found on a close read; this file's extensive
+inline comments (measured costs, real-data trade-offs) made confirming
+"this really is the same logic, safe to dedupe" straightforward. Takeaway:
+duplication *is* sometimes real here (unlike slices 1-2) — worth reading
+closely rather than assuming either way.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
 |---|---|---|---|---|---|
 | 1 | done | `pipeline/reports/overview.py` (1300L), `rankings.py` (733L), `forecast.py` (204L), `network.py` (113L), `filters.py` (128L) | Largest file in the repo; `rankings.py` has no dedicated test file; likely duplicated aggregation/rounding/filter-building across this "reports" family | Partial → good | Medium — feeds `agg_*`-backed report endpoints, not the live CH scan path |
 | 2 | done | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
-| 3 | pending | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
+| 3 | done | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good → good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
 | 4 | pending | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
 | 5 | pending | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
 | 6 | pending | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
