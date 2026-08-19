@@ -70,6 +70,22 @@ reverse — is a real design decision affecting every call site in
 `meta_tools.py` (~600 lines), not a mechanical dedupe. Not touched here, per
 the refactor's "no behavior changes, no unrequested redesigns" constraint.
 
+**Resolved in PR #195 — `refactor(query): unify Ask-tab locale-string
+architecture`.** Per CLAUDE.md's explicit convention ("Server-side
+user-facing strings live in the `_LOCALES` table in `pipeline/query/tools.py`"),
+`tools.py`'s pattern became canonical: all 22 of `meta_tools.py`'s inline
+`(text_jp, text_en)` call sites were migrated onto new `mt_*`-prefixed
+`_LOCALES` entries (verbatim text, no wording changes), `meta_tools.py`'s
+local `_summary` helper was removed, and both `describe_data`/`capabilities`
+now do a call-time deferred `from pipeline.query.tools import _summary` —
+required because `tools.py` imports `META_HANDLERS`/`META_TOOLS` from
+`meta_tools.py` at its own module load time, so a top-level import in the
+other direction would recreate the same circular-import problem that split
+kept these modules apart. All 135 tests across `test_meta_tools.py`,
+`test_tools_locale.py`, `test_tools_integration.py`, `test_router.py`,
+`test_ask_endpoints.py`, `test_api_ask.py` pass unchanged; no displayed
+string changed.
+
 ## Slice 8 — `api/routers/auth.py` / `conversations.py`
 
 ### Not a bug, but explicitly skipped: two touchable-but-untouched duplications

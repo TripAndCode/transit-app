@@ -36,10 +36,6 @@ VALID_KINDS = (
 )
 
 
-def _summary(text_jp: str, text_en: str, locale: str) -> str:
-    return text_en if locale == "en" else text_jp
-
-
 def _as_utc(dt: datetime | None) -> datetime | None:
     """Attach UTC tzinfo to a ClickHouse-returned naive datetime — see
     api/routers/map.py's ``_as_utc`` for the full rationale (ClickHouse's
@@ -58,6 +54,13 @@ async def describe_data(
     locale: str = "ja",
     ch=None,
 ) -> ToolResult:
+    # Deferred import: tools.py imports META_HANDLERS/META_TOOLS from this
+    # module at its own module load time (see tools.py's late, lint-suppressed
+    # import near the bottom of that file), so importing tools.py at this
+    # module's top level would recreate the exact cycle that split-up was
+    # meant to avoid. By call time both modules are always fully loaded.
+    from pipeline.query.tools import _summary
+
     kind = args.get("kind")
     # Defensive coercion: the LLM occasionally hands back ``limit`` as a
     # string ("abc", "50") or even ``None`` despite the JSON-schema
@@ -82,11 +85,7 @@ async def describe_data(
     if kind not in VALID_KINDS:
         return ToolResult(
             kind="empty",
-            summary=_summary(
-                f"未知の kind: {kind}。有効値: {', '.join(VALID_KINDS)}",
-                f"unknown kind: {kind}. valid: {', '.join(VALID_KINDS)}",
-                locale,
-            ),
+            summary=_summary("mt_unknown_kind", locale, kind=kind, valid=", ".join(VALID_KINDS)),
         )
 
     if kind == "routes":
@@ -115,27 +114,22 @@ async def describe_data(
             if total == 0:
                 return ToolResult(
                     kind="empty",
-                    summary=_summary(
-                        f"「{substring}」に該当する路線がありません。",
-                        f"no matching routes for '{substring}'.",
-                        locale,
-                    ),
+                    summary=_summary("mt_routes_filter_no_match", locale, substring=substring),
                 )
             if offset > 0 and rows:
                 shown_from = offset + 1
                 shown_to = offset + len(rows)
                 summary = _summary(
-                    f"「{substring}」に一致する全{total}路線中 "
-                    f"{shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
-                    f"routes matching '{substring}' {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+                    "mt_routes_filter_page",
                     locale,
+                    substring=substring,
+                    total=total,
+                    shown_from=shown_from,
+                    shown_to=shown_to,
+                    limit=limit,
                 )
             else:
-                summary = _summary(
-                    f"「{substring}」に一致する路線: {total} 件（先頭 {len(rows)} 件を表示）",
-                    f"routes matching '{substring}': {total} (showing first {len(rows)})",
-                    locale,
-                )
+                summary = _summary("mt_routes_filter_first", locale, substring=substring, total=total, shown=len(rows))
             return ToolResult(
                 kind="table",
                 summary=summary,
@@ -157,26 +151,16 @@ async def describe_data(
         if total == 0:
             return ToolResult(
                 kind="empty",
-                summary=_summary(
-                    "このエージェンシーには路線が登録されていません。",
-                    "no routes registered for this agency.",
-                    locale,
-                ),
+                summary=_summary("mt_routes_none", locale),
             )
         if offset > 0 and rows:
             shown_from = offset + 1
             shown_to = offset + len(rows)
             summary = _summary(
-                f"全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
-                f"routes {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
-                locale,
+                "mt_routes_page", locale, total=total, shown_from=shown_from, shown_to=shown_to, limit=limit
             )
         else:
-            summary = _summary(
-                f"このエージェンシーには {total} 路線あります（先頭 {len(rows)} 件を表示）",
-                f"This agency has {total} routes (showing first {len(rows)})",
-                locale,
-            )
+            summary = _summary("mt_routes_first", locale, total=total, shown=len(rows))
         return ToolResult(
             kind="table",
             summary=summary,
@@ -208,26 +192,16 @@ async def describe_data(
         if total == 0:
             return ToolResult(
                 kind="empty",
-                summary=_summary(
-                    "このエージェンシーには停留所が登録されていません。",
-                    "no stops registered for this agency.",
-                    locale,
-                ),
+                summary=_summary("mt_stops_none", locale),
             )
         if offset > 0 and rows:
             shown_from = offset + 1
             shown_to = offset + len(rows)
             summary = _summary(
-                f"全{total}停留所中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
-                f"stops {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
-                locale,
+                "mt_stops_page", locale, total=total, shown_from=shown_from, shown_to=shown_to, limit=limit
             )
         else:
-            summary = _summary(
-                f"このエージェンシーには {total} 停留所あります（先頭 {len(rows)} 件）",
-                f"This agency has {total} stops (showing first {len(rows)})",
-                locale,
-            )
+            summary = _summary("mt_stops_first", locale, total=total, shown=len(rows))
         return ToolResult(
             kind="table",
             summary=summary,
@@ -244,11 +218,7 @@ async def describe_data(
                 # ClickHouse-unreachable path in the Ask flow uses) was
                 # written the same way, precisely so internal infrastructure
                 # never reaches an unauthenticated /ask client.
-                summary=_summary(
-                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
-                    "Temporary service issue. Please retry later.",
-                    locale,
-                ),
+                summary=_summary("mt_service_unavailable", locale),
             )
         # `updates`' ORDER BY key is (agency_id, captured_at, ...), so a plain
         # agency-scoped ORDER BY captured_at ASC/DESC LIMIT 1 is index-served.
@@ -263,7 +233,7 @@ async def describe_data(
         if not first_result.result_rows:
             return ToolResult(
                 kind="empty",
-                summary=_summary("観測データがありません。", "no observations.", locale),
+                summary=_summary("mt_no_observations", locale),
             )
         first_obs = first_result.result_rows[0][0]
         last_result = await ch.query(
@@ -294,11 +264,7 @@ async def describe_data(
         ]
         return ToolResult(
             kind="kv",
-            summary=_summary(
-                f"観測期間: {first_obs.date()} 〜 {last_obs.date()}",
-                f"observation window: {first_obs.date()} – {last_obs.date()}",
-                locale,
-            ),
+            summary=_summary("mt_date_range_summary", locale, first_date=first_obs.date(), last_date=last_obs.date()),
             pairs=pairs,
         )
 
@@ -320,11 +286,7 @@ async def describe_data(
             )
         return ToolResult(
             kind="table",
-            summary=_summary(
-                f"登録されているエージェンシー: {len(rows)} 社",
-                f"registered agencies: {len(rows)}",
-                locale,
-            ),
+            summary=_summary("mt_agencies_summary", locale, n=len(rows)),
             rows=[[r["agency_id"], r["agency_name"]] for r in rows],
             columns=["agency_id", "agency_name"],
         )
@@ -338,11 +300,7 @@ async def describe_data(
                 # ClickHouse-unreachable path in the Ask flow uses) was
                 # written the same way, precisely so internal infrastructure
                 # never reaches an unauthenticated /ask client.
-                summary=_summary(
-                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
-                    "Temporary service issue. Please retry later.",
-                    locale,
-                ),
+                summary=_summary("mt_service_unavailable", locale),
             )
         # "サンプルが少ない路線" wants the least-sampled routes, so allow an
         # ascending order. Validate against an allowlist — never interpolate
@@ -376,11 +334,7 @@ async def describe_data(
         if not rows:
             return ToolResult(
                 kind="empty",
-                summary=_summary(
-                    f"選択期間 ({ctx.from_date}〜{ctx.to_date}) にサンプルデータがありません。",
-                    f"no sample data in the selected window ({ctx.from_date} – {ctx.to_date}).",
-                    locale,
-                ),
+                summary=_summary("mt_sample_counts_no_data", locale, from_date=ctx.from_date, to_date=ctx.to_date),
             )
         # Clamp the DISPLAYED window so the summary never claims coverage past
         # where data actually exists. The BETWEEN above is unchanged; we only
@@ -408,33 +362,23 @@ async def describe_data(
             total = total_ch.result_rows[0][0]
             shown_from = offset + 1
             shown_to = offset + len(rows)
-            if order == "asc":
-                jp = (
-                    f"サンプル数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
-                    f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
-                )
-                en = (
-                    f"sample count ascending {shown_from}–{shown_to} of {total} "
-                    f"(next: 'next {limit}') ({ctx.from_date} – {window_end})"
-                )
-            else:
-                jp = (
-                    f"サンプル数 全{total}路線中 {shown_from}–{shown_to}件を表示"
-                    f"（続きは「次の{limit}件」）({ctx.from_date}〜{window_end})"
-                )
-                en = (
-                    f"sample count {shown_from}–{shown_to} of {total} "
-                    f"(next: 'next {limit}') ({ctx.from_date} – {window_end})"
-                )
-        elif order == "asc":
-            jp = f"サンプル数の少ない順 {len(rows)}路線 ({ctx.from_date}〜{window_end})"
-            en = f"sample count bottom-{len(rows)} ({ctx.from_date} – {window_end})"
+            template = "mt_sample_counts_page_asc" if order == "asc" else "mt_sample_counts_page_desc"
+            summary = _summary(
+                template,
+                locale,
+                total=total,
+                shown_from=shown_from,
+                shown_to=shown_to,
+                limit=limit,
+                from_date=ctx.from_date,
+                window_end=window_end,
+            )
         else:
-            jp = f"サンプル数 上位{len(rows)}路線 ({ctx.from_date}〜{window_end})"
-            en = f"sample count top-{len(rows)} ({ctx.from_date} – {window_end})"
+            template = "mt_sample_counts_first_asc" if order == "asc" else "mt_sample_counts_first_desc"
+            summary = _summary(template, locale, n=len(rows), from_date=ctx.from_date, window_end=window_end)
         return ToolResult(
             kind="table",
-            summary=_summary(jp, en, locale),
+            summary=summary,
             rows=[[r["route_code"], int(r["samples"])] for r in rows],
             columns=["route_code", "samples"],
         )
@@ -448,11 +392,7 @@ async def describe_data(
                 # ClickHouse-unreachable path in the Ask flow uses) was
                 # written the same way, precisely so internal infrastructure
                 # never reaches an unauthenticated /ask client.
-                summary=_summary(
-                    "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
-                    "Temporary service issue. Please retry later.",
-                    locale,
-                ),
+                summary=_summary("mt_service_unavailable", locale),
             )
         route_count = await conn.fetchval("SELECT COUNT(*) FROM static_routes WHERE agency_id = $1", agency_id)
         stop_count = await conn.fetchval("SELECT COUNT(*) FROM static_stops WHERE agency_id = $1", agency_id)
@@ -494,7 +434,7 @@ async def describe_data(
         ]
         return ToolResult(
             kind="kv",
-            summary=_summary("データセット概要", "dataset overview", locale),
+            summary=_summary("mt_overview_summary", locale),
             pairs=pairs,
         )
 
@@ -519,7 +459,7 @@ async def describe_data(
             ]
         return ToolResult(
             kind="kv",
-            summary=_summary("計算可能な指標の一覧", "available metrics", locale),
+            summary=_summary("mt_metrics_summary", locale),
             pairs=metric_list,
         )
 
@@ -558,6 +498,9 @@ async def capabilities(
     locale: str = "ja",
     ch=None,
 ) -> ToolResult:
+    # Deferred import — see the matching comment in describe_data() above.
+    from pipeline.query.tools import _summary
+
     table = _CAPABILITY_EXAMPLES_EN if locale == "en" else _CAPABILITY_EXAMPLES_JP
     requested = args.get("category")
     if requested and requested in table:
@@ -566,11 +509,7 @@ async def capabilities(
         pairs = list(table.items())
     return ToolResult(
         kind="kv",
-        summary=_summary(
-            "答えられる質問の例（カテゴリ別）",
-            "example questions I can answer (by category)",
-            locale,
-        ),
+        summary=_summary("mt_capabilities_summary", locale),
         pairs=pairs,
     )
 

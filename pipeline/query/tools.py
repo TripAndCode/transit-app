@@ -183,6 +183,67 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("more_rows", "en"): "…{n} more",
     ("route_prefix", "ja"): "路線{route}",
     ("route_prefix", "en"): "route {route}",
+    # pipeline.query.meta_tools's describe_data/capabilities strings —
+    # migrated onto this shared table so the merged tool-calling surface
+    # has one localization mechanism instead of two (see NOTES.md).
+    ("mt_unknown_kind", "ja"): "未知の kind: {kind}。有効値: {valid}",
+    ("mt_unknown_kind", "en"): "unknown kind: {kind}. valid: {valid}",
+    ("mt_routes_filter_no_match", "ja"): "「{substring}」に該当する路線がありません。",
+    ("mt_routes_filter_no_match", "en"): "no matching routes for '{substring}'.",
+    ("mt_routes_filter_page", "ja"): (
+        "「{substring}」に一致する全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）"
+    ),
+    ("mt_routes_filter_page", "en"): (
+        "routes matching '{substring}' {shown_from}–{shown_to} of {total} (next: 'next {limit}')"
+    ),
+    ("mt_routes_filter_first", "ja"): "「{substring}」に一致する路線: {total} 件（先頭 {shown} 件を表示）",
+    ("mt_routes_filter_first", "en"): "routes matching '{substring}': {total} (showing first {shown})",
+    ("mt_routes_none", "ja"): "このエージェンシーには路線が登録されていません。",
+    ("mt_routes_none", "en"): "no routes registered for this agency.",
+    ("mt_routes_page", "ja"): "全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+    ("mt_routes_page", "en"): "routes {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+    ("mt_routes_first", "ja"): "このエージェンシーには {total} 路線あります（先頭 {shown} 件を表示）",
+    ("mt_routes_first", "en"): "This agency has {total} routes (showing first {shown})",
+    ("mt_stops_none", "ja"): "このエージェンシーには停留所が登録されていません。",
+    ("mt_stops_none", "en"): "no stops registered for this agency.",
+    ("mt_stops_page", "ja"): "全{total}停留所中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）",
+    ("mt_stops_page", "en"): "stops {shown_from}–{shown_to} of {total} (next: 'next {limit}')",
+    ("mt_stops_first", "ja"): "このエージェンシーには {total} 停留所あります（先頭 {shown} 件）",
+    ("mt_stops_first", "en"): "This agency has {total} stops (showing first {shown})",
+    ("mt_service_unavailable", "ja"): "一時的にサービスに接続できません。しばらくしてから再度お試しください。",
+    ("mt_service_unavailable", "en"): "Temporary service issue. Please retry later.",
+    ("mt_no_observations", "ja"): "観測データがありません。",
+    ("mt_no_observations", "en"): "no observations.",
+    ("mt_date_range_summary", "ja"): "観測期間: {first_date} 〜 {last_date}",
+    ("mt_date_range_summary", "en"): "observation window: {first_date} – {last_date}",
+    ("mt_agencies_summary", "ja"): "登録されているエージェンシー: {n} 社",
+    ("mt_agencies_summary", "en"): "registered agencies: {n}",
+    ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) にサンプルデータがありません。",
+    ("mt_sample_counts_no_data", "en"): "no sample data in the selected window ({from_date} – {to_date}).",
+    ("mt_sample_counts_page_asc", "ja"): (
+        "サンプル数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
+        "（続きは「次の{limit}件」）({from_date}〜{window_end})"
+    ),
+    ("mt_sample_counts_page_asc", "en"): (
+        "sample count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+    ),
+    ("mt_sample_counts_page_desc", "ja"): (
+        "サンプル数 全{total}路線中 {shown_from}–{shown_to}件を表示"
+        "（続きは「次の{limit}件」）({from_date}〜{window_end})"
+    ),
+    ("mt_sample_counts_page_desc", "en"): (
+        "sample count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+    ),
+    ("mt_sample_counts_first_asc", "ja"): "サンプル数の少ない順 {n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_asc", "en"): "sample count bottom-{n} ({from_date} – {window_end})",
+    ("mt_sample_counts_first_desc", "ja"): "サンプル数 上位{n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_desc", "en"): "sample count top-{n} ({from_date} – {window_end})",
+    ("mt_overview_summary", "ja"): "データセット概要",
+    ("mt_overview_summary", "en"): "dataset overview",
+    ("mt_metrics_summary", "ja"): "計算可能な指標の一覧",
+    ("mt_metrics_summary", "en"): "available metrics",
+    ("mt_capabilities_summary", "ja"): "答えられる質問の例（カテゴリ別）",
+    ("mt_capabilities_summary", "en"): "example questions I can answer (by category)",
 }
 
 
