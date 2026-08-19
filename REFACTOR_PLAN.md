@@ -29,6 +29,26 @@ both are read-only, real-data instances per `CLAUDE.md`.
 
 ## Findings so far
 
+**Slice 1** (`pipeline/reports/`): the initial survey's "likely duplicated
+aggregation/rounding/filter-building" guess was largely wrong on closer
+reading — this family is already heavily hand-optimized (see `overview.py`'s
+module docstring on `_fetch_grain` consolidating 12 dedup scans into 1) and
+most apparent duplication is deliberate, documented divergence (e.g.
+`filters.py`'s `_TIME_BAND_RANGES` comment: "Duplicated locally so this
+module doesn't reach into a private name in another package"). The only
+*actual* cross-file duplication found was `_round2`/`_MIN`, defined
+identically in both `overview.py` and `rankings.py` (the former's docstring
+even said "Mirrors pipeline.reports.rankings._round2") — consolidated into
+`filters.py`, the family's existing shared module. `rankings.py` also turned
+out to have solid indirect coverage via `tests/api/test_reports.py`
+(both agg and live paths, rounding parity, tie semantics) despite lacking a
+dedicated `test_rankings.py` — so no new characterization-test scaffolding
+was needed beyond a small unit test for the relocated `_round2`. One
+suspected-but-unfixed bug found along the way is in `NOTES.md`. Takeaway for
+remaining slices: verify duplication claims by reading the code before
+assuming a large simplification opportunity — this codebase already got a
+real perf/complexity pass in PRs #75-79 and #184.
+
 **Slice 2** (`pipeline/query/tools.py` + `tool_queries.py` + `meta_tools.py`):
 mostly well-factored already — `tool_queries.py`'s repeated `if ch is None:
 return []` guards and `_dedup_cte_ch(ctx)` calls are already using a shared
@@ -54,7 +74,7 @@ mechanical dedupe — left for a human call.
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
 |---|---|---|---|---|---|
-| 1 | pending | `pipeline/reports/overview.py` (1300L), `rankings.py` (733L), `forecast.py` (204L), `network.py` (113L), `filters.py` (128L) | Largest file in the repo; `rankings.py` has no dedicated test file; likely duplicated aggregation/rounding/filter-building across this "reports" family | Partial | Medium — feeds `agg_*`-backed report endpoints, not the live CH scan path |
+| 1 | done | `pipeline/reports/overview.py` (1300L), `rankings.py` (733L), `forecast.py` (204L), `network.py` (113L), `filters.py` (128L) | Largest file in the repo; `rankings.py` has no dedicated test file; likely duplicated aggregation/rounding/filter-building across this "reports" family | Partial → good | Medium — feeds `agg_*`-backed report endpoints, not the live CH scan path |
 | 2 | done | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
 | 3 | pending | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
 | 4 | pending | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
