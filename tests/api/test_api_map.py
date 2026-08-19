@@ -926,6 +926,54 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
 
 
 @pytest.mark.asyncio
+async def test_route_stop_profile_empty_when_no_data(map_client_ch):
+    """Characterization test (slice 3 refactor baseline): a fabricated/never-
+    observed route_code resolves to the empty response, mirroring
+    test_route_trips_empty_when_no_data. Added because this branch of
+    route_stop_profile had no direct test before this slice, despite sharing
+    the exact existence-precheck + bounded-probe logic route_trips already
+    covers."""
+    client, agency_id = map_client_ch
+    resp = await client.get(f"/api/{agency_id}/today/route/NOPE/stop-profile")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "stops": []}
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
+    """Characterization test (slice 3 refactor baseline): a route that exists
+    (has an agg_route_daily row) but whose only ClickHouse observations are
+    older than the 30-day bound anchored to the agency's own latest activity
+    must resolve to the empty response, mirroring
+    test_route_trips_excludes_stale_route_beyond_bound. Added because this
+    branch of route_stop_profile had no direct test before this slice."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
+            agency_id,
+        )
+        await _seed_route_existence(conn, agency_id, "R_STALE_SP")
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_STALE', 'R_STALE_SP', 1, 600, NOW() - INTERVAL '60 days', 'stale.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_STALE_SP/stop-profile")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "stops": []}
+
+
+@pytest.mark.asyncio
 async def test_route_stop_profile_drilldown(map_app_ch, ch_client):
     app, agency_id = map_app_ch
     pool = app.state.pool
