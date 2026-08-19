@@ -467,6 +467,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
+        # has_static branches the stop_name source: with static GTFS loaded,
+        # join static_stop_times/static_stops for the real name; without it,
+        # synthesize a numbered placeholder ("N番停留所") from stop_sequence
+        # alone, since there's no other source of stop names to key on.
         if has_static:
             sql = """
                 WITH deduped AS (SELECT * FROM _analyze_deduped)
