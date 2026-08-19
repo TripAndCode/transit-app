@@ -463,6 +463,24 @@ async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency_id):
+    """Two routes tied on total_late_min (agg_daily_trend fast path) must
+    rank by route_code, ascending — the fast path used to lack the
+    route_code tie-break its own slow path already had (see NOTES.md);
+    without it, Postgres's GROUP BY order for a tie is unspecified.
+    """
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TIE_B", "平日", 5.0, 2)  # total=10
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TIE_A", "平日", 5.0, 2)  # total=10, tied
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    codes = [r["route_code"] for r in out["concentration"]["top_routes"] if r["route_code"].startswith("R_TIE")]
+    assert codes == ["R_TIE_A", "R_TIE_B"]
+
+
+@pytest.mark.asyncio
 async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency_id):
     """Ranked by raw avg_min, not by _concentration()'s total-lateness-contribution
     metric — a route with few samples but a high average outranks a route
@@ -481,6 +499,24 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
     assert routes[0]["route_code"] == "R_HIGH"
     assert routes[0]["avg_min"] == pytest.approx(8.0, abs=0.05)
     assert routes[1]["route_code"] == "R_LOW"
+
+
+@pytest.mark.asyncio
+async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aagency_id):
+    """Two routes tied on weighted avg_min (agg_daily_trend fast path) must
+    rank by route_code, ascending — same fix as concentration's fast path
+    (see NOTES.md); each route here is a single-day row, so its weighted
+    average is just its own avg_min.
+    """
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 2)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 3)  # tied avg, diff samples
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    codes = [r["route_code"] for r in out["top_delayed"]["routes"] if r["route_code"].startswith("R_TDTIE")]
+    assert codes == ["R_TDTIE_A", "R_TDTIE_B"]
 
 
 @pytest.mark.asyncio

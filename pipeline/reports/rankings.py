@@ -131,6 +131,11 @@ async def compute_ranking(
             )
         )
     # avg_min is element 2; None never occurs (samples > 20), so plain sort.
+    # Two-pass stable sort: pre-sort by route_code (element 0) so ties on
+    # avg_min break deterministically in ascending route_code order
+    # regardless of `reverse` — same non-determinism this replaces as
+    # `_movers`/`_concentration` in overview.py (see NOTES.md).
+    out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
 
@@ -167,7 +172,7 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
         "FROM deduped_ranked\n"
         "GROUP BY route_code, service_type\n"
         "HAVING count(*) > 20\n"
-        f"ORDER BY avg_min {order}\n"
+        f"ORDER BY avg_min {order}, route_code\n"
         "LIMIT {rk_limit:UInt32}",
         parameters={"agency_id": agency_id, "rk_limit": limit, **ch_params},
     )
@@ -234,6 +239,10 @@ async def compute_on_time(
                 samples,
             )
         )
+    # Two-pass stable sort: route_code (element 0) tie-breaks ties on
+    # on_time_pct in ascending order regardless of `reverse` — see
+    # compute_ranking above / NOTES.md.
+    out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
 
@@ -258,7 +267,7 @@ async def _on_time_live(
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
         "HAVING count(*) > 20\n"
-        f"ORDER BY on_time_pct {order}\n"
+        f"ORDER BY on_time_pct {order}, route_code\n"
         "LIMIT {ot_limit:UInt32}",
         parameters={"agency_id": agency_id, "ot_threshold": threshold_sec, "ot_limit": limit, **ch_params},
     )
@@ -303,6 +312,9 @@ async def compute_worst_5min(
                 r["samples"],
             )
         )
+    # Two-pass stable sort: route_code (element 0) tie-breaks ties on
+    # late5_count in ascending order — see compute_ranking above / NOTES.md.
+    out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=True)
     return out[:limit]
 
@@ -319,7 +331,7 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int) 
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
         "HAVING sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0\n"
-        "ORDER BY late5_count DESC\n"
+        "ORDER BY late5_count DESC, route_code\n"
         "LIMIT {w5_limit:UInt32}",
         parameters={"agency_id": agency_id, "w5_limit": limit, **ch_params},
     )
@@ -372,7 +384,7 @@ async def compute_dow_ranking(
         f"WHERE agency_id = $1 AND {where}\n"
         "GROUP BY route_code, service_type\n"
         "HAVING SUM(samples) > 10\n"
-        "ORDER BY avg_min DESC NULLS LAST\n"
+        "ORDER BY avg_min DESC NULLS LAST, route_code\n"
         f"LIMIT ${n}"
     )
     rows = await conn.fetch(sql, agency_id, *params, limit)
@@ -390,7 +402,7 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
         "HAVING count(*) > 10\n"
-        "ORDER BY avg_min DESC\n"
+        "ORDER BY avg_min DESC, route_code\n"
         "LIMIT {dr_limit:UInt32}",
         parameters={"agency_id": agency_id, "dr_limit": limit, **ch_params},
     )
@@ -455,7 +467,7 @@ async def compute_compare_ranking(
         "       ROUND((we_avg - wd_avg)::numeric, 2) AS signed_delta\n"
         "FROM per_route\n"
         "WHERE wd_n > 10 AND we_n > 10\n"
-        "ORDER BY ABS(wd_avg - we_avg) DESC\n"
+        "ORDER BY ABS(wd_avg - we_avg) DESC, route_code\n"
         f"LIMIT ${n}"
     )
     rows = await conn.fetch(sql, agency_id, *params, limit)

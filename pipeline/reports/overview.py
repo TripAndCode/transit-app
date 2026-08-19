@@ -618,7 +618,7 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "ORDER BY total_late_min DESC NULLS LAST",
+            "ORDER BY total_late_min DESC NULLS LAST, route_code",
             agency_id,
             *params,
         )
@@ -686,7 +686,9 @@ async def _top_delayed_routes(
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
             "HAVING SUM(samples) > 0\n"
-            "ORDER BY avg_min DESC NULLS LAST",
+            # Ties broken by route_code, same as the slow path just below and
+            # as _concentration()'s fast path.
+            "ORDER BY avg_min DESC NULLS LAST, route_code",
             agency_id,
             *params,
         )
