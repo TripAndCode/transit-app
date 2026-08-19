@@ -698,9 +698,7 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     return bool(result.result_rows)
 
 
-async def _require_registered_route(
-    args: dict, conn, agency_id: int, locale: str, ch=None
-) -> Any | ToolResult:
+async def _require_registered_route(args: dict, conn, agency_id: int, locale: str, ch=None) -> Any | ToolResult:
     """Validate the common ``route`` arg shared by several handlers below.
 
     Returns the raw ``route`` value from ``args`` on success, or a
