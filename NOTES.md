@@ -87,6 +87,21 @@ a future pass doesn't have to re-derive the reasoning:
    handling... must not change in any way, even superficially." Left
    byte-identical rather than judgment-call it as "safe enough."
 
+   **Resolved** (user explicitly authorized fixing flagged items): the two
+   sequences differ only in the `provider` label passed to `record_event`
+   (`provider` variable in `callback()` vs. the literal `"local"` in
+   `local_login()`) — everything else (fields inserted, transaction scoping,
+   auth decision logic) is identical. Extracted into
+   `_mint_session_and_log_login(conn, uid, ua, ip, provider)`, called from
+   both sites inside their existing `conn.transaction()` blocks. Added
+   field-level characterization tests first (`test_login_event_and_session_fields_on_successful_callback`
+   in `tests/api/test_oauth_flow.py`, `test_login_event_and_session_fields_on_successful_login`
+   in `tests/api/test_local_admin.py`) asserting `user_id`/`actor_id`/`provider`/
+   `user_agent`/`meta` on the resulting `login_events` row and that the minted
+   `sid` matches the session cookie — both passed unchanged pre- and
+   post-refactor. Full auth suite (29 tests) + repo-wide `ruff check`/
+   `ruff format --check` + `mypy` all clean.
+
 2. `api/routers/conversations.py`: `followup_endpoint`'s ownership check
    (`_conv.get_conversation` wrapped in the same PermissionDenied/LookupError
    → 404 try/except consolidated elsewhere in this slice into

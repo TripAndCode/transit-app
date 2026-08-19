@@ -132,6 +132,35 @@ async def test_login_with_correct_credentials_sets_session_cookie(local_client, 
 
 
 @pytest.mark.asyncio
+async def test_login_event_and_session_fields_on_successful_login(local_client, aconn):
+    """Field-level characterization of the session-row-insert + login-event
+    sequence in local_login() (see NOTES.md's Slice 8 entry), pinned before
+    any dedupe with callback()'s identical sequence."""
+    await _seed(local_client)
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "root@local", "password": "correct-horse-battery-staple"},
+        headers={"user-agent": "test-ua"},
+    )
+    assert resp.status_code == 200
+    uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='root@local'")
+    row = await aconn.fetchrow(
+        "SELECT user_id, actor_id, kind, provider, user_agent, meta FROM login_events "
+        "WHERE user_id=$1 AND kind='login'",
+        uid,
+    )
+    assert row is not None
+    assert row["user_id"] == uid
+    assert row["actor_id"] == uid
+    assert row["provider"] == "local"
+    assert row["user_agent"] == "test-ua"
+    assert row["meta"] is None
+    sid = await aconn.fetchval("SELECT sid FROM sessions WHERE user_id=$1", uid)
+    assert sid is not None
+    assert f"sid={sid}" in resp.headers.get("set-cookie", "")
+
+
+@pytest.mark.asyncio
 async def test_login_with_wrong_password_is_rejected_and_audited(local_client, aconn):
     await _seed(local_client)
     resp = await local_client.post(
