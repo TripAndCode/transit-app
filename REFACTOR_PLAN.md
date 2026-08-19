@@ -170,6 +170,35 @@ tightly pinned. No `NOTES.md` addition — nothing bug-shaped found. Takeaway:
 delta" are both fine, honest outcomes for a high-risk slice — the goal is
 verified safety, not a LOC count going down.
 
+**Slice 7** (frontend: `ThreadSidebar.tsx`, `RouteForecastSection.tsx`,
+`api/hooks.ts`): first non-backend slice, so it followed CLAUDE.md's frontend
+rules instead (no `useMemo`/`useCallback`/`React.memo` additions, i18n key
+parity, no new hardcoded strings) rather than the DB/diff-harness pattern —
+verification here is the five `frontend/` checks (`typecheck`, `test`,
+`lint`, `lint:i18n`, `lint:i18n-strings`), not a golden-fixture harness.
+`api/hooks.ts` turned out to have nothing worth touching: its repeated
+`const authed = useIsAuthenticated()` lines across five conversation hooks
+look like duplication but aren't safely extractable without either violating
+rules-of-hooks or adding a pointless one-line wrapper hook — left alone.
+`ThreadSidebar.tsx` had a real, confirmed duplication: its "Pinned" section
+was a near-identical copy of each `groups.map()` item (same header + list
+markup), differing only in an emoji prefix — folded into the `groups` array
+as its first entry with an optional `emoji` field. Net -22 lines. Had no
+dedicated test file (per the initial survey), so a characterization test was
+written first, covering empty/loading states and confirming the Pinned
+section renders before the date groups with its emoji-prefixed header — all
+passed unchanged pre- and post-refactor. `RouteForecastSection.tsx` (already
+covered by an existing `.test.tsx`) had a real, confirmed 3x-repeated
+"filter to populated cells, then compute min/max (max floored at 1, min at 0
+when empty)" pattern across `AgencyLanding`, `RouteDetail`'s per-hour cells,
+and `RouteDetail`'s band-collapsed grid — extracted into `populatedRange()`.
+No `NOTES.md` addition — nothing bug-shaped found. Takeaway: the same
+"verify duplication is real before touching it" discipline applies across
+stacks, not just the backend — but the specific things worth checking
+(rules-of-hooks safety, i18n key parity, avoiding new memoization) are
+frontend-specific and worth a fresh read of CLAUDE.md's frontend section
+before starting, not an assumption that backend lessons transfer directly.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
@@ -180,7 +209,7 @@ verified safety, not a LOC count going down.
 | 4 | done | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good → good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
 | 5 | done | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good → good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
 | 6 | done | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good → good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
-| 7 | pending | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
+| 7 | done | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak → good (ThreadSidebar) | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
 | 8 | pending | `api/routers/auth.py` (513L), `conversations.py` (570L) | Next tier of large routers after `map.py` | Good | Medium — auth-adjacent, be conservative |
 
 Order is priority (complexity × duplication × value, discounted by risk).
