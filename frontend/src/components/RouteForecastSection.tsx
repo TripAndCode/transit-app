@@ -317,6 +317,16 @@ function Card({ title, sublabel, action, testid, onOpen, children }: {
   );
 }
 
+/** Filter to cells with a value, plus the min/max of those values (max floored at 1, min at 0 when empty). */
+function populatedRange<T extends { expected_avg_min: number | null }>(
+  cells: T[],
+): { populated: T[]; min: number; max: number } {
+  const populated = cells.filter((c) => c.expected_avg_min != null);
+  const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
+  const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
+  return { populated, min, max };
+}
+
 /** Collapse a per-route 7×24 heatmap into a 7×5 band grid (sample-weighted). */
 function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell[] {
   const acc = new Map<string, { sum: number; n: number }>();
@@ -456,12 +466,10 @@ function AgencyLanding({
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
   if (!data) return null;
 
-  const populated = data.grid.filter((c) => c.expected_avg_min != null);
+  const { populated, min, max } = populatedRange(data.grid);
   if (populated.length === 0 && data.routes.length === 0) {
     return <p style={{ color: "var(--text-secondary)" }}>{noData}</p>;
   }
-  const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
-  const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
   const colorFor = (v: number) => relativeDelayColor(v, min, max);
 
   return (
@@ -523,9 +531,7 @@ function RouteDetail({
   const { data, isPending, error, refetch } = useForecastHeatmap(aid, route);
   const cells = data?.cells ?? [];
 
-  const populated = cells.filter((c) => c.expected_avg_min != null);
-  const max = Math.max(...populated.map((c) => c.expected_avg_min as number), 1);
-  const min = populated.length ? Math.min(...populated.map((c) => c.expected_avg_min as number)) : 0;
+  const { populated, min, max } = populatedRange(cells);
   const totalN = populated.reduce((a, c) => a + c.samples, 0);
   const mean = totalN ? populated.reduce((a, c) => a + (c.expected_avg_min as number) * c.samples, 0) / totalN : 0;
   const allNull = data != null && populated.length === 0;
@@ -535,9 +541,7 @@ function RouteDetail({
   // cell the user sees below it — not a single spiky hour. Its colour ramp is
   // anchored to the band grid's own range.
   const bandGrid = collapseToBands(cells);
-  const bandPop = bandGrid.filter((c) => c.expected_avg_min != null);
-  const bandMax = Math.max(...bandPop.map((c) => c.expected_avg_min as number), 1);
-  const bandMin = bandPop.length ? Math.min(...bandPop.map((c) => c.expected_avg_min as number)) : 0;
+  const { populated: bandPop, min: bandMin, max: bandMax } = populatedRange(bandGrid);
   const bandColorFor = (v: number) => relativeDelayColor(v, bandMin, bandMax);
   const worstBand = bandPop
     .filter((c) => !c.low_confidence)
