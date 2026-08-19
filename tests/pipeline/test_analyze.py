@@ -81,6 +81,59 @@ def test_analyze_creates_agg_route_dow(pg_conn, agency_id, ch_client):
     assert len(dows) > 0
 
 
+def test_analyze_creates_agg_route_hour_dow(pg_conn, agency_id, ch_client):
+    """Characterization: analyze() derives agg_route_hour_dow (dow × scheduled
+    hour) from raw `updates`, not just via direct test-fixture inserts (the
+    only prior exercise of this table, in test_forecast_heatmap.py)."""
+    _seed_updates(pg_conn, agency_id)  # every row scheduled at 11:37 → hour 11
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT hour FROM agg_route_hour_dow WHERE agency_id = %s",
+            (agency_id,),
+        )
+        hours = {r[0] for r in cur.fetchall()}
+        cur.execute(
+            "SELECT DISTINCT dow FROM agg_route_hour_dow WHERE agency_id = %s",
+            (agency_id,),
+        )
+        dows = {r[0] for r in cur.fetchall()}
+        cur.execute(
+            "SELECT bool_and(samples > 0 AND avg_min IS NOT NULL) FROM agg_route_hour_dow WHERE agency_id = %s",
+            (agency_id,),
+        )
+        well_formed = cur.fetchone()[0]
+    assert hours == {11}
+    assert dows <= {1, 2, 3, 4, 5, 6, 7}
+    assert len(dows) > 0
+    assert well_formed
+
+
+def test_analyze_creates_agg_route_daily(pg_conn, agency_id, ch_client):
+    """Characterization: analyze() derives agg_route_daily (per-route,
+    per-day summary powering the fast today/route-summary path) from raw
+    `updates`, not just via direct test-fixture inserts (the only prior
+    exercise of this table, in test_overview.py)."""
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, service_type, avg_delay_sec, worst_delay_sec, trips_observed, samples, "
+            "last_seen_at FROM agg_route_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+    assert len(rows) > 0
+    for route_code, service_type, avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at in rows:
+        assert route_code == "44372"
+        assert service_type == "平日"
+        assert avg_delay_sec is not None
+        assert worst_delay_sec is not None
+        assert trips_observed > 0
+        assert samples > 0
+        assert last_seen_at is not None
+
+
 def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)

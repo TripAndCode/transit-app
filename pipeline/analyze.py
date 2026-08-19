@@ -108,6 +108,17 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
         psycopg2.extras.execute_batch(cur, sql, rows)
 
 
+def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> None:
+    """Run *sql*, insert the result into *table*, and log the row count.
+
+    Shared by the query/dedup/rank-style aggregate builders below, which all
+    follow the same run-then-insert-then-log shape.
+    """
+    rows = _run_query(sql, p, conn)
+    _insert_agg(table, col_names, rows, conn)
+    logger.info(f"  {table}: {len(rows)} rows")
+
+
 def analyze(agency_id: int, conn, ch_client) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
@@ -221,8 +232,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             HAVING COUNT(*) > 20
             ORDER BY avg_min DESC
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_stats",
             [
                 "agency_id",
@@ -236,10 +247,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "late5_pct",
                 "samples",
             ],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_stats: {len(rows)} rows")
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
@@ -260,14 +270,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY route_code, service_type, scheduled_time
             ORDER BY route_code, scheduled_time
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_hour",
             ["agency_id", "route_code", "service_type", "scheduled_time", "avg_min", "p50_min", "p90_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_hour: {len(rows)} rows")
 
         # ── agg_route_dow ────────────────────────────────────────────────
         sql = """
@@ -282,14 +291,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
             ORDER BY route_code
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_dow",
             ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_dow: {len(rows)} rows")
 
         # ── agg_route_hour_dow ───────────────────────────────────────────
         # Per route × service × day-of-week × hour, for the Forecast heatmap.
@@ -313,14 +321,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                      EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
             ORDER BY route_code
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_hour_dow",
             ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_hour_dow: {len(rows)} rows")
 
         # ── agg_daily_trend ──────────────────────────────────────────────
         # UNTYPED dedup so NULL-service routes (e.g. 広島's unmatched rows) are
@@ -342,14 +349,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_daily_trend",
             ["agency_id", "date", "route_code", "service_type", "avg_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_daily_trend: {len(rows)} rows")
 
         # ── agg_route_daily (per-route, per-day; powers the fast today/route-summary) ──
         # Mirrors the route-summary endpoint's aggregation but precomputed for
@@ -370,8 +376,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_daily",
             [
                 "agency_id",
@@ -384,10 +390,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "samples",
                 "last_seen_at",
             ],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_daily: {len(rows)} rows")
 
         # ── agg_route_daily_dist (per-day delay distribution for reports) ──
         # Exact scalars (sum/count, threshold counts) + a fixed-width delay
@@ -416,8 +421,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY date, route_code, service_type
             ORDER BY date, route_code
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_route_daily_dist",
             [
                 "agency_id",
@@ -430,10 +435,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "late5_count",
                 "hist",
             ],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_route_daily_dist: {len(rows)} rows")
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
         # Powers Overview's peak-hour-by-DOW (its ~96% cold cost). UNTYPED dedup
@@ -454,14 +458,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
             ORDER BY date, hour
         """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_hour_daily",
             ["agency_id", "date", "hour", "avg_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_hour_daily: {len(rows)} rows")
 
         # ── agg_stop_seq ─────────────────────────────────────────────────
         if has_static:
@@ -502,14 +505,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 HAVING COUNT(*) > 5
                 ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) DESC
             """
-        rows = _run_query(sql, p, conn)
-        _insert_agg(
+        _build_and_insert(
+            sql,
             "agg_stop_seq",
             ["agency_id", "route_code", "stop_sequence", "stop_name", "avg_min", "samples"],
-            rows,
+            p,
             conn,
         )
-        logger.info(f"  agg_stop_seq: {len(rows)} rows")
 
         # ── agg_feed_health (per-day data-quality signal) ────────────────
         # Per-day raw observation count and how many were implausible (frozen/

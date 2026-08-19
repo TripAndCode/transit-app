@@ -115,6 +115,33 @@ already clean (router.py, llm_client.py) while a sibling file in the same
 slice has a real, large win (chat.py) — read each file independently rather
 than extrapolating from one file's result to its neighbors.
 
+**Slice 5** (`pipeline/analyze.py`): the highest-risk slice yet — feeds every
+`agg_*` table the default (unfiltered) read path serves from — so verification
+leaned harder than prior slices: a new golden-fixture diff harness
+(`scripts/dev/diff_analyze_slice5.py`) snapshots all 13 `agg_*` tables'
+contents and byte/value-compares them against a saved baseline, on top of the
+existing + 2 new characterization tests. The file itself is exceptionally
+well-documented (dense inline comments justifying every non-obvious choice —
+streaming over buffering, JST-not-UTC timestamp fixes, NULL-service
+sentinels) and none of that was touched. The one real, safe win: 9 of the
+aggregate builders (route_stats, route_hour, route_dow, route_hour_dow,
+daily_trend, route_daily, route_daily_dist, hour_daily, stop_seq) repeated an
+identical run-query → bulk-insert → log-row-count 3-statement sequence,
+verbatim — extracted into `_build_and_insert()`. The three `has_static`-gated
+builders (stop_daily, stop_routes, route_stop_daily) use a structurally
+different INSERT...SELECT pattern and were correctly left alone. Two real
+coverage gaps closed first: `agg_route_hour_dow` and `agg_route_daily` were
+only ever exercised via direct test-fixture INSERTs in *other* test files
+(test_forecast_heatmap.py, test_overview.py), never through analyze()'s own
+SQL derivation — added direct characterization tests for both. No `NOTES.md`
+addition — nothing bug-shaped surfaced on a close read. Takeaway: the
+highest-risk slices in this codebase are also often the most carefully
+already-written ones (dense comments = prior authors already fought these
+exact correctness battles) — the mechanical, boilerplate-only wins are still
+there, but they're narrower than in a less-hardened codebase, and extra
+verification rigor (a real golden-fixture harness, not just existing tests)
+is worth the added effort when the blast radius is this large.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
@@ -123,7 +150,7 @@ than extrapolating from one file's result to its neighbors.
 | 2 | done | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
 | 3 | done | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good → good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
 | 4 | done | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good → good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
-| 5 | pending | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
+| 5 | done | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good → good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
 | 6 | pending | `pipeline/ingest.py` (473L) | GTFS-RT ingest entry point | Good | High — touches raw `updates` ingestion; recent perf work here (#184), check for overlap |
 | 7 | pending | Frontend: `ThreadSidebar.tsx` (591L), `RouteForecastSection.tsx` (649L), `api/hooks.ts` (547L) | Largest frontend files; `hooks.ts` and `ThreadSidebar` have no dedicated test file | Partial/weak | Low — pure frontend, no DB; must preserve i18n key parity and React Compiler purity rules |
 | 8 | pending | `api/routers/auth.py` (513L), `conversations.py` (570L) | Next tier of large routers after `map.py` | Good | Medium — auth-adjacent, be conservative |
