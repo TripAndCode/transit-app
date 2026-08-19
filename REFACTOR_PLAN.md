@@ -49,12 +49,33 @@ remaining slices: verify duplication claims by reading the code before
 assuming a large simplification opportunity — this codebase already got a
 real perf/complexity pass in PRs #75-79 and #184.
 
+**Slice 2** (`pipeline/query/tools.py` + `tool_queries.py` + `meta_tools.py`):
+mostly well-factored already — `tool_queries.py`'s repeated `if ch is None:
+return []` guards and `_dedup_cte_ch(ctx)` calls are already using a shared
+helper, not duplication. The one real, safe win: `route_stats`,
+`segment_hotspots`, `time_pattern`, `schedule_realism`, and `trend_shift` in
+`tools.py` each repeated an identical "route missing → route_arg_required" +
+"route not registered → route_not_registered" guard (5 copies) — extracted
+into `_require_registered_route`. Net -5 lines. One coverage gap found and
+fixed: none of the five handlers' missing-route-arg branch had a direct
+test — added `test_dispatch_missing_route_arg_returns_empty` (parametrized)
++ an en-locale variant before refactoring.
+
+Also observed (not touched — flagged in `NOTES.md` as an architecture
+question, not a bug): `meta_tools.py` has its own `_summary(text_jp,
+text_en, locale)` helper, structurally different from `tools.py`'s
+`_summary(template, lang, **vars)` central-table-lookup design. Two
+different localization patterns coexist in the same tool-calling family.
+Consolidating them is a real design decision (which pattern becomes
+canonical, and it touches every `meta_tools.py` call site), not a
+mechanical dedupe — left for a human call.
+
 ## Slices
 
 | # | Status | Slice (files) | Why | Coverage now | Risk |
 |---|---|---|---|---|---|
 | 1 | done | `pipeline/reports/overview.py` (1300L), `rankings.py` (733L), `forecast.py` (204L), `network.py` (113L), `filters.py` (128L) | Largest file in the repo; `rankings.py` has no dedicated test file; likely duplicated aggregation/rounding/filter-building across this "reports" family | Partial → good | Medium — feeds `agg_*`-backed report endpoints, not the live CH scan path |
-| 2 | pending | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
+| 2 | done | `pipeline/query/tools.py` (1166L), `tool_queries.py` (352L), `meta_tools.py` (667L) | Core of Ask-tab stage-3 tool-calling surface; likely overlapping SQL-building/formatting helpers | Good | Medium — `_LOCALES` strings (ja/en) are pinned exactly; diff harness must check them byte-for-byte |
 | 3 | pending | `api/routers/map.py` (1151L, ~2x the next-largest router) | Single file doing far more than its peers; route/shape/heatmap endpoints likely share extractable helpers | Good | Medium — touches the live ClickHouse scan path for `time_band`-filtered requests |
 | 4 | pending | `pipeline/query/chat.py` (817L), `router.py` (376L), `llm_client.py` (293L) | 3-stage Ask router (rules → e5-small NN → RAG+LLM); natural seams already exist per stage | Good | Higher — must preserve kill-switch/env-gate behavior exactly; no live LLM calls in tests |
 | 5 | pending | `pipeline/analyze.py` (704L) | Core `agg_*` aggregation logic; likely repeated per-agency loop patterns | Good | High — feeds every default (unfiltered) read path; output drift breaks every downstream report |
