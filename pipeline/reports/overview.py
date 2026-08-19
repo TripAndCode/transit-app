@@ -50,17 +50,14 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable, Iterator
 
 from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _time_band_sql_on
+from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
 
 _log = logging.getLogger(__name__)
-
-_MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
 
 # How many days before ``ctx.from_date`` the shared grain has to reach.
 # ``compute_overview_summary`` builds its two comparison windows inline as
@@ -70,15 +67,6 @@ _MIN = Decimal("0.01")  # 2-dp minutes, matching the live ROUND(..., 2)
 # worst case rather than a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
-
-
-def _round2(x: float) -> Decimal:
-    """Round an already-in-minutes float to 2 dp, half-up — matches Postgres
-    ``ROUND(x::numeric, 2)``. Used to round ClickHouse live-path results in
-    Python instead of ClickHouse's own ``round()`` (round-half-to-even),
-    which would otherwise diverge from the agg fast path at exact .5
-    boundaries for the same metric. Mirrors pipeline.reports.rankings._round2."""
-    return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 # ---------------------------------------------------------------------------

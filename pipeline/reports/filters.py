@@ -2,8 +2,24 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from api.range import RangeCtx, build_agg_daily_trend_filter, build_updates_filter_ch, dow_clause
 from pipeline.db import build_dedup_ch_sql
+
+# 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
+# submodule that reconciles ClickHouse's round-half-to-even live path against
+# Postgres's round-half-up agg path (overview.py, rankings.py).
+_MIN = Decimal("0.01")
+
+
+def _round2(x: float) -> Decimal:
+    """Round an already-in-minutes float to 2 dp, half-up — matches Postgres
+    ``ROUND(x::numeric, 2)``. Used to round ClickHouse live-path results in
+    Python instead of ClickHouse's own ``round()`` (round-half-to-even),
+    which would otherwise diverge from the agg fast path at exact .5
+    boundaries for the same metric."""
+    return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
 def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
