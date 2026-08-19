@@ -720,6 +720,8 @@ async def compute_trend_series(
 
     days = []
     for r in daily:
+        # None (no data) sorts last; among real values, worst delay first.
+        # No route_code tie-break on equal avg_min — see NOTES.md.
         offenders = sorted(
             by_date.get(r["date"], []),
             key=lambda x: (x["avg_min"] is None, -(x["avg_min"] or 0)),

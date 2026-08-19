@@ -109,5 +109,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "data_to": data_to,
             }
         )
+    # None (no data yet) sorts last; among real values, worst delay first.
+    # No route_code-style tie-break on equal avg_delay_min — see NOTES.md.
     rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
     return rows
