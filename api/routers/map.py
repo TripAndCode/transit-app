@@ -473,6 +473,10 @@ async def route_shape(
         )
     static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
 
+    # Local, not the module-level `_round_half_up_int` above: this endpoint's
+    # `avg_min` is minutes to 2 decimal places (matches rankings.py's avg_min
+    # display contract), not whole seconds, so it needs its own half-up
+    # rounding at a different quantize scale.
     def _round2(x) -> float:
         return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
