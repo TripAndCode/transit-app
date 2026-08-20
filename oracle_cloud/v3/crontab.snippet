@@ -2,5 +2,6 @@
 CRON_TZ=Asia/Tokyo
 0  9 * * *  nice -n 10 /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
 5  9 * * *  nice -n 10 /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
-# ENABLE ONLY after workstation mirror parity verified (MIGRATION.md step 7):
-#30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1
+# Enabled in production (see MIGRATION.md step 7) — the workstation mirror
+# (this repo's `make fetch` + `make sync-r2`) is the parity check this waited on.
+30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1

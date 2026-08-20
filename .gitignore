@@ -9,6 +9,7 @@ gtfs.db
 raw_archives/
 raw_archives_static/
 .env
+.cloudflare_api.txt
 # Claude Code — commit shared tools, ignore personal/runtime/docs
 .claude/*
 !.claude/commands/

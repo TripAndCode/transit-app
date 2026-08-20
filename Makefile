@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down
 
 # Default target — first-run setup.
 all: bootstrap
@@ -147,6 +147,11 @@ fetch:
 
 fetch-ingest:
 	bash scripts/fetch_and_ingest.sh
+
+# Mirror local raw_archives/raw_archives_static to Cloudflare R2 (see .env's
+# OBJECT_STORE_* vars). Run after `make fetch`.
+sync-r2:
+	bash scripts/sync_archives_to_r2.sh
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
