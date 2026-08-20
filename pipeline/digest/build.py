@@ -182,6 +182,11 @@ def build_digest(conn, target_day: date) -> DigestData:
                         low_confidence=low_conf,
                     )
                 )
+        # Two-pass stable sort: pre-sort by route_code so ties on deviation_min
+        # break deterministically in ascending route_code order regardless of
+        # `reverse` — same non-determinism class fixed for the reports family
+        # in PR #196 (see NOTES.md).
+        movers.sort(key=lambda m: m.route_code)
         movers.sort(key=lambda m: m.deviation_min, reverse=True)
 
         avg_min = round((delay_w / samples_sum) / 60, 1) if samples_sum else None
