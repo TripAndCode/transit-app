@@ -195,3 +195,18 @@ practice (Postgres's scan order for a small per-agency table may be
 incidentally stable), but not a guaranteed contract either, same caveat PR
 #196 documented for its own regression tests. Worth the same deliberate
 decision on whether to extend the `route_code` tie-break here.
+
+**Resolved** (user explicitly authorized fixing flagged items): applied the
+same two-pass stable-sort tie-break as PR #196 — pre-sort `movers` by
+`route_code` ascending, then sort by `deviation_min` descending, so ties
+resolve deterministically regardless of insertion order. Added
+`test_movers_tie_break_is_deterministic` (`tests/pipeline/test_digest_build.py`)
+seeding two routes ("9" inserted before "1") with identical `avg_delay_sec`/
+baseline stats and asserting the resulting movers come back in `route_code`
+ascending order. Same caveat as PR #196's own tests: this test still passes
+even without the fix, since this repo's Postgres scan order for a small
+per-agency table already happens to return route_code-ascending order
+incidentally — so it pins the guaranteed contract going forward rather than
+empirically reproducing the original non-determinism. Full
+`tests/pipeline/test_digest_build.py` suite (14 tests) passes; `ruff check`/
+`ruff format --check` clean repo-wide; `mypy pipeline/digest/` clean.
