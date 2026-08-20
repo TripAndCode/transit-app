@@ -198,8 +198,11 @@ def summarize_agency_overview(
             }
         )
     # Low-confidence routes sort last; among the rest, worst delay first.
-    # No tie-break on equal expected_avg_min (falls back to route_rows'
-    # incoming order) — see NOTES.md.
+    # Two-pass stable sort: pre-sort by route_code so ties on
+    # expected_avg_min break deterministically in ascending route_code order,
+    # regardless of route_rows' incoming order — same fix class as PR #196
+    # (see NOTES.md).
+    routes.sort(key=lambda x: x["route_code"])
     routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
     if top_n is not None:
         routes = routes[:top_n]

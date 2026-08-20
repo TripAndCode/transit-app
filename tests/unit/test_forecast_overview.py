@@ -55,6 +55,24 @@ def test_routes_ranked_desc_low_conf_last_and_capped():
     assert out["routes"][0]["low_confidence"] is False
 
 
+def test_routes_tie_break_by_route_code_regardless_of_input_order():
+    """Two routes tied on expected_avg_min must rank by route_code, ascending
+    — deterministic regardless of route_rows' incoming order. See NOTES.md's
+    "same unguarded-tie shape, three more sites" entry (fix extends PR #196's
+    tie-break convention here).
+    """
+    route_rows = [
+        {"route_code": "R_Z", "route_name": "Zulu", "avg_min": 5.0, "samples": 100},
+        {"route_code": "R_A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
+    ]
+    out = summarize_agency_overview([], route_rows)
+    assert [r["route_code"] for r in out["routes"]] == ["R_A", "R_Z"]
+
+    # Reversed input order must yield the same output order.
+    out_reversed = summarize_agency_overview([], list(reversed(route_rows)))
+    assert [r["route_code"] for r in out_reversed["routes"]] == ["R_A", "R_Z"]
+
+
 def test_hourly_cells_to_dow_band_pools_by_derived_dow():
     # 2026-05-19 is a Tuesday (dow=2), 2026-05-20 is a Wednesday (dow=3).
     hourly = [
