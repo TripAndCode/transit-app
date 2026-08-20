@@ -708,3 +708,38 @@ async def test_compute_trend_series_live_path_without_ch_raises(aconn, aagency_i
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
     with pytest.raises(RuntimeError, match="ClickHouse client"):
         await compute_trend_series(aagency_id, ctx, aconn, ch=None)
+
+
+@pytest.mark.asyncio
+async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aconn, aagency_id):
+    """Two routes tied on avg_min within the same bucket (agg_daily_trend
+    fast path) must rank in top_offenders by route_code, ascending —
+    `per_day` comes from a GROUP BY with no ordering guarantee. Extends
+    PR #196's tie-break convention (see NOTES.md).
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    day = date(2026, 5, 18)
+    for route_code in ("R_TR_Z", "R_TR_A"):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples) "
+            "VALUES ($1, $2, $3, $4, $5, $6) "
+            "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
+            "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+            aagency_id,
+            day.isoformat(),
+            route_code,
+            "平日",
+            5.0,
+            10,
+        )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    out = await compute_trend_series(aagency_id, ctx, aconn, top_offenders=2)
+    offenders = out["days"][0]["top_offenders"]
+    codes = [o["route_code"] for o in offenders if o["route_code"].startswith("R_TR_")]
+    assert codes == ["R_TR_A", "R_TR_Z"]

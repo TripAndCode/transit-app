@@ -73,6 +73,36 @@ so collision odds are low; forecast/trend are both display-truncated lists
 where a tied-route swap is cosmetic), but the same "is this intentional or
 an oversight" question applies. Not fixed here — flagged only.
 
+**Resolved** (user explicitly authorized fixing flagged items) — investigated
+each of the 3 individually rather than applying the same patch mechanically:
+
+- `network.py::compute_network_summary`: **not actually a bug.** `rows` is
+  built 1:1 from `agencies`, which is fetched via
+  `ORDER BY agency_id`, and Python's `list.sort()` is stable — so ties on
+  `avg_delay_min` already resolve to ascending `agency_id` order
+  deterministically, with no GROUP BY-style non-determinism in the path.
+  Left the code unchanged; corrected the misleading comment to explain why
+  this one doesn't need (and wouldn't benefit from) an explicit tie-break.
+- `forecast.py::summarize_agency_overview`: genuine gap — `route_rows`
+  comes from the caller with no ordering guarantee. Fixed with the same
+  two-pass stable-sort convention as PR #196 (pre-sort by `route_code`,
+  then the existing sort). Added
+  `test_routes_tie_break_by_route_code_regardless_of_input_order` in
+  `tests/unit/test_forecast_overview.py` — this one's a pure function with
+  no DB involved, so the test empirically proves the fix (reversed input
+  order yields identical output), unlike PR #196's DB-backed tests which
+  could only pin the contract going forward.
+- `rankings.py::compute_trend_series`: genuine gap — `per_day` comes from a
+  GROUP BY with no ORDER BY. Fixed the same way (pre-sort by `route_code`
+  before the existing `top_offenders` sort). Added
+  `test_compute_trend_series_top_offenders_tie_break_is_deterministic` in
+  `tests/api/test_reports.py`.
+
+All of `tests/unit/test_forecast_overview.py` (13) and `tests/api/test_reports.py`
+(31) pass, plus `tests/api/test_network.py`/`tests/pipeline/test_health.py`
+(10, confirming the network.py comment-only change is harmless). `ruff
+check`/`ruff format --check` clean repo-wide, `mypy pipeline/reports/` clean.
+
 ## Slice 2 — `pipeline/query/tools.py` / `tool_queries.py` / `meta_tools.py`
 
 ### Ambiguous — needs human decision: two coexisting localization patterns

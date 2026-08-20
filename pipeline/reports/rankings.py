@@ -721,9 +721,12 @@ async def compute_trend_series(
     days = []
     for r in daily:
         # None (no data) sorts last; among real values, worst delay first.
-        # No route_code tie-break on equal avg_min — see NOTES.md.
+        # Two-pass stable sort: pre-sort by route_code so ties on avg_min
+        # break deterministically in ascending route_code order — `per_day`
+        # comes from a GROUP BY with no ordering guarantee, same fix class
+        # as PR #196 (see NOTES.md).
         offenders = sorted(
-            by_date.get(r["date"], []),
+            sorted(by_date.get(r["date"], []), key=lambda x: x["route_code"]),
             key=lambda x: (x["avg_min"] is None, -(x["avg_min"] or 0)),
         )[:top_offenders]
         days.append(
