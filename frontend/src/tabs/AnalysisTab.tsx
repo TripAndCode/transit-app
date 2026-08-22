@@ -8,6 +8,7 @@ import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
+import { InsightPanel } from "../components/InsightPanel";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
@@ -235,6 +236,7 @@ export function AnalysisTab() {
           </div>
         )}
       </div>
+      <InsightPanel />
       </div>
     </div>
   );
