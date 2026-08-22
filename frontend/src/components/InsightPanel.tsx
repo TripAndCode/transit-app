@@ -35,21 +35,34 @@ function writeCollapsed(collapsed: boolean): void {
 }
 
 /** Session-only "already shown" pathway keys, so a route/reason the user
- *  already navigated to from this panel isn't repeated this session. */
-function readSeen(): string[] {
+ *  already navigated to from this panel isn't repeated this session.
+ *  Namespaced per agency -- paired with `key={agencyId}` at the mount site
+ *  in AnalysisTab.tsx so switching agencies both remounts this component
+ *  (fresh `seen` state) and reads/writes a different storage key, instead
+ *  of one agency's dismissed suggestion silently suppressing a same-numbered
+ *  route on another agency for the rest of the browser session. */
+function seenStorageKey(agencyId: number): string {
+  return `${SEEN_KEY}.${agencyId}`;
+}
+
+function readSeen(agencyId: number): string[] {
   try {
-    const raw = sessionStorage.getItem(SEEN_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = sessionStorage.getItem(seenStorageKey(agencyId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    // Guard the parse result's shape, not just catch JSON syntax errors --
+    // valid-but-wrong-shaped JSON (e.g. "{}") parses without throwing, and
+    // a non-array here would crash `exclude.join(",")` in useSuggestion.
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function addSeen(key: string): void {
+function addSeen(agencyId: number, key: string): void {
   try {
-    const seen = readSeen();
+    const seen = readSeen(agencyId);
     if (!seen.includes(key)) {
-      sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen, key]));
+      sessionStorage.setItem(seenStorageKey(agencyId), JSON.stringify([...seen, key]));
     }
   } catch {
     /* ignore */
@@ -62,7 +75,7 @@ export function InsightPanel() {
   const id = agencyId ? Number(agencyId) : null;
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const [seen, setSeen] = useState(readSeen);
+  const [seen, setSeen] = useState<string[]>(() => (id != null ? readSeen(id) : []));
 
   const enabled = readEnabled();
   const suggestion = useSuggestion(enabled ? id : null, seen);
@@ -79,8 +92,8 @@ export function InsightPanel() {
     const data = suggestion.data;
     if (!data || id == null) return;
     const key = `${data.report_type}:${data.route_code}`;
-    addSeen(key);
-    setSeen(readSeen());
+    addSeen(id, key);
+    setSeen(readSeen(id));
     // Pin from/to to the window this suggestion actually evaluated (rather
     // than the user's ambient Analysis tab filter, e.g. useRangeContext's
     // 30-day default) so the click-through lands exactly where the reason

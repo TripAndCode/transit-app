@@ -236,7 +236,11 @@ export function AnalysisTab() {
           </div>
         )}
       </div>
-      <InsightPanel />
+      {/* key={id} forces a remount on agency switch -- InsightPanel's `seen`
+          state is seeded once from sessionStorage per mount; without this,
+          switching agencies would keep the previous agency's exclude set
+          in React state even though its sessionStorage key is now separate. */}
+      <InsightPanel key={id} />
       </div>
     </div>
   );

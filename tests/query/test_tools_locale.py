@@ -47,6 +47,42 @@ def test_summary_interpolates_vars():
     assert out == "Delay ranking, top 10 routes"
 
 
+def test_summary_suggest_reason_anomaly_exact_strings():
+    """Insight Panel reason text is pinned exactly in both locales -- a
+    substring check (e.g. `"0%" in text`) would miss a wording regression
+    or the ja/en templates drifting out of sync in content."""
+    assert (
+        _summary("suggest_reason_anomaly", lang="ja", route="16012", avg_min="6.5")
+        == "路線16012の本日の平均遅延が普段より大幅に悪化しています（平均6.5分）。"
+    )
+    assert (
+        _summary("suggest_reason_anomaly", lang="en", route="16012", avg_min="6.5")
+        == "Route 16012's average delay today is much worse than usual (avg 6.5 min)."
+    )
+
+
+def test_summary_suggest_reason_trend_shift_exact_strings():
+    assert (
+        _summary("suggest_reason_trend_shift", lang="ja", route="R2", delta_min="+4.0")
+        == "路線R2の遅延が今週の途中から悪化しています（+4.0分の変化）。"
+    )
+    assert (
+        _summary("suggest_reason_trend_shift", lang="en", route="R2", delta_min="+4.0")
+        == "Route R2's delay pattern shifted partway through this week (+4.0 min change)."
+    )
+
+
+def test_summary_suggest_reason_on_time_fallback_exact_strings():
+    assert (
+        _summary("suggest_reason_on_time_fallback", lang="ja", route="R4", pct="21")
+        == "路線R4が今週最も定時率が低い路線です（定時率21%）。"
+    )
+    assert (
+        _summary("suggest_reason_on_time_fallback", lang="en", route="R4", pct="21")
+        == "Route R4 has the worst on-time rate this week (21% on time)."
+    )
+
+
 def test_dispatch_unknown_tool_returns_en_message():
     """The dispatcher's bottom-of-the-funnel error is locale-aware too."""
     result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1, locale="en"))

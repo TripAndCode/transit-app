@@ -61,7 +61,8 @@ describe("InsightPanel", () => {
     expect(screen.getByText("Route R1 is anomalous")).toBeTruthy();
     fireEvent.click(screen.getByText("View"));
     // sessionStorage now records this pathway as shown, per the dedup design.
-    expect(sessionStorage.getItem("transit.insightPanelSeen")).toContain("trend:R1");
+    // Keyed per-agency (agencyId=1 here) -- see seenStorageKey in InsightPanel.tsx.
+    expect(sessionStorage.getItem("transit.insightPanelSeen.1")).toContain("trend:R1");
     // The updated "seen" set must flow into the next useSuggestion call too
     // (not just get written to sessionStorage), otherwise the next poll
     // would re-suggest the just-shown route.
@@ -89,6 +90,35 @@ describe("InsightPanel", () => {
     renderPanel();
     expect(screen.getByText("Couldn't load insight right now.")).toBeTruthy();
     expect(screen.queryByText("No notable signal right now.")).toBeNull();
+  });
+
+  it("does not crash when sessionStorage holds valid-but-wrong-shaped JSON", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    // Valid JSON, not an array -- JSON.parse succeeds silently, so only a
+    // runtime Array.isArray check (not a try/catch) catches this shape.
+    sessionStorage.setItem("transit.insightPanelSeen.1", "{}");
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "trend", route_code: "R1", reason_text: "ok", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-15" },
+      isPending: false,
+      error: null,
+    } as never);
+    renderPanel();
+    expect(screen.getByText("ok")).toBeTruthy();
+    expect(spy).toHaveBeenCalledWith(1, []);
+  });
+
+  it("does not leak one agency's seen pathways into another agency's exclude set", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    sessionStorage.setItem("transit.insightPanelSeen.1", JSON.stringify(["trend:R1"]));
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: null,
+      isPending: false,
+      error: null,
+    } as never);
+    // A fresh mount for agency 2 (what AnalysisTab's `key={id}` produces on
+    // an agency switch) must not inherit agency 1's seen set.
+    renderPanel("2");
+    expect(spy).toHaveBeenCalledWith(2, []);
   });
 
   it("collapses on click and persists the preference", () => {

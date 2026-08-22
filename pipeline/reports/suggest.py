@@ -35,19 +35,21 @@ TREND_SHIFT_MIN_DELTA_MIN = 2.0
 # route_codes never starves the candidate pool. Not `len(exclude) + 1`: a
 # single route can occupy several consecutive rows (one per service type),
 # so that headroom assumption undercounted and could spuriously return None.
-RANKING_FETCH_LIMIT = 1000
-# compute_on_time's fast agg-table path (ctx.time_band == "all", the only
-# shape this rule ever passes -- see _read_dist_scalars in rankings.py) has
-# NO SQL LIMIT: it reads every matching (route_code, service_type) row from
-# agg_route_daily_dist and only slices to `limit` in Python. So this constant
-# must be at least the total number of qualifying pairs for an agency's
-# trailing week, or a route's service-type rows can be truncated BEFORE
-# _pool_on_time_by_route sees them, silently corrupting the pooled percentage
-# for whichever route lands on the boundary. Real data tops out around ~880
-# pairs (agency 1); 5000 leaves ~5.7x headroom instead of re-running
-# RANKING_FETCH_LIMIT's mistake of a soft cap sitting near real utilization.
-# Since there's no live-scan fallback at this ctx shape, a higher limit here
-# costs nothing extra -- the full agg-table scan already happened either way.
+#
+# Neither compute_ranking's fast path (_read_dist_with_hist) nor
+# compute_on_time's (_read_dist_scalars, both in rankings.py) has a SQL
+# LIMIT at the ctx shape this module always uses (time_band == "all"): both
+# read every matching row from their agg table and only slice to `limit` in
+# Python. So each constant must be at least the total number of qualifying
+# pairs for an agency's trailing window, or a route's service-type rows can
+# be truncated BEFORE the corresponding _pool_*_by_route sees them, silently
+# corrupting the pooled figure for whichever route lands on the boundary.
+# Real data tops out around ~880 pairs (agency 1); 5000 leaves ~5.7x
+# headroom for both constants -- keep them equal rather than re-introducing
+# a soft cap sitting near real utilization on just one of the two. Since
+# there's no live-scan fallback at this ctx shape, a higher limit here costs
+# nothing extra -- the full agg-table scan already happened either way.
+RANKING_FETCH_LIMIT = 5000
 ON_TIME_FALLBACK_FETCH_LIMIT = 5000
 
 ExcludeSet = frozenset[tuple[str, str]]
@@ -167,7 +169,7 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
     today_by_route = _pool_ranking_by_route(today_rows)
     baseline_by_route = _pool_ranking_by_route(baseline_rows)
 
-    best = None  # (deviation_sec, route_code, today_avg_min)
+    candidates = []  # (deviation_sec, route_code, today_avg_min)
     for route_code, today_pooled in today_by_route.items():
         if ("trend", route_code) in exclude:
             continue
@@ -181,12 +183,15 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
             avg_delay_sec, baseline_avg_sec, baseline_p90_sec, today_pooled["samples"]
         )
         if bucket == "anomaly" and deviation_sec is not None:
-            if best is None or deviation_sec > best[0]:
-                best = (deviation_sec, route_code, today_pooled["avg_min"])
+            candidates.append((deviation_sec, route_code, today_pooled["avg_min"]))
 
-    if best is None:
+    if not candidates:
         return None
-    _deviation_sec, route_code, today_avg = best
+    # Highest deviation first; route_code ascending breaks ties -- same
+    # convention as rules 2/3's `sorted(..., key=lambda kv: (-metric, kv[0]))`,
+    # rather than leaving ties to today_by_route's incidental insertion order.
+    candidates.sort(key=lambda c: (-c[0], c[1]))
+    _deviation_sec, route_code, today_avg = candidates[0]
     return {
         "report_type": "trend",
         "route_code": route_code,
