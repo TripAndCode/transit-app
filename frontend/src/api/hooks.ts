@@ -30,6 +30,7 @@ import type {
   RouteStopProfileResponse,
   RouteSummaryResponse,
   RouteTripsResponse,
+  Suggestion,
 } from "./types";
 import { useSession } from "./auth";
 
@@ -105,6 +106,23 @@ export function useReport(
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
+  });
+}
+
+export function useSuggestion(
+  agencyId: number | null,
+  exclude: string[],
+): UseQueryResult<Suggestion | null> {
+  const excludeKey = exclude.join(",");
+  return useQuery({
+    queryKey: ["reports-suggest", agencyId, excludeKey],
+    queryFn: ({ signal }) => {
+      const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
+      return apiGet<Suggestion | null>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, { signal });
+    },
+    enabled: agencyId != null,
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 }
 

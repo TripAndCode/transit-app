@@ -158,6 +158,13 @@ export type ReportResponse = ReportMeta & {
   ctx?: ResponseCtx;
 };
 
+export type Suggestion = {
+  report_type: string;
+  route_code: string;
+  reason_text: string;
+  severity: "notable" | "normal";
+};
+
 export type TrendDay = {
   date: string;
   avg_min: number;
