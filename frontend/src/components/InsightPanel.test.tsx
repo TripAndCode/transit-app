@@ -24,13 +24,16 @@ describe("InsightPanel", () => {
   });
 
   it("renders nothing when the feature flag is off", () => {
-    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
       data: { report_type: "trend", route_code: "R1", reason_text: "test reason", severity: "notable" },
       isPending: false,
       error: null,
     } as never);
     const { container } = renderPanel();
     expect(container.textContent).toBe("");
+    // The flag being off must gate the hook call itself, not just the render —
+    // otherwise every unopted-in visit still fires a live suggest request.
+    expect(spy).toHaveBeenCalledWith(null, []);
   });
 
   it("shows the suggestion and navigates on click when flag is on", () => {

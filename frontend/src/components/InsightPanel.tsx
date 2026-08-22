@@ -65,7 +65,7 @@ export function InsightPanel() {
   const [seen, setSeen] = useState(readSeen);
 
   const enabled = readEnabled();
-  const suggestion = useSuggestion(id, seen);
+  const suggestion = useSuggestion(enabled ? id : null, seen);
 
   if (!enabled) return null;
 
