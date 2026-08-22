@@ -32,6 +32,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.suggest import compute_suggestion
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -99,6 +100,47 @@ async def list_reports(
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
+
+
+class SuggestionResponse(BaseModel):
+    """Payload for GET /reports/suggest -- the Insight Panel's single pick."""
+
+    report_type: str
+    route_code: str
+    reason_text: str
+    severity: str
+    # The evaluation window the rule that produced this suggestion actually
+    # used (1 day for the anomaly rule, 7 days for trend-shift/on-time) --
+    # ISO date strings so the frontend can pin its click-through navigation
+    # to the window the reason text describes, instead of the user's ambient
+    # (possibly 30-day) Analysis tab filter, which can dilute or hide the
+    # very signal being described.
+    from_date: str
+    to_date: str
+
+
+@router.get("/reports/suggest", response_model=SuggestionResponse | None)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def get_suggestion(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ch=Depends(get_ch),
+    locale: str = Depends(get_locale),
+    exclude: list[str] = Query(default=[]),
+):
+    """One rule-based 'go look at this' suggestion for the Analysis tab's
+    Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
+    pairs the frontend has already shown this session (sessionStorage-backed,
+    stateless here). Returns ``null`` when every rule's candidates are
+    excluded or the agency has no data at all -- the frontend renders its
+    own calm 'no signal' copy for that case, not this endpoint.
+    """
+    exclude_set: frozenset[tuple[str, str]] = frozenset(
+        (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
+    )
+    result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
+    return result
 
 
 class ForecastHeatmapCell(BaseModel):

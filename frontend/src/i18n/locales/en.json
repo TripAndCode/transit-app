@@ -876,6 +876,14 @@
       "offender": "Route {{code}} ({{min}} min)"
     }
   },
+  "insight_panel": {
+    "title": "Worth a look",
+    "no_signal": "No notable signal right now.",
+    "load_error": "Couldn't load insight right now.",
+    "view_button": "View",
+    "collapse_aria": "Collapse insight panel",
+    "expand_aria": "Expand insight panel"
+  },
   "errors": {
     "rate_limited": "High traffic right now. Please wait a moment and retry.",
     "not_found": "No data available yet.",

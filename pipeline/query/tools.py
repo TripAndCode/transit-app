@@ -244,6 +244,16 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_metrics_summary", "en"): "available metrics",
     ("mt_capabilities_summary", "ja"): "答えられる質問の例（カテゴリ別）",
     ("mt_capabilities_summary", "en"): "example questions I can answer (by category)",
+    ("suggest_reason_anomaly", "ja"): "路線{route}の本日の平均遅延が普段より大幅に悪化しています（平均{avg_min}分）。",
+    ("suggest_reason_anomaly", "en"): (
+        "Route {route}'s average delay today is much worse than usual (avg {avg_min} min)."
+    ),
+    ("suggest_reason_trend_shift", "ja"): "路線{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
+    ("suggest_reason_trend_shift", "en"): (
+        "Route {route}'s delay pattern shifted partway through this week ({delta_min} min change)."
+    ),
+    ("suggest_reason_on_time_fallback", "ja"): "路線{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
+    ("suggest_reason_on_time_fallback", "en"): "Route {route} has the worst on-time rate this week ({pct}% on time).",
 }
 
 

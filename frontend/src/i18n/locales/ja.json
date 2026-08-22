@@ -876,6 +876,14 @@
       "offender": "路線{{code}}({{min}}分)"
     }
   },
+  "insight_panel": {
+    "title": "注目ポイント",
+    "no_signal": "今は特に注目すべき動きはありません。",
+    "load_error": "読み込みに失敗しました。",
+    "view_button": "見る",
+    "collapse_aria": "注目ポイントパネルを閉じる",
+    "expand_aria": "注目ポイントパネルを開く"
+  },
   "errors": {
     "rate_limited": "アクセスが集中しています。少し待って再試行してください。",
     "not_found": "対象のデータがまだありません。",
