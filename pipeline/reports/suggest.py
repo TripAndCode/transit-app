@@ -36,7 +36,19 @@ TREND_SHIFT_MIN_DELTA_MIN = 2.0
 # single route can occupy several consecutive rows (one per service type),
 # so that headroom assumption undercounted and could spuriously return None.
 RANKING_FETCH_LIMIT = 1000
-ON_TIME_FALLBACK_FETCH_LIMIT = 50
+# compute_on_time's fast agg-table path (ctx.time_band == "all", the only
+# shape this rule ever passes -- see _read_dist_scalars in rankings.py) has
+# NO SQL LIMIT: it reads every matching (route_code, service_type) row from
+# agg_route_daily_dist and only slices to `limit` in Python. So this constant
+# must be at least the total number of qualifying pairs for an agency's
+# trailing week, or a route's service-type rows can be truncated BEFORE
+# _pool_on_time_by_route sees them, silently corrupting the pooled percentage
+# for whichever route lands on the boundary. Real data tops out around ~880
+# pairs (agency 1); 5000 leaves ~5.7x headroom instead of re-running
+# RANKING_FETCH_LIMIT's mistake of a soft cap sitting near real utilization.
+# Since there's no live-scan fallback at this ctx shape, a higher limit here
+# costs nothing extra -- the full agg-table scan already happened either way.
+ON_TIME_FALLBACK_FETCH_LIMIT = 5000
 
 ExcludeSet = frozenset[tuple[str, str]]
 
@@ -230,7 +242,12 @@ async def _on_time_fallback(agency_id, conn, ch, week_ctx, exclude, locale) -> d
     (see :func:`_pool_ranking_by_route`'s docstring / :func:`_pool_on_time_by_route`)
     so a route occupying several service-type rows can't spuriously starve
     the fallback of headroom, and so the % the reason text names matches
-    what an unfiltered on_time report would show for that route.
+    what an unfiltered on_time report would show for that route --
+    ``ON_TIME_FALLBACK_FETCH_LIMIT`` must cover every (route_code,
+    service_type) row for the agency's trailing week for that to hold: fetch
+    truncation happens before pooling, so a route split across the fetch
+    boundary would otherwise get pooled from a partial subset of its rows
+    and show a wrong (and, in the extreme, a wrong-route) result.
     """
     rows = await compute_on_time(agency_id, week_ctx, conn, ch, limit=ON_TIME_FALLBACK_FETCH_LIMIT, sort_order="asc")
     pooled = _pool_on_time_by_route(rows)

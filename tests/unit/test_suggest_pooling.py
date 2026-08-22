@@ -12,7 +12,28 @@ LOWEST-avg variant, not a genuine route-grain figure.
 
 from decimal import Decimal
 
-from pipeline.reports.suggest import _pool_on_time_by_route, _pool_ranking_by_route
+from pipeline.reports.suggest import ON_TIME_FALLBACK_FETCH_LIMIT, _pool_on_time_by_route, _pool_ranking_by_route
+
+
+def test_on_time_fallback_fetch_limit_covers_real_agency_scale():
+    """_on_time_fallback's compute_on_time call fetches ALL matching
+    (route_code, service_type) rows from agg_route_daily_dist -- the fast
+    agg-table path has no SQL LIMIT, only a Python-side `out[:limit]` slice
+    (see rankings.py::_read_dist_scalars / compute_on_time) -- and that
+    slice happens BEFORE _pool_on_time_by_route runs. So this constant must
+    exceed the largest real per-agency weekly (route, service_type) row
+    count, or a route split across the fetch boundary gets pooled from a
+    partial subset of its own rows (see
+    tests/pipeline/test_suggest.py::test_on_time_fallback_pools_full_route_before_truncating
+    for the mechanism).
+
+    The old ``ON_TIME_FALLBACK_FETCH_LIMIT = 50`` was already exceeded on
+    real data (confirmed live: 822 pairs for one agency, 219 for another) --
+    this asserts a floor with real headroom above that, so a future
+    regression back toward that scale fails this test immediately, without
+    needing a 50+ row DB fixture.
+    """
+    assert ON_TIME_FALLBACK_FETCH_LIMIT >= 2000
 
 
 def test_pool_ranking_by_route_is_sample_weighted_not_last_wins():

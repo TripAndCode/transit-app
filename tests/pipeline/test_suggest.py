@@ -34,7 +34,7 @@ async def suggest_agency(apply_schema, ch_client):
     await pool.close()
 
 
-async def _seed(pool, agency_id, route_code, day, delays_sec):
+async def _seed(pool, agency_id, route_code, day, delays_sec, service_type="weekday"):
     """One `updates` row per delay value, distinct trips so dedup keeps them all."""
     async with pool.acquire() as conn:
         for i, d in enumerate(delays_sec):
@@ -44,14 +44,14 @@ async def _seed(pool, agency_id, route_code, day, delays_sec):
                 " stop_sequence, dep_delay, captured_at, file_name) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 agency_id,
-                f"{route_code}-{day}-trip-{i}",
+                f"{route_code}-{service_type}-{day}-trip-{i}",
                 route_code,
-                "weekday",
+                service_type,
                 time(10, 0),
                 1,
                 d,
                 datetime.fromisoformat(f"{day}T10:{i // 60:02d}:{i % 60:02d}"),
-                f"test/{route_code}/{day}/{i}.pb",
+                f"test/{route_code}/{service_type}/{day}/{i}.pb",
             )
 
 
@@ -212,3 +212,66 @@ async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
     assert result["report_type"] == "on_time"
     assert result["route_code"] == "R5"
     assert result["severity"] == "normal"
+
+
+@pytest.mark.asyncio
+async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agency, ch_client, monkeypatch):
+    """Regression test for the truncate-then-pool ordering bug: compute_on_time's
+    fetch used to be sliced to ON_TIME_FALLBACK_FETCH_LIMIT *before*
+    _pool_on_time_by_route ran, so a route whose service-type rows straddled
+    the fetch boundary got pooled from a partial subset of its own rows.
+
+    Three (route, service_type) rows this week, ascending by on_time_pct:
+      RT/svcA    0%   (samples=30)
+      R_other    30%  (samples=30)
+      RT/svcB    100% (samples=30)
+    True sample-weighted pooled RT = (0*30 + 100*30) / 60 = 50% -- WORSE
+    on-time than R_other's 30%, so R_other is genuinely this week's
+    worst-on-time ROUTE, at 30%.
+
+    With a too-small fetch limit (2, monkeypatched below to reproduce the old
+    bug's mechanism at a scale that doesn't need 50+ real rows), the fetch
+    truncates to just [RT/svcA, R_other] before RT/svcB is ever pooled in:
+    RT's pooled pct collapses to 0% (only svcA counted). The fallback then
+    both picks the WRONG route (RT instead of R_other) and reports the WRONG
+    percentage for it (0% instead of 50%) -- exactly the failure mode seen on
+    real data with the old ``ON_TIME_FALLBACK_FETCH_LIMIT = 50`` once an
+    agency had more than 50 qualifying rows. A limit that comfortably covers
+    all 3 rows (the module's real, shipped value -- exercised unpatched
+    below) must not reproduce that truncation, correctly reporting R_other
+    at 30%. (The shipped constant's magnitude relative to real per-agency
+    row counts is asserted directly, DB-free, in
+    ``tests/unit/test_suggest_pooling.py``.)
+    """
+    from unittest.mock import patch
+
+    from api.range import RangeCtx
+    from pipeline.reports.suggest import _on_time_fallback
+
+    pool, agency_id = suggest_agency
+    day = jst_today().isoformat()
+    await _seed(pool, agency_id, "RT", day, [600] * 30, service_type="svcA")  # 0% on-time
+    await _seed(pool, agency_id, "RT", day, [30] * 30, service_type="svcB")  # 100% on-time
+    await _seed(pool, agency_id, "R_other", day, [30] * 9 + [600] * 21, service_type="weekday")  # 9/30 = 30%
+    _run_analyze(agency_id, ch_client)
+
+    week_ctx = RangeCtx(from_date=jst_today(), to_date=jst_today())
+
+    async with pool.acquire() as conn:
+        # Reproduce the old bug's mechanism with a deliberately tiny fetch
+        # limit -- this is what ON_TIME_FALLBACK_FETCH_LIMIT = 50 did on real
+        # data once an agency had more than 50 qualifying rows.
+        with patch("pipeline.reports.suggest.ON_TIME_FALLBACK_FETCH_LIMIT", 2):
+            truncated = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
+        assert truncated is not None
+        assert truncated["route_code"] == "RT"
+        assert "0%" in truncated["reason_text"]  # RT's pooled pct wrongly collapsed to 0%
+
+        # The shipped limit (patched back to its real value on exiting the
+        # `with` above) must not reproduce that truncation.
+        result = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
+
+    assert result is not None
+    assert result["report_type"] == "on_time"
+    assert result["route_code"] == "R_other"
+    assert "30%" in result["reason_text"]
