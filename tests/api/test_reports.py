@@ -791,6 +791,9 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
         await _seed_route(pool, agency_id, "ONLY", "weekday", day, [600] * 25)
     _run_analyze(agency_id, ch_client)
 
-    resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY")
+    # A malformed entry (no ":") alongside the well-formed one must be
+    # silently ignored at the HTTP boundary, not 500 -- the endpoint only
+    # keeps entries it can split into (report_type, route_code).
+    resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
     assert resp.json() is None

@@ -87,6 +87,44 @@ async def test_anomaly_today_wins_when_present(suggest_agency, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_anomaly_fires_when_wall_clock_today_has_zero_rows(suggest_agency, ch_client):
+    """analyze() normally lags the wall clock by >= 1 day, so wall-clock
+    "today" has zero agg rows at the moment the Insight Panel is viewed --
+    exactly the scenario that used to make rule 1 always fall through (see
+    the module's rewrite: anchoring on jst_today() instead of the latest
+    analyzed date). Seed data only through "yesterday" (nothing for
+    jst_today() itself) and confirm the anomaly rule still fires, anchored
+    on the latest analyzed date.
+    """
+    pool, agency_id = suggest_agency
+    today = jst_today()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    baseline_day = (today - timedelta(days=4)).isoformat()
+    # Nothing seeded for `today` at all -- only through "yesterday".
+    await _seed(pool, agency_id, "R1", baseline_day, [60] * 30)  # baseline: 1 min avg
+    await _seed(pool, agency_id, "R1", yesterday, [300] * 30)  # "latest day": 5 min avg
+    _run_analyze(agency_id, ch_client)
+
+    async with pool.acquire() as conn:
+        # Sanity-check the premise: wall-clock "today" really has no agg row.
+        latest = await conn.fetchval("SELECT MAX(date) FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+        assert latest is not None
+        assert latest.isoformat() == yesterday
+        assert latest != today
+
+        result = await compute_suggestion(agency_id, conn, ch_client)
+
+    assert result is not None
+    assert result["report_type"] == "trend"
+    assert result["route_code"] == "R1"
+    assert result["severity"] == "notable"
+    # The evaluation window must be anchored on the latest analyzed date
+    # (yesterday), not the wall clock.
+    assert result["from_date"] == yesterday
+    assert result["to_date"] == yesterday
+
+
+@pytest.mark.asyncio
 async def test_trend_shift_wins_when_no_anomaly_today(suggest_agency, ch_client):
     pool, agency_id = suggest_agency
     today = jst_today()
@@ -140,9 +178,7 @@ async def test_exclude_skips_already_shown_candidate(suggest_agency, ch_client):
     _run_analyze(agency_id, ch_client)
 
     async with pool.acquire() as conn:
-        result = await compute_suggestion(
-            agency_id, conn, ch_client, exclude=frozenset({("trend", "R1")})
-        )
+        result = await compute_suggestion(agency_id, conn, ch_client, exclude=frozenset({("trend", "R1")}))
 
     # R1's trend anomaly is excluded, but it's a distinct pathway so the
     # on-time fallback can still suggest it (the ("on_time", "R1") tuple
@@ -169,9 +205,7 @@ async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
 
     async with pool.acquire() as conn:
         # Exclude R6's on-time fallback specifically
-        result = await compute_suggestion(
-            agency_id, conn, ch_client, exclude=frozenset({("on_time", "R6")})
-        )
+        result = await compute_suggestion(agency_id, conn, ch_client, exclude=frozenset({("on_time", "R6")}))
 
     # R6 is worst on-time but excluded -> fallback returns R5 instead
     assert result is not None

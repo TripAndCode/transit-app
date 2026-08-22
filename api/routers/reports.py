@@ -109,6 +109,14 @@ class SuggestionResponse(BaseModel):
     route_code: str
     reason_text: str
     severity: str
+    # The evaluation window the rule that produced this suggestion actually
+    # used (1 day for the anomaly rule, 7 days for trend-shift/on-time) --
+    # ISO date strings so the frontend can pin its click-through navigation
+    # to the window the reason text describes, instead of the user's ambient
+    # (possibly 30-day) Analysis tab filter, which can dilute or hide the
+    # very signal being described.
+    from_date: str
+    to_date: str
 
 
 @router.get("/reports/suggest", response_model=SuggestionResponse | None)
@@ -129,10 +137,7 @@ async def get_suggestion(
     own calm 'no signal' copy for that case, not this endpoint.
     """
     exclude_set: frozenset[tuple[str, str]] = frozenset(
-        (report_type, route_code)
-        for item in exclude
-        if ":" in item
-        for report_type, route_code in [item.split(":", 1)]
+        (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
     )
     result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
     return result
