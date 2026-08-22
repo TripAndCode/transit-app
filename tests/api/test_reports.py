@@ -743,3 +743,54 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
     offenders = out["days"][0]["top_offenders"]
     codes = [o["route_code"] for o in offenders if o["route_code"].startswith("R_TR_")]
     assert codes == ["R_TR_A", "R_TR_Z"]
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
+# tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_
+# to_ch already expect) rather than app.state.ch_client: compute_suggestion's
+# RangeCtx calls never set a time_band, so they always take the agg-table
+# fast path and never touch `ch` at all -- app.state.ch_client stays at
+# reports_app's default None, and get_ch's lazy-503 stand-in is never
+# exercised.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    from datetime import timedelta
+
+    from api.range import jst_today
+
+    today = jst_today()
+    for offset in range(6, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        await _seed_route(pool, agency_id, "GOOD", "weekday", day, [30] * 25)
+        await _seed_route(pool, agency_id, "BAD", "weekday", day, [600] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/suggest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["report_type"] == "on_time"
+    assert body["route_code"] == "BAD"
+    assert body.get("reason_text")
+
+
+@pytest.mark.asyncio
+async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    from datetime import timedelta
+
+    from api.range import jst_today
+
+    today = jst_today()
+    for offset in range(6, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        await _seed_route(pool, agency_id, "ONLY", "weekday", day, [600] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY")
+    assert resp.status_code == 200
+    assert resp.json() is None
