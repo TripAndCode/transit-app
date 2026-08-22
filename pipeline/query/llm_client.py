@@ -38,7 +38,11 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "groq": {
         "key_env": "GROQ_API_KEY",
         "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.3-70b-versatile",
+        # llama-3.3-70b-versatile was decommissioned by Groq; gpt-oss-120b
+        # matches the Cerebras default so the two ladder rungs behave
+        # consistently. Override via GROQ_MODEL if your account's available
+        # models differ (check `GET /openai/v1/models`).
+        "model": "openai/gpt-oss-120b",
     },
     "ollama": {
         "key_env": "OLLAMA_API_KEY",
