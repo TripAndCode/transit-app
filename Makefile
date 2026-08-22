@@ -155,14 +155,17 @@ sync-r2:
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
-# Usage: make load_static PATH=./raw_archives_static
+# Usage: make load_static STATIC_PATH=./raw_archives_static
 # Usage: make ingest FOLDER=./raw_archives AGENCY_ID=1
 
 ingest:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py ingest $(FOLDER) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
+# Not named PATH: the Makefile's bare `export` directive would export a
+# command-line PATH=... override into every recipe's environment, clobbering
+# the real $PATH and breaking `poetry`/every other command in this recipe.
 load_static:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py load_static $(PATH) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py load_static $(STATIC_PATH) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
 analyze:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)

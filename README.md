@@ -256,7 +256,7 @@ Fetches the current GTFS-RT protobuf from each agency's `feed_url`. This is the 
 ### Load static GTFS
 
 ```bash
-make load_static PATH=./raw_archives_static
+make load_static STATIC_PATH=./raw_archives_static
 ```
 
 Loads `stops.txt`, `stop_times.txt`, `trips.txt`, `routes.txt`, `calendar_dates.txt` from the latest `*_static.zip`. Required for stop-name resolution and heatmap.
