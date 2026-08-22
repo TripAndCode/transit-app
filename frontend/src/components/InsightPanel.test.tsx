@@ -25,7 +25,14 @@ describe("InsightPanel", () => {
 
   it("renders nothing when the feature flag is off", () => {
     const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
-      data: { report_type: "trend", route_code: "R1", reason_text: "test reason", severity: "notable" },
+      data: {
+        report_type: "trend",
+        route_code: "R1",
+        reason_text: "test reason",
+        severity: "notable",
+        from_date: "2026-08-15",
+        to_date: "2026-08-15",
+      },
       isPending: false,
       error: null,
     } as never);
@@ -38,8 +45,15 @@ describe("InsightPanel", () => {
 
   it("shows the suggestion and navigates on click when flag is on", () => {
     localStorage.setItem("transit.insightPanelEnabled", "1");
-    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
-      data: { report_type: "trend", route_code: "R1", reason_text: "Route R1 is anomalous", severity: "notable" },
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: {
+        report_type: "trend",
+        route_code: "R1",
+        reason_text: "Route R1 is anomalous",
+        severity: "notable",
+        from_date: "2026-08-15",
+        to_date: "2026-08-15",
+      },
       isPending: false,
       error: null,
     } as never);
@@ -48,6 +62,10 @@ describe("InsightPanel", () => {
     fireEvent.click(screen.getByText("View"));
     // sessionStorage now records this pathway as shown, per the dedup design.
     expect(sessionStorage.getItem("transit.insightPanelSeen")).toContain("trend:R1");
+    // The updated "seen" set must flow into the next useSuggestion call too
+    // (not just get written to sessionStorage), otherwise the next poll
+    // would re-suggest the just-shown route.
+    expect(spy).toHaveBeenLastCalledWith(1, ["trend:R1"]);
   });
 
   it("shows the calm no-signal message when the endpoint returns null", () => {
@@ -61,10 +79,29 @@ describe("InsightPanel", () => {
     expect(screen.getByText("No notable signal right now.")).toBeTruthy();
   });
 
+  it("shows a distinct message when the suggest request errors", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: null,
+      isPending: false,
+      error: new Error("network down"),
+    } as never);
+    renderPanel();
+    expect(screen.getByText("Couldn't load insight right now.")).toBeTruthy();
+    expect(screen.queryByText("No notable signal right now.")).toBeNull();
+  });
+
   it("collapses on click and persists the preference", () => {
     localStorage.setItem("transit.insightPanelEnabled", "1");
     vi.spyOn(hooks, "useSuggestion").mockReturnValue({
-      data: { report_type: "trend", route_code: "R1", reason_text: "Route R1 is anomalous", severity: "notable" },
+      data: {
+        report_type: "trend",
+        route_code: "R1",
+        reason_text: "Route R1 is anomalous",
+        severity: "notable",
+        from_date: "2026-08-15",
+        to_date: "2026-08-15",
+      },
       isPending: false,
       error: null,
     } as never);

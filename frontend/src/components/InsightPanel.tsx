@@ -81,7 +81,16 @@ export function InsightPanel() {
     const key = `${data.report_type}:${data.route_code}`;
     addSeen(key);
     setSeen(readSeen());
-    navigate(`/agencies/${id}/analysis/${data.report_type}?routes=${encodeURIComponent(data.route_code)}`);
+    // Pin from/to to the window this suggestion actually evaluated (rather
+    // than the user's ambient Analysis tab filter, e.g. useRangeContext's
+    // 30-day default) so the click-through lands exactly where the reason
+    // text's numbers are visible.
+    const qs = new URLSearchParams({
+      routes: data.route_code,
+      from: data.from_date,
+      to: data.to_date,
+    });
+    navigate(`/agencies/${id}/analysis/${data.report_type}?${qs.toString()}`);
   }
 
   return (
@@ -117,10 +126,15 @@ export function InsightPanel() {
             <Sparkles size={14} strokeWidth={1.75} />
             {t("insight_panel.title")}
           </h4>
-          {!suggestion.data && !suggestion.isPending && (
-            <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("insight_panel.no_signal")}</p>
+          {suggestion.error ? (
+            <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("insight_panel.load_error")}</p>
+          ) : (
+            !suggestion.data &&
+            !suggestion.isPending && (
+              <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("insight_panel.no_signal")}</p>
+            )
           )}
-          {suggestion.data && (
+          {!suggestion.error && suggestion.data && (
             <div>
               <p style={{ fontSize: 12, color: "var(--text-primary)", lineHeight: 1.6 }}>
                 {suggestion.data.reason_text}

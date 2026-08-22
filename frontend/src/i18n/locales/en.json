@@ -879,6 +879,7 @@
   "insight_panel": {
     "title": "Worth a look",
     "no_signal": "No notable signal right now.",
+    "load_error": "Couldn't load insight right now.",
     "view_button": "View",
     "collapse_aria": "Collapse insight panel",
     "expand_aria": "Expand insight panel"

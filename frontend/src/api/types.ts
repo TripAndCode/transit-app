@@ -163,6 +163,11 @@ export type Suggestion = {
   route_code: string;
   reason_text: string;
   severity: "notable" | "normal";
+  // The evaluation window the rule that produced this suggestion actually
+  // used (ISO date strings) -- pin click-through navigation to this window
+  // rather than the user's ambient Analysis tab filter.
+  from_date: string;
+  to_date: string;
 };
 
 export type TrendDay = {
