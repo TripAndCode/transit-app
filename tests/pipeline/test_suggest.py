@@ -144,7 +144,37 @@ async def test_exclude_skips_already_shown_candidate(suggest_agency, ch_client):
             agency_id, conn, ch_client, exclude=frozenset({("trend", "R1")})
         )
 
-    # R1's anomaly is excluded and nothing else qualifies -> falls through
-    # every rule to the always-available on-time fallback, which has no
-    # data seeded here, so the whole chain returns None.
-    assert result is None
+    # R1's trend anomaly is excluded, but it's a distinct pathway so the
+    # on-time fallback can still suggest it (the ("on_time", "R1") tuple
+    # is not excluded, only ("trend", "R1") is). This demonstrates that
+    # exclusion is per (report_type, route_code) pair, not blanket route.
+    assert result is not None
+    assert result["report_type"] == "on_time"
+    assert result["route_code"] == "R1"
+    assert result["severity"] == "normal"
+
+
+@pytest.mark.asyncio
+async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
+    pool, agency_id = suggest_agency
+    today = jst_today()
+    # Flat, unremarkable delay patterns for two routes (no anomaly/trend signal)
+    # -> both rules fall through, fallback picks the worst on-time route.
+    # We then exclude that route's on-time tuple and verify the other is returned.
+    for offset in range(6, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        await _seed(pool, agency_id, "R5", day, [30] * 25)  # on-time (<=60s)
+        await _seed(pool, agency_id, "R6", day, [600] * 25)  # always late -> worst
+    _run_analyze(agency_id, ch_client)
+
+    async with pool.acquire() as conn:
+        # Exclude R6's on-time fallback specifically
+        result = await compute_suggestion(
+            agency_id, conn, ch_client, exclude=frozenset({("on_time", "R6")})
+        )
+
+    # R6 is worst on-time but excluded -> fallback returns R5 instead
+    assert result is not None
+    assert result["report_type"] == "on_time"
+    assert result["route_code"] == "R5"
+    assert result["severity"] == "normal"

@@ -9,6 +9,10 @@ route this week. No LLM; every branch is a composition of existing report
 primitives (compute_ranking / route_trend_shift / compute_on_time) -- see
 docs/superpowers/specs/2026-08-22-proactive-insight-panel-design.md for the
 rationale behind this shape over a scored-blend or no-ranking rotation.
+
+compute_suggestion() returns None when either the agency has zero on-time
+data at all, or when all remaining candidates at a rule level are excluded
+via the exclude set.
 """
 
 from __future__ import annotations
@@ -117,10 +121,8 @@ async def _trend_shift_this_week(
 
 async def _on_time_fallback(agency_id, conn, ch, week_ctx, exclude, locale) -> dict | None:
     rows = await compute_on_time(agency_id, week_ctx, conn, ch, limit=len(exclude) + 1, sort_order="asc")
-    # Extract route codes already in the exclude set (any report type)
-    excluded_routes = {r for _report_type, r in exclude}
     for route_code, _service, on_time_pct, _avg, _samples in rows:
-        if route_code in excluded_routes:
+        if ("on_time", route_code) in exclude:
             continue
         return {
             "report_type": "on_time",
