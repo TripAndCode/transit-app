@@ -44,6 +44,15 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         # models differ (check `GET /openai/v1/models`).
         "model": "openai/gpt-oss-120b",
     },
+    "openai": {
+        "key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.openai.com/v1",
+        # Paid rung, deliberately placed last in CHAT_PROVIDERS so the free
+        # Cerebras/Groq tiers are exhausted first. gpt-5.4-mini is the
+        # current cost-efficient mini-tier model (confirmed available via
+        # GET /v1/models); override via OPENAI_MODEL if needed.
+        "model": "gpt-5.4-mini",
+    },
     "ollama": {
         "key_env": "OLLAMA_API_KEY",
         "base_url": "http://localhost:11434/v1",
