@@ -1,10 +1,11 @@
 """Provider-agnostic LLM adapter with ordered fallback.
 
 Lets the Ask tab try Cerebras first (1M tokens/day free), fall back to
-Groq (100K/day) on rate-limit, and optionally bounce to a local Ollama
-instance for offline safety. All three speak OpenAI-compatible REST, so
-the openai-python SDK works with each by swapping ``base_url`` and
-``api_key``. Falling back lets a single .env file work locally and
+Groq (100K/day) on rate-limit, optionally bounce to a local Ollama
+instance for offline safety, and finally OpenAI as a paid last resort
+once both free tiers are exhausted. All four speak OpenAI-compatible
+REST, so the openai-python SDK works with each by swapping ``base_url``
+and ``api_key``. Falling back lets a single .env file work locally and
 remotely without code-path divergence.
 
 Configuration is fully env-driven; see ``.env.example`` for the keys.
@@ -26,7 +27,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-# Built-in defaults for the three providers we support. Operator overrides
+# Built-in defaults for each provider we support. Operator overrides
 # any field via env (e.g. CEREBRAS_BASE_URL=...). The "key_env" is the
 # env-var name that holds the provider's API key.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {

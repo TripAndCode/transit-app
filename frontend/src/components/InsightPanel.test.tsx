@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -23,6 +23,10 @@ describe("InsightPanel", () => {
     sessionStorage.clear();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("renders nothing when the feature flag is explicitly off", () => {
     // Explicit "0" simulates a real deploy where a user opted out, or a
     // test environment where import.meta.env.DEV happens to be true (as it
@@ -45,6 +49,22 @@ describe("InsightPanel", () => {
     expect(container.textContent).toBe("");
     // The flag being off must gate the hook call itself, not just the render —
     // otherwise every unopted-in visit still fires a live suggest request.
+    expect(spy).toHaveBeenCalledWith(null, []);
+  });
+
+  it("defaults to disabled with no stored preference in a production build", () => {
+    // Proves the "a real deploy stays opt-in-only" claim as a test, not
+    // just a code comment -- every other test in this file runs under
+    // Vitest's DEV=true, so without this, a future refactor that drops the
+    // DEV check would silently ship the panel on-by-default in production.
+    vi.stubEnv("DEV", false);
+    const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "trend", route_code: "R1", reason_text: "should not show", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-15" },
+      isPending: false,
+      error: null,
+    } as never);
+    const { container } = renderPanel();
+    expect(container.textContent).toBe("");
     expect(spy).toHaveBeenCalledWith(null, []);
   });
 

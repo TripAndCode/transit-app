@@ -160,11 +160,11 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
     comparison -- and the route+number the reason text names -- matches what
     an unfiltered report would show for that route.
     """
-    today_rows = await compute_ranking(agency_id, today_ctx, conn, ch, sort_order="desc", limit=RANKING_FETCH_LIMIT)
+    today_rows = await compute_ranking(agency_id, today_ctx, conn, ch=ch, sort_order="desc", limit=RANKING_FETCH_LIMIT)
     if not today_rows:
         return None
     baseline_rows = await compute_ranking(
-        agency_id, baseline_ctx, conn, ch, sort_order="desc", limit=RANKING_FETCH_LIMIT
+        agency_id, baseline_ctx, conn, ch=ch, sort_order="desc", limit=RANKING_FETCH_LIMIT
     )
     today_by_route = _pool_ranking_by_route(today_rows)
     baseline_by_route = _pool_ranking_by_route(baseline_rows)
@@ -210,7 +210,7 @@ async def _trend_shift_this_week(agency_id, conn, ch, week_ctx, baseline_ctx, ex
     don't crowd out other routes' one slot each in the top-N candidate list.
     """
     baseline_rows = await compute_ranking(
-        agency_id, baseline_ctx, conn, ch, sort_order="desc", limit=RANKING_FETCH_LIMIT
+        agency_id, baseline_ctx, conn, ch=ch, sort_order="desc", limit=RANKING_FETCH_LIMIT
     )
     pooled = _pool_ranking_by_route(baseline_rows)
     candidates = sorted(pooled.items(), key=lambda kv: (-kv[1]["avg_min"], kv[0]))[:TREND_SHIFT_CANDIDATE_LIMIT]
@@ -254,7 +254,7 @@ async def _on_time_fallback(agency_id, conn, ch, week_ctx, exclude, locale) -> d
     boundary would otherwise get pooled from a partial subset of its rows
     and show a wrong (and, in the extreme, a wrong-route) result.
     """
-    rows = await compute_on_time(agency_id, week_ctx, conn, ch, limit=ON_TIME_FALLBACK_FETCH_LIMIT, sort_order="asc")
+    rows = await compute_on_time(agency_id, week_ctx, conn, ch=ch, limit=ON_TIME_FALLBACK_FETCH_LIMIT, sort_order="asc")
     pooled = _pool_on_time_by_route(rows)
     ranked = sorted(pooled.items(), key=lambda kv: (kv[1]["on_time_pct"], kv[0]))
     for route_code, stats in ranked:

@@ -3,6 +3,15 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
+import { delayColor } from "../styles/tokens";
+
+// Map the backend's binary severity onto the existing delay warm ramp
+// (CLAUDE.md: "Severity uses the existing warm ramp") via representative
+// minute values landing in delayBand()'s "severe" vs "ok" tiers, rather
+// than inventing new colors just for this panel.
+function severityColor(severity: "notable" | "normal"): string {
+  return delayColor(severity === "notable" ? 6 : 0);
+}
 
 const ENABLED_KEY = "transit.insightPanelEnabled";
 const COLLAPSED_KEY = "transit.insightPanelCollapsed";
@@ -84,14 +93,19 @@ export function InsightPanel() {
   const [seen, setSeen] = useState<string[]>(() => (id != null ? readSeen(id) : []));
 
   const enabled = readEnabled();
-  const suggestion = useSuggestion(enabled ? id : null, seen);
+  // Also gated on !collapsed: a collapsed panel has nowhere to show a
+  // suggestion, so polling it every refetchInterval would just be wasted
+  // backend load for a rail the user has explicitly hidden.
+  const suggestion = useSuggestion(enabled && !collapsed ? id : null, seen);
 
   if (!enabled) return null;
 
   function toggleCollapsed() {
-    const next = !collapsed;
-    setCollapsed(next);
-    writeCollapsed(next);
+    setCollapsed((c) => {
+      const next = !c;
+      writeCollapsed(next);
+      return next;
+    });
   }
 
   function handleView() {
@@ -155,9 +169,23 @@ export function InsightPanel() {
           )}
           {!suggestion.error && suggestion.data && (
             <div>
-              <p style={{ fontSize: 12, color: "var(--text-primary)", lineHeight: 1.6 }}>
-                {suggestion.data.reason_text}
-              </p>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 8 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-block",
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    marginTop: 5,
+                    flexShrink: 0,
+                    background: severityColor(suggestion.data.severity),
+                  }}
+                />
+                <p style={{ fontSize: 12, color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
+                  {suggestion.data.reason_text}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={handleView}
