@@ -311,10 +311,7 @@ def _maybe_mount_static(app: FastAPI) -> None:
         # realpath collapses any ".." before the containment check, so a path
         # like "../../etc/passwd" can't escape static_root.
         candidate = os.path.realpath(os.path.join(STATIC_DIR, full_path))
-        if (
-            os.path.commonpath([candidate, static_root]) == static_root
-            and os.path.isfile(candidate)
-        ):
+        if os.path.commonpath([candidate, static_root]) == static_root and os.path.isfile(candidate):
             return FileResponse(candidate)
         return FileResponse(index_path)
 
