@@ -27,7 +27,7 @@ Other agencies (Aomori City Bus / Hiroshima Bus / Hiroshima Kotsu) work exactly 
 
 When you open the app, you first see a screen for choosing an agency (bus/rail operator).
 
-![Agency selection screen](./01-agency-select.png)
+![Agency selection screen](./01-agency-select.en.png)
 
 Click the card for the agency you want to view to enter that agency's dashboard.
 Once you've chosen an agency, the app automatically reopens the screen you last had open
@@ -60,7 +60,7 @@ Use this filter bar when you want to dig into a specific route or time window.
 This is the first tab shown after signing in. **It's the place to check, at a glance, how
 delayed things are overall today.**
 
-![Overview tab](./02-overview.png)
+![Overview tab](./02-overview.en.png)
 
 Key things to look at:
 
@@ -79,7 +79,7 @@ If you just want the big picture, this tab alone is enough.
 
 The map shows average delay at each stop/station as a colored circle (bubble).
 
-![Map tab](./03-map.png)
+![Map tab](./03-map.en.png)
 
 - **Color**: represents delay size (green = little to no delay → orange/red = large delay).
 - **Circle size**: bigger circles mean bigger delays.
@@ -100,7 +100,7 @@ explained step by step below.
 
 When you open the Analysis tab with nothing selected yet, it looks like this.
 
-![Analysis tab (initial state)](./04-analysis-landing.png)
+![Analysis tab (initial state)](./04-analysis-landing.en.png)
 
 The screen is split into three main areas.
 
@@ -136,7 +136,7 @@ Clicking the small round "ⓘ" (hint) icon to the right of the word "Reports" op
 **popup explaining how to read each report**. This built-in usage guide is the first
 place to check whenever you're unsure.
 
-![Hint popup](./06-analysis-hint-popover.png)
+![Hint popup](./06-analysis-hint-popover.en.png)
 
 The popup explains things like:
 
@@ -153,7 +153,7 @@ If a chart's meaning isn't clear, look for this icon first.
 
 Clicking "Delay ranking" in the left menu lists routes ordered from most to least delayed.
 
-![Delay ranking screen](./05-analysis-ranking.png)
+![Delay ranking screen](./05-analysis-ranking.en.png)
 
 What the columns mean:
 
@@ -168,7 +168,7 @@ The "⬇ CSV" button in the top-right downloads this table as-is.
 
 Clicking "Trend" in the left menu shows a screen like this.
 
-![Trend report screen](./07-analysis-trend.png)
+![Trend report screen](./07-analysis-trend.en.png)
 
 - The colored grid at the top (day of week × time of day) is a heatmap of **when delays
   tend to happen**, using color intensity. Darker (closer to red) means bigger delays.
@@ -178,7 +178,7 @@ Clicking "Trend" in the left menu shows a screen like this.
 
 ### 5-6. On-time rate report
 
-![On-time rate report screen](./08-analysis-ontime.png)
+![On-time rate report screen](./08-analysis-ontime.en.png)
 
 Routes are ranked by the percentage of arrivals that were on time. Closer to 100% is better.
 
@@ -188,7 +188,7 @@ A small panel is always shown on the right side of the Analysis tab. This is a r
 new feature: **an "alerts" area where the app automatically spots changes in the data**
 and tells you about them — no manual digging required.
 
-![Worth a look panel (initial state)](./04-analysis-landing.png)
+![Worth a look panel (initial state)](./04-analysis-landing.en.png)
 
 For example, it might show something like "Route 3968526772's delay pattern shifted
 partway through this week," along with the route to watch and the size of the change
@@ -197,7 +197,7 @@ partway through this week," along with the route to watch and the size of the ch
 Clicking "View" inside the panel automatically jumps to a Trend screen focused on that
 route and period.
 
-![Result after clicking View](./09-analysis-insight-view.png)
+![Result after clicking View](./09-analysis-insight-view.en.png)
 
 Notice that the filter bar at the top of the screen now has the period and route-name
 chips (tags) set automatically. This is the same filter bar described in section 2, being
@@ -222,7 +222,7 @@ always a notice** — the panel can be empty when there's nothing notable to fla
 The sidebar shows this as "Agencies (How you compare to others)" — it's actually a
 **network-wide screen that compares your agency against every other agency**.
 
-![Agencies tab](./10-network.png)
+![Agencies tab](./10-network.en.png)
 
 Agencies are ranked from smallest to largest average delay, with a "YOU" badge on your
 own agency. Use this to check how you're doing relative to everyone else.
@@ -234,7 +234,7 @@ own agency. Use this to check how you're doing relative to everyone else.
 The sidebar labels this "Latest observations," but it's really a **near-real-time view of
 current operations**.
 
-![Latest observations tab](./11-live.png)
+![Latest observations tab](./11-live.en.png)
 
 - **Watch**: routes where today's delay is significantly higher than normal are listed
   here. "vs normal +9 min" means "running 9 minutes later than usual."
@@ -252,7 +252,7 @@ Instead of hunting for the right chart yourself like on the other tabs, the Ask 
 you **pick what you want to know in a chat-like flow and get an answer (a table or chart)
 right away**.
 
-![Ask tab landing screen](./12-ask-landing.png)
+![Ask tab landing screen](./12-ask-landing.en.png)
 
 How to use it:
 
@@ -263,7 +263,7 @@ How to use it:
 
 Once you ask, the result appears on screen like this.
 
-![Ask answer screen](./13-ask-answer.png)
+![Ask answer screen](./13-ask-answer.en.png)
 
 - The question you picked is shown as a bubble on the right (e.g. "Top 5 routes (All)").
 - Below it, the answer — a table, in this case the top-5 delay ranking — is shown.
@@ -273,7 +273,7 @@ Once you ask, the result appears on screen like this.
   provided buttons (e.g. "Are any routes worse than last week?"), type it in as plain text
   and press "Send" to get an answer grounded in the result currently on screen.
 
-![Follow-up free-text input](./14-ask-followup-freetext.png)
+![Follow-up free-text input](./14-ask-followup-freetext.en.png)
 
 > Note: this free-text box is meant specifically for **digging further into the result
 > already on screen** (to build a brand-new ranking from scratch, use the quick-question

@@ -1,10 +1,29 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
+import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 
 const MANUAL_BASE = "/user-manual";
+
+/** The manual's own top-level `# Title` line is redundant with this page's
+ *  own <h1> (and differently styled, since react-markdown's h1 has no CSS of
+ *  its own) -- strip it before rendering. Kept in the source .md so the file
+ *  still reads correctly viewed directly on GitHub. */
+function stripLeadingH1(markdown: string): string {
+  return markdown.replace(/^#\s.*\n+/, "");
+}
+
+async function fetchManual(locale: string, signal: AbortSignal): Promise<string> {
+  const r = await fetch(`${MANUAL_BASE}/${locale}.md`, { signal });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new ApiError(r.status, body);
+  }
+  return r.text();
+}
 
 /** Renders the in-app user manual, fetched as a static Markdown asset per
  *  locale (public/user-manual/{en,ja}.md) rather than embedded in JSX. This
@@ -12,66 +31,53 @@ const MANUAL_BASE = "/user-manual";
  *  lint:i18n-strings' kana check entirely -- the Japanese text lives in a
  *  .md asset, never in a .tsx source file, same reasoning that already
  *  exempts images. */
-type FetchResult = { locale: string; content: string } | { locale: string; error: unknown };
-
 export function HelpPage() {
   const { t, i18n } = useTranslation();
-  const locale = i18n.language.startsWith("en") ? "en" : "ja";
-  // Keyed by the locale it was fetched for, so a stale result from a
-  // just-superseded locale is never rendered -- derived below instead of
-  // clearing state synchronously at the top of the effect (which would
-  // trigger a cascading extra render on every locale change).
-  const [result, setResult] = useState<FetchResult | null>(null);
+  // Same fallback chain as api/client.ts's Accept-Language header, not the
+  // raw (possibly still-detecting) i18n.language other call sites use.
+  const resolved = i18n.resolvedLanguage ?? i18n.language ?? "ja";
+  const locale = resolved.startsWith("en") ? "en" : "ja";
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${MANUAL_BASE}/${locale}.md`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`manual fetch failed: ${r.status}`);
-        return r.text();
-      })
-      .then((content) => {
-        if (!cancelled) setResult({ locale, content });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setResult({ locale, error });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [locale]);
-
-  const current = result?.locale === locale ? result : null;
-  const content = current && "content" in current ? current.content : null;
-  const error = current && "error" in current ? current.error : null;
+  const { data: content, error, refetch } = useQuery({
+    queryKey: ["userManual", locale],
+    queryFn: ({ signal }) => fetchManual(locale, signal),
+  });
 
   return (
     <div style={{ maxWidth: 820, margin: "0 auto", padding: "0 0 64px" }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("help.title")}</h1>
-      {error != null && <ErrorBanner error={error} />}
+      {error != null && <ErrorBanner error={error} onRetry={() => void refetch()} />}
       {content == null && error == null && (
         <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
       )}
       {content != null && (
         <div className="user-manual-content">
           <ReactMarkdown
-            // The manual's own table of contents links to GitHub-style
-            // heading slugs (e.g. #5-analysis-tab--...); rehype-slug adds
-            // matching `id`s to headings so those links actually scroll.
+            // GFM adds the table syntax the manual uses (plain CommonMark,
+            // react-markdown's default, treats a pipe table as one text
+            // paragraph). rehype-slug adds heading `id`s matching the
+            // manual's own GitHub-style table-of-contents anchors.
+            remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeSlug]}
             components={{
               // Manual images are authored as relative paths (./NN-x.png) so
               // the source .md also renders correctly viewed directly on
-              // GitHub -- rewrite them to this page's actual asset location.
-              img: ({ src, alt }) => (
+              // GitHub -- rewrite only those to this page's actual asset
+              // location; leave absolute/data URLs untouched.
+              img: ({ src, alt, title }) => (
                 <img
-                  src={typeof src === "string" ? `${MANUAL_BASE}/${src.replace(/^\.\//, "")}` : src}
+                  src={
+                    typeof src === "string" && src.startsWith("./")
+                      ? `${MANUAL_BASE}/${src.slice(2)}`
+                      : src
+                  }
                   alt={alt}
+                  title={title}
                 />
               ),
             }}
           >
-            {content}
+            {stripLeadingH1(content)}
           </ReactMarkdown>
         </div>
       )}

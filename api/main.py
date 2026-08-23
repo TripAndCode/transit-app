@@ -283,7 +283,12 @@ def _maybe_mount_static(app: FastAPI) -> None:
     The catch-all ``spa_fallback`` route serves ``index.html`` for any path that
     no router consumed, EXCEPT paths starting with API/health/doc prefixes —
     those return a JSON 404 so the frontend fetch layer can render a real error
-    instead of trying to JSON-parse the SPA HTML.
+    instead of trying to JSON-parse the SPA HTML. Vite's ``public/`` dir (e.g.
+    the user-manual markdown + screenshots) is copied verbatim to the *root*
+    of ``dist/`` at build time, not under ``assets/`` -- before falling back
+    to ``index.html``, check whether the path resolves to a real file
+    anywhere under ``STATIC_DIR`` and serve that instead, so those assets
+    aren't silently swallowed into the SPA shell.
     """
     if not os.path.isdir(STATIC_DIR):
         return
@@ -295,12 +300,22 @@ def _maybe_mount_static(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     index_path = os.path.join(STATIC_DIR, "index.html")
+    static_root = os.path.realpath(STATIC_DIR)
 
     @app.get("/{full_path:path}", include_in_schema=False, name="spa_fallback")
     async def spa_fallback(full_path: str):
-        """Serve ``index.html`` for SPA routes; JSON 404 for unknown API paths."""
+        """Serve a real file under ``STATIC_DIR`` if the path resolves to one;
+        JSON 404 for unknown API paths; otherwise ``index.html`` for SPA routes."""
         if full_path.startswith(_API_PREFIXES):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # realpath collapses any ".." before the containment check, so a path
+        # like "../../etc/passwd" can't escape static_root.
+        candidate = os.path.realpath(os.path.join(STATIC_DIR, full_path))
+        if (
+            os.path.commonpath([candidate, static_root]) == static_root
+            and os.path.isfile(candidate)
+        ):
+            return FileResponse(candidate)
         return FileResponse(index_path)
 
 
