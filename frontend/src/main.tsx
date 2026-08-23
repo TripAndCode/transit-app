@@ -28,6 +28,7 @@ const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ defau
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
+const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const AdminUserDetailPage = lazy(() =>
   import("./pages/AdminUserDetailPage").then((m) => ({ default: m.AdminUserDetailPage })),
@@ -91,6 +92,7 @@ const router = createBrowserRouter([
       // Legacy bare /network bookmark, from before the route above existed.
       { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
       { path: "me", element: el(<AccountPage />) },
+      { path: "help", element: el(<HelpPage />) },
       {
         path: "admin",
         element: el(<RequireAdmin><AdminLayout /></RequireAdmin>),

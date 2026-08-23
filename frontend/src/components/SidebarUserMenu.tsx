@@ -97,6 +97,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               <span>{t("account.admin_link")}</span>
             </Link>
           )}
+          <Link role="menuitem" to="/help" onClick={() => setOpen(false)} style={popItemStyle}>
+            <span>{t("nav.help")}</span>
+          </Link>
           <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{LOCALE_LABELS[current]}</span>

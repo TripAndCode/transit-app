@@ -14,6 +14,7 @@
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "account_menu": "Account menu",
+    "help": "Help",
     "prototype_section_label": "PROTOTYPE",
     "prototype_onboarding": "First-time login screen",
     "prototype_stale_feed": "Feed-stale state",
@@ -262,6 +263,9 @@
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
     }
+  },
+  "help": {
+    "title": "User Manual"
   },
   "account": {
     "admin_link": "Admin",
