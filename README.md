@@ -93,11 +93,15 @@ The stage internals, provider ladder, intent cache, and the anonymized
 
 | Flag | Default | Effect |
 |---|---|---|
-| `ASK_FOLLOWUP_ENABLED` | `false` | Off → follow-up chips hidden, `POST /followup` returns 503. The LLM kill-switch. |
+| `ASK_FOLLOWUP_ENABLED` | `false`¹ | Off → follow-up chips hidden, `POST /followup` returns 503. The LLM kill-switch. |
 | `ASK_INTENT_CACHE_ENABLED` | `false` | Enables the canonical-intent cache + guided builder UX. |
 | `ASK_HISTORY_ENABLED` | `true` | Off → the LLM stage gets no conversation memory. |
 | `ASK_QUERY_LOG_ENABLED` | `true` | Off → no rows written to `ask_query_log`. |
 | `ASK_ROUTER_ENABLED` | `true` | Off → skip stages 1–2 (every question goes to the LLM). |
+
+¹ Code-level fallback when unset. `.env.example` ships it `true` as the
+local-dev default (so a fresh `make bootstrap` dogfoods it with no manual
+flag-flipping) — a real deploy sets its own env vars and is unaffected.
 
 ## Load data
 
