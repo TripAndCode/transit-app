@@ -24,6 +24,12 @@ type QuestionDockProps = {
   onValueChange: (name: string, next: unknown) => void;
   /** Called after Run dispatches, so the caller resets composingId/values. */
   onRunComplete: () => void;
+  /** Whether to render the persistent chip toolbar. False on the landing
+   *  state (no messages yet), where AskLandingCards already exposes every
+   *  template — showing the same 5 templates again here duplicated it.
+   *  True once a conversation has messages, so a chip toolbar is still
+   *  available to start a new kind of question inline. */
+  showToolbar: boolean;
 };
 
 export function QuestionDock({
@@ -35,6 +41,7 @@ export function QuestionDock({
   onChipTap,
   onValueChange,
   onRunComplete,
+  showToolbar,
 }: QuestionDockProps) {
   const { t, i18n } = useTranslation();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,6 +65,11 @@ export function QuestionDock({
         .filter((p) => p.kind === "route" && p.required && !values[p.name])
         .map((p) => p.name)
     : [];
+
+  // Nothing to show: no active template and the toolbar is suppressed
+  // (landing state) — an empty bordered box would otherwise sit under the
+  // landing cards with nothing in it.
+  if (!composing && !showToolbar) return null;
 
   return (
     <div
@@ -89,53 +101,55 @@ export function QuestionDock({
           />
         )}
 
-        <div
-          role="toolbar"
-          aria-label={t("ask.dock.chip_strip_aria")}
-          style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
-        >
-          {templates.map((tpl) => {
-            const active = composingId === tpl.id;
-            return (
-              <button
-                key={tpl.id}
-                type="button"
-                onClick={() => onChipTap(tpl)}
-                disabled={busy && !active}
-                aria-disabled={busy && !active}
-                aria-pressed={active}
+        {showToolbar && (
+          <div
+            role="toolbar"
+            aria-label={t("ask.dock.chip_strip_aria")}
+            style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
+          >
+            {templates.map((tpl) => {
+              const active = composingId === tpl.id;
+              return (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() => onChipTap(tpl)}
+                  disabled={busy && !active}
+                  aria-disabled={busy && !active}
+                  aria-pressed={active}
+                  style={{
+                    background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
+                    color: active ? "white" : "var(--text-primary, #1a1a1a)",
+                    border: "1px solid",
+                    borderColor: active
+                      ? "var(--accent, #5b6cad)"
+                      : "var(--border-soft, rgba(0,0,0,0.08))",
+                    borderRadius: 999,
+                    padding: "5px 14px",
+                    fontSize: 13,
+                    cursor: busy && !active ? "not-allowed" : "pointer",
+                    opacity: busy && !active ? 0.6 : 1,
+                    transition: "background 120ms ease, color 120ms ease",
+                  }}
+                  title={t(tpl.title_key)}
+                >
+                  {tpl.emoji} {t(tpl.title_key)}
+                </button>
+              );
+            })}
+            {!composing && (
+              <span
                 style={{
-                  background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
-                  color: active ? "white" : "var(--text-primary, #1a1a1a)",
-                  border: "1px solid",
-                  borderColor: active
-                    ? "var(--accent, #5b6cad)"
-                    : "var(--border-soft, rgba(0,0,0,0.08))",
-                  borderRadius: 999,
-                  padding: "5px 14px",
-                  fontSize: 13,
-                  cursor: busy && !active ? "not-allowed" : "pointer",
-                  opacity: busy && !active ? 0.6 : 1,
-                  transition: "background 120ms ease, color 120ms ease",
+                  fontSize: 11,
+                  color: "var(--text-tertiary, #999)",
+                  marginLeft: 6,
                 }}
-                title={t(tpl.title_key)}
               >
-                {tpl.emoji} {t(tpl.title_key)}
-              </button>
-            );
-          })}
-          {!composing && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--text-tertiary, #999)",
-                marginLeft: 6,
-              }}
-            >
-              {t("ask.dock.chip_strip_idle_hint")}
-            </span>
-          )}
-        </div>
+                {t("ask.dock.chip_strip_idle_hint")}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

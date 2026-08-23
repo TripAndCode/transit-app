@@ -15,9 +15,11 @@ const templates = buildCardTemplates();
 function Harness({
   onSubmit,
   busy = false,
+  showToolbar = true,
 }: {
   onSubmit: (payload: { tool: string; args: Record<string, unknown>; user_summary: string }) => void | Promise<void>;
   busy?: boolean;
+  showToolbar?: boolean;
 }) {
   const [composingId, setComposingId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -34,23 +36,36 @@ function Harness({
   }
 
   return (
-    <QuestionDock
-      agencyId={1}
-      busy={busy}
-      onSubmit={onSubmit}
-      composingId={composingId}
-      values={values}
-      onChipTap={handleChipTap}
-      onValueChange={(name, next) => setValues((prev) => ({ ...prev, [name]: next }))}
-      onRunComplete={() => {
-        setComposingId(null);
-        setValues({});
-      }}
-    />
+    <>
+      {/* Stands in for a landing-area pill (AskLandingCards), which can open
+       *  a chip even while the dock's own toolbar is hidden. */}
+      {!showToolbar && (
+        <button
+          type="button"
+          onClick={() => handleChipTap(templates.find((tpl) => tpl.id === "top_delay")!)}
+        >
+          external-open
+        </button>
+      )}
+      <QuestionDock
+        agencyId={1}
+        busy={busy}
+        onSubmit={onSubmit}
+        composingId={composingId}
+        values={values}
+        onChipTap={handleChipTap}
+        onValueChange={(name, next) => setValues((prev) => ({ ...prev, [name]: next }))}
+        onRunComplete={() => {
+          setComposingId(null);
+          setValues({});
+        }}
+        showToolbar={showToolbar}
+      />
+    </>
   );
 }
 
-function setup(overrides: { busy?: boolean } = {}) {
+function setup(overrides: { busy?: boolean; showToolbar?: boolean } = {}) {
   const onSubmit = vi.fn();
   renderWithProviders(<Harness onSubmit={onSubmit} {...overrides} />);
   return { onSubmit };
@@ -140,6 +155,26 @@ describe("QuestionDock", () => {
     expect(payload.tool).toBe("on_time");
     // default best_first is "false" (string) → coerced to boolean false.
     expect(payload.args.best_first).toBe(false);
+  });
+
+  it("renders nothing when idle and showToolbar is false (landing state)", () => {
+    setup({ showToolbar: false });
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: i18n.t("ask.dock.run") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(i18n.t("ask.dock.chip_strip_idle_hint")),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still raises the ParamStrip when composing externally, even with showToolbar false", async () => {
+    const user = userEvent.setup();
+    setup({ showToolbar: false });
+    await user.click(screen.getByText("external-open"));
+    expect(screen.getByRole("button", { name: i18n.t("ask.dock.run") })).toBeInTheDocument();
+    // The chip toolbar itself stays hidden -- only ParamStrip appears.
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
   it("collapses the ParamStrip when the active chip is tapped again", async () => {

@@ -331,6 +331,7 @@ export function AskTab() {
             values={values}
             onChipTap={handleChipTap}
             onValueChange={handleValueChange}
+            showToolbar={hasMessages}
             onRunComplete={handleRunComplete}
           />
         )}

@@ -43,16 +43,15 @@ describe("AskLandingCards", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders one pill per route-required template", () => {
+  it("renders one pill per route-required template, each with a distinct label", () => {
     setup();
     expect(screen.getByText(i18n.t("ask.landing.pills_title"))).toBeInTheDocument();
-    // All route-required templates render the same "select a route" placeholder
-    // when called with no route_code — buildSummary can't disambiguate them by
-    // text alone here — so assert one pill per route-required template exists.
-    const routeTrendTpl = templates.find((t) => t.id === "route_trend")!;
-    const label = routeTrendTpl.buildSummary({}, i18n.t.bind(i18n));
-    const matches = screen.getAllByText(new RegExp(escapeRegExp(label)));
-    expect(matches).toHaveLength(templates.filter(needsRoute).length);
+    // Pills show the template's title, not buildSummary's "select a route"
+    // placeholder -- that placeholder is identical across every
+    // route-required template and can't disambiguate them by text alone.
+    for (const tpl of templates.filter(needsRoute)) {
+      expect(screen.getByText(new RegExp(escapeRegExp(i18n.t(tpl.title_key))))).toBeInTheDocument();
+    }
   });
 
   it("calls onInstantSubmit with the right template when an instant card is clicked", async () => {
@@ -69,11 +68,8 @@ describe("AskLandingCards", () => {
     const user = userEvent.setup();
     const { onOpenChip } = setup();
     const routeTrendTpl = templates.find((t) => t.id === "route_trend")!;
-    const label = routeTrendTpl.buildSummary({}, i18n.t.bind(i18n));
-    // route_trend is the first route-required template in buildCardTemplates(),
-    // so it's the first pill rendered — all 3 share the identical placeholder text.
-    const [firstPill] = screen.getAllByText(new RegExp(escapeRegExp(label)));
-    await user.click(firstPill);
+    const label = i18n.t(routeTrendTpl.title_key);
+    await user.click(screen.getByText(new RegExp(escapeRegExp(label))));
     expect(onOpenChip).toHaveBeenCalledTimes(1);
     expect(onOpenChip.mock.calls[0][0].id).toBe("route_trend");
   });
@@ -89,8 +85,8 @@ describe("AskLandingCards", () => {
     expect(onInstantSubmit).not.toHaveBeenCalled();
 
     const routeTrendTpl = templates.find((t) => t.id === "route_trend")!;
-    const pillLabel = routeTrendTpl.buildSummary({}, i18n.t.bind(i18n));
-    const [pill] = screen.getAllByText(new RegExp(escapeRegExp(pillLabel))).map((el) => el.closest("button")!);
+    const pillLabel = i18n.t(routeTrendTpl.title_key);
+    const pill = screen.getByText(new RegExp(escapeRegExp(pillLabel))).closest("button")!;
     expect(pill).toBeDisabled();
     await user.click(pill);
     expect(onOpenChip).not.toHaveBeenCalled();
