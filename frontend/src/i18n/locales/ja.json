@@ -467,6 +467,7 @@
     },
     "followup_placeholder": "この結果について質問...",
     "followup_send": "送信",
+    "followup_error": "質問への回答に失敗しました。もう一度お試しください。",
     "followup_chips": {
       "panel_aria": "フォローアップ質問",
       "chips": {

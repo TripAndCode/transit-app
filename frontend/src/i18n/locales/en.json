@@ -467,6 +467,7 @@
     },
     "followup_placeholder": "Ask about this result...",
     "followup_send": "Send",
+    "followup_error": "Couldn't answer that question. Please try again.",
     "followup_chips": {
       "panel_aria": "Follow-up questions",
       "chips": {

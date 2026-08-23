@@ -52,6 +52,10 @@ export function AskTab() {
   //    own toolbar) ───────────────────────────────────────────────────────
   const [composingId, setComposingId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
+  // Free-text follow-up draft, lifted so it survives FollowupChipsRow's
+  // unmount while a follow-up request is in flight (row is hidden during
+  // followup.isPending below).
+  const [followupDraft, setFollowupDraft] = useState("");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
 
@@ -292,14 +296,18 @@ export function AskTab() {
                 <FollowupChipsRow
                   messages={messages}
                   t={t}
-                  onFollowup={(ctxMsgId, question) =>
-                    activeId &&
+                  onFollowup={(ctxMsgId, question) => {
+                    if (!activeId) return;
+                    setFollowupDraft("");
                     followup.mutate({
                       conversationId: activeId,
                       contextMessageId: ctxMsgId,
                       question,
-                    })
-                  }
+                    });
+                  }}
+                  draftValue={followupDraft}
+                  onDraftChange={setFollowupDraft}
+                  error={followup.isError ? t("ask.followup_error") : null}
                 />
               )}
             </>
