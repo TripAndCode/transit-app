@@ -49,11 +49,18 @@ def _allowed_providers() -> set[str]:
     """Providers the follow-up may use, from ``ASK_FOLLOWUP_PROVIDERS``.
 
     The free-text follow-up echoes a system prompt that forbids obeying
-    in-question instructions; some models (notably Groq ``llama-3.3-70b``)
-    ignore that and follow injected instructions, while Cerebras
-    ``gpt-oss-120b`` resists. Defaults to ``cerebras`` so the follow-up never
-    silently answers from an injection-prone fallback; operators widen it
-    explicitly. Empty/unset → the default.
+    in-question instructions -- verify a candidate provider against
+    scripts/followup_eval.py before adding it here, don't assume. Groq's
+    old default model (``llama-3.3-70b-versatile``, since decommissioned)
+    failed that eval by obeying injected instructions Cerebras
+    ``gpt-oss-120b`` resisted; Groq now defaults to ``gpt-oss-120b`` too
+    (see GROQ_MODEL in .env.example) and re-ran clean at 11/11 probes, so
+    ``cerebras,groq`` is a verified-safe default to widen to -- but that
+    verification is tied to the specific model each provider runs, not the
+    provider name, and doesn't transfer if either model changes again.
+    Defaults to ``cerebras`` alone so an unverified operator's follow-up
+    never silently answers from an injection-prone fallback; operators
+    widen it explicitly (and re-verify) via env. Empty/unset → the default.
     """
     raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "cerebras")
     return {n.strip().lower() for n in raw.split(",") if n.strip()}
