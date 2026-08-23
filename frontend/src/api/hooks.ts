@@ -496,7 +496,10 @@ export function useFollowupEnabled(agencyId: number | null) {
   return useQuery({
     queryKey: ["ask-followup-enabled", agencyId],
     queryFn: ({ signal }) =>
-      apiGet<{ enabled: boolean }>(`/api/${agencyId}/ask/followup-enabled`, { signal }),
+      apiGet<{ enabled: boolean; max_question_chars: number }>(
+        `/api/${agencyId}/ask/followup-enabled`,
+        { signal },
+      ),
     enabled: agencyId != null,
     staleTime: 60 * 60 * 1000,
   });

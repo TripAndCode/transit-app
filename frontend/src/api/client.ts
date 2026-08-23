@@ -67,19 +67,28 @@ export async function apiDelete<T = void>(path: string): Promise<T | undefined> 
   return requestMaybeEmpty<T>(path, { method: "DELETE" });
 }
 
+/** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's
+ * `HTTPException(detail=...)`. `null` if `err` isn't an `ApiError` or its
+ * body isn't `{"detail": string}`. */
+export function apiErrorDetail(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  try {
+    const parsed = JSON.parse(err.body);
+    return parsed && typeof parsed === "object" && typeof parsed.detail === "string"
+      ? parsed.detail
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Extract a human-readable message from an unknown error, preferring an
  * `ApiError`'s parsed `detail` field. Mirrors the previous per-caller
  * `Error(detail.detail ?? detail)` shape so existing UI text stays intact. */
 export function formatApiError(e: unknown): string {
   if (e instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(e.body);
-      if (parsed && typeof parsed === "object" && typeof parsed.detail === "string") {
-        return parsed.detail;
-      }
-    } catch {
-      // body wasn't JSON — fall through
-    }
+    const detail = apiErrorDetail(e);
+    if (detail != null) return detail;
     return e.body || e.message;
   }
   return e instanceof Error ? e.message : String(e);

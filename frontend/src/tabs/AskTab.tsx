@@ -124,11 +124,15 @@ export function AskTab() {
   function handleSelectThread(threadId: string | null) {
     setActiveId(threadId);
     setFilterEdit(null);
+    setFollowupDraft("");
+    followup.reset();
   }
 
   function handleNewThread() {
     setActiveId(null);
     setFilterEdit(null);
+    setFollowupDraft("");
+    followup.reset();
   }
 
   async function handleCardSubmit({
@@ -298,16 +302,19 @@ export function AskTab() {
                   t={t}
                   onFollowup={(ctxMsgId, question) => {
                     if (!activeId) return;
-                    setFollowupDraft("");
-                    followup.mutate({
-                      conversationId: activeId,
-                      contextMessageId: ctxMsgId,
-                      question,
-                    });
+                    // Only clear the draft if this submission *was* the draft --
+                    // a canned chip prompt shouldn't wipe text the user is
+                    // still composing.
+                    const isDraftSubmit = question === followupDraft.trim();
+                    followup.mutate(
+                      { conversationId: activeId, contextMessageId: ctxMsgId, question },
+                      { onSuccess: () => isDraftSubmit && setFollowupDraft("") },
+                    );
                   }}
                   draftValue={followupDraft}
                   onDraftChange={setFollowupDraft}
-                  error={followup.isError ? t("ask.followup_error") : null}
+                  error={followup.isError ? followup.error : null}
+                  maxChars={followupFlag.data?.max_question_chars}
                 />
               )}
             </>

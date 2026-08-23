@@ -5,6 +5,7 @@ import { renderWithProviders } from "../../test/renderWithProviders";
 import { FollowupChipsRow } from "./FollowupChipsRow";
 import { useTranslation } from "react-i18next";
 import type { ConvMessage } from "../../api/types";
+import { ApiError } from "../../api/client";
 
 const messagesWithResult: ConvMessage[] = [
   {
@@ -23,7 +24,8 @@ function Wrapper(props: {
   onFollowup: (ctxMsgId: number, question: string) => void;
   draftValue: string;
   onDraftChange: (next: string) => void;
-  error?: string | null;
+  error?: unknown;
+  maxChars?: number;
 }) {
   const { t } = useTranslation();
   return <FollowupChipsRow t={t} {...props} />;
@@ -84,16 +86,58 @@ describe("FollowupChipsRow free-text input", () => {
     expect(onFollowup).not.toHaveBeenCalled();
   });
 
-  it("shows an error message when passed", () => {
+  it("shows a generic error message for an unrecognized LLM error", () => {
     renderWithProviders(
       <Wrapper
         messages={messagesWithResult}
         onFollowup={vi.fn()}
         draftValue=""
         onDraftChange={vi.fn()}
-        error="Couldn't answer that question. Please try again."
+        error={new ApiError(502, JSON.stringify({ detail: "llm_error:unexpected" }))}
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't answer that question");
+  });
+
+  it("shows a too-long-specific message for a 400 question_too_long error", () => {
+    renderWithProviders(
+      <Wrapper
+        messages={messagesWithResult}
+        onFollowup={vi.fn()}
+        draftValue=""
+        onDraftChange={vi.fn()}
+        error={new ApiError(400, JSON.stringify({ detail: "question_too_long" }))}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("too long");
+  });
+
+  it("shows a rate-limit-specific message for an llm_error:rate_limit error", () => {
+    renderWithProviders(
+      <Wrapper
+        messages={messagesWithResult}
+        onFollowup={vi.fn()}
+        draftValue=""
+        onDraftChange={vi.fn()}
+        error={new ApiError(502, JSON.stringify({ detail: "llm_error:rate_limit" }))}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("High traffic");
+  });
+
+  it("caps the input at the server-supplied maxChars", () => {
+    renderWithProviders(
+      <Wrapper
+        messages={messagesWithResult}
+        onFollowup={vi.fn()}
+        draftValue=""
+        onDraftChange={vi.fn()}
+        maxChars={10}
+      />,
+    );
+    expect(screen.getByPlaceholderText("Ask about this result...")).toHaveAttribute(
+      "maxlength",
+      "10",
+    );
   });
 });

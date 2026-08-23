@@ -1,10 +1,12 @@
 import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
 import { FOLLOWUP_CHIPS } from "../../components/askFollowupChips";
+import { ErrorBanner } from "../../components/ErrorBanner";
 
-// Mirrors pipeline/query/followup.py's MAX_QUESTION_CHARS -- kept in sync by
-// hand since the two live in different languages/build systems.
-const FOLLOWUP_MAX_CHARS = 500;
+// Fallback used only for the brief window before /ask/followup-enabled
+// resolves; the server-supplied `maxChars` (pipeline/query/followup.py's
+// MAX_QUESTION_CHARS) is authoritative and always wins once loaded.
+const FOLLOWUP_MAX_CHARS_FALLBACK = 500;
 
 /** Bottom-of-thread follow-up chips plus a free-text box. Grounds every
  *  follow-up (chip or typed) on the most recent assistant message that
@@ -18,13 +20,15 @@ export function FollowupChipsRow({
   draftValue,
   onDraftChange,
   error,
+  maxChars = FOLLOWUP_MAX_CHARS_FALLBACK,
 }: {
   messages: ConvMessage[];
   t: TFunction;
   onFollowup: (contextMsgId: number, question: string) => void;
   draftValue: string;
   onDraftChange: (next: string) => void;
-  error?: string | null;
+  error?: unknown;
+  maxChars?: number;
 }) {
   const lastResultMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -35,10 +39,15 @@ export function FollowupChipsRow({
   })();
   if (lastResultMsgId == null) return null;
 
+  // The <input maxLength> below already caps draftValue at maxChars, so
+  // trimmed can never exceed it -- only the lower bound needs checking here.
   const trimmed = draftValue.trim();
-  const canSubmit = trimmed.length > 0 && trimmed.length <= FOLLOWUP_MAX_CHARS;
+  const canSubmit = trimmed.length > 0;
 
   function submitDraft() {
+    // lastResultMsgId is non-null here (the early return above guarantees
+    // it), but TS doesn't retain that narrowing across this nested function
+    // boundary, so the null check stays for type safety, not defensively.
     if (!canSubmit || lastResultMsgId == null) return;
     onFollowup(lastResultMsgId, trimmed);
   }
@@ -94,7 +103,7 @@ export function FollowupChipsRow({
           value={draftValue}
           onChange={(e) => onDraftChange(e.target.value)}
           placeholder={t("ask.followup_placeholder")}
-          maxLength={FOLLOWUP_MAX_CHARS}
+          maxLength={maxChars}
           aria-label={t("ask.followup_placeholder")}
           style={{
             flex: 1,
@@ -125,11 +134,7 @@ export function FollowupChipsRow({
         </button>
       </form>
 
-      {error && (
-        <div role="alert" style={{ fontSize: 12, color: "var(--error-fg, #8a6f1c)" }}>
-          {error}
-        </div>
-      )}
+      {error != null && <ErrorBanner error={error} />}
     </div>
   );
 }

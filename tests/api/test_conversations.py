@@ -873,3 +873,19 @@ async def test_followup_anon_success_returns_synthetic_messages(conv_app, monkey
             conv_id,
         )
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_followup_enabled_endpoint_reports_flag_and_max_chars(conv_app, monkeypatch):
+    """The frontend's input maxLength is sourced from this endpoint (not
+    hand-mirrored) so it can never drift from MAX_QUESTION_CHARS."""
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, _uid, _pool = conv_app
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/api/{agency}/ask/followup-enabled")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["enabled"] is True
+    assert body["max_question_chars"] == conv_router._followup.MAX_QUESTION_CHARS
