@@ -8,11 +8,17 @@ const ENABLED_KEY = "transit.insightPanelEnabled";
 const COLLAPSED_KEY = "transit.insightPanelCollapsed";
 const SEEN_KEY = "transit.insightPanelSeen";
 
-/** Fail-open (feature off) if localStorage is unavailable — same shape as
+/** Defaults on in dev builds (same `import.meta.env.DEV` gate as
+ *  Sidebar.tsx's PROTOTYPE section) so dogfooding needs no manual setup;
+ *  a real deploy stays opt-in-only. An explicit localStorage preference
+ *  (set either way via devtools) always wins over that default. Fail-open
+ *  to off if localStorage is unavailable — same shape as
  *  Sidebar.tsx's readCollapsedPref. */
 function readEnabled(): boolean {
   try {
-    return localStorage.getItem(ENABLED_KEY) === "1";
+    const stored = localStorage.getItem(ENABLED_KEY);
+    if (stored != null) return stored === "1";
+    return import.meta.env.DEV;
   } catch {
     return false;
   }

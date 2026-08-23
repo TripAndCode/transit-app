@@ -23,7 +23,12 @@ describe("InsightPanel", () => {
     sessionStorage.clear();
   });
 
-  it("renders nothing when the feature flag is off", () => {
+  it("renders nothing when the feature flag is explicitly off", () => {
+    // Explicit "0" simulates a real deploy where a user opted out, or a
+    // test environment where import.meta.env.DEV happens to be true (as it
+    // is under Vitest) -- an explicit preference always wins over the
+    // dev-build default, so this is the only way to exercise "off" here.
+    localStorage.setItem("transit.insightPanelEnabled", "0");
     const spy = vi.spyOn(hooks, "useSuggestion").mockReturnValue({
       data: {
         report_type: "trend",
@@ -41,6 +46,19 @@ describe("InsightPanel", () => {
     // The flag being off must gate the hook call itself, not just the render —
     // otherwise every unopted-in visit still fires a live suggest request.
     expect(spy).toHaveBeenCalledWith(null, []);
+  });
+
+  it("defaults to enabled with no stored preference (dev-build default)", () => {
+    // No localStorage.setItem here -- import.meta.env.DEV is true under
+    // Vitest, matching a real dev build, so this exercises the actual
+    // default path rather than an explicit "1".
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "trend", route_code: "R1", reason_text: "dev default shown", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-15" },
+      isPending: false,
+      error: null,
+    } as never);
+    renderPanel();
+    expect(screen.getByText("dev default shown")).toBeTruthy();
   });
 
   it("shows the suggestion and navigates on click when flag is on", () => {
