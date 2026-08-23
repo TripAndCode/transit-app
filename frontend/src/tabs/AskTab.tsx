@@ -52,6 +52,10 @@ export function AskTab() {
   //    own toolbar) ───────────────────────────────────────────────────────
   const [composingId, setComposingId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
+  // Free-text follow-up draft, lifted so it survives FollowupChipsRow's
+  // unmount while a follow-up request is in flight (row is hidden during
+  // followup.isPending below).
+  const [followupDraft, setFollowupDraft] = useState("");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
 
@@ -120,11 +124,15 @@ export function AskTab() {
   function handleSelectThread(threadId: string | null) {
     setActiveId(threadId);
     setFilterEdit(null);
+    setFollowupDraft("");
+    followup.reset();
   }
 
   function handleNewThread() {
     setActiveId(null);
     setFilterEdit(null);
+    setFollowupDraft("");
+    followup.reset();
   }
 
   async function handleCardSubmit({
@@ -292,14 +300,21 @@ export function AskTab() {
                 <FollowupChipsRow
                   messages={messages}
                   t={t}
-                  onFollowup={(ctxMsgId, question) =>
-                    activeId &&
-                    followup.mutate({
-                      conversationId: activeId,
-                      contextMessageId: ctxMsgId,
-                      question,
-                    })
-                  }
+                  onFollowup={(ctxMsgId, question) => {
+                    if (!activeId) return;
+                    // Only clear the draft if this submission *was* the draft --
+                    // a canned chip prompt shouldn't wipe text the user is
+                    // still composing.
+                    const isDraftSubmit = question === followupDraft.trim();
+                    followup.mutate(
+                      { conversationId: activeId, contextMessageId: ctxMsgId, question },
+                      { onSuccess: () => isDraftSubmit && setFollowupDraft("") },
+                    );
+                  }}
+                  draftValue={followupDraft}
+                  onDraftChange={setFollowupDraft}
+                  error={followup.isError ? followup.error : null}
+                  maxChars={followupFlag.data?.max_question_chars}
                 />
               )}
             </>
@@ -323,6 +338,7 @@ export function AskTab() {
             values={values}
             onChipTap={handleChipTap}
             onValueChange={handleValueChange}
+            showToolbar={hasMessages}
             onRunComplete={handleRunComplete}
           />
         )}

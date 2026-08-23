@@ -128,7 +128,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                   opacity: busy ? 0.6 : 1,
                 }}
               >
-                {tpl.emoji} {tpl.buildSummary({}, t)}
+                {tpl.emoji} {t(tpl.title_key)}
               </button>
             ))}
           </div>

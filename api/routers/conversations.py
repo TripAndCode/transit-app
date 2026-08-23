@@ -559,5 +559,11 @@ async def followup_endpoint(
 async def followup_enabled_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
 ):
-    """Public flag check so the frontend knows whether to render the input."""
-    return {"enabled": _followup.is_enabled()}
+    """Public flag check so the frontend knows whether to render the input.
+
+    Also exposes ``max_question_chars`` so the client's input cap can't drift
+    from :data:`pipeline.query.followup.MAX_QUESTION_CHARS`."""
+    return {
+        "enabled": _followup.is_enabled(),
+        "max_question_chars": _followup.MAX_QUESTION_CHARS,
+    }

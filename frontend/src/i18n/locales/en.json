@@ -892,7 +892,11 @@
     "generic_status": "Failed to load ({{status}})",
     "network": "Connection dropped for a moment. Please retry.",
     "generic": "Failed to load.",
-    "no_agency_selected": "No agency selected"
+    "no_agency_selected": "No agency selected",
+    "followup_too_long": "That question is too long. Please shorten it and try again.",
+    "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
+    "followup_connection": "Connection dropped for a moment. Please retry.",
+    "followup_llm_generic": "Couldn't answer that question. Please try again."
   },
   "admin": {
     "users": {
