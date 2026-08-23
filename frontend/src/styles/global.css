@@ -193,6 +193,54 @@ summary::-webkit-details-marker { display: none; }
 .maplibregl-popup-tip {
   display: none;
 }
+/* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
+   which emits bare h1-h6/p/ul/table/blockquote/img with no styling of their
+   own -- give them the same tokens the rest of the app uses instead of
+   leaving the manual page looking unstyled next to every other tab. */
+.user-manual-content h2 {
+  font-size: 18px;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+.user-manual-content h3 {
+  font-size: 15px;
+  margin: 20px 0 8px;
+}
+.user-manual-content p,
+.user-manual-content li {
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+.user-manual-content blockquote {
+  margin: 12px 0;
+  padding: 8px 14px;
+  background: var(--bg-soft);
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+}
+.user-manual-content table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+.user-manual-content th,
+.user-manual-content td {
+  border: 1px solid var(--border-soft);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13px;
+}
+.user-manual-content img {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  margin: 12px 0;
+}
+.user-manual-content a {
+  color: var(--accent);
+}
+
 .maplibregl-popup-close-button {
   color: var(--text-secondary);
   font-size: 16px;

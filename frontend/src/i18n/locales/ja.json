@@ -14,6 +14,7 @@
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
     "account_menu": "アカウントメニュー",
+    "help": "ヘルプ",
     "prototype_section_label": "PROTOTYPE",
     "prototype_onboarding": "初回ログイン画面",
     "prototype_stale_feed": "フィード遅延状態",
@@ -262,6 +263,9 @@
       "平日": "平日",
       "土日祝": "土日祝"
     }
+  },
+  "help": {
+    "title": "利用マニュアル"
   },
   "account": {
     "admin_link": "管理",
