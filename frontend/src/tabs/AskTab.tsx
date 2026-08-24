@@ -126,6 +126,12 @@ export function AskTab() {
     setFilterEdit(null);
     setFollowupDraft("");
     followup.reset();
+    // A template left composing (chip tapped, ParamStrip open, never run)
+    // must not survive a thread switch -- otherwise QuestionDock keeps
+    // rendering it over the new thread's own landing-state picker,
+    // reintroducing the duplicated-picker bug this component was fixed for.
+    setComposingId(null);
+    setValues({});
   }
 
   function handleNewThread() {
@@ -133,6 +139,8 @@ export function AskTab() {
     setFilterEdit(null);
     setFollowupDraft("");
     followup.reset();
+    setComposingId(null);
+    setValues({});
   }
 
   async function handleCardSubmit({
@@ -300,15 +308,14 @@ export function AskTab() {
                 <FollowupChipsRow
                   messages={messages}
                   t={t}
-                  onFollowup={(ctxMsgId, question) => {
+                  onFollowup={(ctxMsgId, question, isDraft) => {
                     if (!activeId) return;
                     // Only clear the draft if this submission *was* the draft --
                     // a canned chip prompt shouldn't wipe text the user is
                     // still composing.
-                    const isDraftSubmit = question === followupDraft.trim();
                     followup.mutate(
                       { conversationId: activeId, contextMessageId: ctxMsgId, question },
-                      { onSuccess: () => isDraftSubmit && setFollowupDraft("") },
+                      { onSuccess: () => isDraft && setFollowupDraft("") },
                     );
                   }}
                   draftValue={followupDraft}

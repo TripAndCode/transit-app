@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
 import { FOLLOWUP_CHIPS } from "../../components/askFollowupChips";
@@ -24,12 +25,22 @@ export function FollowupChipsRow({
 }: {
   messages: ConvMessage[];
   t: TFunction;
-  onFollowup: (contextMsgId: number, question: string) => void;
+  /** `isDraft` is an explicit source flag, not inferred from text -- a typed
+   *  draft that happens to exactly match a canned chip's translated prompt
+   *  must not be misattributed to the chip (or vice versa). */
+  onFollowup: (contextMsgId: number, question: string, isDraft: boolean) => void;
   draftValue: string;
   onDraftChange: (next: string) => void;
   error?: unknown;
   maxChars?: number;
 }) {
+  // Guards the native Enter-to-submit against IME composition: on some
+  // browser/OS combos (notably Safari + macOS), pressing Enter to confirm a
+  // kana→kanji conversion candidate can also fire the form's submit before
+  // the user finished typing. Declared before the early return below so the
+  // hook order stays unconditional.
+  const isComposingRef = useRef(false);
+
   const lastResultMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -49,7 +60,7 @@ export function FollowupChipsRow({
     // it), but TS doesn't retain that narrowing across this nested function
     // boundary, so the null check stays for type safety, not defensively.
     if (!canSubmit || lastResultMsgId == null) return;
-    onFollowup(lastResultMsgId, trimmed);
+    onFollowup(lastResultMsgId, trimmed, true);
   }
 
   return (
@@ -67,7 +78,7 @@ export function FollowupChipsRow({
           <button
             key={chip.id}
             type="button"
-            onClick={() => onFollowup(lastResultMsgId, t(chip.prompt_key))}
+            onClick={() => onFollowup(lastResultMsgId, t(chip.prompt_key), false)}
             style={{
               padding: "5px 12px",
               fontSize: 12,
@@ -94,6 +105,7 @@ export function FollowupChipsRow({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          if (isComposingRef.current) return;
           submitDraft();
         }}
         style={{ display: "flex", gap: 6 }}
@@ -102,6 +114,12 @@ export function FollowupChipsRow({
           type="text"
           value={draftValue}
           onChange={(e) => onDraftChange(e.target.value)}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+          }}
           placeholder={t("ask.followup_placeholder")}
           maxLength={maxChars}
           aria-label={t("ask.followup_placeholder")}

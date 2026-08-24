@@ -722,6 +722,43 @@ async def test_followup_authed_too_long_maps_to_400(conv_app, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_followup_authed_real_long_question_maps_to_400_not_422(conv_app, monkeypatch):
+    """End-to-end version of the test above: a genuinely oversized question,
+    not a mocked `answer_followup` return value. `FollowupBody.question`
+    must NOT declare a Pydantic `max_length` -- that would 422 before this
+    handler's own too_long check (and its friendly frontend copy) ever run."""
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="describe_data",
+            args={},
+            signature_hash=None,
+            result={"ok": True},
+            rendered_summary="prior answer",
+        )
+    long_question = "a" * (conv_router._followup.MAX_QUESTION_CHARS + 1)
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": long_question, "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "question_too_long"
+
+
+@pytest.mark.asyncio
 async def test_followup_authed_llm_error_maps_to_502(conv_app, monkeypatch):
     import api.routers.conversations as conv_router
 

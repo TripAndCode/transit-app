@@ -39,9 +39,16 @@ async def _owned_or_404(coro):
 
 def _raise_for_followup_error(err: str | None) -> None:
     """Map a ``pipeline.query.followup.answer_followup`` error code to the
-    matching HTTP error, shared by both the anon and authed followup paths."""
+    matching HTTP error, shared by both the anon and authed followup paths.
+
+    ``too_long``/``empty`` are client input-validation failures (400), not
+    provider/LLM failures (502) -- the frontend's ``canSubmit`` guard means
+    ``empty`` should never reach here from the real UI, but a direct API
+    call must still get a client-error status, not "bad gateway"."""
     if err == "too_long":
         raise HTTPException(status_code=400, detail="question_too_long")
+    if err == "empty":
+        raise HTTPException(status_code=400, detail="question_empty")
     if err is not None:
         raise HTTPException(status_code=502, detail=f"llm_error:{err}")
 
@@ -404,7 +411,13 @@ async def append_message_endpoint(
 
 
 class FollowupBody(BaseModel):
-    question: str = Field(..., max_length=_followup.MAX_QUESTION_CHARS)
+    # No max_length here on purpose: a Pydantic-level length violation would
+    # 422 before this handler ever runs `answer_followup`'s own `len(q) >
+    # MAX_QUESTION_CHARS` check, so `_raise_for_followup_error`'s friendly
+    # "question_too_long" 400 (and its matching frontend copy) would never
+    # actually fire for a real oversized question -- only for the mocked
+    # unit test that calls `answer_followup` directly.
+    question: str = Field(...)
     # Authed path: reference an existing assistant message stored in DB
     context_message_id: int | None = None
     # Anon path: inline the prior result (frontend has it in localStorage)
