@@ -21,7 +21,7 @@ const messagesWithResult: ConvMessage[] = [
 
 function Wrapper(props: {
   messages: ConvMessage[];
-  onFollowup: (ctxMsgId: number, question: string) => void;
+  onFollowup: (ctxMsgId: number, question: string, isDraft: boolean) => void;
   draftValue: string;
   onDraftChange: (next: string) => void;
   error?: unknown;
@@ -67,7 +67,23 @@ describe("FollowupChipsRow free-text input", () => {
       />,
     );
     await user.click(screen.getByText("Send"));
-    expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?");
+    expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?", true);
+  });
+
+  it("passes isDraft=false for a canned chip, even if its prompt text matches the current draft", async () => {
+    const user = userEvent.setup();
+    const onFollowup = vi.fn();
+    const chipPrompt = "Explain the pattern in this result in 3 sentences or fewer.";
+    renderWithProviders(
+      <Wrapper
+        messages={messagesWithResult}
+        onFollowup={onFollowup}
+        draftValue={chipPrompt}
+        onDraftChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Why this pattern?" }));
+    expect(onFollowup).toHaveBeenCalledWith(1, chipPrompt, false);
   });
 
   it("does not submit a whitespace-only draft", async () => {
