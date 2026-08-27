@@ -72,20 +72,31 @@ Run `git worktree list`. If an entry's branch is `vps-loop/item-<N>`:
    - Proceed to Step 4 with a clean slate.
 3. **If that log is NOT empty** (real commits exist — the interrupted run
    may have actually finished the implementation, possibly already
-   verified): do NOT delete anything, and do NOT try to resume or ship it
-   yourself either — you don't know why the prior run stopped, and
-   guessing wrong in either direction (discarding real work, or shipping
-   something that was actually still broken) is worse than pausing.
-   Instead:
-   - Append to the Status log: `- <UTC timestamp>: item N has an existing
-     worktree/branch with real commits (<list the commit subjects>) but no
-     PR — likely an interrupted prior run's completed-or-partial work.
-     Needs human review before this item can be retried (inspect
-     <worktree path>, then either ship it or clear it manually).`
-   - Do NOT dispatch a worker for item N this run. Move on: if another
-     backlog item is eligible (per Step 3's own walk), work that one
-     instead; if none are, stop per Step 3's existing "nothing actionable"
-     path.
+   verified): resume and ship it yourself, without dispatching a fresh
+   `isolation: "worktree"` worker (that would create an unrelated, separate
+   worktree rather than continuing this one).
+   a. Run `/review-branch` against this existing worktree/branch, exactly
+      as Step 5 does for a freshly-dispatched worker — even if the prior
+      run may have already run it once, re-verifying here is cheap and is
+      the trust boundary before anything gets pushed.
+   b. **Clean (no Major findings):** from the worktree
+      (`git -C <that path> ...`), push it (`git push -u origin
+      vps-loop/item-<N>`), `gh pr create` for it (per `pr-github.md`
+      style, noting in the PR body that this resumed an interrupted prior
+      run), fill in the real PR number in `docs/refactor-log.md` if it's
+      still showing `(PR #pending)` (commit that on the same branch, push
+      again), and append to the Status log:
+      `- <UTC timestamp>: item N shipped as PR #<number> (resumed from an
+      interrupted prior run's existing commits).` This run is done — do
+      not also dispatch a new item.
+   c. **Major findings:** dispatch a fix — not via `isolation: "worktree"`
+      (which creates a new, disconnected worktree), but a plain
+      general-purpose Agent dispatch whose prompt explicitly instructs it
+      to `cd` into the existing worktree path first, then fix the listed
+      findings there and commit. Cap at 2 total review passes, same as
+      Step 5's own cap. If still not clean after 2 passes: append the
+      residual findings and the worktree path to the Status log for human
+      review, do NOT push, do NOT open a PR, stop.
 
 ## Step 4 — Dispatch the worker
 
