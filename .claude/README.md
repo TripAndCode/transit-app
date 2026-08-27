@@ -10,7 +10,7 @@ Invoke as `/name` from a Claude Code session.
 
 | Command | Does | Reads/writes |
 |---|---|---|
-| `/review-branch` | Diffs branch vs `main` once, dispatches `branch-reviewer` subagents in parallel (fresh context each) covering every dimension — call count scaled to diff size (3 / 5 / one-per-dimension) — synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. | Read-only + `make check`. No commit/push. |
+| `/review-branch` | Diffs branch vs `main` once into a file, dispatches `branch-reviewer` subagents in parallel (fresh context each, handed the diff path) covering every dimension, with the call count scaled to the diff — synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. Read the command file for the actual fan-out rule. | Read-only + `make check`. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
 | `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick next actionable `NEXT_TASK.md` item → dispatch an isolated worker → verify via the `/review-branch` process → push + open a **draft** PR, then mark ready. Never merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
@@ -18,9 +18,10 @@ Invoke as `/name` from a Claude Code session.
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
 → `/address-my-pr-comments` (triage + fix + reply).
 
-Each command file states its own token-frugality rules inline, at the top of the file
-that uses them — this README is not loaded by any session, so it is a map, not a rule
-store. Don't move rules here.
+Each command file states its own token-frugality rules inline, in the phase they apply
+to. This README is a map, not a rule store: no command loads it, so nothing here is
+enforceable — treat every line above as a possibly-stale summary of the command file it
+describes, never as the rule itself.
 
 ## Agents (`.claude/agents/*.md`)
 
@@ -38,8 +39,10 @@ i18n key parity or `agg_*` column renames).
 
 ## Guardrails baked into these files
 
-- DB safety: any SQL is read-only against dev `transit`@5433; tests point at
-  throwaway `transit_test`@5544. (See root `CLAUDE.md`.)
+- DB safety: any SQL is read-only against dev Postgres `transit`@5433 and the dev
+  ClickHouse (`transit-ch`); tests point at throwaway `transit_test`@5544 and
+  ClickHouse @8124. Postgres writes are additionally hook-blocked by
+  `hooks/guard-dev-db.sh`. (See root `CLAUDE.md`.)
 - No command here commits or pushes without explicit user go-ahead, except
   `/vps-loop-run`, which runs unattended: it may push feature branches and open
   draft PRs, but never pushes to `main` and never merges.

@@ -53,11 +53,17 @@ Dimensions you may be asked for:
 
 Rules:
 - The prompt gives you a **path** to the branch diff (against `main`, NOT master),
-  the changed-file list, and the stated objective. Read the diff from that path.
-  If no diff or path was given, or the diff looks truncated / a named file's hunks are
-  missing, derive what you need yourself (`git diff main...HEAD [-- <path>]`,
-  `git -C <worktree-abs-path>` if a worktree was named) and say so under Obstacles —
-  never review from nothing and report "no findings".
+  the changed-file list, the stated objective, and the worktree path if there is one.
+  Read the diff from that path.
+- **Never re-derive a path the prompt declares deliberately excluded or redacted**
+  (lockfiles, generated files, secret-bearing paths). Missing hunks for those are
+  intentional, not truncation: note them under Obstacles and move on. Re-deriving them
+  pulls back exactly what the coordinator withheld.
+- Derive a diff yourself ONLY when no path was given, the file is unreadable, or a
+  hunk is cut mid-line — then run `git diff main...HEAD [-- <path>]` (`git -C
+  <worktree-abs-path>` if a worktree was named; without one, a bare `git diff` runs in
+  the main checkout on `main` and yields nothing) and say so under Obstacles. Never
+  review from nothing and report "no findings".
 - The changed-file list is context, **not a read boundary**: reading outside it —
   callers, consumers, tests, config — is expected and required for `consistency`,
   `perf`, and `security`. Stay inside a pathspec only when the caller explicitly

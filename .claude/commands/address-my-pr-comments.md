@@ -69,20 +69,26 @@ Boundaries.
 4. If nothing is left after filtering, say so and stop.
 
 ## Phase 1 — Digest & analyze (NO replies written, NO code touched)
-**Scale how you do this to the thread count.** Under ~10 threads, judge them yourself
-directly. At ~10 or more, dispatch fresh-context subagents instead of reading
-everything yourself — but **group threads by file/topic FIRST, then split those groups
-into batches** (bounded so each subagent handles a set that fits comfortably in one
-context, ~10 threads), so threads making the same point stay in one batch.
+**Scale how you do this to the thread count.** **Group threads by file/topic FIRST**,
+then batch those groups (bounded so each subagent handles a set that fits comfortably
+in one context, ~10 threads) so threads making the same point stay in one batch.
+Dispatch subagents only when that grouping yields **2 or more** batches — a single
+batch is pure overhead (one extra dispatch, a merge pass with nothing to merge, and you
+lose the code grounding Phase 2's replies need), so judge those yourself directly.
+If one group alone exceeds the bound, keep it whole and let that batch run long rather
+than splitting a group across batches.
 Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
 not run any `gh` write call, do not post or reply to any comment, never call the
 resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
-:5433. Report only." — a dispatched subagent doesn't see this command file, so the
-per-thread approval gate above binds it only if you say so.
+dev Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+only within the worktree path given; never read another worktree. Report only." — a
+dispatched subagent doesn't see this command file, so the per-thread approval gate
+above binds it only if you say so.
 Give each batch: its thread text, the worktree path, the verdict taxonomy and row
 fields below, and the targeted-read rule. Each batch returns those same row fields,
 one row per thread. After all batches return, run one cross-batch pass yourself to
-merge rows whose underlying point is the same before emitting the table.
+merge rows whose underlying point is the same before emitting the table (skip this when
+there was only one batch — nothing to merge).
 
 For EACH thread, read the actual code at the referenced file:line before judging —
 targeted read first (`grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a

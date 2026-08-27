@@ -18,41 +18,60 @@ review affordable without narrowing coverage. Don't drop them while rewording.
   Postgres queries or MapLibre layers, respectively.
 
 ## Phase 1 — Understand (you, directly)
-1. Compute the diff ONCE, into a file, against `main` (NOT master), excluding
-   lockfiles and generated files (they carry no review value and would be shipped to
-   every reviewer):
+1. Compute the diff ONCE, into a file at an **absolute** path, against `main` (NOT
+   master). All pathspecs use `:(top)` so they resolve from the repo root, not the
+   current directory — a bare `-- .` run from `frontend/` silently drops every backend
+   hunk:
    ```bash
-   D=<scratchpad>/branch.diff
-   git diff main...HEAD -- . ':(exclude)poetry.lock' ':(exclude)frontend/package-lock.json' > "$D"
-   git diff main...HEAD --stat            # keep this; it's the file list
-   git diff main...HEAD --shortstat       # keep this; it's the tier input
+   D="<scratchpad>/branch.diff"          # absolute; scratchpad dir, not /tmp
+   EX=(':(top)'
+       ':(exclude,top)poetry.lock' ':(exclude,top)frontend/package-lock.json'
+       ':(exclude,top).env' ':(exclude,top).env.local' ':(exclude,top).env.*.local'
+       ':(exclude,top)*.pem' ':(exclude,top)*credential*' ':(exclude,top)*service-account*')
+   git diff main...HEAD -- "${EX[@]}" > "$D"
+   git diff main...HEAD --numstat -- "${EX[@]}"   # tier input AND file list
+   git diff main...HEAD --numstat                 # unfiltered, to see what was excluded
    ```
-   (`git -C <worktree-abs-path>` in a worktree.) Phase 2 hands subagents that **path**,
-   never inlined diff text. If a lockfile did change, say so in the intro from `--stat`
-   alone ("`poetry.lock` +N/-M, dependency bump — reviewed by stat only").
-   You need only `--stat`/`--shortstat` yourself to tier the diff and state the
-   objective — don't pull a large diff into your own context.
-2. Run `git status --porcelain` too. Uncommitted work is NOT in `main...HEAD`: either
-   append `git diff` / `git diff --cached` to the handed-over file, or state in the
-   intro that uncommitted changes were not reviewed.
+   Exclusions are **structural, in this command** — never "hand the path over and add a
+   note", because the note can't redact a file the reviewer is told to read.
+   - `--numstat` (excluded) is the single source for both the tier input (sum of
+     insertions + deletions) and the changed-file list. Don't use `--stat`/`--shortstat`:
+     unfiltered totals mis-tier a diff (a 40-line change with 6k lines of lock churn
+     would land in the widest tier, which is exactly what the exclusion exists to stop).
+   - Templates (`*.example`, `*.sample`) hold no values and ARE reviewable — don't
+     exclude them.
+   - If the unfiltered `--numstat` lists any other path whose name carries
+     `KEY`/`SECRET`/`TOKEN`/`PASSWORD`/`CREDENTIAL` and isn't a template, add it to `EX`
+     before writing the file, report it as a finding, and recommend rotation if a value
+     is present (per CLAUDE.md's secrets rule).
+   - Report every excluded path in the intro from the unfiltered `--numstat` alone
+     ("`poetry.lock` +N/-M, dependency bump — reviewed by numstat only").
+2. Run `git status --porcelain`. Uncommitted work is NOT in `main...HEAD`. Either fold
+   it in — `git add -N` the untracked paths first (plain `git diff` never shows them),
+   then append `git diff -- "${EX[@]}"` and `git diff --cached -- "${EX[@]}"` (same
+   pathspec — an unfiltered append re-opens the secret and lockfile holes) and add
+   their numstat totals to the tier input — or state in the intro that uncommitted
+   changes were not reviewed, naming them.
 3. Deduce the branch objective and how the new code builds on `main`.
 4. Write a short context intro stating that objective before any findings.
-5. Risk tier — three-way, and it keys on *what executes the file*, not its extension:
-   - **Trivial** — human-facing prose only (`README.md`, `docs/**`), zero code/config/
-     script. Skips Phase 2 entirely; one-pass gate.
-     **Never trivial:** anything under `.claude/**` (commands, agents, skills, hooks,
-     settings) or the root `CLAUDE.md`. Those are instructions a future session
-     executes, so a defect there silently degrades every later run.
-   - **Process-doc** — the diff touches `.claude/**` or the root `CLAUDE.md`. Full
-     3-pass gate; Phase 2 covers `practices`, `logic`, `consistency`, `alternatives`,
-     plus `security` if it touches an approval gate, a DB-safety rail, or secrets
-     handling, plus `enforcement` if a hook/CI gate changed. Skip step 6's test-delta
-     gate — these files have no `tests/` share by nature. In its place: every rule the
-     diff adds must name ONE canonical home, with other mentions as pointers rather
-     than copies. A rule duplicated across files, or a rule living only in a file
-     nothing loads, is a Major finding.
-   - **Standard** — everything else: full dimension coverage (fan-out per Phase 2),
-     full 3-pass gate, no shortcuts.
+5. Risk tier — keyed on whether something *executes* the file, not on its path:
+   - **Trivial** — human-facing prose only (a README, `docs/**`, a user-manual page),
+     zero code/config/script. Skips Phase 2 entirely; one-pass gate.
+     **Never trivial:** anything a session, shell, or CI run executes — every `.md`
+     under `.claude/**` (commands, agents, skills, hooks, settings) and the root
+     `CLAUDE.md` included, whatever the extension.
+   - **Process-doc** — the diff touches `.claude/**` or the root `CLAUDE.md` and
+     *nothing outside them*. Full dimension coverage and full 3-pass gate, exactly as
+     standard tier — only two deltas: (a) skip step 6's test-delta gate, since these
+     files have no `tests/` share by nature; (b) additionally require that every rule
+     the diff adds names ONE canonical home, other mentions being pointers rather than
+     copies — a rule duplicated across files, or a rule living only in a file nothing
+     loads, is a Major finding. `security` is never optional here: judging whether a
+     reword thinned a rail *is* the security review, and that's the diff most likely to
+     be scored "no rail touched".
+   - **Standard** — everything else, including a diff that touches `.claude/**` *and*
+     code (that combination is standard, not process-doc, so the test-delta gate still
+     applies; layer the canonical-home rule on top).
 6. Test-delta gate (standard tier only): compare lines changed under `tests/` and
    `frontend/src/**/*.{test,spec}.{ts,tsx}` (this repo's tests are colocated next to
    source per `frontend/vitest.config.ts`, including under nested `__tests__` dirs —
@@ -72,55 +91,77 @@ review affordable without narrowing coverage. Don't drop them while rewording.
 Phase 3.
 
 `.claude/agents/branch-reviewer.md` is the single source of truth for the dimension
-list. Always cover: bugs, logic, consistency, perf, practices, security, alternatives.
-Additionally cover `enforcement` ONLY when the diff touches `.claude/hooks/`,
-`frontend/eslint.config.js`, `.github/workflows/`, `pyproject.toml` lint/type config,
-or a new/changed `scripts/check-*` script.
+list, and this paragraph is the single statement of coverage: **always cover bugs,
+logic, consistency, perf, practices, security, alternatives** — for every non-trivial
+tier, process-doc included. Additionally cover `enforcement` ONLY when the diff
+touches `.claude/hooks/`, `frontend/eslint.config.js`, `.github/workflows/`,
+`pyproject.toml` lint/type config, or a new/changed `scripts/check-*` script.
 
 **Fan-out — take the FIRST matching row.** "Changed lines" = insertions + deletions
-from the Phase 1 `--shortstat` (lockfiles/generated files already excluded).
-- **Under ~150 lines in 1–2 files** → 3 calls: `bugs+logic` / `perf+security` /
-  `practices+consistency+alternatives`.
-- **Under ~600 lines, any file count** → 5 calls: `bugs+logic` / `consistency` /
-  `perf` / `security` / `practices+alternatives`.
-- **Anything else** (over ~600 lines, spanning layers, or no row above matched) →
-  one call per dimension.
+summed from the Phase 1 excluded `--numstat`. Use hard comparisons, and round *up* a
+row when a diff sits near a bound (the tier is monotonic anyway, so widening early
+costs nothing later). The bounds exist so one merged call's diff plus its targeted
+reads still fit in a single context with room for evidence gathering — that's what to
+preserve if you ever retune them.
+- **`<= 150` lines in 1–2 files, one layer** → 3 base calls: `bugs+logic` /
+  `perf+security` / `practices+consistency+alternatives`.
+- **`<= 600` lines, any file count, one layer** → 5 base calls: `bugs+logic` /
+  `consistency` / `perf` / `security` / `practices+alternatives`.
+- **Anything else** — over 600 lines, spanning layers (API + frontend + pipeline), or
+  no row above matched → one call per dimension.
 
-**Size-independent escalations, applied on top of the matched row** — these dimensions
-don't correlate with diff size, so they get their own call regardless:
+**Escalations — size-independent, because these dimensions' risk doesn't track diff
+size.** When one fires, that dimension is **removed from its merged group and
+dispatched standalone**; the group keeps its remaining members (and is dropped if
+emptied). So a row is "3 base calls, +1 per escalation", not 3 calls flat.
 - `security` — the diff touches auth/session/admin routes, `require_admin`, env or
-  secret handling, a user-supplied URL, or a PII path.
+  secret handling, a user-supplied URL, a PII path, or `.claude/**` / root `CLAUDE.md`
+  (a reworded rail is invisible without a dedicated look).
 - `consistency` — the diff renames or removes an identifier, or changes a Pydantic
-  model/route field, an `agg_*` column, an i18n key, or a `_LOCALES` entry.
+  model/route field, an `agg_*` column, an i18n key, a `_LOCALES` entry, or — in
+  `.claude/**` — a section, step number, command, or agent that another file
+  references by name or number.
 - `enforcement` — always its own call when it applies.
+On the one-call-per-dimension row the escalations are already satisfied and add
+nothing.
 
 A merged call is told every dimension it owns and reports findings per dimension —
 merging reduces call count, never coverage.
 
-**Hand over a diff PATH, not diff text.** Give each subagent exactly: the absolute
-path to the Phase 1 diff file, the `--stat` file list, the Phase 1 objective
-statement, and its dimension(s). Nothing else; no subagent sees another's output.
-Do NOT paste the diff into the prompts — that re-serializes it as generated output
-once per call, which costs far more than the single Bash call it would save, and a
-large diff can exceed one turn's output budget and be silently truncated.
-If the diff touches a secret-bearing path (`.env*`, credential/service-account JSON,
-`*.pem`, anything named `*KEY*`/`*SECRET*`/`*TOKEN*`), don't hand those hunks over:
-pass the path with a redacted note, report it as a finding, and recommend rotation if
-a value is present.
+**Hand over a diff PATH, not diff text.** Give each subagent: the absolute path to the
+Phase 1 diff file, the changed-file list, the Phase 1 objective statement, its
+dimension(s), the worktree absolute path if the branch lives in one, and optionally a
+brief that *adds* checks to a dimension (never one that removes a dimension's baseline).
+Nothing else; no subagent sees another's output.
+Do NOT paste the diff into the prompts — that re-serializes it as generated output once
+per call, costing far more than the single Bash call it saves, and a large diff can
+exceed one turn's output budget and be silently truncated.
+Include this line verbatim, naming what Phase 1 left out:
+`Deliberately excluded, do NOT re-derive: <paths>. This is not truncation.`
+Without it, a reviewer sees a file named in the list with no hunks, follows its
+own "re-derive what's missing" rule, and pulls back the full unfiltered diff —
+inverting the saving and defeating the secret exclusion.
 
 Reviewers already carry the targeted-read and don't-re-diff rules in their own prompt
 — don't restate them per dispatch.
 
+**Worktree hazard.** Dispatched reviewers have Bash and read the worktree concurrently.
+While any is running, do NOT `git checkout` / `switch` / `reset` in that worktree — read
+other revisions with `git show <rev>:<path>` instead — and re-verify HEAD once they all
+return, so findings are known to be against the revision you diffed.
+
 **If a PR already exists for this branch** — per CLAUDE.md the review normally runs
-*before* the PR is opened, so this is a no-op on round 1. Check with
-`gh pr view --json number -q .number`; if there's none, skip this and say so.
-Otherwise fetch its threads once (`gh api repos/{owner}/{repo}/pulls/<number>/comments
---paginate`) and drop a candidate finding ONLY when an existing thread makes the same
-point at the same location AND the current code demonstrably addresses it. A thread
-merely existing is NOT evidence of a fix — `/pr-github` posts findings as threads, so
-a topic-level drop would silently void passes 2 and 3 of the gate and let an unfixed
-Major through. Anything else gets reported, marked `(already raised in <thread url> —
-still open)`, and counts toward the Major gate as normal.
+*before* the PR is opened, so skip this block unless a PR number is already known (from
+`/pr-github`, `/address-my-pr-comments`, or the caller). Don't spend a query per pass
+looking for a PR that by policy shouldn't exist yet.
+With a number in hand, fetch its threads once (`gh api
+repos/{owner}/{repo}/pulls/<number>/comments --paginate`) and drop a candidate finding
+ONLY when an existing thread makes the same point at the same location AND the current
+code demonstrably addresses it. A thread merely existing is NOT evidence of a fix —
+`/pr-github` posts findings as threads, so a topic-level drop would silently void
+passes 2 and 3 of the gate and let an unfixed Major through. Anything else gets
+reported, marked `(already raised in <thread url> — still open)`, and counts toward the
+Major gate as normal.
 
 Then YOU synthesize: dedupe, rank by severity, drop low-confidence noise. Keep only
 findings that affect correctness or the objective.
@@ -145,8 +186,9 @@ Each pass re-tiers against the **cumulative** `main...HEAD` diff as it stands th
 fix commits add to it, so it grows and never shrinks. The tier is **monotonic across
 the gate**: it may widen, never narrow. Once a branch has qualified for
 one-call-per-dimension, or for a dedicated `security` / `consistency` / `enforcement`
-call, it keeps them for every remaining pass. A fresh pass means resetting mindset,
-not adding calls.
+call, it keeps them for every remaining pass — state the tier and call plan in each
+pass's intro so the next pass can honour that floor. Don't add calls merely because
+it's a fresh pass; only because the diff grew or an escalation newly applies.
 Trivial tier: one pass is enough — there's no dimension-review or fix-iterate loop to
 re-run against.
 
