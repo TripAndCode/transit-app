@@ -72,6 +72,20 @@ the design spec — it should see only its one task.
 Record the worktree path and branch name the Agent tool call returns; later
 steps need them.
 
+## Step 4b — If the worker couldn't complete the task
+
+If the worker's own report indicates it could NOT complete the
+implementation (blocked, needs more context, denied a tool call it
+couldn't work around, or otherwise did not produce a finished local
+commit) — as opposed to reporting a completed implementation ready for
+review — do NOT proceed to Step 5. Instead:
+
+1. Append to the Status log: `- <UTC timestamp>: item N blocked before
+   verification — worker reported: <the worker's own blocker description,
+   summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`
+2. Do NOT push, do NOT open a PR.
+3. Stop here.
+
 ## Step 5 — Verify
 
 Invoke `/review-branch`, but do not rely on the bare slash command
