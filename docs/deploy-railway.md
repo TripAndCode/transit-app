@@ -107,10 +107,10 @@ exists when you wire the app.
 5. `app` → **Settings → Networking → Generate Domain**. Railway issues
    `https://<something>.up.railway.app` with TLS. Copy it — that's
    `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
-6. First deploy: promote `main` to `production` now (see step 6 below) to
-   actually trigger it. The pre-deploy `migrate up` runs first; watch
-   **Deploy Logs** for `applied migration 0001 … 0016`, then the uvicorn
-   boot line.
+6. First deploy: promote `main` to `production` now (see the "Updates"
+   section below) to actually trigger it. The pre-deploy `migrate up` runs
+   first; watch **Deploy Logs** for `applied migration 0001 … 0016`, then
+   the uvicorn boot line.
 
 Smoke test:
 
