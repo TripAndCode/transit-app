@@ -64,6 +64,11 @@ Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && 
 - Phase-sized features get functional reviews on live data before merge (see `review-branch.md` flow).
 - CI is intentionally skipped on every commit right now (add `[skip ci]` on its own line/trailer to every commit message, including ordinary code changes) — rely on the local checks below (and the pre-push hook) instead of GitHub Actions.
 
+## Process
+
+- **Capture repeated mistakes immediately.** If an agent (autonomous loop or interactive session) makes the same mistake twice in this repo, don't just fix it and move on — capture the rule in `transit-app-gotchas` (or whichever skill already covers that area) in the *same session* as the second occurrence, not deferred to a follow-up task. A mistake seen once is noise; seen twice, it's a gap in the documented rules that will keep costing time until it's written down somewhere an agent actually reads before acting.
+- **Enforcement ladder.** Rules can live at several layers, roughly from strongest/automatic to weakest/advisory: codebase (the code itself makes the mistake impossible, e.g. a type or a guard clause) → static analysis/CI (lint, `mypy`, tests) → bot rules (pre-commit/pre-push hooks, PR-bot checks) → skills (on-demand docs like `transit-app-gotchas`, loaded when relevant) → style guide (this file — read-only guidance, relies on whoever's working remembering to check it). When the same rule gets flagged in review 2+ times despite already being documented, that's a signal it's sitting at too weak a layer for how often it's violated — promote it up the ladder (e.g. skill → hook, or hook → CI check) instead of just re-documenting it again in the same place.
+
 ## Autonomous VPS loop
 
 A Claude Code CLI instance runs unattended on a dedicated VPS (separate from any dev machine), driven by cron, to advance work incrementally without a human keeping a session open.
