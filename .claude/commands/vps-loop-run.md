@@ -11,12 +11,17 @@ in order; do not skip ahead.
 ## Step 1 — State check
 
 Run `git status --porcelain`. If it is NOT empty:
-1. `git stash push -m "vps-loop-run: unexpected state found at $(date -u +%Y-%m-%dT%H:%M:%SZ)"`.
-2. Append to `NEXT_TASK.md`'s "Status log" section: `- <UTC timestamp>: found
+1. Save that output — you need it for step 2, and `git stash push` empties
+   it.
+2. `git stash push -m "vps-loop-run: unexpected state found at $(date -u +%Y-%m-%dT%H:%M:%SZ)"`.
+3. Append to `NEXT_TASK.md`'s "Status log" section: `- <UTC timestamp>: found
    unexpected uncommitted changes, stashed as <stash ref> — needs human
-   review before next run.` (read the exact stash ref, e.g. `stash@{0}`,
-   from the `git stash push` output).
-3. Stop here. Do not proceed to any later step this run.
+   review before next run. Files: <the exact git status --porcelain output
+   from step 1, one path per line>.` (read the exact stash ref, e.g.
+   `stash@{0}`, from the `git stash push` output). This file list is the
+   only diagnostic a human gets without SSHing in to inspect the stash
+   themselves — include it verbatim, don't summarize or omit it.
+4. Stop here. Do not proceed to any later step this run.
 
 ## Step 2 — Sync main
 
