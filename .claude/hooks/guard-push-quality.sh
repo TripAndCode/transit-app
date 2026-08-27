@@ -135,6 +135,9 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
     echo "== npm run lint:i18n-strings =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
+    echo "== npm run build + check-entry-chunk (MapLibre must stay out of the entry chunk) =="
+    run_with_timeout 90 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run build" || FAIL=1
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && node scripts/check-entry-chunk.mjs" || FAIL=1
   } >>"$LOG" 2>&1
 fi
 
