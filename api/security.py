@@ -1,7 +1,7 @@
 """Auth dependencies + CSRF guard.
 
 `require_user` / `require_admin` are FastAPI dependencies that read the
-user previously loaded by `session_middleware` into `request.state.user`.
+user previously loaded by `SessionMiddleware` into `request.state.user`.
 `csrf_guard` Origin/Referer-gates mutating routes via a serialized-origin
 equality against the env-driven allow-list. Keep this module
 dependency-free of asyncpg so it stays cheap to import in unit tests.
