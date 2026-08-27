@@ -228,7 +228,7 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
   These are two different JSONL files with two different jobs — don't
   conflate them.
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
-  ClickHouse (`:8124`) — see `CLAUDE.md` ▸ Databases for the
+  ClickHouse (`:8124`) — see `CLAUDE.md` ▸ Database safety for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
   ClickHouse-gated tests instead of failing.
 
