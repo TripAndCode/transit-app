@@ -62,3 +62,24 @@ Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && 
 - Squash merges to `main`; Conventional Commits subjects.
 - Stacked PRs: merge bottom-up, but **don't `--delete-branch` while a dependent PR still targets that branch** — GitHub closes (not retargets) the dependent PR and it can't be reopened once its base is gone. Retarget the next PR to `main` first; delete branches at the end.
 - Phase-sized features get functional reviews on live data before merge (see `review-branch.md` flow).
+- CI is intentionally skipped on every commit right now (add `[skip ci]` on its own line/trailer to every commit message, including ordinary code changes) — rely on the local checks below (and the pre-push hook) instead of GitHub Actions.
+
+## Autonomous VPS loop
+
+A Claude Code CLI instance runs unattended on a dedicated VPS (separate from any dev machine), driven by cron, to advance work incrementally without a human keeping a session open.
+
+- **Where**: a small VPS clone of this repo (not the primary dev machine), authenticated to GitHub via a personal token (`gh auth login`) and to Anthropic via `claude setup-token` (a long-lived OAuth token, not a metered API key).
+- **Cadence**: a system cron job runs a fixed wrapper script hourly (off the round-minute mark) that invokes `claude -p` non-interactively with a fixed meta-prompt, then exits — it does not stay resident between runs.
+- **`NEXT_TASK.md`** (repo root, untracked/local — not meant to be committed as part of normal feature work) is the loop's only input: freeform markdown describing the current task, a refactor backlog (candidates found but not yet started — split into small steps before starting any), and a status log the loop appends to after each run. Empty or missing file → the run is a safe no-op ("standing by"). There is no other entry point — to hand it a new task, either write it locally and push it to the VPS:
+  ```bash
+  scp -i ~/.ssh/conoha/<key>.pem ./NEXT_TASK.md root@<vps-ip>:/root/transit-app/NEXT_TASK.md
+  ```
+  or edit the file on the VPS directly:
+  ```bash
+  ssh -i ~/.ssh/conoha/<key>.pem root@<vps-ip>
+  nano /root/transit-app/NEXT_TASK.md
+  ```
+  Either way, the change takes effect on the loop's next hourly run — there's no way to trigger it early short of SSHing in and running `/root/claude-loop.sh` manually.
+- **Per run**: read `NEXT_TASK.md` → advance by one incremental step only (never attempt the whole task in one run) → run the relevant tests → commit (with `[skip ci]`, per above) → push a feature branch and open/update a PR via `gh` → update the status log. Every commit still goes through review like any other PR; the loop never merges its own work.
+- **Safety layering**: the shared, tracked `.claude/settings.json` hooks (`guard-dev-db.sh` blocking write/DDL SQL against the dev DB on :5433, `guard-push-quality.sh` gating `git push` on lint/tests) apply here same as anywhere. On top of that, the VPS checkout has its own `.claude/settings.local.json` (gitignored, VPS-only — never commit this) that allowlists the narrow set of safe operations the unattended loop needs (reads, the test/lint commands, `git`/`gh` up through opening a PR) and explicitly denies `git push` to `main`, force-push, `reset --hard`, `rm -rf`, and DB-reset targets. The loop can never push to `main` directly or merge — only open PRs for a human to review.
+- **Known limitation**: `guard-push-quality.sh`'s backend-test timeout (240s) was tuned on faster hardware than the current VPS plan (4 vCPU/4GB), where a full `pytest` run takes ~6.5 minutes — a clean push can still fail the gate on timeout alone. Not yet resolved; if pushes start failing consistently with no real test failure in the log, that's the likely cause.
