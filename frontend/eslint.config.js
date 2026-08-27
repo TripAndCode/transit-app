@@ -38,13 +38,20 @@ export default tseslint.config(
     rules: {
       // 'recommended-latest' includes the React Compiler diagnostics shipped
       // with eslint-plugin-react-hooks v7 (flags code the compiler can't
-      // optimize), on top of the classic rules-of-hooks set.
+      // optimize), on top of the classic rules-of-hooks set. Its actual
+      // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
+      // at 'warn', and `npm run lint` is bare `eslint .` with no
+      // `--max-warnings` — so a warn-level bailout doesn't fail the build
+      // today. `react-hooks/todo` ("unimplemented compiler features", Hint
+      // severity, off by default upstream) was previously promoted to
+      // 'error' here as an attempted bailout signal — removed: it isn't
+      // actually a bailout diagnostic, and promoting an unverified
+      // off-by-default rule risks failing lint on unrelated files with no
+      // lint run available in this sandbox to confirm it's clean. Needs a
+      // human to either add `--max-warnings 0` to `frontend/package.json`'s
+      // `lint` script, or promote `unsupported-syntax`/`incompatible-library`
+      // to `error` after a verified clean `npm run lint` run.
       ...reactHooks.configs['recommended-latest'].rules,
-      // 'recommended-latest' leaves the compiler-bailout diagnostic ('todo')
-      // off by default. With manual useMemo/useCallback/React.memo banned
-      // below, a silent bailout would otherwise leave code unmemoized with
-      // no lint signal at all — promote it to error so bailouts are visible.
-      'react-hooks/todo': 'error',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
       // Honor the underscore-prefix convention for intentionally-unused bindings.
@@ -103,6 +110,32 @@ export default tseslint.config(
                 'Do not import useMemo/useCallback/memo — the React Compiler handles memoization automatically. Use useEffectEvent for fresh-props-in-stable-handlers.',
             },
           ],
+        },
+      ],
+      // Backstop for no-restricted-imports/no-restricted-syntax above:
+      // catches useMemo/useCallback/memo reached via a receiver name other
+      // than the conventional `React` (a default-import alias, e.g.
+      // `import Reakt from "react"; Reakt.useMemo(...)`) or a computed
+      // property access (`React["useMemo"]`) — both otherwise slip past the
+      // `object.name==='React'` MemberExpression selector and past
+      // no-restricted-imports (a default specifier resolves to the name
+      // `"default"`, which isn't in `importNames`). Receiver-agnostic by
+      // design, since the property name itself is the signal; verified no
+      // existing `.memo`/`.useMemo`/`.useCallback` property access exists in
+      // frontend/src today, so this introduces no false positive.
+      'no-restricted-properties': [
+        'error',
+        {
+          property: 'useMemo',
+          message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
+        },
+        {
+          property: 'useCallback',
+          message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
+        },
+        {
+          property: 'memo',
+          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
         },
       ],
     },

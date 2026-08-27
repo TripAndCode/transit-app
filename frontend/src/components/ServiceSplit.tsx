@@ -182,7 +182,7 @@ function ServiceSplitDailyChart({
     weekend: null,
   });
 
-  const { xs, weekdayPath, weekendPath, yMax, dateLabels, weekdayCoords, weekendCoords } = (() => {
+  const { xs, weekdayPath, weekendPath, yMax, dateLabels } = (() => {
     const innerW = DC_W - DC_PAD_LEFT - DC_PAD_RIGHT;
     const innerH = DC_H - DC_PAD_TOP - DC_PAD_BOTTOM;
     const stepX =
@@ -223,15 +223,8 @@ function ServiceSplitDailyChart({
       weekendPath: buildPath(we),
       yMax: yMaxLocal,
       dateLabels: labels,
-      weekdayCoords: wd,
-      weekendCoords: we,
     };
   })();
-
-  // Silence the unused-var lint for weekdayCoords/weekendCoords; they may
-  // be useful later for dot markers but aren't read yet.
-  void weekdayCoords;
-  void weekendCoords;
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = e.currentTarget;
