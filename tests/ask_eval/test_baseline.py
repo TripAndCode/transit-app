@@ -11,11 +11,19 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections import Counter
 from pathlib import Path
 
 import httpx
 import pytest
+
+# The `/ask` endpoint rate-limits anonymous callers to 60/minute
+# (api/middleware/ratelimit.py FREE_LIMIT) — a real production abuse
+# guard, not something to weaken for this eval. All 148 golden-set
+# requests come from the same test-runner IP, so pace them well under
+# that limit instead.
+_REQUEST_INTERVAL_SECONDS = 1.1
 
 GOLDEN = Path(__file__).parent / "golden_set.jsonl"
 EVAL_API_BASE = os.environ.get("EVAL_API_BASE", "http://localhost:8000")
@@ -61,7 +69,9 @@ def test_golden_set_aggregate_score():
     failures = []
     stage_counts: Counter = Counter()
     with httpx.Client(base_url=EVAL_API_BASE, timeout=60.0) as client:
-        for case in cases:
+        for i, case in enumerate(cases):
+            if i > 0:
+                time.sleep(_REQUEST_INTERVAL_SECONDS)
             resp = client.post(
                 f"/api/{EVAL_AGENCY_ID}/ask",
                 json={"question": case["question"]},
