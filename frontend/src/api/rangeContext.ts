@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type DowFilter = "all" | "weekday" | "weekend";
@@ -83,8 +84,11 @@ export function jstYearMonth(d: Date): { year: number; month: number } {
 export function useRangeContext(): [RangeCtx, (patch: RangeCtxPatch) => void] {
   const [params, setParams] = useSearchParams();
 
-  const to = params.get("to") || todayISO();
-  const from = params.get("from") || isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
+  const [defaultTo] = useState(todayISO);
+  const [defaultFrom] = useState(() => isoDaysAgo(DEFAULT_RANGE_DAYS - 1));
+
+  const to = params.get("to") || defaultTo;
+  const from = params.get("from") || defaultFrom;
   const dow = (params.get("dow") as DowFilter) || "all";
   const time_band = (params.get("time_band") as TimeBand) || "all";
   const service = (params.get("service") as ServiceFilter) || "all";

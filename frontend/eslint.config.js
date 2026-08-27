@@ -77,6 +77,32 @@ export default tseslint.config(
           selector: "CallExpression[callee.object.name='React'][callee.property.name='memo']",
           message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
         },
+        {
+          // Catches the member-expression form of the two hooks
+          // (`React.useMemo(...)`/`React.useCallback(...)`) that the
+          // bare-identifier CallExpression selectors above miss. A
+          // MemberExpression selector (rather than
+          // CallExpression[callee.object...]) also catches `React.memo`
+          // passed by reference, not just called.
+          selector: "MemberExpression[object.name='React'][property.name=/^(useMemo|useCallback|memo)$/]",
+          message:
+            'Do not use React.useMemo/React.useCallback/React.memo — the React Compiler handles memoization automatically.',
+        },
+      ],
+      // Closes the aliased-import hole the syntax selectors above can't see
+      // (e.g. `import { useMemo as m } from "react"`).
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react',
+              importNames: ['useMemo', 'useCallback', 'memo'],
+              message:
+                'Do not import useMemo/useCallback/memo — the React Compiler handles memoization automatically. Use useEffectEvent for fresh-props-in-stable-handlers.',
+            },
+          ],
+        },
       ],
     },
   },
