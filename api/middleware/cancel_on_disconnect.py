@@ -17,7 +17,7 @@ Scope is deliberately GET-only: mutating requests should run to
 completion even if the client gives up, and non-GET bodies would need
 real receive plumbing.
 
-Verified end-to-end by tests/test_request_cancellation.py.
+Verified end-to-end by tests/api/test_request_cancellation.py.
 """
 
 import asyncio
