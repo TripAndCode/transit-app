@@ -5,6 +5,11 @@ description: Post selected branch-review findings as inline comments on the GitH
 
 Post selected review findings as inline comments on the GitHub PR for the current branch.
 
+## Hold for approval (hard constraint)
+Nothing gets posted without an explicit pick from the user in step 2. Listing the
+findings is not approval — post only the findings the user actually selected, never
+"post everything" by default.
+
 ## Auth
 - Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or
   store any API token. If a call fails, check `gh auth status`.

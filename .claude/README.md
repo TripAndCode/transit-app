@@ -10,18 +10,25 @@ Invoke as `/name` from a Claude Code session.
 
 | Command | Does | Reads/writes |
 |---|---|---|
-| `/review-branch` | Diffs branch vs `main`, dispatches `branch-reviewer` subagent once per dimension in parallel (fresh context each), synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. | Read-only + `make check`. No commit/push. |
+| `/review-branch` | Diffs branch vs `main` once, dispatches `branch-reviewer` subagents in parallel (fresh context each) covering every dimension — call count scaled to diff size (3 / 5 / one-per-dimension) — synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. | Read-only + `make check`. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick next actionable `NEXT_TASK.md` item → dispatch an isolated worker → verify via the `/review-branch` process → push + open a **draft** PR, then mark ready. Never merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
 → `/address-my-pr-comments` (triage + fix + reply).
 
+Token-frugality rules these files share (keep them when editing): compute the diff
+ONCE and hand it to subagents rather than having each re-derive it; scale fan-out /
+batching to the size of the work instead of always going maximum-width; tell every
+subagent to read targeted (`grep -n` then `sed -n '<a>,<b>p'`) before any whole-file
+read; drop candidate findings whose topic already has a PR thread.
+
 ## Agents (`.claude/agents/*.md`)
 
 | Agent | Role | Tools |
 |---|---|---|
-| `branch-reviewer` | Fresh-context principal-engineer reviewer for **one** dimension of a branch diff (dispatched by `/review-branch`, never called directly). `.claude/agents/branch-reviewer.md` is the source of truth for the dimension list — `/review-branch` reads it from there, not from this table. | Read, Grep, Glob, Bash (model: opus) |
+| `branch-reviewer` | Fresh-context principal-engineer reviewer for one or more named dimensions of a branch diff (dispatched by `/review-branch`, never called directly; small diffs get merged multi-dimension calls, large ones one call per dimension). `.claude/agents/branch-reviewer.md` is the source of truth for the dimension list — `/review-branch` reads it from there, not from this table. | Read, Grep, Glob, Bash (model: opus) |
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`,
 `practices`, `security`, `alternatives` — this list is a convenience snapshot

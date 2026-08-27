@@ -69,9 +69,18 @@ Boundaries.
 4. If nothing is left after filtering, say so and stop.
 
 ## Phase 1 — Digest & analyze (NO replies written, NO code touched)
-For EACH thread, read the actual code at the referenced file:line before judging,
-and read the full exchange if `round >= 1` (original comment + all replies/fixes so
-far). Produce a numbered table, one row per thread:
+**Scale how you do this to the thread count.** Under ~10 threads, judge them yourself
+directly. At ~10 or more, batch them (roughly 9 per batch) and dispatch one
+fresh-context subagent per batch in parallel instead of reading everything yourself —
+each batch gets its own thread text and the worktree path; none needs the full diff.
+
+For EACH thread, read the actual code at the referenced file:line before judging —
+targeted read first (`grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a
+window around it), whole-file read only when that isn't enough — and read the full
+exchange if `round >= 1` (original comment + all replies/fixes so far). If two or
+more threads make the same underlying point, don't judge and draft each in isolation:
+note the overlap and produce one shared verdict/reply covering all of them.
+Produce a numbered table, one row per thread:
 - **What they mean** — restate the reviewer's point in plain words (decode any
   shorthand).
 - **What happened since** — only if `round >= 1`: summarize the reply/fix chain so

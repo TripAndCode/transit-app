@@ -14,7 +14,9 @@ Review the current branch for project $ARGUMENTS as a principal engineer.
   Postgres queries or MapLibre layers, respectively.
 
 ## Phase 1 — Understand (you, directly)
-1. Diff the current branch against `main` (NOT master).
+1. Diff the current branch against `main` (NOT master) ONCE — `git diff main...HEAD`
+   plus `--stat`. Keep that output; Phase 2 hands it to the subagents instead of each
+   one re-running its own diff.
 2. Deduce the branch objective and how the new code builds on `main`.
 3. Write a short context intro stating that objective before any findings.
 4. Risk-tier classification: if the diff touches ONLY `.md` files and/or is a
@@ -22,8 +24,8 @@ Review the current branch for project $ARGUMENTS as a principal engineer.
    **trivial tier** and say so in the context intro — this skips Phase 2
    subagent dispatch (see below) and shortens the review gate to a single
    pass. Everything else (any code, config, CI, hook, or script change, no
-   matter how small) is **standard tier** — full dimension dispatch, full
-   3-pass gate, no shortcuts.
+   matter how small) is **standard tier** — full dimension coverage (fan-out
+   scaled to diff size, see Phase 2), full 3-pass gate, no shortcuts.
 5. Test-delta gate (standard tier only — trivial tier has no code to gate):
    compare lines changed under `tests/` and
    `frontend/src/**/*.{test,spec}.{ts,tsx}` (this repo's tests are colocated next to
@@ -46,16 +48,39 @@ Review the current branch for project $ARGUMENTS as a principal engineer.
 **Trivial tier: skip this phase entirely.** There's no code for any dimension to
 review — read the doc diff yourself directly and move to Phase 3.
 
-**Standard tier:** dispatch the `branch-reviewer` subagent once per dimension listed
-under "Dimensions you may be asked for" in `.claude/agents/branch-reviewer.md` —
-that file is the single source of truth for the dimension list, so it doesn't drift
-out of sync with this one. Always dispatch: bugs, logic, consistency, perf,
-practices, security, alternatives. Additionally dispatch `enforcement` ONLY when the
-diff touches `.claude/hooks/`, `frontend/eslint.config.js`, `.github/workflows/`,
-`pyproject.toml` lint/type config, or a new/changed `scripts/check-*` script — skip
-it otherwise, same as `postgres-perf`/`maplibre-map` are conditional. Run all
-dispatched dimensions in parallel, each with a clean context and the diff + stated
-objective only — none sees another's output.
+**Standard tier — cover every dimension, but scale the number of calls to the diff.**
+`.claude/agents/branch-reviewer.md` is the single source of truth for the dimension
+list. Always cover: bugs, logic, consistency, perf, practices, security, alternatives.
+Additionally cover `enforcement` ONLY when the diff touches `.claude/hooks/`,
+`frontend/eslint.config.js`, `.github/workflows/`, `pyproject.toml` lint/type config,
+or a new/changed `scripts/check-*` script.
+
+Fan-out, by diff size (all dispatched in parallel, each with clean context):
+- **Under ~150 changed lines in 1–2 files:** 3 calls — `bugs+logic`, `perf+security`,
+  `practices+consistency+alternatives`.
+- **~150–600 lines, or 3+ files:** 5 calls — `bugs+logic`, `consistency`, `perf`,
+  `security`, `practices+alternatives`.
+- **Larger, spanning layers (API + frontend + pipeline), or security/PII-sensitive
+  regardless of size:** one call per dimension.
+A merged call is told every dimension it owns and reports findings per dimension —
+merging reduces calls, never coverage. `enforcement`, when it applies, is always its
+own call.
+
+**Hand over the diff once — don't let 8 subagents each re-derive it.** Compute
+`git diff main...HEAD` yourself (`git -C <worktree-abs-path>` in a worktree) and give
+each subagent that diff text plus the changed-file list, instead of telling it to
+"diff against main" and paying for the same diff N times.
+
+**Token-frugal reads.** Tell every dispatched subagent to check with a targeted read
+first — `grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a window around
+each hit — falling back to a whole-file read only when that isn't enough to judge
+correctness.
+
+**If a PR already exists for this branch,** fetch its comment threads once before
+reporting (`gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate`, resolved
+or not) and drop any candidate finding whose topic already has a thread there. Report
+only genuinely new issues; if there were no threads, say so and skip the check.
+
 Then YOU synthesize: dedupe, rank by severity, drop low-confidence noise. Keep only
 findings that affect correctness or the objective.
 
@@ -74,6 +99,9 @@ Standard tier: before a PR is considered ready, run this whole flow THREE times,
 each pass approaching the diff as if seeing the PR for the first time (reset
 mindset between passes). Each fresh read surfaces issues the prior
 context-anchored read glossed over.
+Each pass re-applies Phase 2's fan-out rule to the diff as it stands then (a diff
+that shrank to a couple of files after fixes gets the 3-call shape, not the full
+split) — three genuinely fresh passes, not three maximum-width ones.
 Trivial tier: one pass is enough — there's no dimension-review or fix-iterate
 loop to re-run against.
 
