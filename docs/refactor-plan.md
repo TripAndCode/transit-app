@@ -3,7 +3,7 @@
 Behavior-preserving simplification pass, executed one slice at a time. Each
 slice ships as its own branch/PR — the PR review is the checkpoint, not a
 chat check-in. No behavior changes; anything that looks like a bug is noted
-in `NOTES.md` instead of being silently "fixed".
+in `docs/refactor-notes.md` instead of being silently "fixed".
 
 Process per slice:
 1. **Baseline** — identify the slice's public entry points, write
@@ -44,7 +44,7 @@ out to have solid indirect coverage via `tests/api/test_reports.py`
 (both agg and live paths, rounding parity, tie semantics) despite lacking a
 dedicated `test_rankings.py` — so no new characterization-test scaffolding
 was needed beyond a small unit test for the relocated `_round2`. One
-suspected-but-unfixed bug found along the way is in `NOTES.md`. Takeaway for
+suspected-but-unfixed bug found along the way is in `docs/refactor-notes.md`. Takeaway for
 remaining slices: verify duplication claims by reading the code before
 assuming a large simplification opportunity — this codebase already got a
 real perf/complexity pass in PRs #75-79 and #184.
@@ -61,7 +61,7 @@ fixed: none of the five handlers' missing-route-arg branch had a direct
 test — added `test_dispatch_missing_route_arg_returns_empty` (parametrized)
 + an en-locale variant before refactoring.
 
-Also observed (not touched — flagged in `NOTES.md` as an architecture
+Also observed (not touched — flagged in `docs/refactor-notes.md` as an architecture
 question, not a bug): `meta_tools.py` has its own `_summary(text_jp,
 text_en, locale)` helper, structurally different from `tools.py`'s
 `_summary(template, lang, **vars)` central-table-lookup design. Two
@@ -84,7 +84,7 @@ Net -32 lines in `api/routers/map.py`. One coverage gap found and fixed:
 `route_stop_profile`'s "nonexistent route" and "stale route beyond 30-day
 bound" branches had no direct test, despite `route_trips` already covering
 the identical logic — added two characterization tests mirroring the
-existing `route_trips` ones before refactoring. No `NOTES.md` addition this
+existing `route_trips` ones before refactoring. No `docs/refactor-notes.md` addition this
 time — nothing bug-shaped was found on a close read; this file's extensive
 inline comments (measured costs, real-data trade-offs) made confirming
 "this really is the same logic, safe to dedupe" straightforward. Takeaway:
@@ -109,7 +109,7 @@ suffix, so folding it in would've added more parameterization than it saved.
 Net **-85 lines** in `chat.py`. Two of the five sites (cache stage-2
 JSON-fallback and main-dispatch) had no direct error-leakage characterization
 test despite the other three being thoroughly covered in
-`test_chat_error_leakage.py` — added both before refactoring. No `NOTES.md`
+`test_chat_error_leakage.py` — added both before refactoring. No `docs/refactor-notes.md`
 addition this time. Takeaway: even within one "slice," some files are
 already clean (router.py, llm_client.py) while a sibling file in the same
 slice has a real, large win (chat.py) — read each file independently rather
@@ -133,7 +133,7 @@ different INSERT...SELECT pattern and were correctly left alone. Two real
 coverage gaps closed first: `agg_route_hour_dow` and `agg_route_daily` were
 only ever exercised via direct test-fixture INSERTs in *other* test files
 (test_forecast_heatmap.py, test_overview.py), never through analyze()'s own
-SQL derivation — added direct characterization tests for both. No `NOTES.md`
+SQL derivation — added direct characterization tests for both. No `docs/refactor-notes.md`
 addition — nothing bug-shaped surfaced on a close read. Takeaway: the
 highest-risk slices in this codebase are also often the most carefully
 already-written ones (dense comments = prior authors already fought these
@@ -165,7 +165,7 @@ exercise both loops' buffering/dedup/batching/failure paths (including
 DataError retry and non-DataError whole-batch-discard), so that suite itself
 served as the verification harness — a from-scratch golden-fixture script
 would have been redundant for a change this mechanical and already this
-tightly pinned. No `NOTES.md` addition — nothing bug-shaped found. Takeaway:
+tightly pinned. No `docs/refactor-notes.md` addition — nothing bug-shaped found. Takeaway:
 "nothing worth changing" and "modest DRY win with a slightly positive LOC
 delta" are both fine, honest outcomes for a high-risk slice — the goal is
 verified safety, not a LOC count going down.
@@ -192,7 +192,7 @@ covered by an existing `.test.tsx`) had a real, confirmed 3x-repeated
 "filter to populated cells, then compute min/max (max floored at 1, min at 0
 when empty)" pattern across `AgencyLanding`, `RouteDetail`'s per-hour cells,
 and `RouteDetail`'s band-collapsed grid — extracted into `populatedRange()`.
-No `NOTES.md` addition — nothing bug-shaped found. Takeaway: the same
+No `docs/refactor-notes.md` addition — nothing bug-shaped found. Takeaway: the same
 "verify duplication is real before touching it" discipline applies across
 stacks, not just the backend — but the specific things worth checking
 (rules-of-hooks safety, i18n key parity, avoiding new memoization) are
@@ -222,7 +222,7 @@ most auth-conservative slice by design. `auth.py` was read in full and left
 login-event sequence, repeated between the OAuth callback and local_login)
 sits inside the actual session-minting control flow, exactly the kind of
 "looks safe but touches session/token handling" case this slice's brief said
-to flag rather than judgment-call (see `NOTES.md`). `conversations.py` had a
+to flag rather than judgment-call (see `docs/refactor-notes.md`). `conversations.py` had a
 real, safe win outside the auth-sensitive core: `get_conversation`,
 `update_conversation`, `delete_conversation`, `list_messages`, and
 `append_message_endpoint`'s ownership check each repeated an identical
@@ -238,7 +238,7 @@ four before refactoring. `followup_endpoint` had the same two duplications
 untouched: it has zero existing test coverage anywhere in `tests/` and is a
 kill-switch-gated LLM-adjacent feature, so touching it here would mean
 writing a new characterization-test suite from scratch as a refactor side
-effect rather than a mechanical dedupe — flagged in `NOTES.md` instead.
+effect rather than a mechanical dedupe — flagged in `docs/refactor-notes.md` instead.
 Takeaway for future work on this codebase: "auth-adjacent" doesn't mean
 "nothing to simplify" — it means read closely enough to separate the actual
 authorization/session logic (untouchable here) from the response-shaping
@@ -266,7 +266,7 @@ correctly concluded "nothing worth changing" or "small/negative LOC delta"
 rather than forcing a change to show progress — that restraint is treated as
 a successful outcome of this process, not a failure to find work.
 
-**`NOTES.md` entries for human triage** (none were auto-fixed; all are
+**`docs/refactor-notes.md` entries for human triage** (none were auto-fixed; all are
 flag-only per this refactor's "no behavior changes" rule):
 1. **Slice 1** — inconsistent tie-break on ranking sorts: `overview.py`'s
    `_movers`/`_concentration` (slow path) and `rankings.py`'s
@@ -297,6 +297,6 @@ no longer needed now that the plan is complete.
 - `db/clickhouse/bootstrap.py` — no test file (low risk, 38L)
 - `api/routers/network.py`, `debug.py`, `ask_dashboard.py`, `internal.py` — each matched only one test file; confirm real coverage before treating as "done" when their slice comes up
 
-## Ambiguous cases (→ NOTES.md when found)
+## Ambiguous cases (→ docs/refactor-notes.md when found)
 None identified yet from the structural survey pass — real ambiguous-case
 flagging happens per-slice during close reading, not decided upfront.

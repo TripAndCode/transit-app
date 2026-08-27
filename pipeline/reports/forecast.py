@@ -201,7 +201,7 @@ def summarize_agency_overview(
     # Two-pass stable sort: pre-sort by route_code so ties on
     # expected_avg_min break deterministically in ascending route_code order,
     # regardless of route_rows' incoming order — same fix class as PR #196
-    # (see NOTES.md).
+    # (see docs/refactor-notes.md).
     routes.sort(key=lambda x: x["route_code"])
     routes.sort(key=lambda x: (x["low_confidence"], -x["expected_avg_min"]))
     if top_n is not None:
