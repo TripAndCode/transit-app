@@ -12,7 +12,7 @@ Invoke as `/name` from a Claude Code session.
 |---|---|---|
 | `/review-branch` | Diffs branch vs `main` once into a file, dispatches `branch-reviewer` subagents in parallel (fresh context each, handed the diff path) covering every dimension, with the call count scaled to the diff — synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. Read the command file for the actual fan-out rule. | Read-only + `make check`. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
-| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick next actionable `NEXT_TASK.md` item → dispatch an isolated worker → verify via the `/review-branch` process → push + open a **draft** PR, then mark ready. Never merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick next actionable `NEXT_TASK.md` item → dispatch an isolated worker → verify via the `/review-branch` process → push + open a **draft** PR and leave it in draft (1 of 3 gate passes run; a human completes the rest). Never marks ready, never merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
@@ -39,10 +39,14 @@ i18n key parity or `agg_*` column renames).
 
 ## Guardrails baked into these files
 
-- DB safety: any SQL is read-only against dev Postgres `transit`@5433 and the dev
-  ClickHouse (`transit-ch`); tests point at throwaway `transit_test`@5544 and
-  ClickHouse @8124. Postgres writes are additionally hook-blocked by
-  `hooks/guard-dev-db.sh`. (See root `CLAUDE.md`.)
+- DB safety: any SQL is read-only against the dev Postgres and dev ClickHouse;
+  tests point at throwaway `transit_test`@5544 and ClickHouse @8124.
+  `hooks/guard-dev-db.sh` is a partial net, not a guarantee: it only fires when the
+  command text *literally* names the dev port or container AND carries a write/DDL
+  keyword. An env-var write, a Makefile target, or a Python script reading
+  `DATABASE_URL` is not caught, and ClickHouse isn't covered at all. It also
+  false-positives on prose that merely mentions those names. Treat the rule in
+  `CLAUDE.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead, except
   `/vps-loop-run`, which runs unattended: it may push feature branches and open
   draft PRs, but never pushes to `main` and never merges.

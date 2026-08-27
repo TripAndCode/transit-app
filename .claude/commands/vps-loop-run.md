@@ -4,24 +4,34 @@ description: Coordinator for the autonomous VPS loop — checks repo/PR state, d
 ---
 
 Coordinator for one autonomous-loop run. (A design spec exists at
-`docs/superpowers/specs/2026-08-27-vps-loop-coordinator-worker-verifier-design.md`, but
-`docs/` is gitignored — it won't exist on the VPS clone. This file is self-contained;
-don't block on reading it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
+`docs/superpowers/specs/2026-08-27-vps-loop-coordinator-worker-verifier-design.md`;
+`docs/superpowers/**` IS gitignored, so it won't exist on the VPS clone — this file is
+self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* ignored:
+`.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
 ## Step 1 — State check
 
-`git status --porcelain --untracked-files=no` — **tracked changes only**. `NEXT_TASK.md`
-lives untracked at the repo root by design, so an unfiltered `git status --porcelain` is
-permanently non-empty and would stop every tick forever. If NOT empty:
+`git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
+the one file that is untracked by design. (`NEXT_TASK.md` isn't gitignored, so an
+unfiltered `git status --porcelain` is permanently non-empty and would stop every tick
+forever — but blanket `--untracked-files=no` would also blind this guard to a killed
+worker's leftovers or a copied-in `*.pem`, none of which are ignored here.) If NOT
+empty:
 1. Save that output (step 3 of this list needs it; `git stash push` empties it).
-2. `git stash push -m "vps-loop-run: unexpected state found at $(date -u +%Y-%m-%dT%H:%M:%SZ)"`.
-   If it reports "No local changes to save" (nothing was stashed), log the file list
-   with no stash ref instead of inventing one.
+2. `git stash push -u -m "vps-loop-run: unexpected state found at $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- ':(top)' ':(exclude,top)NEXT_TASK.md'`
+   — `-u` so untracked leftovers are saved too (matching Step 3b), and the same
+   `NEXT_TASK.md` exclusion as the status check above: a bare `stash push -u` would
+   stash the loop's own untracked input file out of the worktree, leaving every later
+   tick with no backlog to read. Two outcomes that
+   create no stash — log the file list with no stash ref rather than inventing one, and
+   say which occurred: "No local changes to save", or `Entry '<path>' not uptodate.
+   Cannot merge.` (an intent-to-add index entry someone left behind; note it needs
+   `git reset -- <path>` by a human, and do NOT run that yourself).
 3. Append to `NEXT_TASK.md`'s "Status log": `- <UTC timestamp>: found unexpected
    uncommitted changes, stashed as <stash ref, e.g. stash@{0}, read from the push
-   output> — needs human review before next run. Files: <the exact `git status
-   --porcelain` output, one path per line>.` Include the file list verbatim — it's
+   output> — needs human review before next run. Files: <the exact output of the
+   filtered `git status --porcelain` from above, one path per line>.` Include the file list verbatim — it's
    the only diagnostic a human gets without SSHing in to inspect the stash.
 4. Stop. No later step runs this tick.
 
@@ -36,10 +46,14 @@ the fixed branch name `vps-loop/item-<N>` — never derive a name from the item'
 Walk items top to bottom:
 
 - Skip any item marked "DO NOT START" — intentional, not a failure, not reported as one.
-- `gh pr list --search "head:vps-loop/item-<N>" --state all --json number,state`.
-  Any `OPEN` or `MERGED` entry → skip item N (done or in progress). A `CLOSED`
-  (rejected, unmerged) entry does NOT block it — item N stays eligible.
-- If the item text has `Depends on: item <M>`, run the same query for M with
+- `gh pr list --head "vps-loop/item-<N>" --state all --json number,state,headRefName`,
+  and assert `headRefName` equals the branch exactly before acting. Use `--head`, NOT
+  `--search "head:…"`: the search qualifier matches by prefix/token, so
+  `head:vps-loop/item-1` can also return `item-10`'s PR and skip item 1 forever with no
+  log line. Any `OPEN` or `MERGED` entry → skip item N (done or in progress). A
+  `CLOSED` (rejected, unmerged) entry does NOT block a fresh attempt — but see Step 3b
+  before resuming any leftover commits.
+- If the item text has `Depends on: item <M>`, run the same exact-head query for M with
   `--state merged`. Empty → skip N this tick (dependency unmet) and keep walking;
   don't stall the run on it.
 
@@ -54,43 +68,62 @@ actionable this run.` and stop. Either way, no worker is dispatched.
 
 ## Step 3b — Stale worktree/branch before dispatch
 
-Step 3 already confirmed no PR exists for `vps-loop/item-<N>`, and the loop runs one
-item at a time (its cron cadence must exceed a worst-case tick, or this inference
-doesn't hold), so an existing worktree or local branch by that name is leftover from an
-interrupted run — which may still hold finished work.
+A worktree or local branch named `vps-loop/item-<N>` at this point is leftover from an
+interrupted run (the loop runs one item at a time — its cron cadence must exceed a
+worst-case tick, or this inference doesn't hold) **or** from a PR a human closed, since
+Step 3 keeps `CLOSED` items eligible.
 
-Check both: `git worktree list`, and `git rev-parse --verify vps-loop/item-<N>` for a
-branch with no worktree. If either exists, check `git log main..vps-loop/item-<N>
---oneline` (from the main checkout, not `-C` into the worktree, so it resolves against
-current `main`):
+**First: was its PR rejected?** Re-query `gh pr list --head "vps-loop/item-<N>" --state
+closed --json number,state,headRefName`. A `CLOSED`, unmerged PR means a human declined
+these exact commits — do NOT resume and re-push them. Log
+`- <UTC timestamp>: item N has leftover commits from closed PR #<number>; not resumed —
+delete the branch or reopen the PR by hand.` and skip item N this tick.
 
-**Log empty — no commits beyond `main`.** Before discarding anything, check the
-worktree itself: `git -C <path> status --porcelain`.
-- Dirty (the likeliest interrupted state is a worker killed mid-implementation, before
-  its first commit — and `remove --force` exists precisely to override that refusal):
-  do NOT remove it. `git -C <path> stash push -u -m "vps-loop item-<N> leftover"`, log
-  the stash ref, worktree path, and file list to the Status log, and stop this tick.
-  Boundaries say stash, don't discard — and Step 1's check never looks inside a
-  worktree.
-- Clean: `git worktree unlock <path>` (ignore "not locked"), `git worktree remove
-  --force <path>`, `git branch -D vps-loop/item-<N>` if still present, then Step 4.
+Otherwise detect both shapes: `git worktree list`, and
+`git rev-parse --verify --quiet refs/heads/vps-loop/item-<N>` for a branch with no
+worktree (use `--quiet` and the full ref — a bare `rev-parse --verify` prints
+`fatal: Needed a single revision` and exits 128 on the normal no-branch path, which
+Boundaries would treat as a tool error and stop the tick). Then check
+`git log main..vps-loop/item-<N> --oneline` (from the main checkout, not `-C` into the
+worktree, so it resolves against current `main`).
 
-**Log non-empty — real commits exist** (the interrupted run may have finished the
-work): resume and ship it yourself. Do NOT dispatch an `isolation: "worktree"` worker;
-that creates a separate, unrelated worktree.
-1. Run only Step 5's **review** process against this worktree/branch. Step 5's own
-   Major-findings branch does NOT apply here — it dispatches the Step 4
-   `isolation: "worktree"` pattern; use item 3 below instead. Re-verifying is cheap and
-   is the trust boundary before anything is pushed, even if the prior run reviewed it.
-2. **Clean (no Major findings):** run **Step 6** as written, noting in the PR body that
-   this resumed an interrupted prior run, and use the resumed variant of the status
-   line: `- <UTC timestamp>: item N shipped as PR #<number> (resumed from an interrupted
-   prior run's existing commits).` This run is done — do not also dispatch a new item.
-3. **Major findings:** dispatch a plain general-purpose Agent (NOT
-   `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
-   path first, fix the listed findings there, and commit. Cap at 2 total fix iterations,
-   same as Step 5. Clean after that → do item 2. Still not clean → append residual
-   findings + worktree path to the Status log, no push, no PR, stop.
+**Log empty — no commits beyond `main`:**
+- *Branch only, no worktree:* nothing can be lost — `git branch -D vps-loop/item-<N>`,
+  then Step 4.
+- *Worktree exists:* check it before discarding anything —
+  `git -C <path> status --porcelain`.
+  - Dirty (the likeliest interrupted state is a worker killed mid-implementation,
+    before its first commit — and `remove --force` exists precisely to override that
+    refusal): do NOT remove it. `git -C <path> stash push -u -m "vps-loop item-<N>
+    leftover"`, log the stash ref, worktree path, and file list, and stop this tick.
+    Boundaries say stash, don't discard — and Step 1's check never looks inside a
+    worktree.
+  - Clean: `git worktree unlock <path>` (ignore "not locked"), `git worktree remove
+    --force <path>`, `git branch -D vps-loop/item-<N>` if still present, then Step 4.
+
+**Log non-empty — real commits exist** and no closed PR rejected them:
+- *Branch only, no worktree:* do NOT review from the main checkout — Step 2 just left it
+  on `main`, so `git diff main...HEAD` there is empty and would produce a vacuously
+  clean review of unreviewed commits. Log `- <UTC timestamp>: item N has an
+  un-reviewed leftover branch with commits but no worktree: <commit list>. Not resumed
+  — needs a human to attach a worktree or delete it.` and stop this tick.
+- *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
+  `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
+  1. Run only Step 5's **review** process against this worktree/branch. Step 5's own
+     Major-findings branch does NOT apply here — it dispatches the Step 4
+     `isolation: "worktree"` pattern; use item 3 below instead. Re-verifying is cheap
+     and is the trust boundary before anything is pushed.
+  2. **Clean (no Major findings):** run **Step 6** as written, with two adjustments:
+     note in the PR body that this resumed an interrupted prior run, and replace Step
+     6's item-5 status line with `- <UTC timestamp>: item N shipped as PR #<number>
+     (resumed from an interrupted prior run's existing commits).` Step 6's item 3 is
+     conditional — an interrupted worker may never have written the `(PR #pending)`
+     placeholder. This run is done; do not also dispatch a new item.
+  3. **Major findings:** dispatch a plain general-purpose Agent (NOT
+     `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
+     path first, fix the listed findings there, and commit. Cap at 2 fix iterations,
+     same as Step 5. Clean after that → do item 2. Still not clean → append residual
+     findings + worktree path to the Status log, no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 
@@ -129,12 +162,14 @@ the main repo on `main`"). Follow its process yourself with every git operation 
 `git -C <worktree-abs-path>`.
 
 Compute the diff once **into a file**, exactly per `review-branch.md` Phase 1 —
-including its `:(top)` pathspecs and its lockfile/secret exclusions — and hand each
-Phase 2 `branch-reviewer` subagent that file's **absolute path**, the changed-file
-list, the objective, its dimension(s), and the worktree path. Never paste diff text
-into the prompts: unattended runs hit the largest diffs, where inlining is both the
-most expensive and the most likely to truncate silently. Scale the fan-out per
-`review-branch.md`'s ladder and escalations.
+including its single-invocation rule, `:(top)` pathspecs, and lockfile/secret
+exclusions — and hand each Phase 2 subagent exactly what `review-branch.md` Phase 2's
+"Hand over a diff PATH" paragraph specifies, **including its verbatim
+`Deliberately excluded, do NOT re-derive: …` line** (without it, a reviewer sees a
+hunk-less excluded file, follows its own fallback, and re-derives the unfiltered diff —
+inverting both the saving and the secret exclusion, in the path that hits the largest
+diffs). Add the worktree absolute path. Never paste diff text into the prompts. Fan out
+per `review-branch.md`'s row and escalation rules — don't restate them here.
 
 - No Major findings → Step 6.
 - Major findings → dispatch the worker once more (same Agent pattern, same worktree)
@@ -154,13 +189,13 @@ From the worktree (`git -C <worktree-abs-path> ...`):
    (CLAUDE.md: every PR starts as a draft until its `/review-branch` pass is clean.)
 3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
    the same branch, push again.
-4. Promotion out of draft depends on how many **fresh-eyes gate passes** ran.
-   `review-branch.md` defines ready-for-merge as three of them, and root CLAUDE.md
-   applies that identically to loop work. Step 5 runs one. So: leave the PR in **draft**
-   and log `- <UTC timestamp>: item N — 1 of 3 gate passes run; needs human completion
-   before merge.` Run `gh pr ready <number>` only if all three passes ran clean in this
-   tick.
-5. Append `- <UTC timestamp>: item N shipped as PR #<number>.` to the Status log.
+4. **Leave the PR in draft.** `review-branch.md` defines ready-for-merge as three
+   fresh-eyes gate passes and root CLAUDE.md applies that identically to loop work;
+   Step 5 runs one. Never `gh pr ready` from this command — promoting is the human's
+   step after the remaining passes.
+5. Append ONE status line, saying both what shipped and what's outstanding:
+   `- <UTC timestamp>: item N opened as draft PR #<number>; 1 of 3 gate passes run,
+   needs human completion before merge.`
 
 ## Boundaries
 

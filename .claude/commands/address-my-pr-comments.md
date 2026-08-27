@@ -72,7 +72,7 @@ Boundaries.
 **Scale how you do this to the thread count.** **Group threads by file/topic FIRST**,
 then batch those groups (bounded so each subagent handles a set that fits comfortably
 in one context, ~10 threads) so threads making the same point stay in one batch.
-Dispatch subagents only when that grouping yields **2 or more** batches — a single
+Dispatch with `subagent_type: Explore` — it has no Edit/Write tools, so the read-only rail below is tool-enforced rather than prompt-only — and only when that grouping yields **2 or more** batches — a single
 batch is pure overhead (one extra dispatch, a merge pass with nothing to merge, and you
 lose the code grounding Phase 2's replies need), so judge those yourself directly.
 If one group alone exceeds the bound, keep it whole and let that batch run long rather
@@ -140,13 +140,14 @@ different thread.
 
 ## Phase 3 — Execute (only the items explicitly approved in Phase 2)
 1. **Apply all approved code changes as one batch** (all `change-then-reply` items
-   together). DB SAFETY: if a fix touches DB code, tests point at the throwaway DB —
-   `DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`. NEVER
-   let a run hit dev DB :5433. See CLAUDE.md / transit-app-gotchas.
+   together). DB SAFETY: if a fix touches DB code, tests point at the throwaway
+   Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
+   and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
+   (`transit-ch`). See CLAUDE.md / transit-app-gotchas.
 2. **Run `/review-branch`** on the result — fresh-context subagent review + iterative
    fix. This pass is mandatory whenever any code changed; do not skip it. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
-   either fixed or explicitly acknowledged to the user. Cap at 2 review passes —
+   either fixed or explicitly acknowledged to the user. Cap at 2 fix iterations (this is the fix counter, NOT `review-branch.md`'s 3 fresh-eyes gate passes) —
    if Major findings still remain after that, stop and report the residual
    findings to the user instead of continuing to iterate.
 3. Show the diff plus the `/review-branch` evidence (findings handled, `make check`

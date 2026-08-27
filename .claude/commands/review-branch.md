@@ -18,40 +18,62 @@ review affordable without narrowing coverage. Don't drop them while rewording.
   Postgres queries or MapLibre layers, respectively.
 
 ## Phase 1 — Understand (you, directly)
-1. Compute the diff ONCE, into a file at an **absolute** path, against `main` (NOT
-   master). All pathspecs use `:(top)` so they resolve from the repo root, not the
-   current directory — a bare `-- .` run from `frontend/` silently drops every backend
-   hunk:
+1. Compute the diff ONCE, in a **single Bash invocation**. Shell variables do NOT
+   survive between tool calls: a later command reusing `$EX` expands to nothing — in
+   bash silently unfiltered (re-opening the lockfile and secret holes this block
+   exists to close), in zsh a hard error. Keep the block together, or repeat the
+   pathspecs literally in every command.
    ```bash
-   D="<scratchpad>/branch.diff"          # absolute; scratchpad dir, not /tmp
+   set -u
+   P="<scratchpad>/branch.pass1.diff"   # absolute; bump passN each gate pass, so a
+                                        # live reviewer can't read a later revision
    EX=(':(top)'
        ':(exclude,top)poetry.lock' ':(exclude,top)frontend/package-lock.json'
-       ':(exclude,top).env' ':(exclude,top).env.local' ':(exclude,top).env.*.local'
-       ':(exclude,top)*.pem' ':(exclude,top)*credential*' ':(exclude,top)*service-account*')
-   git diff main...HEAD -- "${EX[@]}" > "$D"
-   git diff main...HEAD --numstat -- "${EX[@]}"   # tier input AND file list
-   git diff main...HEAD --numstat                 # unfiltered, to see what was excluded
+       ':(exclude,top)*.env' ':(exclude,top)*.env.local' ':(exclude,top)*.env.*.local'
+       ':(exclude,top)*.pem' ':(exclude,top)*.p12'
+       ':(exclude,top)*service-account*.json' ':(exclude,top)*credentials.json')
+   # (a) see everything FIRST — the exclusion decision has to happen before the file
+   #     is written, or the secrets are already in it
+   git diff main...HEAD --numstat --no-renames
+   # (b) write the diff, then take the tier input AND file list from the SAME pathspec
+   git diff main...HEAD -- "${EX[@]}" > "$P"
+   git diff main...HEAD --numstat --no-renames -- "${EX[@]}"
+   # (c) uncommitted + untracked work, WITHOUT touching the index
+   git ls-files --others --exclude-standard -- "${EX[@]}" \
+     | while read -r f; do git diff --no-index /dev/null "$f"; done >> "$P"
+   git diff -- "${EX[@]}" >> "$P"
+   git diff --cached -- "${EX[@]}" >> "$P"
    ```
-   Exclusions are **structural, in this command** — never "hand the path over and add a
-   note", because the note can't redact a file the reviewer is told to read.
-   - `--numstat` (excluded) is the single source for both the tier input (sum of
-     insertions + deletions) and the changed-file list. Don't use `--stat`/`--shortstat`:
-     unfiltered totals mis-tier a diff (a 40-line change with 6k lines of lock churn
-     would land in the widest tier, which is exactly what the exclusion exists to stop).
-   - Templates (`*.example`, `*.sample`) hold no values and ARE reviewable — don't
-     exclude them.
-   - If the unfiltered `--numstat` lists any other path whose name carries
-     `KEY`/`SECRET`/`TOKEN`/`PASSWORD`/`CREDENTIAL` and isn't a template, add it to `EX`
-     before writing the file, report it as a finding, and recommend rotation if a value
-     is present (per CLAUDE.md's secrets rule).
-   - Report every excluded path in the intro from the unfiltered `--numstat` alone
-     ("`poetry.lock` +N/-M, dependency bump — reviewed by numstat only").
-2. Run `git status --porcelain`. Uncommitted work is NOT in `main...HEAD`. Either fold
-   it in — `git add -N` the untracked paths first (plain `git diff` never shows them),
-   then append `git diff -- "${EX[@]}"` and `git diff --cached -- "${EX[@]}"` (same
-   pathspec — an unfiltered append re-opens the secret and lockfile holes) and add
-   their numstat totals to the tier input — or state in the intro that uncommitted
-   changes were not reviewed, naming them.
+   - **Never `git add -N`** to surface untracked files. It writes an intent-to-add
+     entry that persists (so `git status --porcelain --untracked-files=no` reports it as
+     a tracked change forever, wedging `/vps-loop-run` Step 1), makes every later
+     `git stash push` fail with `Entry '…' not uptodate`, and — since the pathspec isn't
+     applied to it — can stage the very paths `EX` withholds. `git diff --no-index` is
+     read-only.
+   - `--no-renames` matters: a rename prints `0  0  old => new`, so a pure-rename PR
+     sums to **zero** changed lines (narrowest fan-out, on the diff shape `consistency`
+     exists for) and hands reviewers a path that doesn't exist. Binary files print
+     `-`/`-` — not zero.
+   - Env excludes are `*.env`-shaped, not root-anchored, so `frontend/.env.local` is
+     caught too. `*.example` / `*.sample` templates hold no values and stay reviewable.
+   - **Do not exclude on name alone.** A bare `*credential*` swallows
+     `tests/api/test_cors_credentials.py`; a `KEY`/`SECRET`/`TOKEN`/`PASSWORD` name
+     filter swallows `.github/workflows/secrets-scan.yml` (the secret-scan gate
+     itself), `db/migrations/0003_api_keys.*.sql`, and `frontend/src/styles/tokens*.ts`
+     — hiding exactly the surface a `security` pass exists to read. Exclude only files
+     that plausibly *carry* credential material (dotenv, keystores, service-account
+     JSON, `*.pem`/`*.p12`); for source, config, migration, and workflow files keep the
+     hunks and scan them for literal values instead.
+   - If step (a)'s unfiltered list shows a credential-carrying path not already in
+     `EX`, add it before step (b) runs, report it as a finding, and recommend rotation.
+     Establish presence without echoing values — `grep -oE '^[A-Z_]+=' <file>` per
+     CLAUDE.md — or simply recommend rotation.
+   - Name every excluded path in the intro, from step (a)'s list alone.
+   - Sum insertions + deletions from step (b)'s numstat for the fan-out row input, plus
+     the line counts of anything step (c) appended.
+2. Run `git status --porcelain` for the record. State in the intro anything step (c)
+   did not fold in (e.g. an ignored-but-modified file), so "not reviewed" is explicit
+   rather than assumed.
 3. Deduce the branch objective and how the new code builds on `main`.
 4. Write a short context intro stating that objective before any findings.
 5. Risk tier — keyed on whether something *executes* the file, not on its path:
@@ -63,7 +85,11 @@ review affordable without narrowing coverage. Don't drop them while rewording.
    - **Process-doc** — the diff touches `.claude/**` or the root `CLAUDE.md` and
      *nothing outside them*. Full dimension coverage and full 3-pass gate, exactly as
      standard tier — only two deltas: (a) skip step 6's test-delta gate, since these
-     files have no `tests/` share by nature; (b) additionally require that every rule
+     files have no `tests/` line share by nature — but if the diff touches
+     `.claude/hooks/**`, `.claude/settings.json`, or any executed script, step 6's
+     positive+negative verification-evidence requirement STILL applies (that's a
+     security control; only the line-count math is inapplicable); (b) additionally
+     require that every rule
      the diff adds names ONE canonical home, other mentions being pointers rather than
      copies — a rule duplicated across files, or a rule living only in a file nothing
      loads, is a Major finding. `security` is never optional here: judging whether a
@@ -94,16 +120,20 @@ Phase 3.
 list, and this paragraph is the single statement of coverage: **always cover bugs,
 logic, consistency, perf, practices, security, alternatives** — for every non-trivial
 tier, process-doc included. Additionally cover `enforcement` ONLY when the diff
-touches `.claude/hooks/`, `frontend/eslint.config.js`, `.github/workflows/`,
-`pyproject.toml` lint/type config, or a new/changed `scripts/check-*` script.
+touches `.claude/hooks/`, `.claude/settings.json` (both hooks are *registered* there,
+so a one-line edit disables a gate without touching `hooks/`),
+`frontend/eslint.config.js`, `.github/workflows/`, `pyproject.toml` lint/type config,
+or a new/changed `scripts/check-*` script.
 
-**Fan-out — take the FIRST matching row.** "Changed lines" = insertions + deletions
-summed from the Phase 1 excluded `--numstat`. Use hard comparisons, and round *up* a
-row when a diff sits near a bound (the tier is monotonic anyway, so widening early
-costs nothing later). The bounds exist so one merged call's diff plus its targeted
+**Fan-out row — take the FIRST matching row.** ("Row" is the fan-out; "tier" is the
+risk tier from Phase 1 step 5. They're separate.) "Changed lines" = insertions +
+deletions summed from the Phase 1 excluded `--numstat`. Use hard comparisons, and when
+a diff sits near a bound take the next row **down this list** (more calls) — widening
+early costs nothing, since the row never narrows later. The bounds exist so one merged call's diff plus its targeted
 reads still fit in a single context with room for evidence gathering — that's what to
 preserve if you ever retune them.
-- **`<= 150` lines in 1–2 files, one layer** → 3 base calls: `bugs+logic` /
+- **`<= 150` lines in 1–2 files, one layer** ("layer" = backend API / frontend /
+  pipeline / infra; a `.claude/**`-only diff counts as one layer) → 3 base calls: `bugs+logic` /
   `perf+security` / `practices+consistency+alternatives`.
 - **`<= 600` lines, any file count, one layer** → 5 base calls: `bugs+logic` /
   `consistency` / `perf` / `security` / `practices+alternatives`.
@@ -113,7 +143,9 @@ preserve if you ever retune them.
 **Escalations — size-independent, because these dimensions' risk doesn't track diff
 size.** When one fires, that dimension is **removed from its merged group and
 dispatched standalone**; the group keeps its remaining members (and is dropped if
-emptied). So a row is "3 base calls, +1 per escalation", not 3 calls flat.
+emptied). So a row costs its base calls +1 per escalation that actually splits a group
+— a dimension the row already dispatches standalone (e.g. `security` on the 5-call row)
+needs no extra call, and the escalation is a no-op there.
 - `security` — the diff touches auth/session/admin routes, `require_admin`, env or
   secret handling, a user-supplied URL, a PII path, or `.claude/**` / root `CLAUDE.md`
   (a reworded rail is invisible without a dedicated look).
@@ -182,9 +214,9 @@ Standard and process-doc tiers: before a PR is considered ready, run this whole 
 THREE times, each pass approaching the diff as if seeing it for the first time (reset
 mindset between passes). Each fresh read surfaces issues the prior context-anchored
 read glossed over.
-Each pass re-tiers against the **cumulative** `main...HEAD` diff as it stands then —
-fix commits add to it, so it grows and never shrinks. The tier is **monotonic across
-the gate**: it may widen, never narrow. Once a branch has qualified for
+Each pass re-classifies the **cumulative** `main...HEAD` diff as it stands then. Risk
+tier and fan-out row are both **monotonic across the gate**: they may widen, never
+narrow (a fix that reverts a line can shrink the diff — the floor still holds). Once a branch has qualified for
 one-call-per-dimension, or for a dedicated `security` / `consistency` / `enforcement`
 call, it keeps them for every remaining pass — state the tier and call plan in each
 pass's intro so the next pass can honour that floor. Don't add calls merely because

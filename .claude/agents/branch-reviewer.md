@@ -60,10 +60,13 @@ Rules:
   intentional, not truncation: note them under Obstacles and move on. Re-deriving them
   pulls back exactly what the coordinator withheld.
 - Derive a diff yourself ONLY when no path was given, the file is unreadable, or a
-  hunk is cut mid-line — then run `git diff main...HEAD [-- <path>]` (`git -C
-  <worktree-abs-path>` if a worktree was named; without one, a bare `git diff` runs in
-  the main checkout on `main` and yields nothing) and say so under Obstacles. Never
-  review from nothing and report "no findings".
+  hunk is cut mid-line. When the prompt declared exclusions, carry them into that
+  command — a bare re-derive would pull back exactly what the coordinator withheld:
+  `git diff main...HEAD -- ':(top)' ':(exclude,top)<each declared path>' [-- <path>]`
+  (`git -C <worktree-abs-path>` if a worktree was named; without one, a bare `git diff`
+  runs in the main checkout on `main` and yields nothing). If you can't reconstruct the
+  exclusions, do NOT re-derive: report the unreadable diff under Obstacles and stop.
+  Never review from nothing and report "no findings".
 - The changed-file list is context, **not a read boundary**: reading outside it —
   callers, consumers, tests, config — is expected and required for `consistency`,
   `perf`, and `security`. Stay inside a pathspec only when the caller explicitly

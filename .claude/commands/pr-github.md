@@ -9,10 +9,11 @@ Post selected review findings as inline comments on the GitHub PR for the curren
 Nothing gets posted as a review comment without an explicit pick from the user in
 step 2. Listing the findings is not approval — post only the findings the user
 actually selected, never "post everything" by default.
-This gates Steps 1-4 (posting findings). It does NOT gate PR-body creation/update
-under "PR description style" **when running unattended under `/vps-loop-run`**, which
-has no user present to pick. In an interactive session a body change is offered, not
-performed — Step 1's "stop and offer" still applies.
+This gates Step 3 (posting the comments). It does NOT gate *editing the body text*
+of a PR that `/vps-loop-run` Step 6 already created as a draft — that runs unattended
+with no user present to pick. It is never licence to create a PR outside that flow: in
+an interactive session Step 1's "stop and offer" still applies, and every PR this repo
+opens starts as `--draft` per CLAUDE.md.
 
 ## Auth
 - Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or
