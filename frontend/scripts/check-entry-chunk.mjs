@@ -13,18 +13,31 @@
 // split move bytes into a separately-counted, still-statically-imported
 // chunk while the entry file itself stayed small.
 //
-// DIST_DIR can be overridden via CHECK_ENTRY_CHUNK_DIST_DIR (used by
+// DIST_DIR can be overridden with --dist-dir <path> (used by
 // tests/frontend/check_entry_chunk.test.mjs to run against a fixture
-// dist/ without a real Vite build).
+// dist/ without a real Vite build). Deliberately an explicit CLI arg, not
+// an env var: an ambient env var (a leftover shell export, a repo
+// .envrc, a workflow-level `env:` added later) would silently redirect a
+// real run at a fixture dir with no signal, defeating a check that's
+// otherwise fail-closed.
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+function distDirFromArgv() {
+  const flagIndex = process.argv.indexOf("--dist-dir");
+  if (flagIndex === -1) return null;
+  const value = process.argv[flagIndex + 1];
+  if (!value) {
+    console.error("check-entry-chunk: --dist-dir requires a path argument.");
+    process.exit(1);
+  }
+  return resolve(value);
+}
+
 const FRONTEND_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DIST_DIR = process.env.CHECK_ENTRY_CHUNK_DIST_DIR
-  ? resolve(process.env.CHECK_ENTRY_CHUNK_DIST_DIR)
-  : join(FRONTEND_DIR, "dist");
+const DIST_DIR = distDirFromArgv() ?? join(FRONTEND_DIR, "dist");
 const MANIFEST_PATH = join(DIST_DIR, ".vite", "manifest.json");
 
 // getRTLTextPluginStatus is a MapLibre-internal public method name — it
@@ -52,10 +65,22 @@ function loadManifest() {
   try {
     raw = readFileSync(MANIFEST_PATH, "utf8");
   } catch (err) {
-    console.error(
-      `check-entry-chunk: could not read ${MANIFEST_PATH} (${err.message}). ` +
-        "Did the build run with build.manifest: true in vite.config.ts?",
-    );
+    console.error(`check-entry-chunk: could not read ${MANIFEST_PATH} (${err.message}).`);
+    // frontend/tsconfig.node.json redirects tsc -b's emit away from
+    // frontend/ specifically so this file can never exist going forward,
+    // but a checkout that ran `tsc -b` before that fix landed can still
+    // have one sitting there (gitignored, so `git status` won't show it)
+    // — and Vite loads vite.config.js before vite.config.ts if both
+    // exist, silently dropping build.manifest: true.
+    if (existsSync(join(FRONTEND_DIR, "vite.config.js"))) {
+      console.error(
+        "check-entry-chunk: found a stale frontend/vite.config.js — Vite loads that " +
+          "instead of vite.config.ts, so build.manifest: true never applied. Delete " +
+          "frontend/vite.config.js and frontend/vite.config.d.ts and rebuild.",
+      );
+    } else {
+      console.error("check-entry-chunk: did the build run with build.manifest: true in vite.config.ts?");
+    }
     process.exit(1);
   }
   try {
@@ -116,21 +141,31 @@ const manifest = loadManifest();
 const entries = findEntries(manifest);
 
 let failed = false;
-let markerSeenAnywhereInDist = false;
+let jsMarkerSeenAnywhereInDist = false;
+let cssMarkerSeenAnywhereInDist = false;
 
-// Sanity check the marker choice itself against the WHOLE manifest (not
-// just static closures) — MapLibre is still expected to ship somewhere
-// (MapTab's lazy chunk), so if the marker is nowhere in dist/ at all,
-// this check has silently stopped meaning anything (wrong marker, a
-// minifier change, or maplibre-gl no longer being used) and that's worth
-// failing loudly on rather than a quiet, permanent pass.
+// Sanity check both marker choices against the WHOLE manifest (not just
+// static closures) — MapLibre is still expected to ship somewhere
+// (MapTab's lazy chunk, JS and CSS both), so if a marker is nowhere in
+// dist/ at all, this check has silently stopped meaning anything for that
+// half (wrong marker, a minifier/library change, or maplibre-gl no longer
+// being used) and that's worth failing loudly on rather than a quiet,
+// permanent pass.
 for (const node of Object.values(manifest)) {
-  if (!node.file) continue;
-  const content = readTextOrNull(join(DIST_DIR, node.file));
-  if (content && content.includes(JS_MARKER)) {
-    markerSeenAnywhereInDist = true;
-    break;
+  if (node.file && !jsMarkerSeenAnywhereInDist) {
+    const content = readTextOrNull(join(DIST_DIR, node.file));
+    if (content && content.includes(JS_MARKER)) jsMarkerSeenAnywhereInDist = true;
   }
+  if (!cssMarkerSeenAnywhereInDist) {
+    for (const cssFile of node.css ?? []) {
+      const content = readTextOrNull(join(DIST_DIR, cssFile));
+      if (content && content.includes(CSS_MARKER)) {
+        cssMarkerSeenAnywhereInDist = true;
+        break;
+      }
+    }
+  }
+  if (jsMarkerSeenAnywhereInDist && cssMarkerSeenAnywhereInDist) break;
 }
 
 for (const [entryKey] of entries) {
@@ -148,7 +183,12 @@ for (const [entryKey] of entries) {
         console.error(`check-entry-chunk: FAIL — could not read chunk "${node.file}" (statically reachable from "${entryKey}").`);
         failed = true;
       } else {
-        if (content.includes(JS_MARKER)) {
+        // node.file is normally the JS chunk (CSS lives in node.css below),
+        // but a manifest asset entry linked directly from index.html can
+        // have a .css file here — match on the file's own type, not an
+        // assumption about which field it came from.
+        const marker = node.file.endsWith(".css") ? CSS_MARKER : JS_MARKER;
+        if (content.includes(marker)) {
           console.error(
             `check-entry-chunk: FAIL — "${node.file}" (statically reachable from entry "${entryKey}") contains MapLibre. ` +
               "MapLibre must only be reached via a dynamic import (React.lazy), never a static one.",
@@ -197,19 +237,25 @@ for (const [entryKey] of entries) {
   if (closureTotalBytes > STATIC_CLOSURE_BUDGET_BYTES) {
     console.error(
       `check-entry-chunk: FAIL — entry "${entryKey}" static closure is ${(closureTotalBytes / 1024).toFixed(1)} KiB, ` +
-        `over the ${(STATIC_CLOSURE_BUDGET_BYTES / 1024).toFixed(0)} KiB budget.`,
+        `over the ${(STATIC_CLOSURE_BUDGET_BYTES / 1024).toFixed(0)} KiB budget. If this is an unrelated ` +
+        "dependency growing (not MapLibre), either lazy-load it like MapTab or deliberately raise " +
+        "STATIC_CLOSURE_BUDGET_BYTES in this file — don't ignore the failure.",
     );
     failed = true;
   }
 }
 
-if (!markerSeenAnywhereInDist) {
+for (const [marker, seen] of [
+  [JS_MARKER, jsMarkerSeenAnywhereInDist],
+  [CSS_MARKER, cssMarkerSeenAnywhereInDist],
+]) {
+  if (seen) continue;
   console.error(
-    `check-entry-chunk: FAIL — the "${JS_MARKER}" marker was not found anywhere in ${DIST_DIR}. ` +
+    `check-entry-chunk: FAIL — the "${marker}" marker was not found anywhere in ${DIST_DIR}. ` +
       "This check is meant to catch MapLibre in the entry chunk by finding a MapLibre-internal " +
       "marker string in the build output; if MapLibre is still a dependency, either the marker no " +
-      "longer survives minification or something else changed — investigate before trusting this " +
-      "check's result. If maplibre-gl was intentionally removed, delete this check instead.",
+      "longer survives minification/CSS output or something else changed — investigate before " +
+      "trusting this check's result. If maplibre-gl was intentionally removed, delete this check instead.",
   );
   failed = true;
 }

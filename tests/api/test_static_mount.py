@@ -45,6 +45,10 @@ def client(monkeypatch, tmp_path):
     (static_dir / "user-manual" / "en.md").write_text("# Manual\n\nReal manual text.")
     # A file outside static_dir, for the path-traversal test below.
     (tmp_path / "outside-secret.txt").write_text("should never be served")
+    # Mimics a build artifact that shouldn't ship (e.g. Vite's
+    # dist/.vite/manifest.json) landing in STATIC_DIR anyway.
+    (static_dir / ".vite").mkdir(parents=True)
+    (static_dir / ".vite" / "manifest.json").write_text('{"leaked": true}')
 
     monkeypatch.setattr("api.main.STATIC_DIR", str(static_dir))
     from api.main import _maybe_mount_static
@@ -99,6 +103,19 @@ def test_path_traversal_cannot_escape_static_root(client):
     """A crafted path can't read a file that lives outside STATIC_DIR."""
     r = client.get("/../outside-secret.txt")
     assert "should never be served" not in r.text
+
+
+def test_dot_prefixed_path_never_served_as_a_file(client):
+    """A dot-prefixed path (e.g. a leaked dist/.vite/manifest.json) falls back
+    to the SPA shell instead of being served as a real file, even though it
+    exists on disk under STATIC_DIR -- see api/main.py's spa_fallback
+    docstring: this is defense in depth against a build artifact that
+    shouldn't ship (build-script cleanup is the primary fix; this makes it
+    a codebase-level guarantee instead of a hand-maintained rm -rf)."""
+    r = client.get("/.vite/manifest.json")
+    assert r.status_code == 200
+    assert "leaked" not in r.text
+    assert "SPA" in r.text
 
 
 def test_unknown_api_path_returns_json_404(client):

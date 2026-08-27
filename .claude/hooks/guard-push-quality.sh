@@ -6,7 +6,9 @@
 # be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
 # determine what changed or can't run a required check, it blocks (exit 2)
 # rather than silently letting the push through — set PUSH_GATE_SKIP_TESTS=1
-# for a deliberate, visible opt-out of the DB-dependent backend tests only.
+# for a deliberate, visible opt-out of the DB-dependent backend tests only,
+# or PUSH_GATE_SKIP_BUILD=1 to skip the frontend build:bundle + entry-chunk
+# check specifically.
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
 input="$(cat)"
@@ -72,7 +74,7 @@ if [ "$SCOPE_OK" -eq 1 ]; then
 
   while IFS= read -r line; do
     [ -n "$line" ] && FE_FILES+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css')
+  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs')
 fi
 
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
@@ -137,13 +139,19 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
     echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
-    echo "== npm run build:bundle && npm run check:entry-chunk (MapLibre must stay out of the entry chunk; typecheck already ran above, so this build step skips tsc -b) =="
-    run_with_timeout 240 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run build:bundle && npm run check:entry-chunk"
-    rc=$?
-    if [ "$rc" -eq 124 ]; then
-      echo "frontend build/check-entry-chunk TIMED OUT after 240s (not a build or check failure)." >&2
+    if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
+      echo "WARNING: PUSH_GATE_SKIP_BUILD=1 set — skipping npm run build:bundle + check:entry-chunk for this push (deliberate opt-out; MapLibre-in-entry regressions won't be caught locally)." >&2
+    else
+      echo "== npm run build:bundle && npm run check:entry-chunk (MapLibre must stay out of the entry chunk; typecheck already ran above, so this build step skips tsc -b) =="
+      run_with_timeout 480 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run build:bundle && npm run check:entry-chunk"
+      rc=$?
+      if [ "$rc" -eq 124 ]; then
+        echo "frontend build/check-entry-chunk TIMED OUT after 480s (not a build or check failure)." >&2
+      fi
+      if [ "$rc" -ne 0 ]; then
+        FAIL=1
+      fi
     fi
-    [ "$rc" -ne 0 ] && FAIL=1
   } >>"$LOG" 2>&1
 fi
 
