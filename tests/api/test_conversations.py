@@ -128,7 +128,7 @@ async def test_get_others_conversation_is_404(conv_app):
 async def test_others_conversation_patch_delete_messages_are_404(conv_app):
     """Characterization test for the ownership-mask-as-404 pattern repeated
     across update/delete/list_messages/append_message — pinned before
-    slice 8's dedup into a shared helper (REFACTOR_PLAN.md)."""
+    slice 8's dedup into a shared helper (docs/refactor-plan.md)."""
     app, agency, uid, pool = conv_app
     async with _authed_client(app, uid) as c:
         r = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
