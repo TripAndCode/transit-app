@@ -40,6 +40,11 @@ export default tseslint.config(
       // with eslint-plugin-react-hooks v7 (flags code the compiler can't
       // optimize), on top of the classic rules-of-hooks set.
       ...reactHooks.configs['recommended-latest'].rules,
+      // 'recommended-latest' leaves the compiler-bailout diagnostic ('todo')
+      // off by default. With manual useMemo/useCallback/React.memo banned
+      // below, a silent bailout would otherwise leave code unmemoized with
+      // no lint signal at all — promote it to error so bailouts are visible.
+      'react-hooks/todo': 'error',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
       // Honor the underscore-prefix convention for intentionally-unused bindings.
@@ -71,10 +76,6 @@ export default tseslint.config(
         },
         {
           selector: "CallExpression[callee.name='memo']",
-          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
-        },
-        {
-          selector: "CallExpression[callee.object.name='React'][callee.property.name='memo']",
           message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
         },
         {
