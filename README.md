@@ -659,8 +659,11 @@ DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
 Railway runs the two Docker images — the **app** (`Dockerfile`, with the SPA
 baked in, serving API + UI on one origin) and the **database** (custom
 `db/Dockerfile`: PostGIS + pgvector + pg_trgm, on a persistent volume) — with
-free TLS, a managed domain, and auto-deploy on `git push`. ~$10–18/mo,
-usage-based. No box to harden, no reverse proxy to run. The DB stays on the
+free TLS, a managed domain, and auto-deploy on push to a dedicated
+`production` branch (never `main` directly — see
+[`docs/deploy-railway.md`](docs/deploy-railway.md) for why and how commits
+get promoted there). ~$10–18/mo, usage-based. No box to harden, no reverse
+proxy to run. The DB stays on the
 private network; a **daily Railway scheduled job** ingests the day's Oracle
 archives from object storage — no public DB, no always-on worker. `ingest_live`
 (via the `CRON_SECRET`-gated `POST /internal/cron/ingest` endpoint) remains a

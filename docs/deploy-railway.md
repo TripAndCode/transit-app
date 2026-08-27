@@ -1,10 +1,20 @@
-# Deploy to Railway (push-to-deploy)
+# Deploy to Railway (tag-gated push-to-deploy)
 
 Lowest-effort path: Railway runs your **existing Docker images** — the app
 (`Dockerfile`, with the SPA baked in) and the custom PostGIS+pgvector DB
 (`db/Dockerfile`) — on private networking, with free TLS and a managed
-domain. No box to harden, no Caddy, no SSH. Push to your default branch →
-Railway rebuilds and redeploys.
+domain. No box to harden, no Caddy, no SSH.
+
+**Point every Railway service at the `production` branch, not `main`.**
+This repo runs an autonomous VPS loop (see CLAUDE.md "Autonomous VPS loop")
+that continuously opens PRs against `main`; those merge on a human review
+cadence, not instantly. If Railway watched `main` directly, every merge
+— reviewed or not yet fully soak-tested — would auto-deploy and run
+`preDeployCommand` migrations immediately. Instead, `main` is just the
+integration branch; `production` only ever moves when a human deliberately
+promotes a reviewed commit to it (see step 6), and that promotion is what
+actually triggers a Railway deploy. The `production` branch already exists
+in this repo for exactly this purpose.
 
 Cost: ~$10–18/mo usage-based, in exchange for zero server ops and git-push
 deploys — pick this if you'd rather not manage a Linux box yourself.
@@ -41,22 +51,25 @@ exists when you wire the app.
 
 1. New Project → **Empty Project**.
 2. **+ New → GitHub Repo → your `transit-app`**. Name this service `db`.
-3. `db` service → **Settings → Build**:
+3. `db` service → **Settings → Source → Branch**: change it from the
+   default (`main`) to **`production`**. Do this for every service in this
+   guide (`db`, `app`, `ingest`) — see the note above on why.
+4. `db` service → **Settings → Build**:
    - Builder: **Dockerfile**
    - Dockerfile Path: `db/Dockerfile`
-4. `db` → **Variables** (these feed the `postgis/postgis` image):
+5. `db` → **Variables** (these feed the `postgis/postgis` image):
    ```
    POSTGRES_USER=transit
    POSTGRES_PASSWORD=<openssl rand -hex 24>
    POSTGRES_DB=transit
    ```
-5. `db` → **Settings → Volumes → + Volume**, mount path:
+6. `db` → **Settings → Volumes → + Volume**, mount path:
    ```
    /var/lib/postgresql/data
    ```
    **Without this the database is wiped on every redeploy.** This is the
    one stateful piece of the whole deploy.
-6. Deploy `db`. Wait until it's running. Note its private hostname under
+7. Deploy `db`. Wait until it's running. Note its private hostname under
    **Settings → Networking → Private Networking**: `db.railway.internal`.
 
 > Postgres is reachable **only** on the private network (`*.railway.internal`,
@@ -70,11 +83,13 @@ exists when you wire the app.
 ## 2. Create the app service
 
 1. **+ New → GitHub Repo → the same `transit-app`**. Name it `app`.
-2. Railway auto-detects `railway.json` → Dockerfile builder + `/health`
+2. `app` → **Settings → Source → Branch**: change it from the default
+   (`main`) to **`production`** (see the note at the top of this guide).
+3. Railway auto-detects `railway.json` → Dockerfile builder + `/health`
    healthcheck + the `migrate up` pre-deploy command. Nothing to configure.
-3. `app` → **Variables**:
+4. `app` → **Variables**:
    ```
-   DATABASE_URL=postgresql://transit:<the POSTGRES_PASSWORD from step 1.4>@db.railway.internal:5432/transit
+   DATABASE_URL=postgresql://transit:<the POSTGRES_PASSWORD from step 1.5>@db.railway.internal:5432/transit
    GROQ_API_KEY=gsk_...
    CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
    CHAT_PROVIDERS=cerebras,groq            # add CEREBRAS_API_KEY too if using it
@@ -89,11 +104,13 @@ exists when you wire the app.
      is rejected at startup). Add the
      `https://<domain>/api/auth/{google,github}/callback` redirect URIs at
      the provider. See README ▸ Authentication.
-4. `app` → **Settings → Networking → Generate Domain**. Railway issues
+5. `app` → **Settings → Networking → Generate Domain**. Railway issues
    `https://<something>.up.railway.app` with TLS. Copy it — that's
    `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
-5. Deploy. The pre-deploy `migrate up` runs first; watch **Deploy Logs**
-   for `applied migration 0001 … 0016`, then the uvicorn boot line.
+6. First deploy: promote `main` to `production` now (see step 6 below) to
+   actually trigger it. The pre-deploy `migrate up` runs first; watch
+   **Deploy Logs** for `applied migration 0001 … 0016`, then the uvicorn
+   boot line.
 
 Smoke test:
 
@@ -183,10 +200,12 @@ Production ingest runs **inside the project**, on the private network, so the
 DB stays private (step 1). Add a third service that runs once a day and exits:
 
 1. **+ New → GitHub Repo → the same `transit-app`**. Name it `ingest`.
-2. `ingest` → **Settings → Build**: Dockerfile builder (same image as `app`).
-3. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
+2. `ingest` → **Settings → Source → Branch**: change it from the default
+   (`main`) to **`production`** (see the note at the top of this guide).
+3. `ingest` → **Settings → Build**: Dockerfile builder (same image as `app`).
+4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
-4. `ingest` → **Settings → Deploy → Start Command** — pull the day's zips from
+5. `ingest` → **Settings → Deploy → Start Command** — pull the day's zips from
    object storage, then ingest/analyze/prune. Sketch (adjust to your bucket
    client; the image needs an S3 client + `postgresql-client` added to the
    Dockerfile for this service):
@@ -200,7 +219,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    # full-rebuilds, so history == this window (reports max range is 365d).
    psql "$DATABASE_URL" -c "DELETE FROM updates WHERE captured_at < now() - interval '${RETENTION_DAYS:-400} days'"
    ```
-5. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
+6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    `OBJECT_STORE_*` creds and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
 
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
@@ -249,18 +268,33 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 
 ---
 
-## 6. Updates
+## 6. Updates — promote `main` to `production`
 
-Just push:
+Pushing to `main` does **not** deploy anything — every Railway service
+watches `production` (step 1.3 / 2.2 / 4.2 above). A deploy only happens
+when you deliberately promote a reviewed `main` commit:
 
 ```bash
-git push origin main
+# 1. Review what's new since the last promotion.
+git fetch origin --tags
+git diff "$(git describe --tags --match 'deploy-*' --abbrev=0)"..origin/main
+
+# 2. If it looks good, tag it (the durable "reviewed up to here" marker)
+#    and promote — this push is what actually triggers the Railway deploy.
+TAG="deploy-$(date -u +%Y-%m-%dT%H%M%SZ)"
+git tag "$TAG" origin/main
+git push origin "$TAG"
+git push origin origin/main:production
 ```
 
-Railway rebuilds the app, runs `migrate up` (pre-deploy), then swaps in the
-new release once `/health` passes. New migrations apply automatically — no
-manual step, unlike the Linode path. The `db` service only redeploys when
-`db/Dockerfile` itself changes; its volume persists across app deploys.
+(First-ever promotion: there's no prior `deploy-*` tag yet, so just skip
+the `git diff` step and review `main`'s full history, or `git log`, before
+tagging and promoting.)
+
+Railway rebuilds from whatever `production` now points to, runs
+`migrate up` (pre-deploy), then swaps in the new release once `/health`
+passes. The `db` service only redeploys when `db/Dockerfile` itself
+changed in that promotion; its volume persists across app deploys.
 
 ---
 
@@ -291,7 +325,7 @@ Skip entirely if it's only demo data.
 
 | Symptom | Check |
 |---------|-------|
-| DB empty after redeploy | Volume not mounted at `/var/lib/postgresql/data` on the `db` service (step 1.5). |
+| DB empty after redeploy | Volume not mounted at `/var/lib/postgresql/data` on the `db` service (step 1.6). |
 | App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must be `db.railway.internal`, port `5432`) or a missing provider key. |
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of `*.railway.internal`. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
