@@ -12,4 +12,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
 
 ## Entries
 
-(none yet)
+- 2026-08-27: Added `docs/features/ask-tab.md` and `docs/features/map-tab.md` (feature-map docs for the Ask and Map tabs: UI entry point, request path, key files, manual verification steps, i18n notes), plus a `!docs/features/` negation in `.gitignore` so they aren't silently skipped by `docs/*`. Doc-only, no code changes. (PR #pending)

@@ -25,6 +25,7 @@ docs/*
 !docs/refactor-log.md
 !docs/refactor-plan.md
 !docs/refactor-notes.md
+!docs/features/
 specs/
 .worktrees/
 .superpowers/
