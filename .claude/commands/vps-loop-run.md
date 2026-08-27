@@ -50,8 +50,14 @@ items top to bottom. For each item N, in order:
 The first item N that passes both checks is this run's target.
 
 If no item passes (every remaining item is already claimed, blocked on an
-unmet dependency, or flagged "DO NOT START"), append to the Status log:
-`- <UTC timestamp>: nothing actionable this run.` and stop.
+unmet dependency, or flagged "DO NOT START"): this run now polls
+frequently (every ~10 minutes, per the VPS cron schedule), so consecutive
+idle ticks are expected and should NOT each get their own log line — read
+the Status log's last entry first. If it already reads "nothing
+actionable this run" (ignoring the timestamp), stop silently, no new
+entry. Otherwise (the state just changed to idle), append:
+`- <UTC timestamp>: nothing actionable this run.` and stop. Either way,
+never dispatch a worker this tick.
 
 ## Step 3b — Clean up a stale worktree/branch before dispatching
 
