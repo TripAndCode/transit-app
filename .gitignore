@@ -22,6 +22,7 @@ raw_archives_static/
 .claude/**/.DS_Store
 docs/*
 !docs/deploy-railway.md
+!docs/refactor-log.md
 specs/
 .worktrees/
 .superpowers/
