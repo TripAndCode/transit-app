@@ -643,8 +643,16 @@ make check     # fmt + lint + test
 
 Run a specific test file. **Point `DATABASE_URL` at the throwaway test DB on
 `:5544`, never the dev DB on `:5433`** — the test suite auto-migrates its
-target, and the dev DB holds tens of millions of rows of real data (see `CLAUDE.md` ▸
-Databases for the one-line container build):
+target, and the dev DB holds real data. Start the throwaway database with the custom
+PostGIS + pgvector image (and run `make ch-test` when ClickHouse is required):
+
+```bash
+docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
+  -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \
+  -p 5544:5432 "$(docker build -q db/)"
+```
+
+Then run the test:
 
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
