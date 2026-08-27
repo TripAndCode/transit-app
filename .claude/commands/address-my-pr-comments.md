@@ -70,9 +70,19 @@ Boundaries.
 
 ## Phase 1 — Digest & analyze (NO replies written, NO code touched)
 **Scale how you do this to the thread count.** Under ~10 threads, judge them yourself
-directly. At ~10 or more, batch them (roughly 9 per batch) and dispatch one
-fresh-context subagent per batch in parallel instead of reading everything yourself —
-each batch gets its own thread text and the worktree path; none needs the full diff.
+directly. At ~10 or more, dispatch fresh-context subagents instead of reading
+everything yourself — but **group threads by file/topic FIRST, then split those groups
+into batches** (bounded so each subagent handles a set that fits comfortably in one
+context, ~10 threads), so threads making the same point stay in one batch.
+Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
+not run any `gh` write call, do not post or reply to any comment, never call the
+resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
+:5433. Report only." — a dispatched subagent doesn't see this command file, so the
+per-thread approval gate above binds it only if you say so.
+Give each batch: its thread text, the worktree path, the verdict taxonomy and row
+fields below, and the targeted-read rule. Each batch returns those same row fields,
+one row per thread. After all batches return, run one cross-batch pass yourself to
+merge rows whose underlying point is the same before emitting the table.
 
 For EACH thread, read the actual code at the referenced file:line before judging —
 targeted read first (`grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a

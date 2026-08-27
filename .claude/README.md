@@ -18,11 +18,9 @@ Invoke as `/name` from a Claude Code session.
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
 → `/address-my-pr-comments` (triage + fix + reply).
 
-Token-frugality rules these files share (keep them when editing): compute the diff
-ONCE and hand it to subagents rather than having each re-derive it; scale fan-out /
-batching to the size of the work instead of always going maximum-width; tell every
-subagent to read targeted (`grep -n` then `sed -n '<a>,<b>p'`) before any whole-file
-read; drop candidate findings whose topic already has a PR thread.
+Each command file states its own token-frugality rules inline, at the top of the file
+that uses them — this README is not loaded by any session, so it is a map, not a rule
+store. Don't move rules here.
 
 ## Agents (`.claude/agents/*.md`)
 
@@ -31,7 +29,8 @@ read; drop candidate findings whose topic already has a PR thread.
 | `branch-reviewer` | Fresh-context principal-engineer reviewer for one or more named dimensions of a branch diff (dispatched by `/review-branch`, never called directly; small diffs get merged multi-dimension calls, large ones one call per dimension). `.claude/agents/branch-reviewer.md` is the source of truth for the dimension list — `/review-branch` reads it from there, not from this table. | Read, Grep, Glob, Bash (model: opus) |
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`,
-`practices`, `security`, `alternatives` — this list is a convenience snapshot
+`practices`, `security`, `alternatives`, plus `enforcement` (conditional —
+lint/CI/hook diffs only) — this list is a convenience snapshot
 and can drift; check the agent file for the current list and exact scope of
 each (e.g. `security` covers hardcoded creds, CSRF/SSRF, PII/PDPA-APPI,
 session-cookie flags; `consistency` covers cross-file contract drift like
@@ -41,6 +40,8 @@ i18n key parity or `agg_*` column renames).
 
 - DB safety: any SQL is read-only against dev `transit`@5433; tests point at
   throwaway `transit_test`@5544. (See root `CLAUDE.md`.)
-- No command here commits or pushes without explicit user go-ahead.
+- No command here commits or pushes without explicit user go-ahead, except
+  `/vps-loop-run`, which runs unattended: it may push feature branches and open
+  draft PRs, but never pushes to `main` and never merges.
 - `/address-my-pr-comments` never calls the GraphQL `resolveReviewThread`
   mutation — resolving is the reviewer's call.

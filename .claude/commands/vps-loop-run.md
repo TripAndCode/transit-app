@@ -40,8 +40,9 @@ Walk items top to bottom:
 
 First item passing both checks is this run's target.
 
-If none passes (all claimed, blocked, or "DO NOT START"): the loop polls every ~10
-minutes, so consecutive idle ticks are expected and must NOT each get a log line.
+If none passes (all claimed, blocked, or "DO NOT START"): consecutive idle ticks are
+expected at the loop's configured cron cadence (see CLAUDE.md ▸ Autonomous VPS loop —
+don't restate a number here) and must NOT each get a log line.
 Read the Status log's last entry: if it already reads "nothing actionable this run"
 (timestamp aside), stop silently. Otherwise append `- <UTC timestamp>: nothing
 actionable this run.` and stop. Either way, no worker is dispatched.
@@ -62,9 +63,12 @@ current `main`):
 **Log non-empty** (real commits — the interrupted run may have finished the work):
 resume and ship it yourself. Do NOT dispatch an `isolation: "worktree"` worker; that
 creates a separate, unrelated worktree.
-1. Run Step 5's verification against this existing worktree/branch. Re-verifying is
-   cheap and is the trust boundary before anything is pushed, even if the prior run
-   already reviewed it once.
+1. Run only Step 5's **review** process against this existing worktree/branch (the
+   `git -C <path>` `/review-branch` walk). Step 5's own Major-findings branch does
+   NOT apply here — it dispatches the Step 4 `isolation: "worktree"` pattern, which
+   would create a separate worktree; use item 3 below instead. Re-verifying is cheap
+   and is the trust boundary before anything is pushed, even if the prior run already
+   reviewed it once.
 2. **Clean (no Major findings):** from the worktree (`git -C <path> ...`)
    `git push -u origin vps-loop/item-<N>`, `gh pr create --draft` (per `pr-github.md`
    style; note in the body that this resumed an interrupted run), fill the real number
