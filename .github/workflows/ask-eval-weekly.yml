@@ -125,6 +125,14 @@ jobs:
       - name: Build aggregates
         run: poetry run python gtfs_pipeline.py analyze --agency-id 8
 
+      # Without this, Stage 2 (embedding nearest-neighbor) has nothing to
+      # match against, so the router only ever resolves via Stage 1 rules
+      # or falls straight through to the Stage 3 LLM — the first real run
+      # showed 0 embedding-stage hits and a 0.50 aggregate score because
+      # of exactly this missing step.
+      - name: Build the RAG/embedding index
+        run: poetry run python gtfs_pipeline.py build_rag_index --all-agencies
+
       - name: Start the API server
         run: |
           poetry run uvicorn api.main:app --port 8000 --no-access-log &
