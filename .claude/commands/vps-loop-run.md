@@ -53,17 +53,39 @@ unmet dependency, or flagged "DO NOT START"), append to the Status log:
 By the time Step 3 selects item N, it has already confirmed no PR exists
 for `vps-loop/item-<N>`. Since this loop runs strictly one item at a time
 (hourly cron, never overlapping), a worktree or local branch already
-named `vps-loop/item-<N>` at this point can only be an abandoned leftover
-from an interrupted prior run — never a legitimately in-progress one.
+named `vps-loop/item-<N>` at this point is leftover from an interrupted
+prior run — but "interrupted" doesn't mean "worthless." Check which case this
+is before doing anything:
 
 Run `git worktree list`. If an entry's branch is `vps-loop/item-<N>`:
-1. `git worktree unlock <that path>` (ignore an error saying it wasn't
-   locked — that's fine, just means it's already unlockable).
-2. `git worktree remove --force <that path>`.
-3. `git branch -D vps-loop/item-<N>` if the branch still exists locally
-   after the worktree removal.
 
-Then proceed to Step 4 with a clean slate.
+1. Check `git log main..vps-loop/item-<N> --oneline` (run this in the main
+   checkout, not `-C` into the worktree, so it always resolves against the
+   current `main`).
+2. **If that log is empty** (no commits beyond `main` — a genuinely
+   zero-progress leftover, like an aborted worktree before any work
+   happened): it's safe to discard.
+   - `git worktree unlock <that path>` (ignore an error saying it wasn't
+     locked).
+   - `git worktree remove --force <that path>`.
+   - `git branch -D vps-loop/item-<N>` if the branch still exists locally.
+   - Proceed to Step 4 with a clean slate.
+3. **If that log is NOT empty** (real commits exist — the interrupted run
+   may have actually finished the implementation, possibly already
+   verified): do NOT delete anything, and do NOT try to resume or ship it
+   yourself either — you don't know why the prior run stopped, and
+   guessing wrong in either direction (discarding real work, or shipping
+   something that was actually still broken) is worse than pausing.
+   Instead:
+   - Append to the Status log: `- <UTC timestamp>: item N has an existing
+     worktree/branch with real commits (<list the commit subjects>) but no
+     PR — likely an interrupted prior run's completed-or-partial work.
+     Needs human review before this item can be retried (inspect
+     <worktree path>, then either ship it or clear it manually).`
+   - Do NOT dispatch a worker for item N this run. Move on: if another
+     backlog item is eligible (per Step 3's own walk), work that one
+     instead; if none are, stop per Step 3's existing "nothing actionable"
+     path.
 
 ## Step 4 — Dispatch the worker
 
