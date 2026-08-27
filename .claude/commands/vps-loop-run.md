@@ -32,8 +32,10 @@ items top to bottom. For each item N, in order:
 - Skip any item explicitly marked "DO NOT START" — that's intentional, not a
   failure, and isn't reported as one.
 - Run `gh pr list --search "head:vps-loop/item-<N>" --state all --json
-  number,state`. If any PR exists for that exact branch (open OR merged),
-  skip item N — already done or in progress.
+  number,state`. Inspect the returned `state` field(s): if any entry has
+  state `OPEN` or `MERGED`, skip item N — already done or in progress. A
+  `CLOSED` (rejected, unmerged) entry does NOT block item N — it remains
+  eligible for a fresh attempt on this run.
 - If the item's text includes a line `Depends on: item <M>`, run
   `gh pr list --search "head:vps-loop/item-<M>" --state merged --json
   number`. If that's empty (item M's PR isn't merged yet), skip item N for
@@ -72,9 +74,17 @@ steps need them.
 
 ## Step 5 — Verify
 
-Run `/review-branch` against the worker's branch (per `review-branch.md`'s
-own worktree-awareness: run its git commands via
-`git -C <worktree-abs-path>`).
+Invoke `/review-branch`, but do not rely on the bare slash command
+defaulting to the right branch — `review-branch.md`'s own Boundaries note
+anticipates exactly this scenario ("a subagent's default cwd is the main
+repo on main"). Explicitly follow its process yourself with every git
+operation it specifies (`git diff`, `git log`, etc.) substituted with
+`git -C <worktree-abs-path>` against `main`, rather than typing a bare
+`/review-branch` and hoping it resolves to the worker's branch. Dispatch its
+Phase 2 fresh-context `branch-reviewer` subagents exactly as
+`review-branch.md` describes, giving each the `git -C <worktree-abs-path>`
+diff output (not a bare "diff against main" instruction) so they review the
+right branch regardless of their own default cwd.
 
 - No Major findings: continue to Step 6.
 - Major findings: dispatch the worker once more (same Agent tool pattern,
