@@ -56,8 +56,9 @@ basemap-native/stop-name label matching, not a bespoke POI layer file.
 |---|---|---|
 | `useHeatmap(agencyId, ctx)` | `GET /api/{agency_id}/delays/heatmap` (`api/routers/map.py`) | **Always precomputed Postgres aggregates**, even for a `time_band`-narrowed request — no route filter reads `agg_stop_daily` (+ `agg_stop_routes` for labels); a route filter reads `agg_route_stop_daily`. Both are pre-bucketed by `date`/`service_type`/`time_band`. Stops are merged via `ST_ClusterDBSCAN` in Postgres/PostGIS. This is a documented exception to the repo-wide "narrow request falls back to ClickHouse" rule — see the docstring in `api/routers/map.py` and the `maplibre-map` skill. |
 | `useRouteShape(agencyId, route, ctx)` (fires only when exactly one route is selected) | `GET /api/{agency_id}/route-shape` (`api/routers/map.py`) | **Live ClickHouse scan** of `updates` (via `build_updates_filter_ch(ctx)`), bounded by the ctx date/dow/time_band/service window, joined to Postgres `static_shapes`/`static_stops`/`static_trips` for geometry. This is the Map tab's "narrow request → live ClickHouse" case. Falls back to a 30-day-bounded unfiltered vote when the ctx window has zero observations. |
-| `useForecastHeatmap(agencyId, route)` (single-route "hourly" mode only) | `GET /api/{agency_id}/forecast/heatmap` (`api/routers/reports.py`, not `map.py`) | Precomputed `agg_route_hour_dow` (day-of-week × scheduled-hour grid) — no live scan. |
-| (not called from `MapTab`, same router file) `GET /delays/live`, `/today/route-summary`, `/today/route/{code}/trips`, `/today/route/{code}/stop-profile` | `api/routers/map.py` | Power the separate "最新観測" (Live) triage tab; `delays/live` and the two `today/route/{code}/*` drilldowns run live bounded ClickHouse scans, `today/route-summary` reads precomputed `agg_route_daily`/`agg_route_stats`/`agg_feed_health`. Included here only because they share `map.py`. |
+| `useForecastHeatmap(agencyId, route)` (fires whenever exactly one route is selected — `enabled: agencyId != null && !!route` — in both "trend" and "hourly" drill-down mode; only its *consumption*, the expected-delay coloring/scrubber, is hourly-mode-gated in `MapTab.tsx`) | `GET /api/{agency_id}/forecast/heatmap` (`api/routers/reports.py`, not `map.py`) | Precomputed `agg_route_hour_dow` (day-of-week × scheduled-hour grid) — no live scan. |
+| (not called from `MapTab`, same router file) `GET /today/route-summary`, `/today/route/{code}/trips`, `/today/route/{code}/stop-profile` | `api/routers/map.py` | Power the separate "最新観測" (Live) triage tab (`frontend/src/tabs/LiveTab.tsx` / `frontend/src/tabs/live/RouteDrilldown.tsx` via `useTodayRouteSummary`/`useRouteTrips`/`useRouteStopProfile`); the two `today/route/{code}/*` drilldowns run live bounded ClickHouse scans, `today/route-summary` reads precomputed `agg_route_daily`/`agg_route_stats`/`agg_feed_health`. Included here only because they share `map.py`. |
+| (not called from any current frontend file) `GET /delays/live` | `api/routers/map.py` | Has no current frontend consumer — only referenced from `tests/api/test_api_map.py`. Listed here only because it lives in the same router file; don't assume it backs the Live tab. |
 
 Key backend building block: `api/range.py` — `get_range_ctx` (parses
 `from/to/dow/time_band/service/routes` query params into `RangeCtx`),
@@ -91,7 +92,7 @@ agg-vs-live-ClickHouse filter-fragment split described in `CLAUDE.md`.
 
 | File | Role |
 |---|---|
-| `api/routers/map.py` | All Map-tab-facing endpoints: `/delays/live`, `/route-shape`, `/today/route-summary`, `/today/route/{route_code}/trips`, `/today/route/{route_code}/stop-profile`, `/delays/heatmap` |
+| `api/routers/map.py` | `/route-shape` and `/delays/heatmap` back the Map tab; `/today/route-summary`, `/today/route/{route_code}/trips`, `/today/route/{route_code}/stop-profile` back the separate Live tab; `/delays/live` has no current frontend caller (all in one router file) |
 | `api/routers/reports.py` | `/forecast/heatmap` (and `/forecast/overview`) used by the hourly route drill-down |
 | `api/range.py` | `RangeCtx`, `get_range_ctx`, `build_agg_stop_filter` (Postgres agg), `build_updates_filter_ch` (ClickHouse live) |
 | `api/clickhouse.py` | `max_captured_at` and the async ClickHouse client wiring |
@@ -151,10 +152,11 @@ agg-vs-live-ClickHouse filter-fragment split described in `CLAUDE.md`.
      a popup with name/avg delay/samples/contributing routes.
 5. Watch the network tab: a default (no route/time_band) load issues
    `GET /api/{id}/delays/heatmap` with no narrowing params; selecting a
-   single route adds a `GET /api/{id}/route-shape?...` call. The heatmap
-   call should stay fast/aggregate-backed regardless of `time_band`,
-   while `route-shape` is the one that's visibly a live ClickHouse round
-   trip.
+   single route adds both a `GET /api/{id}/route-shape?...` call and a
+   `GET /api/{id}/forecast/heatmap?route=...` call (the latter fires in
+   trend mode too, not just hourly). The heatmap call should stay
+   fast/aggregate-backed regardless of `time_band`, while `route-shape` is
+   the one that's visibly a live ClickHouse round trip.
 
 ## i18n
 

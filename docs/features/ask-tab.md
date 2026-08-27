@@ -7,8 +7,11 @@ doc expands on with file-level detail.
 ## How a user reaches it
 
 - Route: `/agencies/:agencyId/ask`, registered in `frontend/src/main.tsx`
-  (`React.lazy`-loaded). This is the default landing tab after picking an
-  agency.
+  (`React.lazy`-loaded). It is **not** the default landing tab — a bare
+  `agencies/:agencyId` navigates to `overview`
+  (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
+  redirects a fresh/remembered agency selection to `/agencies/{id}/map`.
+  Reach the Ask tab by clicking "Ask" in the sidebar.
 - Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n
   key).
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
@@ -19,10 +22,14 @@ doc expands on with file-level detail.
 What the user sees/does:
 
 - **Empty thread (landing state)** —
-  `frontend/src/tabs/ask/AskLandingCards.tsx`: 5 instant-run cards (e.g.
-  "🏆 Top-N delays") that dispatch immediately on click, plus
-  route-requiring "pills" (e.g. "📈 Route delay trend") that open an
-  inline parameter picker (`frontend/src/components/ParamStrip.tsx`)
+  `frontend/src/tabs/ask/AskLandingCards.tsx`: `buildCardTemplates()`
+  (`frontend/src/components/askCardTemplates.ts`) defines 5 templates
+  total, split by `needsRoute()` into 2 instant-run cards that need no
+  route ("🏆 Top-N delays" / `top_delay`, "🎯 On-time rate" /
+  `ontime_rank`) which dispatch immediately on click, and 3 route-requiring
+  "pills" ("📈 Route delay trend" / `route_trend`, "⚖️ Weekday vs Weekend" /
+  `weekday_vs_weekend`, "🚏 Route overview" / `route_overview`) that open
+  an inline parameter picker (`frontend/src/components/ParamStrip.tsx`)
   before running.
 - **Bottom dock** — `frontend/src/components/QuestionDock.tsx`: persistent
   chip toolbar (visible once a thread has messages) to start a new
@@ -57,9 +64,14 @@ since the frontend template already supplies `tool`/`args`.
 
 **Anonymous user, same templates:** `useAppendMessage`'s anon branch
 builds a synthetic `question = "__build__ <tool> <json-args>"` and calls
-`POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`); this sentinel
-is handled by `pipeline.query.chat.chat_with_tools`'s `__build__`
-short-circuit rather than going through the 3-stage router.
+`POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`). This still
+passes through Stage 1 (regex `_RULES`) and Stage 2 (embedding NN) first
+like any other question — both normally miss against the sentinel string,
+since it looks nothing like a real question — and only when neither stage
+decides does the request fall to `pipeline.query.chat.chat_with_tools`,
+which recognizes the `__build__` prefix and short-circuits to parse
+`(tool, args)` directly, dispatching **without ever calling the LLM**
+either way.
 
 **Free-text / natural-language path (the 3-stage router)** — reached via
 `POST /api/{agency_id}/ask` for any question that isn't a `__build__`
@@ -79,15 +91,33 @@ sentinel:
    tool/args (source: `tests/ask_eval/golden_set.jsonl`).
 4. **Stage 3 — RAG + LLM**: neither stage decided → top-3 golden examples
    are few-shot-injected and `pipeline/query/chat.py: chat_with_tools(...)`
-   calls the provider ladder (`pipeline/query/llm_client.py`: Cerebras →
-   Groq → Ollama) with the tool-use surface from `pipeline/query/tools.py`.
-   The chosen tool call is dispatched the same way; out-of-scope questions
-   get a friendly refusal with suggestions.
+   calls the provider ladder (`pipeline/query/llm_client.py`) with the
+   tool-use surface from `pipeline/query/tools.py`. The ladder's order and
+   membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
+   list, `.env.example` ships `cerebras,groq`; the code's own back-compat
+   default if unset is just `groq`) selects from `cerebras` / `groq` /
+   `openai` / `ollama` — `openai` is a supported but optional paid rung,
+   meant to be placed last. The chosen tool call is dispatched the same
+   way; out-of-scope questions get a friendly refusal with suggestions.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
-   `pipeline/query/tools.py` → SQL against `agg_*` (Postgres), or a live
-   ClickHouse scan of `updates` for a `time_band`-filtered/narrow request
-   → `ToolResult` → `render_tool_result()` produces the locale-specific
-   summary string.
+   `pipeline/query/tools.py`. Whether that handler reads precomputed
+   `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
+   on the **specific tool**, not uniformly on filter narrowness:
+   - The ranking family — `top_n`, `on_time` (`on_time_rate`), `trend`
+     (`time_series`), and `compare_segments`'s `dimension="dow"` branch
+     (used by the `cmp_service` alias) — follows the repo-wide pattern:
+     `agg_*` (`agg_daily_trend` etc.) by default, falling back to a live
+     ClickHouse scan only for a `time_band`-filtered/narrow request (see
+     e.g. `compute_ranking`/`compute_trend_series` in
+     `pipeline/reports/rankings.py`).
+   - `route_stats` (`route_dow_breakdown`), `compare_segments`'s
+     `dimension="service_type"` branch (`route_compare_service`),
+     `segment_hotspots`, and `schedule_realism_segments`
+     (`pipeline/query/tool_queries.py`) have **no agg fast path at all** —
+     they always read live `updates` via ClickHouse regardless of the
+     filter.
+   Either way the result becomes a `ToolResult` →
+   `render_tool_result()` produces the locale-specific summary string.
 6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
    log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for
    `__build__` sentinels).
@@ -153,7 +183,7 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
 | `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
 | `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
 | `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
-| `llm_client.py` | Cerebras → Groq → Ollama provider ladder, malformed tool-call recovery |
+| `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (cerebras/groq/openai/ollama), malformed tool-call recovery |
 | `tools.py` | Tool specs (`TOOLS`), `dispatch()`, `render_tool_result()`, the `_LOCALES` string table |
 | `tool_queries.py` | SQL helpers backing several tool handlers |
 | `intent.py` / `intent_cache.py` | Canonical-intent signature/cache (`ASK_INTENT_CACHE_ENABLED`) |
@@ -186,9 +216,17 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
   `tests/api/test_ask_endpoints.py`, `tests/api/test_ask_dashboard.py`,
   `tests/api/test_conversations.py` (includes follow-up endpoint +
   kill-switch behavior).
-- End-to-end eval: `tests/ask_eval/test_ask_eval.py` against
-  `tests/ask_eval/golden_set.jsonl` (also the canonical source for
-  Stage 2's tool/args mapping).
+- End-to-end eval: `tests/ask_eval/test_ask_eval.py` is the CI gate — it
+  shells out to `scripts/ask_eval.py`, which reads
+  `tests/ask_eval/gold_questions.jsonl` (chip + builder coverage must be
+  100%). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
+  `RUN_LLM_EVAL=1` + a real `GROQ_API_KEY`, hits a running dev API) replays
+  `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
+  scores tool-selection accuracy — `golden_set.jsonl` is also the file
+  `make build-rag-index` embeds into `rag_chunks` for Stage 2 (see
+  `pipeline/query/rag_index.py`, `gtfs_pipeline.py: cmd_build_rag_index`).
+  These are two different JSONL files with two different jobs — don't
+  conflate them.
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
   ClickHouse (`:8124`) — see `CLAUDE.md` ▸ Databases for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
@@ -198,24 +236,35 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
 `make serve` alone for single-origin):
 
 1. `cp .env.example .env`; set a real `GROQ_API_KEY` (and optionally
-   `CEREBRAS_API_KEY` — Cerebras is tried first) to exercise Stage 3.
-   `ASK_FOLLOWUP_ENABLED=true` ships as the `.env.example` local-dev
-   default, so follow-up chips work out of the box; set it `false` to
-   verify the kill-switch (chips hidden, `POST /followup` returns 503).
+   `CEREBRAS_API_KEY` — Cerebras is tried first per `CHAT_PROVIDERS`) to
+   exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
+   `.env.example` local-dev default, so follow-up chips work out of the
+   box; set it `false` to verify the kill-switch (chips hidden,
+   `POST /followup` returns 503).
 2. `make bootstrap && make serve` (FastAPI on `:8000`), or add
    `make frontend-dev` for hot reload on `:5173` (Vite proxies `/api`).
-3. Open the app — the default route lands on `/agencies/{id}/ask`. Click
-   "Ask" in the sidebar if not already there.
-4. On the empty-thread landing view, click an instant card (e.g.
+   `make bootstrap` alone leaves the DB empty — load data before clicking
+   through, or every card returns an empty result:
+   `make fetch-ingest` (or `ingest_live` + `make load_static`), then
+   `make analyze` for the agency.
+3. Build the Stage 2 embedding index so paraphrases actually route to
+   `"embedding"` instead of always falling to Stage 3:
+   `poetry run python gtfs_pipeline.py build_rag_index --agency-id 1`
+   (or `make build-rag-index` for all agencies). Without this,
+   `rag_chunks` is empty and Stage 2 never dispatches.
+4. Open the app — the default route lands on Overview
+   (`/agencies/{id}/overview`; a fresh/remembered agency selection instead
+   redirects to Map). Click "Ask" in the sidebar to reach this tab.
+5. On the empty-thread landing view, click an instant card (e.g.
    "🏆 Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,
    no LLM).
-5. Click a route-requiring pill (e.g. "📈 Route delay trend"), pick a
+6. Click a route-requiring pill (e.g. "📈 Route delay trend"), pick a
    route, then run it from the `ParamStrip` — expect a trend chart bubble.
-6. After any answer, use a follow-up chip ("Why this pattern?") or type
+7. After any answer, use a follow-up chip ("Why this pattern?") or type
    free text in the follow-up box — expect a short LLM-generated
    explanation grounded only in the prior table.
-7. To exercise the 3-stage NL router directly (not reachable from the
+8. To exercise the 3-stage NL router directly (not reachable from the
    current chip-only UI), call the API directly:
    ```bash
    curl -X POST localhost:8000/api/1/ask \
@@ -226,7 +275,7 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
    should return `"embedding"`; a genuinely novel/out-of-scope question
    should return `"llm"` (needs a working Groq/Cerebras key) or a
    friendly refusal.
-8. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
+9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")
    LLM rerouting.
 
