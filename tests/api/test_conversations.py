@@ -640,7 +640,7 @@ async def test_append_message_postgres_error_in_dispatch_does_not_poison_transac
 #
 # Characterization tests written before deduping followup_endpoint's ownership
 # check onto _owned_or_404() and consolidating its too_long/llm_error mapping
-# (see NOTES.md "Slice 8"). These pin current behavior exactly; the LLM client
+# (see docs/refactor-notes.md "Slice 8"). These pin current behavior exactly; the LLM client
 # is never called live — pipeline.query.followup.answer_followup is mocked.
 
 

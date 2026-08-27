@@ -134,7 +134,7 @@ async def test_login_with_correct_credentials_sets_session_cookie(local_client, 
 @pytest.mark.asyncio
 async def test_login_event_and_session_fields_on_successful_login(local_client, aconn):
     """Field-level characterization of the session-row-insert + login-event
-    sequence in local_login() (see NOTES.md's Slice 8 entry), pinned before
+    sequence in local_login() (see docs/refactor-notes.md's Slice 8 entry), pinned before
     any dedupe with callback()'s identical sequence."""
     await _seed(local_client)
     resp = await local_client.post(

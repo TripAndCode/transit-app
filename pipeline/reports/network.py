@@ -114,7 +114,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # tie-break: `rows` is built 1:1 from `agencies`, which the query above
     # orders by agency_id, and Python's sort() is stable — so equal-delay
     # rows keep their agency_id-ascending relative order. Verified not the
-    # same bug as NOTES.md's ranking-family tie-break issue (those sort rows
+    # same bug as docs/refactor-notes.md's ranking-family tie-break issue (those sort rows
     # coming from a GROUP BY with no such prior ordering guarantee).
     rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
     return rows

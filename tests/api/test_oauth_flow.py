@@ -261,7 +261,7 @@ async def test_first_login_emits_account_created(auth_client, aconn, monkeypatch
 @pytest.mark.asyncio
 async def test_login_event_and_session_fields_on_successful_callback(auth_client, aconn, monkeypatch):
     """Field-level characterization of the session-row-insert + login-event
-    sequence in callback() (see NOTES.md's Slice 8 entry), pinned before any
+    sequence in callback() (see docs/refactor-notes.md's Slice 8 entry), pinned before any
     dedupe with local_login()'s identical sequence."""
     from api.routers import auth as auth_mod
 

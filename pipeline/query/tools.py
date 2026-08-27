@@ -185,7 +185,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_prefix", "en"): "route {route}",
     # pipeline.query.meta_tools's describe_data/capabilities strings —
     # migrated onto this shared table so the merged tool-calling surface
-    # has one localization mechanism instead of two (see NOTES.md).
+    # has one localization mechanism instead of two (see docs/refactor-notes.md).
     ("mt_unknown_kind", "ja"): "未知の kind: {kind}。有効値: {valid}",
     ("mt_unknown_kind", "en"): "unknown kind: {kind}. valid: {valid}",
     ("mt_routes_filter_no_match", "ja"): "「{substring}」に該当する路線がありません。",

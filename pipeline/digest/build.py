@@ -185,7 +185,7 @@ def build_digest(conn, target_day: date) -> DigestData:
         # Two-pass stable sort: pre-sort by route_code so ties on deviation_min
         # break deterministically in ascending route_code order regardless of
         # `reverse` — same non-determinism class fixed for the reports family
-        # in PR #196 (see NOTES.md).
+        # in PR #196 (see docs/refactor-notes.md).
         movers.sort(key=lambda m: m.route_code)
         movers.sort(key=lambda m: m.deviation_min, reverse=True)
 
