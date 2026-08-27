@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useForecastHeatmap, useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";
