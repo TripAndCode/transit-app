@@ -54,6 +54,30 @@ export default tseslint.config(
       // `any` is a code smell, not a correctness bug — surface it as a warning
       // during adoption rather than blocking on the existing uses.
       '@typescript-eslint/no-explicit-any': 'warn',
+      // React Compiler (enabled repo-wide, see CLAUDE.md) auto-memoizes —
+      // manual useMemo/useCallback/React.memo are redundant at best and can
+      // mask compiler bailouts at worst. Banned as a hard error; use
+      // useEffectEvent for fresh-props-in-stable-handlers instead (see
+      // MapTab).
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.name='useMemo']",
+          message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
+        },
+        {
+          selector: "CallExpression[callee.name='useCallback']",
+          message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
+        },
+        {
+          selector: "CallExpression[callee.name='memo']",
+          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
+        },
+        {
+          selector: "CallExpression[callee.object.name='React'][callee.property.name='memo']",
+          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
+        },
+      ],
     },
   },
 )

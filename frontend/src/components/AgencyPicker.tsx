@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMatch, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
@@ -26,12 +26,12 @@ export function AgencyPicker() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const filtered = useMemo(() => {
+  const filtered = (() => {
     if (!agencies) return [];
     const q = filter.trim().toLowerCase();
     if (!q) return agencies;
     return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
-  }, [agencies, filter]);
+  })();
 
   if (isLoading) {
     return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;

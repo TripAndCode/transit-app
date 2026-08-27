@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
@@ -40,7 +40,7 @@ export function RoutesPicker({
   // raises it instead of silently dropping the tail (search still scans all).
   const [visibleCap, setVisibleCap] = useState(200);
 
-  const groups = useMemo<RouteGroup[]>(() => {
+  const groups: RouteGroup[] = (() => {
     if (!data) return [];
     const m = new Map<string, RouteVariant[]>();
     for (const r of data) {
@@ -62,9 +62,9 @@ export function RoutesPicker({
       const shared = longs.size === 1 ? variants[0].long_name : null;
       return { name, variants, shared_long_name: shared };
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [data]);
+  })();
 
-  const filteredGroups = useMemo(() => {
+  const filteredGroups = (() => {
     const q = filter.trim().toLowerCase();
     if (!q) return groups;
     return groups
@@ -76,7 +76,7 @@ export function RoutesPicker({
         return { ...g, variants };
       })
       .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(q));
-  }, [groups, filter]);
+  })();
 
   function toggleCode(code: string) {
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);

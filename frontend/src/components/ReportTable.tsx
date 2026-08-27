@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
@@ -117,7 +116,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
-  const maxes = useMemo(() => {
+  const maxes = (() => {
     if (!schema) return new Map<number, number>();
     const m = new Map<number, number>();
     for (const col of schema) {
@@ -130,7 +129,7 @@ export function ReportTable({ reportType, rows }: Props) {
       m.set(col.index, mx || 1);
     }
     return m;
-  }, [rows, schema]);
+  })();
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table

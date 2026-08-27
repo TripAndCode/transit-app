@@ -1,5 +1,4 @@
 // frontend/src/components/ConcentrationBar.tsx
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
@@ -190,7 +189,7 @@ function LorenzCurve({
   restRouteCount: number;
 }) {
   const { t } = useTranslation();
-  const { path, ticks20, share20Pct } = useMemo(() => {
+  const { path, ticks20, share20Pct } = (() => {
     // Build ascending shares: rest is one aggregate bucket (the
     // long tail of small routes), followed by top_routes sorted
     // ascending so the curve climbs from flat -> steep.
@@ -244,7 +243,7 @@ function LorenzCurve({
       ticks20: { x: toX(cutoff), y: toY(interpY) },
       share20Pct: 100 - interpY,
     };
-  }, [topRoutes, restSharePct, restRouteCount]);
+  })();
 
   if (!path) return null;
   const innerW = LZ_W - LZ_PAD_LEFT - LZ_PAD_RIGHT;

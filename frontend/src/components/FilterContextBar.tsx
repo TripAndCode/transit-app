@@ -1,4 +1,4 @@
-import { useState, useMemo, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
 import type { DowFilter, TimeBand } from "../api/rangeContext";
@@ -131,28 +131,22 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
     to_date: value.to_date ?? defaultTo,
   }));
 
-  const dowOptions = useMemo<{ value: DowFilter; label: string }[]>(
-    () => [
-      { value: "all", label: t("ask.filter_bar.dow_all") },
-      { value: "weekday", label: t("ask.filter_bar.dow_weekday") },
-      { value: "weekend", label: t("ask.filter_bar.dow_weekend") },
-    ],
-    [t],
-  );
+  const dowOptions: { value: DowFilter; label: string }[] = [
+    { value: "all", label: t("ask.filter_bar.dow_all") },
+    { value: "weekday", label: t("ask.filter_bar.dow_weekday") },
+    { value: "weekend", label: t("ask.filter_bar.dow_weekend") },
+  ];
 
-  const timeBandOptions = useMemo<{ value: TimeBand; label: string }[]>(
-    () => [
-      { value: "all", label: t("filters.time_band.all") },
-      { value: "morning", label: t("filters.time_band.morning") },
-      { value: "forenoon", label: t("filters.time_band.forenoon") },
-      { value: "noon", label: t("filters.time_band.noon") },
-      { value: "afternoon", label: t("filters.time_band.afternoon") },
-      { value: "evening", label: t("filters.time_band.evening") },
-      { value: "night", label: t("filters.time_band.night") },
-      { value: "late_night", label: t("filters.time_band.late_night") },
-    ],
-    [t],
-  );
+  const timeBandOptions: { value: TimeBand; label: string }[] = [
+    { value: "all", label: t("filters.time_band.all") },
+    { value: "morning", label: t("filters.time_band.morning") },
+    { value: "forenoon", label: t("filters.time_band.forenoon") },
+    { value: "noon", label: t("filters.time_band.noon") },
+    { value: "afternoon", label: t("filters.time_band.afternoon") },
+    { value: "evening", label: t("filters.time_band.evening") },
+    { value: "night", label: t("filters.time_band.night") },
+    { value: "late_night", label: t("filters.time_band.late_night") },
+  ];
 
   function handleEdit() {
     // Sync draft to current value when opening editor
