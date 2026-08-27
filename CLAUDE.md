@@ -45,7 +45,7 @@ Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && 
 
 ## Frontend rules
 
-- React 19.2 with the **React Compiler enabled** — do not add `useMemo`/`useCallback`/`React.memo` for performance. For fresh-props-in-stable-handlers, use `useEffectEvent` (see `MapTab`), never render-time ref writes.
+- React 19.2 with the **React Compiler enabled** — `useMemo`/`useCallback`/`React.memo` are banned as a hard ESLint error (`no-restricted-syntax` in `frontend/eslint.config.js`; `npm run lint` fails on any use, including the `React.useMemo`/`React.useCallback`/`React.memo` member-expression forms) — the compiler memoizes automatically, so don't add them for performance. For fresh-props-in-stable-handlers, use `useEffectEvent` (see `MapTab`), never render-time ref writes.
 - eslint `react-hooks` compiler rules: `set-state-in-effect` and `purity` are enforced as `error` project-wide (eslint-plugin-react-hooks v7's `recommended-latest` default — this repo currently has zero violations, so there's no legacy-code carve-out in place or needed). Prefer derived state over sync-effects.
 - No hardcoded UI strings: every user-visible string goes through `t()` with keys in **both** `frontend/src/i18n/locales/{ja,en}.json` (key parity is CI-linted). Kana in `.ts/.tsx` source fails `lint:i18n-strings`; suppress intentional cases with `i18n-ignore`.
 - Calm UI: no alarm reds, no dense panels, no stressful motion. Severity uses the existing warm ramp.
