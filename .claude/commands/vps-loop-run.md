@@ -48,6 +48,23 @@ If no item passes (every remaining item is already claimed, blocked on an
 unmet dependency, or flagged "DO NOT START"), append to the Status log:
 `- <UTC timestamp>: nothing actionable this run.` and stop.
 
+## Step 3b — Clean up a stale worktree/branch before dispatching
+
+By the time Step 3 selects item N, it has already confirmed no PR exists
+for `vps-loop/item-<N>`. Since this loop runs strictly one item at a time
+(hourly cron, never overlapping), a worktree or local branch already
+named `vps-loop/item-<N>` at this point can only be an abandoned leftover
+from an interrupted prior run — never a legitimately in-progress one.
+
+Run `git worktree list`. If an entry's branch is `vps-loop/item-<N>`:
+1. `git worktree unlock <that path>` (ignore an error saying it wasn't
+   locked — that's fine, just means it's already unlockable).
+2. `git worktree remove --force <that path>`.
+3. `git branch -D vps-loop/item-<N>` if the branch still exists locally
+   after the worktree removal.
+
+Then proceed to Step 4 with a clean slate.
+
 ## Step 4 — Dispatch the worker
 
 Use the Agent tool with `isolation: "worktree"` (leave `subagent_type` unset
