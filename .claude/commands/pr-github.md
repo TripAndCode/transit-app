@@ -34,6 +34,12 @@ Write PR descriptions to be **scanned, not read**. Default to structure over pro
 - **Bold the keywords** in each bullet so the eye lands on them.
 - **Cut prose to the load-bearing clause.** Move rationale into the table cell /
   bullet it belongs to; don't write a paragraph to set it up.
+- **State the origin**, right after the one-line summary: `**Origin:**
+  Interactive session` if the work came from a human-driven session, or
+  `**Origin:** Autonomous VPS loop (item N)` if `/vps-loop-run` produced it
+  (per CLAUDE.md's "Autonomous VPS loop"). Lets a reviewer tell at a glance
+  which review posture applies (VPS-loop PRs never get merged without an
+  explicit human go-ahead, regardless of how clean the review came back).
 - Keep sections short and titled: What · Affected · Behaviour · Fixes · Tests ·
   Verification (include only those that apply). End with the Claude Code trailer.
 
