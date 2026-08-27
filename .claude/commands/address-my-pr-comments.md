@@ -69,9 +69,34 @@ Boundaries.
 4. If nothing is left after filtering, say so and stop.
 
 ## Phase 1 — Digest & analyze (NO replies written, NO code touched)
-For EACH thread, read the actual code at the referenced file:line before judging,
-and read the full exchange if `round >= 1` (original comment + all replies/fixes so
-far). Produce a numbered table, one row per thread:
+**Scale how you do this to the thread count.** **Group threads by file/topic FIRST**,
+then batch those groups (bounded so each subagent handles a set that fits comfortably
+in one context, ~10 threads) so threads making the same point stay in one batch.
+Dispatch with `subagent_type: Explore` — it has no Edit/Write tools, so the read-only rail below is tool-enforced rather than prompt-only — and only when that grouping yields **2 or more** batches — a single
+batch is pure overhead (one extra dispatch, a merge pass with nothing to merge, and you
+lose the code grounding Phase 2's replies need), so judge those yourself directly.
+If one group alone exceeds the bound, keep it whole and let that batch run long rather
+than splitting a group across batches.
+Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
+not run any `gh` write call, do not post or reply to any comment, never call the
+resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
+dev Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+only within the worktree path given; never read another worktree. Report only." — a
+dispatched subagent doesn't see this command file, so the per-thread approval gate
+above binds it only if you say so.
+Give each batch: its thread text, the worktree path, the verdict taxonomy and row
+fields below, and the targeted-read rule. Each batch returns those same row fields,
+one row per thread. After all batches return, run one cross-batch pass yourself to
+merge rows whose underlying point is the same before emitting the table (skip this when
+there was only one batch — nothing to merge).
+
+For EACH thread, read the actual code at the referenced file:line before judging —
+targeted read first (`grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a
+window around it), whole-file read only when that isn't enough — and read the full
+exchange if `round >= 1` (original comment + all replies/fixes so far). If two or
+more threads make the same underlying point, don't judge and draft each in isolation:
+note the overlap and produce one shared verdict/reply covering all of them.
+Produce a numbered table, one row per thread:
 - **What they mean** — restate the reviewer's point in plain words (decode any
   shorthand).
 - **What happened since** — only if `round >= 1`: summarize the reply/fix chain so
@@ -115,13 +140,14 @@ different thread.
 
 ## Phase 3 — Execute (only the items explicitly approved in Phase 2)
 1. **Apply all approved code changes as one batch** (all `change-then-reply` items
-   together). DB SAFETY: if a fix touches DB code, tests point at the throwaway DB —
-   `DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`. NEVER
-   let a run hit dev DB :5433. See CLAUDE.md / transit-app-gotchas.
+   together). DB SAFETY: if a fix touches DB code, tests point at the throwaway
+   Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
+   and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
+   (`transit-ch`). See CLAUDE.md / transit-app-gotchas.
 2. **Run `/review-branch`** on the result — fresh-context subagent review + iterative
    fix. This pass is mandatory whenever any code changed; do not skip it. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
-   either fixed or explicitly acknowledged to the user. Cap at 2 review passes —
+   either fixed or explicitly acknowledged to the user. Cap at 2 fix iterations (this is the fix counter, NOT `review-branch.md`'s 3 fresh-eyes gate passes) —
    if Major findings still remain after that, stop and report the residual
    findings to the user instead of continuing to iterate.
 3. Show the diff plus the `/review-branch` evidence (findings handled, `make check`
