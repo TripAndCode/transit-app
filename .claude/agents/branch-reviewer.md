@@ -45,6 +45,18 @@ Dimensions you may be asked for:
   unmasked, or transferred without a confirmed lawful basis (PDPA/APPI); session
   cookie flags (`cookie_secure()`, `SESSION_COOKIE_NAME`, TTL) not weakened.
 - alternatives: faster / simpler / more memory-friendly ways to hit the objective.
+- enforcement: ONLY for diffs touching a lint rule, CI check, git hook, or
+  static-analysis gate (e.g. `.claude/hooks/`, `frontend/eslint.config.js`,
+  `.github/workflows/`, `pyproject.toml` `[tool.ruff]`/`[tool.mypy]`, or a new
+  `scripts/check-*` script). Verify the PR provides evidence of BOTH: (1) a
+  positive control — a deliberately-violating snippet the check actually
+  catches, and (2) a negative control — existing/legitimate code the check
+  does NOT flag (check for known intentional exceptions already in the
+  codebase, e.g. `useEffectEvent`'s use of `useEffect` in `MapTab`, before
+  trusting a rule that would flag them). Also check the check is scoped as
+  intended (a diff-scoped check that accidentally runs whole-project, or vice
+  versa). Missing either control, or a scoping mismatch, is itself a Major
+  finding — don't wait for it to misfire in practice.
 
 Rules:
 - Diff against `main` (NOT master).
