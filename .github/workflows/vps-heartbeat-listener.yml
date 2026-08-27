@@ -1,0 +1,17 @@
+name: VPS Heartbeat Listener
+
+# Fired by the VPS cron wrapper (/root/claude-loop.sh) after every hourly run,
+# success or failure, via `gh api repos/:owner/:repo/dispatches -f
+# event_type=vps-heartbeat`. This job does nothing but exist and complete —
+# vps-heartbeat-watchdog.yml queries this workflow's most recent run
+# timestamp to detect whether the VPS loop has gone silent.
+on:
+  repository_dispatch:
+    types: [vps-heartbeat]
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record heartbeat
+        run: echo "Heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -1,0 +1,38 @@
+name: VPS Heartbeat Watchdog
+
+# Fails on purpose when the VPS autonomous loop (CLAUDE.md "Autonomous VPS
+# loop") has gone silent for too long. GitHub emails repo watchers on a
+# failed scheduled workflow by default, so a failure here is the alert -
+# no third-party monitoring account needed. Offset off :00/:30 (GitHub
+# scheduled workflows queue up and lag around the top of the hour).
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check last heartbeat age
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LAST_RUN=$(gh run list --repo "${{ github.repository }}" \
+            --workflow=vps-heartbeat-listener.yml \
+            --json createdAt \
+            --limit 1)
+          if [ "$(echo "$LAST_RUN" | jq 'length')" -eq 0 ]; then
+            echo "::error::No VPS heartbeat has ever been recorded — the loop may never have run, or repository_dispatch is misconfigured."
+            exit 1
+          fi
+          CREATED_AT=$(echo "$LAST_RUN" | jq -r '.[0].createdAt')
+          CREATED_EPOCH=$(date -u -d "$CREATED_AT" +%s)
+          NOW_EPOCH=$(date -u +%s)
+          AGE_MIN=$(( (NOW_EPOCH - CREATED_EPOCH) / 60 ))
+          echo "Last heartbeat was ${AGE_MIN} minutes ago (threshold: 100)."
+          if [ "$AGE_MIN" -gt 100 ]; then
+            echo "::error::Last VPS heartbeat was ${AGE_MIN} minutes ago (threshold: 100 min). The VPS autonomous loop may have stopped — check cron, gh auth, and the claude setup-token on the VPS."
+            exit 1
+          fi
