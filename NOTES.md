@@ -157,7 +157,7 @@ a future pass doesn't have to re-derive the reasoning:
    `await record_event(conn, user_id=uid, actor_id=uid, kind="login", ...)`
    inside a `conn.transaction()` block. This is real duplication, but it's
    inside the actual session-minting control flow — this slice's scope
-   (REFACTOR_PLAN.md) is explicitly auth-conservative: "session/token
+   (docs/refactor-plan.md) is explicitly auth-conservative: "session/token
    handling... must not change in any way, even superficially." Left
    byte-identical rather than judgment-call it as "safe enough."
 

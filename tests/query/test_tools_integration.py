@@ -541,7 +541,7 @@ async def test_dispatch_missing_route_arg_returns_empty(aconn, aagency_id, tool_
     """Route-required tools must short-circuit with the 'route_arg_required'
     message (not attempt registration/data lookup) when no route arg is
     given. Characterization test pinning this branch ahead of slice 2's
-    ``_resolve_and_check_route`` guard consolidation (REFACTOR_PLAN.md)."""
+    ``_resolve_and_check_route`` guard consolidation (docs/refactor-plan.md)."""
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
     result = await dispatch(tool_name, {}, ctx, aconn, aagency_id, locale="ja")
     assert result.kind == "empty"
