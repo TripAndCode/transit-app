@@ -144,12 +144,11 @@ different thread.
    Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
    and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
    (`transit-ch`). See CLAUDE.md / transit-app-gotchas.
-2. **Run `/review-branch`** on the result — fresh-context subagent review + iterative
-   fix. This pass is mandatory whenever any code changed; do not skip it. "Green"
+2. **Run `/review-branch`** on the result using its proportional routing and
+   fix-triggered retry policy. This is mandatory whenever code changed. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
-   either fixed or explicitly acknowledged to the user. Cap at 2 fix iterations (this is the fix counter, NOT `review-branch.md`'s 3 fresh-eyes gate passes) —
-   if Major findings still remain after that, stop and report the residual
-   findings to the user instead of continuing to iterate.
+   either fixed or explicitly acknowledged to the user. If Major findings remain
+   after the command's two-fix cap, stop and report them instead of iterating again.
 3. Show the diff plus the `/review-branch` evidence (findings handled, `make check`
    output). **Ask before any commit or push** — do not commit or push on your own.
    If the user defers or declines the push, hold the approved `change-then-reply`

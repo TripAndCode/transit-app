@@ -10,13 +10,17 @@ Invoke as `/name` from a Claude Code session.
 
 | Command | Does | Reads/writes |
 |---|---|---|
-| `/review-branch` | Diffs branch vs `main` once into a file, dispatches `branch-reviewer` subagents in parallel (fresh context each, handed the diff path) covering every dimension, with the call count scaled to the diff — synthesizes findings, then cleanup pass (`make check`). Runs 3x fresh-eyes per the review gate. Read the command file for the actual fan-out rule. | Read-only + `make check`. No commit/push. |
+| `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Read-only + proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
-| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick next actionable `NEXT_TASK.md` item → dispatch an isolated worker → verify via the `/review-branch` process → push + open a **draft** PR and leave it in draft (1 of 3 gate passes run; a human completes the rest). Never marks ready, never merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → proportional `/review-branch` verification → draft PR. Never marks ready or merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
 → `/address-my-pr-comments` (triage + fix + reply).
+
+`scripts/prepare_review.py` is the deterministic front end for `/review-branch`. It
+produces the private diff and JSON routing manifest, so commands should consume its
+output rather than reimplementing path exclusions, line counts, or test-share math.
 
 Each command file states its own token-frugality rules inline, in the phase they apply
 to. This README is a map, not a rule store: no command loads it, so nothing here is
@@ -27,7 +31,7 @@ describes, never as the rule itself.
 
 | Agent | Role | Tools |
 |---|---|---|
-| `branch-reviewer` | Fresh-context principal-engineer reviewer for one or more named dimensions of a branch diff (dispatched by `/review-branch`, never called directly; small diffs get merged multi-dimension calls, large ones one call per dimension). `.claude/agents/branch-reviewer.md` is the source of truth for the dimension list — `/review-branch` reads it from there, not from this table. | Read, Grep, Glob, Bash (model: opus) |
+| `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`,
 `practices`, `security`, `alternatives`, plus `enforcement` (conditional —
@@ -52,3 +56,15 @@ i18n key parity or `agg_*` column renames).
   draft PRs, but never pushes to `main` and never merges.
 - `/address-my-pr-comments` never calls the GraphQL `resolveReviewThread`
   mutation — resolving is the reviewer's call.
+
+## VPS operations
+
+- Cron invokes a short `claude -p "/vps-loop-run"` wrapper; the command file owns
+  orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
+- Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
+  variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
+- To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
+  cron. The loop operates on one item and never merges its own draft PR.
+- The pre-push backend timeout is 240 seconds, while the small VPS can need roughly
+  6.5 minutes. A timeout with no test failure is an infrastructure limitation, not
+  evidence that tests failed; resolve it before weakening the gate.

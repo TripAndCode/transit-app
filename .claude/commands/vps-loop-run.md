@@ -161,21 +161,16 @@ Don't type a bare `/review-branch` and hope it resolves to the worker's branch �
 the main repo on `main`"). Follow its process yourself with every git operation run as
 `git -C <worktree-abs-path>`.
 
-Compute the diff once **into a file**, exactly per `review-branch.md` Phase 1 —
-including its single-invocation rule, `:(top)` pathspecs, and lockfile/secret
-exclusions — and hand each Phase 2 subagent exactly what `review-branch.md` Phase 2's
-"Hand over a diff PATH" paragraph specifies, **including its verbatim
-`Deliberately excluded, do NOT re-derive: …` line** (without it, a reviewer sees a
-hunk-less excluded file, follows its own fallback, and re-derives the unfiltered diff —
-inverting both the saving and the secret exclusion, in the path that hits the largest
-diffs). Add the worktree absolute path. Never paste diff text into the prompts. Fan out
-per `review-branch.md`'s row and escalation rules — don't restate them here.
+Run `scripts/prepare_review.py` against the worker worktree, then follow
+`review-branch.md`'s current routing, prompt, synthesis, and verification rules. That
+command is the canonical home for review fan-out and retry policy; do not copy them
+here. Add the worktree absolute path to every dispatch and never paste diff text into
+the prompts.
 
 - No Major findings → Step 6.
 - Major findings → dispatch the worker once more (same Agent pattern, same worktree)
-  with only those findings, then re-verify. Cap at 2 **fix iterations** (a distinct
-  counter from `review-branch.md`'s 3 fresh-eyes gate passes; `address-my-pr-comments.md`
-  uses the same cap). Still Major after the second: append `- <UTC timestamp>: item N
+  with only those findings, then re-verify only the affected review group. Cap at 2
+  fix iterations. Still Major after the second: append `- <UTC timestamp>: item N
   blocked — /review-branch still reports Major findings after 2 fix iterations.
   Worktree: <path>, branch: vps-loop/item-<N>. Findings: <summary>.`, no push, no PR,
   stop.
@@ -189,13 +184,10 @@ From the worktree (`git -C <worktree-abs-path> ...`):
    (CLAUDE.md: every PR starts as a draft until its `/review-branch` pass is clean.)
 3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
    the same branch, push again.
-4. **Leave the PR in draft.** `review-branch.md` defines ready-for-merge as three
-   fresh-eyes gate passes and root CLAUDE.md applies that identically to loop work;
-   Step 5 runs one. Never `gh pr ready` from this command — promoting is the human's
-   step after the remaining passes.
-5. Append ONE status line, saying both what shipped and what's outstanding:
-   `- <UTC timestamp>: item N opened as draft PR #<number>; 1 of 3 gate passes run,
-   needs human completion before merge.`
+4. **Leave the PR in draft.** Step 5 completed the required proportional review, but
+   the unattended loop never marks its own PR ready; that remains the human's action.
+5. Append: `- <UTC timestamp>: item N opened as draft PR #<number>; automated review
+   complete, needs human approval before merge.`
 
 ## Boundaries
 
