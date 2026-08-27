@@ -178,13 +178,19 @@ right branch regardless of their own default cwd.
 From the worktree (`git -C <worktree-abs-path> ...`):
 
 1. `git push -u origin vps-loop/item-<N>`.
-2. `gh pr create` for that branch, following `pr-github.md`'s PR description
-   style (structure over prose, affected-scope table, etc.). Note the PR
-   number `gh pr create` returns.
+2. `gh pr create --draft` for that branch, following `pr-github.md`'s PR
+   description style (structure over prose, affected-scope table, etc.).
+   Note the PR number `gh pr create` returns. Per CLAUDE.md's Git/PRs
+   rule, every PR starts as a draft until its `/review-branch` pass is
+   confirmed clean — Step 5 already ran and passed by this point, so
+   step 5 below marks it ready right away rather than leaving it in
+   draft for a human to promote.
 3. Replace the `(PR #pending)` placeholder in `docs/refactor-log.md` with
    the real `(PR #<number>)`, commit that change on the same branch, and
    `git -C <worktree-abs-path> push` again (updates the same open PR).
-4. Append to `NEXT_TASK.md`'s local "Status log" section:
+4. `gh pr ready <number>` — Step 5's `/review-branch` pass already came
+   back clean for this exact diff, so mark it ready for human review now.
+5. Append to `NEXT_TASK.md`'s local "Status log" section:
    `- <UTC timestamp>: item N shipped as PR #<number>.`
 
 ## Boundaries

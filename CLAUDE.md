@@ -64,6 +64,7 @@ Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && 
 - Phase-sized features get functional reviews on live data before merge (see `review-branch.md` flow).
 - **Every PR gets a `/review-branch` pass before it's opened — no exceptions for small/trivial diffs, and this applies identically whether the work originated from an interactive session or the autonomous VPS loop.** The trivial-tier fast path exists for genuinely doc-only diffs; it is not a reason to skip the flow entirely.
 - Every PR body states its origin: `**Origin:** Interactive session` or `**Origin:** Autonomous VPS loop (item N)` (see `pr-github.md`'s PR description style).
+- **Open every PR as a draft (`gh pr create --draft`) until the `/review-branch` flow for it is confirmed clean; only then mark it ready (`gh pr ready <number>`).** This makes "has this actually finished review" a visible GitHub state instead of a claim a human has to trust — a PR sitting in draft is a signal review/fix rounds are still in progress, not yet an invitation to merge.
 - CI is intentionally skipped on every commit right now (add `[skip ci]` on its own line/trailer to every commit message, including ordinary code changes) — rely on the local checks below (and the pre-push hook) instead of GitHub Actions.
 
 ## Process
