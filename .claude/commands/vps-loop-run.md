@@ -134,9 +134,10 @@ worktree, so it resolves against current `main`).
      `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
      path first, fix the listed findings there, and commit. Cap at 2 fix iterations
      per pass, same as Step 5. Clean after that → resume at whichever pass found the
-     findings (finish Pass 2 if Pass 1 was the one fixed) before doing item 2. Still
-     not clean after that pass's cap → append residual findings + worktree path to
-     the Status log, no push, no PR, stop.
+     findings (finish Pass 2 if Pass 1 was the one fixed; if Pass 2 was the one
+     fixed, that fix-and-reverify cycle *is* Pass 2 — no further pass needed) before
+     doing item 2. Still not clean after that pass's cap → append residual findings
+     + worktree path to the Status log, no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 
