@@ -76,6 +76,10 @@ the task needs them.
   line/trailer. Local verification and the pre-push hook are therefore mandatory.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
+- After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
+  `scripts/cleanup_git_state.py` dry run is the deletion authority: only clean local
+  worktrees and branches proven recoverable from `main` or an exact merged-PR head
+  may be removed. Remote branches, `production`, and unique post-merge commits stay.
 
 ## Process rules
 

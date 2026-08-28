@@ -35,9 +35,16 @@ empty:
    the only diagnostic a human gets without SSHing in to inspect the stash.
 4. Stop. No later step runs this tick.
 
-## Step 2 — Sync main
+## Step 2 — Sync main and clear proven-stale state
 
-`git checkout main && git pull`.
+1. `git checkout main && git pull --ff-only`.
+2. Run `python3 scripts/cleanup_git_state.py` and inspect its complete plan, then run
+   `python3 scripts/cleanup_git_state.py --apply`. This is the canonical cleanup
+   policy shared with `/cleanup-merged`: it removes only clean local worktrees/refs
+   that are already recoverable from `main` or an exact merged-PR head. It retains
+   open PRs, dirty/locked worktrees, unique commits, `production`, and remote branches.
+3. If either command errors, follow the Boundaries tool-error rule: log it and stop
+   this tick. Never replace a retained decision with manual force deletion.
 
 ## Step 3 — Pick the next actionable item
 
