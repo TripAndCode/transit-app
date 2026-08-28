@@ -74,27 +74,14 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: "CallExpression[callee.name='useMemo']",
-          message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
-        },
-        {
-          selector: "CallExpression[callee.name='useCallback']",
-          message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
-        },
-        {
-          selector: "CallExpression[callee.name='memo']",
-          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
-        },
-        {
-          // Catches the member-expression form of the two hooks
-          // (`React.useMemo(...)`/`React.useCallback(...)`) that the
-          // bare-identifier CallExpression selectors above miss. A
-          // MemberExpression selector (rather than
-          // CallExpression[callee.object...]) also catches `React.memo`
-          // passed by reference, not just called.
-          selector: "MemberExpression[object.name='React'][property.name=/^(useMemo|useCallback|memo)$/]",
+          // Bare-identifier form only; the member-expression form
+          // (`React.useMemo`/`.useCallback`/`.memo`, any receiver, computed
+          // or not) is fully covered by no-restricted-properties below —
+          // a separate MemberExpression selector here would just
+          // double-report the same violation.
+          selector: "CallExpression[callee.name=/^(useMemo|useCallback|memo)$/]",
           message:
-            'Do not use React.useMemo/React.useCallback/React.memo — the React Compiler handles memoization automatically.',
+            'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
         },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
@@ -112,13 +99,11 @@ export default tseslint.config(
           ],
         },
       ],
-      // Backstop for no-restricted-imports/no-restricted-syntax above:
-      // catches useMemo/useCallback/memo reached via a receiver name other
-      // than the conventional `React` (a default-import alias, e.g.
-      // `import Reakt from "react"; Reakt.useMemo(...)`) or a computed
-      // property access (`React["useMemo"]`) — both otherwise slip past the
-      // `object.name==='React'` MemberExpression selector and past
-      // no-restricted-imports (a default specifier resolves to the name
+      // Catches every member-expression form of the ban: the conventional
+      // `React.useMemo(...)`/`.useCallback(...)`/`.memo`, a default-import
+      // alias (`import Reakt from "react"; Reakt.useMemo(...)`), and
+      // computed property access (`React["useMemo"]`) — all otherwise slip
+      // past no-restricted-imports (a default specifier resolves to the name
       // `"default"`, which isn't in `importNames`). Receiver-agnostic by
       // design, since the property name itself is the signal; verified no
       // existing `.memo`/`.useMemo`/`.useCallback` property access exists in
