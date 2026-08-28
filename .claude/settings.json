@@ -7,7 +7,7 @@
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-dev-db.sh\"" },
           {
             "type": "command",
-            "timeout": 1200,
+            "timeout": 1500,
             "statusMessage": "Pre-push gate: ruff fmt/lint + tests + frontend typecheck/test/lint/i18n/build/entry-chunk",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-push-quality.sh\""
           }

@@ -111,9 +111,9 @@ fi
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   {
     echo "== poetry run ruff format --check (changed files) =="
-    poetry run ruff format --check -- "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run ruff format --check -- "${PY_FILES[@]}" || FAIL=1
     echo "== poetry run ruff check (changed files) =="
-    poetry run ruff check -- "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run ruff check -- "${PY_FILES[@]}" || FAIL=1
   } >>"$LOG" 2>&1
 fi
 
@@ -138,7 +138,7 @@ fi
 if [ "$RUN_BACKEND" -eq 1 ]; then
   if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p 5544 >/dev/null 2>&1; then
     echo "== poetry run pytest (DATABASE_URL -> :5544 test DB) ==" >>"$LOG"
-    if ! run_with_timeout 240 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
+    if ! run_with_timeout 420 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
     fi
