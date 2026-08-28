@@ -116,21 +116,27 @@ worktree, so it resolves against current `main`).
   — needs a human to attach a worktree or delete it.` and stop this tick.
 - *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
   `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
-  1. Run only Step 5's **review** process against this worktree/branch. Step 5's own
-     Major-findings branch does NOT apply here — it dispatches the Step 4
-     `isolation: "worktree"` pattern; use item 3 below instead. Re-verifying is cheap
-     and is the trust boundary before anything is pushed.
-  2. **Clean (no Major findings):** run **Step 6** as written, with two adjustments:
-     note in the PR body that this resumed an interrupted prior run, and replace Step
-     6's item-5 status line with `- <UTC timestamp>: item N shipped as PR #<number>
-     (resumed from an interrupted prior run's existing commits).` Step 6's item 3 is
-     conditional — an interrupted worker may never have written the `(PR #pending)`
-     placeholder. This run is done; do not also dispatch a new item.
-  3. **Major findings:** dispatch a plain general-purpose Agent (NOT
+  1. Run Step 5's full **Pass 1 then Pass 2** review sequence against this
+     worktree/branch — the two-pass rule applies here exactly as it does to a
+     freshly-dispatched item; a resumed branch is not exempt. Neither pass's own
+     "dispatch the worker" sub-branch applies here, though — both route to the
+     Step 4 `isolation: "worktree"` pattern, which doesn't fit a resume; use item
+     3 below instead for a Major on either pass. Re-verifying is cheap and is the
+     trust boundary before anything is pushed.
+  2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
+     two adjustments: note in the PR body that this resumed an interrupted prior
+     run, and replace Step 6's item-5 status line with `- <UTC timestamp>: item N
+     shipped as PR #<number> (resumed from an interrupted prior run's existing
+     commits).` Step 6's item 3 is conditional — an interrupted worker may never
+     have written the `(PR #pending)` placeholder. This run is done; do not also
+     dispatch a new item.
+  3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
      `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
-     path first, fix the listed findings there, and commit. Cap at 2 fix iterations,
-     same as Step 5. Clean after that → do item 2. Still not clean → append residual
-     findings + worktree path to the Status log, no push, no PR, stop.
+     path first, fix the listed findings there, and commit. Cap at 2 fix iterations
+     per pass, same as Step 5. Clean after that → resume at whichever pass found the
+     findings (finish Pass 2 if Pass 1 was the one fixed) before doing item 2. Still
+     not clean after that pass's cap → append residual findings + worktree path to
+     the Status log, no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 

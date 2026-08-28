@@ -72,8 +72,8 @@ the task needs them.
   only for enforcement, high-risk paths, or material fixes. Human prose outside
   `.claude/**` may use its direct trivial path; `.claude/**` and this file are
   executable process docs.
-- Open PRs as drafts. Mark ready only after the proportional review is clean. Every
-  PR body states `**Origin:** Interactive session` or
+- Open PRs as drafts. Mark ready only after both required `/review-branch` passes
+  are clean. Every PR body states `**Origin:** Interactive session` or
   `**Origin:** Autonomous VPS loop (item N)`.
 - CI is currently skipped: every commit message includes `[skip ci]` as its own
   line/trailer. Local verification and the pre-push hook are therefore mandatory.
