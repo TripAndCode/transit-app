@@ -583,6 +583,17 @@ No prose, no markdown fences. `confidence` should reflect how sure you are about
 choice; use lower values when the user's wording is ambiguous.
 """
 
+# Appended alongside JSON_MODE_ADDENDUM only for a recognized follow-up that
+# is continuing the user's own prior tool call (see chat.py's use_cache
+# branch — response_format=json_object can't be combined with tool_choice,
+# so this is the JSON-mode equivalent of forcing tool_choice="required").
+JSON_MODE_FORCE_TOOL_ADDENDUM = """\
+This question is a recognized continuation of your own previous tool call
+(e.g. "next 50" continuing a listing). "tool" MUST name that same tool
+(with "args" adjusted, e.g. an incremented offset) — it must NOT be null
+or omitted.
+"""
+
 
 # Human-readable name of each locale, for the "Reply in ..." system addendum
 # (see :mod:`pipeline.query.chat`). Kept here so the LLM-related strings live
