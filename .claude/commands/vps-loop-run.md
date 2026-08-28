@@ -148,7 +148,13 @@ Give the worker ONLY:
   happens after you're done. If you discover you need something not present
   in the current `main` and not described in this task's own text, STOP and
   report that blocker instead of implementing a workaround or reimplementing
-  the missing prerequisite yourself."
+  the missing prerequisite yourself. Never run `git stash drop`, `git stash
+  clear`, or `git stash pop` against any stash you did not create yourself
+  in this exact tick — stashes are visible repo-wide across worktrees, so
+  one you find may be another operator's or a prior tick's leftover
+  explicitly held for human review. If you notice a stash you didn't
+  create, leave it untouched and mention it in your report instead of
+  inspecting, reusing, or discarding it."
 
 Nothing else — not the rest of the backlog, not this command's text, not the design
 spec. Record the worktree path and branch the call returns; later steps need them.
