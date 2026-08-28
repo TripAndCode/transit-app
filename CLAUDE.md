@@ -73,8 +73,17 @@ the task needs them.
   `.claude/**` may use its direct trivial path; `.claude/**` and this file are
   executable process docs.
 - Open PRs as drafts. Mark ready only after both required `/review-branch` passes
-  are clean. Every PR body states `**Origin:** Interactive session` or
-  `**Origin:** Autonomous VPS loop (item N)`.
+  are clean. Once ready and GitHub reports the PR mergeable/clean (no conflicts)
+  AND `main` has not advanced since those two passes ran, it may be squash-merged
+  — by an interactive session or by `/vps-loop-run` itself — then run
+  `/cleanup-merged` to remove the now-stale branch/worktree. GitHub's
+  `mergeable`/`mergeStateStatus` alone does NOT catch a `main` that moved on
+  without a textual conflict (this repo has no branch-protection "must be
+  up to date" rule to surface that as `BEHIND`) — check the actual SHA. Either a
+  `CONFLICTING`/`DIRTY` state or `main` having advanced at all requires the same
+  fix: merge latest `main`, resolve any conflicts, and re-run both review passes
+  on the result before readying or merging. Every PR body states `**Origin:**
+  Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
 - CI is currently skipped: every commit message includes `[skip ci]` as its own
   line/trailer. Local verification and the pre-push hook are therefore mandatory.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
@@ -98,8 +107,16 @@ the task needs them.
 
 - `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked
   input and status log; one run advances at most one item.
-- The loop may create worktrees, commit, push feature branches, and open draft PRs.
-  It never pushes to `main`, force-pushes, marks its own PR ready, or merges.
+- The loop may create worktrees, commit, push feature branches, open draft PRs,
+  mark its own PR ready, and squash-merge it once both required `/review-branch`
+  passes are clean, GitHub reports the PR mergeable/clean, AND `main` hasn't
+  advanced since those passes ran (Step 5 gates this unconditionally before Step
+  6 runs; Step 6 re-checks the `main` SHA immediately before merging, since a
+  non-conflicting advance is invisible to `mergeable`/`mergeStateStatus` alone)
+  — then run `/cleanup-merged` to remove the now-stale branch/worktree. It never
+  pushes directly to `main` (only via a reviewed, merged PR), never force-pushes,
+  and never bypasses the two-pass review gate, a `CONFLICTING` merge state, or a
+  `main` that moved on to force a merge through.
 - Shared hooks apply on the VPS. VPS-only permissions live in ignored
   `.claude/settings.local.json` and must never be committed.
 - Operational setup, non-interactive-shell environment rules, and current timeout

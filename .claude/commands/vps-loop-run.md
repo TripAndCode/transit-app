@@ -125,9 +125,9 @@ worktree, so it resolves against current `main`).
      trust boundary before anything is pushed.
   2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
      two adjustments: note in the PR body that this resumed an interrupted prior
-     run, and replace Step 6's item-5 status line with `- <UTC timestamp>: item N
+     run, and replace Step 6.11's status line with `- <UTC timestamp>: item N
      shipped as PR #<number> (resumed from an interrupted prior run's existing
-     commits).` Step 6's item 3 is conditional — an interrupted worker may never
+     commits).` Step 6.4 is conditional — an interrupted worker may never
      have written the `(PR #pending)` placeholder. This run is done; do not also
      dispatch a new item.
   3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
@@ -223,25 +223,83 @@ extra tokens for how infrequently this coordinator runs.)
 
 ## Step 6 — Ship it
 
-From the worktree (`git -C <worktree-abs-path> ...`):
+From the worktree (`git -C <worktree-abs-path> ...`). Items below are numbered
+6.1–6.11; every cross-reference uses that dotted form, never a bare "step N", to
+avoid confusion with this section's own "Step 6" heading.
 
-1. `git push -u origin vps-loop/item-<N>`.
-2. `gh pr create --draft`, per `pr-github.md`'s description style. Note the number.
-   (CLAUDE.md: every PR starts as a draft, gets at least two `/review-branch` passes,
-   and is only opened once both are clean.)
-3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
-   the same branch, push again.
-4. **Leave the PR in draft.** Step 5 completed the required proportional review, but
-   the unattended loop never marks its own PR ready; that remains the human's action.
-5. Append: `- <UTC timestamp>: item N opened as draft PR #<number>; automated review
-   complete, needs human approval before merge.`
+6.1. Before pushing, record `origin/main`'s current SHA (`git rev-parse
+     origin/main`) as `MAIN_SHA_AT_REVIEW` — this is the `main` that Step 5's
+     passes actually reviewed against.
+6.2. `git push -u origin vps-loop/item-<N>`.
+6.3. `gh pr create --draft`, per `pr-github.md`'s description style (`gh pr
+     create` has no `--json` output mode, so don't try to parse its stdout
+     URL). Immediately follow with a structured lookup by branch name —
+     `gh pr view vps-loop/item-<N> --json number -q .number` — and use that
+     as `<number>` from here on, not anything parsed from create's own
+     output, since this number now drives an irreversible merge below.
+6.4. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`,
+     commit on the same branch, push again.
+6.5. Immediately before readying or merging, re-derive and re-verify identity:
+     `gh pr view <number> --json number,headRefName,headRefOid,mergeable,
+     mergeStateStatus` and assert `headRefName` equals `vps-loop/item-<N>`
+     exactly (the same exact-head safeguard Step 3 already uses) — never act
+     on a PR number from memory alone. Keep `headRefOid` for 6.9.
+6.6. Re-fetch `origin/main` and compare its SHA to `MAIN_SHA_AT_REVIEW` (6.1).
+     If `main` has advanced at all — not only if GitHub reports a textual
+     conflict — treat Step 5's review as stale: merge the new `main` into the
+     branch (resolving any conflicts), re-run Step 5's full two-pass review on
+     the merged result, push, update `MAIN_SHA_AT_REVIEW`, and restart from
+     6.5. A change reviewed only against an old `main` must not merge just
+     because it happens to still apply cleanly. Cap re-syncs from 6.6/6.8 at 2
+     total for this tick (mirrors Step 5's own fix-iteration cap) — if `main`
+     is still advancing or GitHub's mergeability check is still not settling
+     after 2 tries, stop and log `- <UTC timestamp>: item N blocked before
+     merge — main kept advancing / mergeability wouldn't settle after 2
+     re-sync attempts. PR #<number> left ready, not merged.` rather than
+     retrying indefinitely.
+6.7. `gh pr ready <number>`. Step 5 already completed both required
+     `/review-branch` passes clean, and 6.6 just confirmed `main` hasn't moved
+     since — mark it ready rather than leaving it in draft.
+6.8. `gh pr view <number> --json mergeable,mergeStateStatus`. Only proceed to
+     6.9 if `mergeable` is `MERGEABLE` and `mergeStateStatus` is `CLEAN`. Do
+     not merge through a `CONFLICTING`/`DIRTY` state — if either check fails
+     here despite 6.6 above, treat it the same as 6.6's "main advanced" case,
+     counting against the same 2-try cap (re-sync, re-review, restart from
+     6.5) rather than forcing through.
+6.9. `gh pr merge <number> --squash --match-head-commit <headRefOid from 6.5>`.
+     Pinning the merge to the exact head SHA closes the gap between 6.8's
+     check and this call — if any commit lands on the branch in between, `gh`
+     refuses instead of silently merging something unreviewed. This and 6.7
+     are the exceptions to "never mark its own PR ready or merge" that used
+     to apply here: both are authorized specifically because Step 5's
+     two-pass gate is unconditional and 6.5/6.6/6.8 just re-confirmed nothing
+     slipped in since — not a general grant to skip review or force through a
+     bad state.
+6.10. Run `/cleanup-merged` (this repo) to remove the now-merged local
+      branch/worktree. `/cleanup-merged` is local-only by design (it never
+      deletes GitHub branches — see its own file) and `gh pr merge` above
+      has no `--delete-branch`, so the remote `vps-loop/item-<N>` branch is
+      deliberately left behind rather than auto-deleted: this repo can have
+      stacked PRs (`NEXT_TASK.md`'s "Depends on: item <M>" convention), and
+      GitHub closes rather than retargets a dependent PR if its base branch
+      is deleted out from under it (see CLAUDE.md's stacked-PR bullet).
+      Accumulating merged-but-undeleted remote `vps-loop/item-*` branches is
+      accepted operational debt, not a bug to silently fix here — a human
+      can batch-delete ones with no open dependants when it's worth the time.
+6.11. Append: `- <UTC timestamp>: item N merged as PR #<number>; both
+      /review-branch passes clean, mergeable/clean confirmed, squash-merged and
+      cleaned up.`
 
 ## Boundaries
 
-- Never push to `main`, never force-push, never `git reset --hard`, never delete
-  anything found in Step 1 (stash, don't discard).
-- Never merge the PR you open — every one waits for explicit human merge approval,
-  however clean the verification came back.
+- Never push directly to `main` — only via a reviewed, merged PR. Never force-push,
+  never `git reset --hard`, never delete anything found in Step 1 (stash, don't
+  discard).
+- Marking a PR ready and merging it (Step 6.7/6.9) are authorized, but only after
+  Step 5's two full independent `/review-branch` passes are clean, GitHub reports
+  the PR mergeable/clean, AND `main` hasn't advanced since those passes ran (Step
+  6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
+  moved on, and never skip or shortcut the two-pass gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
   (worktree path/branch if one was created) — don't guess or retry blindly.
