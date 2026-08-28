@@ -42,7 +42,13 @@ LOG="$(mktemp)"
 # call's own cleanup runs, it would otherwise leak. Accumulate every
 # marker path here so the EXIT trap sweeps them up alongside $LOG.
 MARKER_FILES=()
-trap 'rm -f "$LOG" "${MARKER_FILES[@]}"' EXIT
+# Count-guard the array expansion: bash 3.2 (macOS's default /bin/bash,
+# with no Homebrew coreutils -- exactly the environment run_with_timeout's
+# fallback branch targets) treats "${MARKER_FILES[@]}" on an empty array as
+# an unbound-variable error under `set -u`, which would abort this whole
+# trap command and leave $LOG uncleaned too. Bash >=4.4 doesn't need this,
+# but 3.2 does, so guard for both.
+trap 'rm -f "$LOG"; [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"' EXIT
 FAIL=0
 
 run_with_timeout() {
