@@ -21,14 +21,12 @@ export function DailyChart({ days, height = 240 }: Props) {
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  const stats = (() => {
-    const avgs = days.map((d) => d.avg_min ?? 0);
-    const samples = days.map((d) => d.samples ?? 0);
-    return {
-      maxAvg: Math.max(1, ...avgs),
-      maxSamples: Math.max(1, ...samples),
-    };
-  })();
+  const avgs = days.map((d) => d.avg_min ?? 0);
+  const samples = days.map((d) => d.samples ?? 0);
+  const stats = {
+    maxAvg: Math.max(1, ...avgs),
+    maxSamples: Math.max(1, ...samples),
+  };
 
   if (!days.length) {
     return (

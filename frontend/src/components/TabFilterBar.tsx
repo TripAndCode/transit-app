@@ -140,21 +140,18 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   type ChipSpec =
     | { kind: "name"; name: string; codes: string[] }
     | { kind: "code"; code: string };
-  const routeChips: ChipSpec[] = (() => {
-    const sel = new Set(ctx.routes);
-    const used = new Set<string>();
-    const chips: ChipSpec[] = [];
-    for (const [name, codes] of groupCodesByName) {
-      if (codes.length > 1 && codes.every((c) => sel.has(c))) {
-        chips.push({ kind: "name", name, codes });
-        for (const c of codes) used.add(c);
-      }
+  const selectedRouteCodes = new Set(ctx.routes);
+  const usedRouteCodes = new Set<string>();
+  const routeChips: ChipSpec[] = [];
+  for (const [name, codes] of groupCodesByName) {
+    if (codes.length > 1 && codes.every((c) => selectedRouteCodes.has(c))) {
+      routeChips.push({ kind: "name", name, codes });
+      for (const c of codes) usedRouteCodes.add(c);
     }
-    for (const code of ctx.routes) {
-      if (!used.has(code)) chips.push({ kind: "code", code });
-    }
-    return chips;
-  })();
+  }
+  for (const code of ctx.routes) {
+    if (!usedRouteCodes.has(code)) routeChips.push({ kind: "code", code });
+  }
 
   function apply() {
     setCtx({

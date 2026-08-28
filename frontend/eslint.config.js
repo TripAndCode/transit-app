@@ -75,17 +75,27 @@ export default tseslint.config(
         'error',
         {
           // Bare-identifier form only; the member-expression form
-          // (`React.useMemo`/`.useCallback`/`.memo`, any receiver, computed
-          // or not) is fully covered by no-restricted-properties below —
-          // a separate MemberExpression selector here would just
-          // double-report the same violation.
+          // (`React.useMemo`/`.useCallback`/`.memo`, any receiver, and
+          // literal computed access like `React["useMemo"]`) is fully
+          // covered by no-restricted-properties below — a separate
+          // MemberExpression selector here would just double-report the
+          // same violation.
           selector: "CallExpression[callee.name=/^(useMemo|useCallback|memo)$/]",
           message:
             'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
         },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
-      // (e.g. `import { useMemo as m } from "react"`).
+      // (e.g. `import { useMemo as m } from "react"`). Only matches *named*
+      // imports (`importNames`) — a namespace import (`import * as React
+      // from "react"`) isn't targeted by name, so this rule instead flags
+      // the whole `react` module the moment ANY of useMemo/useCallback/memo
+      // exist among its exports, regardless of whether the importing file
+      // actually uses them. No file uses `import * as React` today (grepped
+      // clean), so this causes no false positive now, but a future
+      // namespace import (e.g. for `React.forwardRef`) would fail here with
+      // a misleading "do not import useMemo/useCallback/memo" message even
+      // if it never touches them.
       'no-restricted-imports': [
         'error',
         {
@@ -102,12 +112,23 @@ export default tseslint.config(
       // Catches every member-expression form of the ban: the conventional
       // `React.useMemo(...)`/`.useCallback(...)`/`.memo`, a default-import
       // alias (`import Reakt from "react"; Reakt.useMemo(...)`), and
-      // computed property access (`React["useMemo"]`) — all otherwise slip
-      // past no-restricted-imports (a default specifier resolves to the name
-      // `"default"`, which isn't in `importNames`). Receiver-agnostic by
-      // design, since the property name itself is the signal; verified no
-      // existing `.memo`/`.useMemo`/`.useCallback` property access exists in
-      // frontend/src today, so this introduces no false positive.
+      // *literal* computed property access (`React["useMemo"]`) — all
+      // otherwise slip past no-restricted-imports (a default specifier
+      // resolves to the name `"default"`, which isn't in `importNames`).
+      // Receiver-agnostic by design, since the property name itself is the
+      // signal; verified no existing `.memo`/`.useMemo`/`.useCallback`
+      // property access exists in frontend/src today, so this introduces no
+      // false positive. Does NOT catch a *dynamically computed* property
+      // name (e.g. `x["use" + "Memo"]`) — an inherent ESLint static-analysis
+      // limitation, not closeable without a custom scope-aware rule; this
+      // requires deliberate obfuscation to hit, not an easy accidental
+      // route-around. Matches the property name on ANY receiver, not just
+      // React imports — an unrelated future `.memo`/`.useMemo`/
+      // `.useCallback` property (e.g. an unrelated memoization-cache object
+      // or a GraphQL field literally named `memo`) would also trip this.
+      // No such usage exists today; if one is legitimately needed later,
+      // scope this rule to a receiver check or add a targeted
+      // eslint-disable with a one-line reason at that call site.
       'no-restricted-properties': [
         'error',
         {

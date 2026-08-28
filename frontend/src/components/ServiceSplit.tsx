@@ -182,49 +182,40 @@ function ServiceSplitDailyChart({
     weekend: null,
   });
 
-  const { xs, weekdayPath, weekendPath, yMax, dateLabels } = (() => {
-    const innerW = DC_W - DC_PAD_LEFT - DC_PAD_RIGHT;
-    const innerH = DC_H - DC_PAD_TOP - DC_PAD_BOTTOM;
-    const stepX =
-      daily.length > 1 ? innerW / (daily.length - 1) : 0;
-    const toX = (i: number) => DC_PAD_LEFT + i * stepX;
-    const allVals: number[] = [];
-    for (const d of daily) {
-      if (d.weekday != null) allVals.push(d.weekday);
-      if (d.weekend != null) allVals.push(d.weekend);
-    }
-    const yMaxLocal = allVals.length > 0 ? Math.max(...allVals) || 1 : 1;
-    const toY = (v: number) =>
-      DC_PAD_TOP + (1 - v / yMaxLocal) * innerH;
+  const innerW = DC_W - DC_PAD_LEFT - DC_PAD_RIGHT;
+  const innerH = DC_H - DC_PAD_TOP - DC_PAD_BOTTOM;
+  const stepX = daily.length > 1 ? innerW / (daily.length - 1) : 0;
+  const toX = (i: number) => DC_PAD_LEFT + i * stepX;
+  const allVals: number[] = [];
+  for (const d of daily) {
+    if (d.weekday != null) allVals.push(d.weekday);
+    if (d.weekend != null) allVals.push(d.weekend);
+  }
+  const yMax = allVals.length > 0 ? Math.max(...allVals) || 1 : 1;
+  const toY = (v: number) => DC_PAD_TOP + (1 - v / yMax) * innerH;
 
-    const wd: { x: number; y: number; v: number }[] = [];
-    const we: { x: number; y: number; v: number }[] = [];
-    for (let i = 0; i < daily.length; i++) {
-      if (daily[i].weekday != null) {
-        wd.push({ x: toX(i), y: toY(daily[i].weekday as number), v: daily[i].weekday as number });
-      }
-      if (daily[i].weekend != null) {
-        we.push({ x: toX(i), y: toY(daily[i].weekend as number), v: daily[i].weekend as number });
-      }
+  const wd: { x: number; y: number; v: number }[] = [];
+  const we: { x: number; y: number; v: number }[] = [];
+  for (let i = 0; i < daily.length; i++) {
+    if (daily[i].weekday != null) {
+      wd.push({ x: toX(i), y: toY(daily[i].weekday as number), v: daily[i].weekday as number });
     }
-    const buildPath = (pts: { x: number; y: number }[]) =>
-      pts
-        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
-        .join(" ");
+    if (daily[i].weekend != null) {
+      we.push({ x: toX(i), y: toY(daily[i].weekend as number), v: daily[i].weekend as number });
+    }
+  }
+  const buildPath = (pts: { x: number; y: number }[]) =>
+    pts
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      .join(" ");
 
-    const labels = daily.map((d) => {
-      const dt = new Date(d.date + "T00:00:00");
-      return `${dt.getMonth() + 1}/${dt.getDate()}`;
-    });
-    const xsLocal = daily.map((_, i) => toX(i));
-    return {
-      xs: xsLocal,
-      weekdayPath: buildPath(wd),
-      weekendPath: buildPath(we),
-      yMax: yMaxLocal,
-      dateLabels: labels,
-    };
-  })();
+  const dateLabels = daily.map((d) => {
+    const dt = new Date(d.date + "T00:00:00");
+    return `${dt.getMonth() + 1}/${dt.getDate()}`;
+  });
+  const xs = daily.map((_, i) => toX(i));
+  const weekdayPath = buildPath(wd);
+  const weekendPath = buildPath(we);
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = e.currentTarget;
@@ -261,7 +252,6 @@ function ServiceSplitDailyChart({
 
   if (xs.length === 0) return null;
 
-  const innerH = DC_H - DC_PAD_TOP - DC_PAD_BOTTOM;
   // Y axis ticks at 0, mid, max.
   const yTicks = [0, yMax / 2, yMax];
 

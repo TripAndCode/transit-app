@@ -91,19 +91,17 @@ export function RoutePickerPill({
     };
   }, [open]);
 
-  const filtered = (() => {
-    const ql = q.trim().toLowerCase();
-    const list = (ql
-      ? routes.filter(
-          (r) =>
-            (r.route_code ?? "").toLowerCase().includes(ql) ||
-            (r.route_long_name ?? "").toLowerCase().includes(ql) ||
-            (r.route_short_name ?? "").toLowerCase().includes(ql),
-        )
-      : routes
-    ).filter((r) => r.route_code != null);
-    return list.slice(0, 50);
-  })();
+  const ql = q.trim().toLowerCase();
+  const filteredList = (ql
+    ? routes.filter(
+        (r) =>
+          (r.route_code ?? "").toLowerCase().includes(ql) ||
+          (r.route_long_name ?? "").toLowerCase().includes(ql) ||
+          (r.route_short_name ?? "").toLowerCase().includes(ql),
+      )
+    : routes
+  ).filter((r) => r.route_code != null);
+  const filtered = filteredList.slice(0, 50);
 
   // Prefer a human name (short_name is the line name, e.g. "L21 中央大橋線") over
   // the internal route_code; fall through to the code only as a last resort.
