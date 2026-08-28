@@ -325,3 +325,22 @@ test("missing dist/index.html -> exit 1 with an actionable message", () => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /could not read/);
 });
+
+test("MapLibre marker directly in the entry chunk itself is not also misreported as a hand-authored bypass (regression: duplicate/misleading message)", () => {
+  // The entry's own bundled file (assets/index.js) is always also linked
+  // from index.html's <script src>, so it's both statically closure-checked
+  // above AND visible to the index.html scan below. If the scan doesn't
+  // skip files already covered by the manifest walk, this scenario — a real
+  // MapLibre-in-the-entry-chunk regression, the check's original headline
+  // case — gets a second, factually wrong "not part of the Vite manifest's
+  // static import graph" message alongside the correct one.
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+    "assets/index.js": `${JS_MARKER}();`,
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains MapLibre/);
+  assert.doesNotMatch(result.stderr, /not part of the Vite manifest's static import graph/);
+});

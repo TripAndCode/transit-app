@@ -206,6 +206,14 @@ const entries = findEntries(manifest);
 let failed = false;
 let jsMarkerSeenAnywhereInDist = false;
 let cssMarkerSeenAnywhereInDist = false;
+// Every dist/ path already inspected via the manifest's static closures
+// below, so the HTML-scan guard further down can skip them — otherwise a
+// real MapLibre-in-the-entry-chunk regression (the manifest walk's own
+// headline scenario, since a bundled entry script is always also linked
+// from index.html) gets a correct FAIL from the walk plus a second,
+// factually wrong one from the guard claiming the file bypassed the
+// manifest entirely.
+const checkedFilePaths = new Set();
 
 // Sanity check both marker choices against the WHOLE manifest (not just
 // static closures) — MapLibre is still expected to ship somewhere
@@ -241,6 +249,7 @@ for (const [entryKey] of entries) {
 
     if (node.file) {
       const filePath = join(DIST_DIR, node.file);
+      checkedFilePaths.add(filePath);
       const content = readTextOrNull(filePath);
       if (content === null) {
         console.error(`check-entry-chunk: FAIL — could not read chunk "${node.file}" (statically reachable from "${entryKey}").`);
@@ -270,6 +279,7 @@ for (const [entryKey] of entries) {
 
     for (const cssFile of node.css ?? []) {
       const cssPath = join(DIST_DIR, cssFile);
+      checkedFilePaths.add(cssPath);
       const content = readTextOrNull(cssPath);
       if (content === null) {
         console.error(`check-entry-chunk: FAIL — could not read stylesheet "${cssFile}" (statically reachable from "${entryKey}").`);
@@ -327,6 +337,10 @@ for (const [entryKey] of entries) {
     for (const url of collectHtmlAssetUrls(indexHtml)) {
       if (isExternalOrNonFileUrl(url)) continue;
       const assetPath = resolveHtmlAssetPath(url);
+      // Already checked (and, if it contains MapLibre, already correctly
+      // FAILed) via the manifest's static closure above — this guard exists
+      // for files the manifest walk can't see, not to re-report ones it can.
+      if (checkedFilePaths.has(assetPath)) continue;
       const content = readTextOrNull(assetPath);
       // A missing local file here is a different failure mode (a broken
       // reference) than what this guard targets; leave it unflagged.
