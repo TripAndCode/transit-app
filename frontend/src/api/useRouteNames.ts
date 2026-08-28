@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "./hooks";
 
@@ -10,14 +9,12 @@ export function useRouteNames(agencyId: number | null): {
 } {
   const { t } = useTranslation();
   const { data, isLoading } = useRoutes(agencyId);
-  const map = useMemo(() => {
-    const m = new Map<string, string>();
-    if (!data) return m;
+  const map = new Map<string, string>();
+  if (data) {
     for (const r of data) {
-      if (r.route_code) m.set(r.route_code, r.route_short_name || r.route_id);
+      if (r.route_code) map.set(r.route_code, r.route_short_name || r.route_id);
     }
-    return m;
-  }, [data]);
+  }
 
   function format(route_code: string | null | undefined): string {
     if (!route_code) return "—";

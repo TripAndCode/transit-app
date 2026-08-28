@@ -1,4 +1,3 @@
-import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type DowFilter = "all" | "weekday" | "weekend";
@@ -84,38 +83,33 @@ export function jstYearMonth(d: Date): { year: number; month: number } {
 export function useRangeContext(): [RangeCtx, (patch: RangeCtxPatch) => void] {
   const [params, setParams] = useSearchParams();
 
-  const ctx = useMemo<RangeCtx>(() => {
-    const to = params.get("to") || todayISO();
-    const from = params.get("from") || isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
-    const dow = (params.get("dow") as DowFilter) || "all";
-    const time_band = (params.get("time_band") as TimeBand) || "all";
-    const service = (params.get("service") as ServiceFilter) || "all";
-    const routesStr = params.get("routes");
-    const routes = routesStr ? routesStr.split(",").filter(Boolean) : [];
-    return { from, to, dow, time_band, service, routes };
-  }, [params]);
+  const to = params.get("to") || todayISO();
+  const from = params.get("from") || isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
+  const dow = (params.get("dow") as DowFilter) || "all";
+  const time_band = (params.get("time_band") as TimeBand) || "all";
+  const service = (params.get("service") as ServiceFilter) || "all";
+  const routesStr = params.get("routes");
+  const routes = routesStr ? routesStr.split(",").filter(Boolean) : [];
+  const ctx: RangeCtx = { from, to, dow, time_band, service, routes };
 
-  const update = useCallback(
-    (patch: RangeCtxPatch) => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          for (const [k, v] of Object.entries(patch)) {
-            if (k === "routes") {
-              if (v == null || (Array.isArray(v) && v.length === 0)) next.delete("routes");
-              else next.set("routes", (v as string[]).join(","));
-              continue;
-            }
-            if (v == null) next.delete(k);
-            else next.set(k, String(v));
+  function update(patch: RangeCtxPatch) {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [k, v] of Object.entries(patch)) {
+          if (k === "routes") {
+            if (v == null || (Array.isArray(v) && v.length === 0)) next.delete("routes");
+            else next.set("routes", (v as string[]).join(","));
+            continue;
           }
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setParams],
-  );
+          if (v == null) next.delete(k);
+          else next.set(k, String(v));
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
 
   return [ctx, update];
 }

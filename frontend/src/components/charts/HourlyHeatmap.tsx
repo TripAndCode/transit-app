@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRangeContext, type TimeBand } from "../../api/rangeContext";
 import { DELAY_RAMP, delayColor } from "../../styles/tokens";
@@ -42,16 +42,10 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useRangeContext();
 
-  const dates = useMemo(() => {
-    const s = new Set(cells.map((c) => c.date));
-    return Array.from(s).sort();
-  }, [cells]);
+  const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
 
-  const map = useMemo(() => {
-    const m = new Map<string, HourlyCell>();
-    for (const c of cells) m.set(`${c.date}|${c.hour}`, c);
-    return m;
-  }, [cells]);
+  const map = new Map<string, HourlyCell>();
+  for (const c of cells) map.set(`${c.date}|${c.hour}`, c);
 
   if (dates.length === 0) {
     return (

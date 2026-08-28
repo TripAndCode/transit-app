@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type CSSProperties, type RefObject } from "react";
+import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
@@ -89,40 +89,40 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }, [renamingId]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const openMenu = useCallback((e: any, convId: string) => {
+  function openMenu(e: any, convId: string) {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
-  }, []);
+  }
 
-  const handleRename = useCallback((conv: Conversation) => {
+  function handleRename(conv: Conversation) {
     setMenu(null);
     setRenamingId(conv.conversation_id);
     setRenameValue(conv.title);
-  }, []);
+  }
 
-  const commitRename = useCallback((convId: string) => {
+  function commitRename(convId: string) {
     const trimmed = renameValue.trim();
     if (trimmed) {
       updateConv.mutate({ id: convId, patch: { title: trimmed } });
     }
     setRenamingId(null);
     setRenameValue("");
-  }, [renameValue, updateConv]);
+  }
 
-  const handleTogglePin = useCallback((conv: Conversation) => {
+  function handleTogglePin(conv: Conversation) {
     setMenu(null);
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
-  }, [updateConv]);
+  }
 
-  const handleDelete = useCallback((conv: Conversation) => {
+  function handleDelete(conv: Conversation) {
     setMenu(null);
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
     }
-  }, [t, deleteConv, activeId, onSelect]);
+  }
 
   // Group conversations
   const pinned = conversations.filter((c) => c.pinned);
