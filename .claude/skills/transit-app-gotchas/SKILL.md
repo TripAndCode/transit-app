@@ -87,3 +87,14 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   whatever ends up as a push's tip is the only thing standing between "CI is
   dormant" and "CI actually runs and immediately fails for an unrelated
   reason," which could look like a real regression if not checked.
+  Confirmed again live (2026-08-28, item 10/PR #250): resolving a conflict by
+  running `git merge main` produces an auto-generated commit message
+  ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`
+  trailer — `git merge` never adds it automatically. That merge commit
+  became the branch's pushed tip, so it alone (re-)triggered the same
+  billing-failure CI run despite every real work commit on the branch
+  correctly carrying the trailer. Always add `[skip ci]` to a merge commit
+  too: either pass `git merge main -m "Merge main into vps-loop/item-N" -m
+  "[skip ci]"` directly (multiple `-m` flags create a blank-line-separated
+  body, avoiding a literal embedded newline in the shell string), or amend
+  the default merge message before pushing.
