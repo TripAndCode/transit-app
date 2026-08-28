@@ -11,7 +11,7 @@ RUN npm run build
 # scripts/strip_vite_manifest.sh — see that file for why — so the two build
 # paths (container image vs. `make bake`) can't drift out of sync.
 COPY scripts/strip_vite_manifest.sh /tmp/strip_vite_manifest.sh
-RUN sh /tmp/strip_vite_manifest.sh dist && rm /tmp/strip_vite_manifest.sh
+RUN sh /tmp/strip_vite_manifest.sh dist
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
 FROM python:3.12-slim
