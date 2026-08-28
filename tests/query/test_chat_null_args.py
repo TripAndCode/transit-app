@@ -173,6 +173,49 @@ async def test_history_injected_into_prompt(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_force_tool_call_sets_tool_choice_required(monkeypatch):
+    """item 8 fix: a recognized pagination follow-up must force a tool call.
+
+    Live-observed bug: turn 2 of a two-turn conversation ("停留所はいくつ？"
+    then "次の50件" with turn-1 in history) came back with ``tool_call:
+    None`` — ``tool_choice="auto"`` let the model decline to call
+    ``describe_data`` again even though the system prompt documents that
+    exact rewrite. ``api/routers/ask.py`` now passes
+    ``force_tool_call=is_follow_up(question)`` through to here; this pins
+    that ``force_tool_call=True`` maps to ``tool_choice="required"`` (and
+    that the default stays ``"auto"`` so every other question shape is
+    unaffected).
+    """
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
+            captured["tool_choice"] = tool_choice
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    history = [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}]
+
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history, force_tool_call=True)
+    assert captured["tool_choice"] == "required"
+
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history, force_tool_call=False)
+    assert captured["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
 async def test_empty_history_matches_no_history(monkeypatch):
     """history=[] must produce the same messages as history=None."""
     from types import SimpleNamespace
