@@ -43,11 +43,42 @@ run_with_timeout() {
   local secs="$1"; shift
   if command -v timeout >/dev/null 2>&1; then
     timeout "$secs" "$@"
+    return $?
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout "$secs" "$@"
-  else
-    "$@"
+    return $?
   fi
+
+  # Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
+  # coreutils). Running unbounded here would silently defeat this script's
+  # documented fail-closed contract, so enforce the budget with a background
+  # watchdog instead. Every real call site is a compound command (bash -c
+  # "... && ..."), so job control (`set -m`) is required to put it in its
+  # own process group — otherwise TERM/KILL only hits the wrapper shell and
+  # leaves its child process tree (npm/vite/pytest workers) running as an
+  # orphan.
+  local marker; marker="$(mktemp)"
+  rm -f "$marker"
+  local had_job_control=0
+  case $- in *m*) had_job_control=1 ;; esac
+  set -m
+  "$@" &
+  local cmd_pid=$!
+  ( sleep "$secs"; : > "$marker"; kill -TERM -"$cmd_pid" 2>/dev/null; sleep 2; kill -KILL -"$cmd_pid" 2>/dev/null ) &
+  local watchdog_pid=$!
+  wait "$cmd_pid"
+  local status=$?
+  [ "$had_job_control" -eq 1 ] || set +m
+  kill "$watchdog_pid" 2>/dev/null
+  wait "$watchdog_pid" 2>/dev/null
+  if [ -e "$marker" ]; then
+    # Watchdog fired: report GNU timeout's sentinel (124) so call sites'
+    # existing `-eq 124` checks keep working, rather than the SIGTERM exit
+    # status (143) the fallback path would otherwise produce.
+    rm -f "$marker"
+    status=124
+  fi
+  return "$status"
 }
 
 # SCOPE_OK=0 means we couldn't determine what changed (no resolvable base

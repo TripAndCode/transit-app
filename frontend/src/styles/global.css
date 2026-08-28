@@ -236,8 +236,3 @@ summary::-webkit-details-marker { display: none; }
 .user-manual-content a {
   color: var(--accent);
 }
-
-.maplibregl-popup-close-button {
-  color: var(--text-secondary);
-  font-size: 16px;
-}
