@@ -116,21 +116,28 @@ worktree, so it resolves against current `main`).
   — needs a human to attach a worktree or delete it.` and stop this tick.
 - *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
   `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
-  1. Run only Step 5's **review** process against this worktree/branch. Step 5's own
-     Major-findings branch does NOT apply here — it dispatches the Step 4
-     `isolation: "worktree"` pattern; use item 3 below instead. Re-verifying is cheap
-     and is the trust boundary before anything is pushed.
-  2. **Clean (no Major findings):** run **Step 6** as written, with two adjustments:
-     note in the PR body that this resumed an interrupted prior run, and replace Step
-     6's item-5 status line with `- <UTC timestamp>: item N shipped as PR #<number>
-     (resumed from an interrupted prior run's existing commits).` Step 6's item 3 is
-     conditional — an interrupted worker may never have written the `(PR #pending)`
-     placeholder. This run is done; do not also dispatch a new item.
-  3. **Major findings:** dispatch a plain general-purpose Agent (NOT
+  1. Run Step 5's full **Pass 1 then Pass 2** review sequence against this
+     worktree/branch — the two-pass rule applies here exactly as it does to a
+     freshly-dispatched item; a resumed branch is not exempt. Neither pass's own
+     "dispatch the worker" sub-branch applies here, though — both route to the
+     Step 4 `isolation: "worktree"` pattern, which doesn't fit a resume; use item
+     3 below instead for a Major on either pass. Re-verifying is cheap and is the
+     trust boundary before anything is pushed.
+  2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
+     two adjustments: note in the PR body that this resumed an interrupted prior
+     run, and replace Step 6's item-5 status line with `- <UTC timestamp>: item N
+     shipped as PR #<number> (resumed from an interrupted prior run's existing
+     commits).` Step 6's item 3 is conditional — an interrupted worker may never
+     have written the `(PR #pending)` placeholder. This run is done; do not also
+     dispatch a new item.
+  3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
      `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
-     path first, fix the listed findings there, and commit. Cap at 2 fix iterations,
-     same as Step 5. Clean after that → do item 2. Still not clean → append residual
-     findings + worktree path to the Status log, no push, no PR, stop.
+     path first, fix the listed findings there, and commit. Cap at 2 fix iterations
+     per pass, same as Step 5. Clean after that → resume at whichever pass found the
+     findings (finish Pass 2 if Pass 1 was the one fixed; if Pass 2 was the one
+     fixed, that fix-and-reverify cycle *is* Pass 2 — no further pass needed) before
+     doing item 2. Still not clean after that pass's cap → append residual findings
+     + worktree path to the Status log, no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 
@@ -183,13 +190,36 @@ command is the canonical home for review fan-out and retry policy; do not copy t
 here. Add the worktree absolute path to every dispatch and never paste diff text into
 the prompts.
 
-- No Major findings → Step 6.
-- Major findings → dispatch the worker once more (same Agent pattern, same worktree)
-  with only those findings, then re-verify only the affected review group. Cap at 2
-  fix iterations. Still Major after the second: append `- <UTC timestamp>: item N
-  blocked — /review-branch still reports Major findings after 2 fix iterations.
-  Worktree: <path>, branch: vps-loop/item-<N>. Findings: <summary>.`, no push, no PR,
-  stop.
+Per CLAUDE.md, every PR gets **at least two full, independent `/review-branch`
+invocations** before Step 6 — unconditionally, even when the first finds nothing.
+Run them as a strict sequence, not a single branching decision:
+
+1. **Pass 1** — the full invocation above.
+   - Major findings → dispatch the worker once more (same Agent pattern, same
+     worktree) with only those findings, then re-verify only the affected review
+     group. Cap at 2 fix iterations (`review-branch.md`'s own per-invocation cap).
+     Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
+     blocked — /review-branch still reports Major findings after 2 fix
+     iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
+     <summary>.`, no push, no PR, stop.
+   - Once pass 1 is clean — whether immediately, or only after the
+     fix-and-reverify cycle above — proceed to pass 2. Do not skip to Step 6
+     here even though pass 1 is clean; the second pass is mandatory regardless.
+2. **Pass 2** — a second, fully independent invocation: fresh `prepare_review.py`
+   manifest, fresh dispatch per `review-branch.md`'s routing for this diff's tier
+   (not necessarily "two reviewer groups" — follow whatever tier the diff
+   actually routes to), run on the current (possibly pass-1-fixed) diff.
+   - Clean → Step 6.
+   - Major findings → same fix-and-reverify cycle as pass 1, capped at 2 fix
+     iterations for pass 2. Once clean, proceed to Step 6 — a Major caught and
+     fixed on pass 2 still satisfies the two-pass bar; do not run a third full
+     pass just to reach the count. Still Major after 2 fix iterations on pass 2:
+     same blocked-and-stop logging as pass 1, above.
+
+(Doubling the mandatory full-pass count roughly doubles this step's reviewer-agent
+cost for every item, including trivial ones — accepted deliberately, since a
+second independent pass catching something pass 1 missed is worth more than the
+extra tokens for how infrequently this coordinator runs.)
 
 ## Step 6 — Ship it
 
@@ -197,7 +227,8 @@ From the worktree (`git -C <worktree-abs-path> ...`):
 
 1. `git push -u origin vps-loop/item-<N>`.
 2. `gh pr create --draft`, per `pr-github.md`'s description style. Note the number.
-   (CLAUDE.md: every PR starts as a draft until its `/review-branch` pass is clean.)
+   (CLAUDE.md: every PR starts as a draft, gets at least two `/review-branch` passes,
+   and is only opened once both are clean.)
 3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
    the same branch, push again.
 4. **Leave the PR in draft.** Step 5 completed the required proportional review, but
