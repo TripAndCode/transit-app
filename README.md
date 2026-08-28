@@ -448,7 +448,7 @@ Single-page React app at `frontend/` (React 19.2 + React Compiler, Vite 7, TypeS
 Platform notes (since the React 19 modernization, PRs #43/#46/#45):
 
 - **Code splitting** — every tab/page route is `React.lazy`; MapLibre (~800 KB) loads only when the Map tab is visited. Entry chunk ≈ 440 KB. A router-level `RouteError` boundary degrades render crashes to an inline message instead of a white screen.
-- **React Compiler** is on (`babel-plugin-react-compiler` in `vite.config.ts`). Don't add `useMemo`/`useCallback`/`React.memo` for performance — the compiler memoizes automatically. Existing manual memoization is harmless and pruned opportunistically.
+- **React Compiler** is on (`babel-plugin-react-compiler` in `vite.config.ts`). Manual `useMemo`/`useCallback`/`React.memo` are banned as a hard ESLint error — the compiler memoizes automatically; use `useEffectEvent` for fresh-props-in-stable-handlers instead.
 - **Compiler lint** — `eslint-plugin-react-hooks` v7 `recommended-latest`. Two rules are staged at `warn` for pre-existing code (`set-state-in-effect`, `purity`); new code must keep them clean. Handlers that need fresh props inside once-registered listeners use `useEffectEvent` (see `MapTab`), not render-time ref mirroring.
 - **Request cancellation** — all GET hooks thread TanStack Query's `AbortSignal` into `apiGet`; filter changes abort in-flight requests.
 - **i18n lints** — `npm run lint:i18n` checks ja/en key parity; `npm run lint:i18n-strings` fails on hardcoded kana in `src/` (comment-only lines and `.test.` files are skipped; suppress legitimate cases with `i18n-ignore`).
