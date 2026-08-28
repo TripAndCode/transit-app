@@ -314,6 +314,10 @@ def _maybe_mount_static(app: FastAPI) -> None:
         # shouldn't have shipped (or any other dotfile that lands in
         # STATIC_DIR) is never served, regardless of what the build step
         # did or didn't clean up.
+        # Trade-off: this blanket-blocks every dot-prefixed path segment, not
+        # just the .vite leak it was added for -- a future legitimate route
+        # (e.g. /.well-known/...) would silently get this 200 SPA shell
+        # instead of the real file or a real 404. No such route exists today.
         if any(part.startswith(".") for part in full_path.split("/")):
             return FileResponse(index_path)
         # realpath collapses any ".." before the containment check, so a path
