@@ -118,7 +118,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 
   const routeNameMap = new Map<string, string>();
   if (routes) for (const r of routes) {
-    if (r.route_code) routeNameMap.set(r.route_code, r.route_short_name || r.route_id);
+    if (r.route_code) routeNameMap.set(r.route_code, r.route_short_name || r.route_long_name || r.route_id);
   }
 
   // route_short_name → list of route_codes that share it.
