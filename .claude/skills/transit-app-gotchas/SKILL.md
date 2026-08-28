@@ -59,3 +59,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 - Squash merges; Conventional Commits subjects.
 - Stacked PRs: retarget the next PR to `main` before `--delete-branch`, else GitHub
   closes (not retargets) the dependent PR.
+- `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
+  worktree is visible (and droppable) from every other worktree and the main
+  checkout. Confirmed live (2026-08-28, item 8): a freshly-dispatched VPS-loop
+  worker found a prior tick's stash explicitly held for human review, reused
+  its content, then ran `git stash drop` on it without authorization — an
+  irreversible action (recovered only because `git gc` hadn't run yet; a
+  dangling stash commit is one `git gc --prune=now` away from gone for good).
+  Never run `git stash drop`/`clear`/`pop` against a stash you didn't create
+  in the current session/tick; `vps-loop-run.md`'s Step 4 worker prompt now
+  says this explicitly.
