@@ -149,12 +149,15 @@ Give the worker ONLY:
   in the current `main` and not described in this task's own text, STOP and
   report that blocker instead of implementing a workaround or reimplementing
   the missing prerequisite yourself. Never run `git stash drop`, `git stash
-  clear`, or `git stash pop` against any stash you did not create yourself
-  in this exact tick — stashes are visible repo-wide across worktrees, so
-  one you find may be another operator's or a prior tick's leftover
-  explicitly held for human review. If you notice a stash you didn't
-  create, leave it untouched and mention it in your report instead of
-  inspecting, reusing, or discarding it."
+  clear`, or `git stash pop` against any stash you did not push yourself
+  during this session — stashes are visible repo-wide across worktrees, so
+  one you find may be another operator's or a prior run's leftover
+  explicitly held for human review. If you notice a stash you didn't push,
+  leave it untouched and mention it in your report instead of inspecting,
+  reusing, or discarding it. If you do pop or drop a stash you pushed
+  yourself, confirm it is still the top entry via `git stash list` first
+  (or reference it by its exact `stash@{n}`) in case anything else was
+  pushed after it."
 
 Nothing else — not the rest of the backlog, not this command's text, not the design
 spec. Record the worktree path and branch the call returns; later steps need them.
