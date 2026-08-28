@@ -168,6 +168,56 @@ async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monkeypatch):
+    """PR #243 review finding: the Stage-1 exact-text pre-hit is keyed only on
+    literal question text + agency, with no notion of ``history`` — so a
+    generic continuation phrase like "次の50件" would return whichever
+    (tool, args) was last cached for that exact text by *any* prior question
+    in the agency, ignoring the current conversation's actual prior turn.
+    When force_tool_call=True (a recognized, history-dependent
+    continuation), the pre-hit must be skipped so the LLM call — which
+    actually sees history_block — decides instead of a stale cache row.
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+
+    from pipeline.query import intent_cache as ic
+    from pipeline.query.intent import IntentSignature, canonicalize
+    from pipeline.query.intent import signature_hash as _sig_hash
+
+    # Pre-populate a stale cache row for the exact literal text "次の50件",
+    # from some unrelated earlier question/tool — this is what a naive
+    # pre-hit lookup would return regardless of the current history.
+    _stale_tool, _stale_args = "capabilities", {}
+    _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
+    _stale_can_args = canonicalize(_stale_tool, _stale_args, _ctx_dict)
+    _stale_hash = _sig_hash(_stale_tool, _stale_can_args)
+    async with pool.acquire() as conn:
+        await ic.upsert(
+            conn, _stale_hash, IntentSignature(tool=_stale_tool, args=_stale_args, confidence=0.9),
+            _stale_can_args, agency_id, question="次の50件",
+        )
+
+    fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "stops", "offset": 50}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools(
+            "次の50件",
+            _ctx(),
+            conn,
+            agency_id,
+            locale="ja",
+            history=[{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}],
+            force_tool_call=True,
+        )
+
+    assert fake.calls == 1, "force_tool_call must skip the stale pre-hit and reach the LLM"
+    assert result["tool_call"]["name"] == "describe_data"
+    assert result["tool_call"]["arguments"].get("offset") == 50
+
+
+@pytest.mark.asyncio
 async def test_flag_off_no_cache_reads_or_writes(pool_with_agency, monkeypatch):
     """ASK_INTENT_CACHE_ENABLED=false → no cache table activity, behavior matches Phase ①."""
     pool, agency_id = pool_with_agency

@@ -295,7 +295,13 @@ async def chat_with_tools(
     Under ``ASK_INTENT_CACHE_ENABLED``, the JSON-mode request can't take a
     ``tool_choice`` at all (see the ``use_cache`` branch below), so
     ``force_tool_call`` instead appends ``JSON_MODE_FORCE_TOOL_ADDENDUM`` —
-    a prompt-level instruction rather than an API-level guarantee.
+    a prompt-level instruction rather than an API-level guarantee. Also under
+    that flag, ``force_tool_call`` additionally skips the Stage 1 exact-text
+    cache pre-hit (see the ``use_cache`` branch below): that lookup is keyed
+    on literal question text only, with no notion of ``history``, so serving
+    it for a continuation phrase would return whichever answer was last
+    cached for that exact text — ignoring this conversation's actual prior
+    turn — instead of the history-aware answer this parameter exists to get.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -507,7 +513,16 @@ async def chat_with_tools(
     # -----------------------------------------------------------------------
     if use_cache:
         # Stage 1: pre-LLM exact question-text lookup.
-        pre_row = await _cache_lookup_by_question(conn, question, agency_id)
+        #
+        # Keyed on literal question text + agency only — it has no notion of
+        # ``history``, so a generic continuation phrase ("次の50件") would
+        # return whichever (tool, args) was last cached for that exact text
+        # by *any* user in the agency, ignoring this conversation's actual
+        # prior turn. When force_tool_call is set (a recognized continuation
+        # that must be resolved against this history), skip the pre-hit and
+        # fall through to Stage 2 below so the LLM call actually sees
+        # history_block instead of returning a stale, history-blind answer.
+        pre_row = None if force_tool_call else await _cache_lookup_by_question(conn, question, agency_id)
         if pre_row is not None:
             # Exact same question seen before — skip LLM entirely.
             _log.debug("Intent cache pre-hit for question %r (sig=%s)", question[:60], pre_row["signature_hash"])
