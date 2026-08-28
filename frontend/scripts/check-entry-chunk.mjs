@@ -82,7 +82,12 @@ const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
 // single, hand-maintained index.html; it is not meant to handle arbitrary
 // HTML (e.g. attribute values split across lines, or src set via JS).
 // Each regex has two capture groups (quoted, unquoted); exactly one is
-// populated per match — see collectHtmlAssetUrls below.
+// populated per match — see collectHtmlAssetUrls below. Known scope gap: an
+// unquoted value immediately followed by a self-closing `/>` with no space
+// (e.g. src=/vendor.js/>) folds the trailing `/` into the captured URL; that
+// then fails to resolve to a real dist/ file and is silently skipped rather
+// than flagged (a narrow authoring style — the common unquoted self-closing
+// form has a space before the slash, which resolves correctly).
 const SCRIPT_SRC_RE = /<script\b[^>]*\bsrc\s*=\s*(?:["']([^"']+)["']|([^\s"'=<>`]+))[^>]*>/gi;
 const LINK_HREF_RE = /<link\b[^>]*\bhref\s*=\s*(?:["']([^"']+)["']|([^\s"'=<>`]+))[^>]*>/gi;
 
