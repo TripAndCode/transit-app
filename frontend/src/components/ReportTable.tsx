@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
@@ -105,6 +104,24 @@ function fmtNum(v: unknown, _t: TFunction): string {
   return n.toLocaleString();
 }
 
+// Module-scope pure function rather than an in-render IIFE — see
+// eslint.config.js's manual-memoization ban comment for why this shape is
+// preferred over an inline immediately-invoked function expression.
+function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Map<number, number> {
+  if (!schema) return new Map<number, number>();
+  const m = new Map<number, number>();
+  for (const col of schema) {
+    if (!col.bar) continue;
+    let mx = 0;
+    for (const row of rows) {
+      const v = Number(row[col.index]);
+      if (isFinite(v) && Math.abs(v) > mx) mx = Math.abs(v);
+    }
+    m.set(col.index, mx || 1);
+  }
+  return m;
+}
+
 type Props = {
   reportType: string;
   rows: unknown[][];
@@ -117,20 +134,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
-  const maxes = useMemo(() => {
-    if (!schema) return new Map<number, number>();
-    const m = new Map<number, number>();
-    for (const col of schema) {
-      if (!col.bar) continue;
-      let mx = 0;
-      for (const row of rows) {
-        const v = Number(row[col.index]);
-        if (isFinite(v) && Math.abs(v) > mx) mx = Math.abs(v);
-      }
-      m.set(col.index, mx || 1);
-    }
-    return m;
-  }, [rows, schema]);
+  const maxes = computeColumnMaxes(schema, rows);
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table

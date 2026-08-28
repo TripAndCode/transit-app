@@ -2,9 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  // React Compiler (v1.0) auto-memoizes components — manual useMemo/useCallback
-  // are now only needed where the compiler bails out (see eslint react-hooks
-  // compiler diagnostics).
+  // React Compiler (v1.0) auto-memoizes components. Manual useMemo/useCallback/
+  // React.memo are banned as a hard ESLint error (see eslint.config.js) — a
+  // compiler bailout should be fixed at the source, not worked around with
+  // manual memoization.
   plugins: [react({ babel: { plugins: ["babel-plugin-react-compiler"] } })],
   server: {
     port: 5173,

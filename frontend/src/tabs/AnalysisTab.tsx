@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
@@ -39,20 +38,17 @@ export function AnalysisTab() {
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
 
-  const reportLabels: Record<string, string> = useMemo(
-    () => ({
-      ranking: t("reports.type.ranking"),
-      ranking_best: t("reports.type.ranking_best"),
-      on_time: t("reports.type.on_time"),
-      worst_5min: t("reports.type.worst_5min"),
-      trend: t("reports.type.trend"),
-      compare_ranking: t("reports.type.compare_ranking"),
-      dow_weekday: t("reports.type.dow_weekday"),
-      dow_weekend: t("reports.type.dow_weekend"),
-      route_forecast: t("reports.type.route_forecast"),
-    }),
-    [t],
-  );
+  const reportLabels: Record<string, string> = {
+    ranking: t("reports.type.ranking"),
+    ranking_best: t("reports.type.ranking_best"),
+    on_time: t("reports.type.on_time"),
+    worst_5min: t("reports.type.worst_5min"),
+    trend: t("reports.type.trend"),
+    compare_ranking: t("reports.type.compare_ranking"),
+    dow_weekday: t("reports.type.dow_weekday"),
+    dow_weekend: t("reports.type.dow_weekend"),
+    route_forecast: t("reports.type.route_forecast"),
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
