@@ -69,3 +69,16 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Never run `git stash drop`/`clear`/`pop` against a stash you didn't create
   in the current session/tick; `vps-loop-run.md`'s Step 4 worker prompt now
   says this explicitly.
+- `[skip ci]` must be on EVERY commit, including intermediate fix-and-reverify
+  commits mid-branch, not just the first/last one on a branch. Confirmed live
+  (2026-08-28, item 9/PR #248): 2 of 5 commits on a `/review-branch`
+  fix-iteration cycle were missing the trailer, so GitHub Actions actually
+  triggered for those two (`on: push`/`pull_request` isn't gated on the
+  convention — `[skip ci]` only works because GitHub itself skips a run when
+  it's present in the triggering commit message; omit it and CI runs
+  normally). The run failed in ~4s with "recent account payments have failed
+  or your spending limit needs to be increased" — a GitHub Actions billing
+  problem on this account, unrelated to the code, but real and worth knowing:
+  a stray missing `[skip ci]` is the only thing standing between "CI is
+  dormant" and "CI actually runs and immediately fails for an unrelated
+  reason," which could look like a real regression if not checked.
