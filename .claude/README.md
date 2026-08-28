@@ -66,6 +66,15 @@ i18n key parity or `agg_*` column renames).
 
 - Cron invokes a short `claude -p "/vps-loop-run"` wrapper; the command file owns
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
+  `/root/claude-loop.sh` itself is VPS-local infrastructure, not tracked in this
+  repo -- it runs the invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  (added 2026-08-29) so a dispatched Step-4 worker's background Agent task isn't
+  killed by the CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a
+  "you'll be notified when it finishes" expectation after that ceiling can never
+  be fulfilled, and the still-in-progress worker's uncommitted edits are lost
+  when the parent process exits. Confirmed live on item 16. A genuinely-hung
+  worker is still caught by `vps-heartbeat-watchdog.yml`, since a stuck run
+  never reaches the heartbeat line either.
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
