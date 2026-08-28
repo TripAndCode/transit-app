@@ -42,11 +42,12 @@ bootstrap:
 	@echo "    make serve        # then open http://localhost:8000"
 
 # Copy the Vite build into api/static so FastAPI serves SPA + API on one origin.
-# Same layout the Dockerfile uses in prod.
+# Same layout the Dockerfile uses in prod. Manifest-stripping is shared with
+# the Dockerfile via scripts/strip_vite_manifest.sh — see that file for why.
 bake:
 	@rm -rf api/static
 	@cp -R frontend/dist api/static
-	@rm -rf api/static/.vite
+	@sh scripts/strip_vite_manifest.sh api/static
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
