@@ -36,7 +36,13 @@ fi
 cd "$CLAUDE_PROJECT_DIR" || { echo "BLOCKED: git push — could not cd to \$CLAUDE_PROJECT_DIR ($CLAUDE_PROJECT_DIR)." >&2; exit 2; }
 
 LOG="$(mktemp)"
-trap 'rm -f "$LOG"' EXIT
+# run_with_timeout's fallback path (below) creates a marker temp file per
+# call; if this script's own process is killed abruptly (SIGKILL, or an
+# external harness timeout) after a marker is created but before that
+# call's own cleanup runs, it would otherwise leak. Accumulate every
+# marker path here so the EXIT trap sweeps them up alongside $LOG.
+MARKER_FILES=()
+trap 'rm -f "$LOG" "${MARKER_FILES[@]}"' EXIT
 FAIL=0
 
 run_with_timeout() {
@@ -59,6 +65,7 @@ run_with_timeout() {
   # orphan.
   local marker; marker="$(mktemp)"
   rm -f "$marker"
+  MARKER_FILES+=("$marker")
   local had_job_control=0
   case $- in *m*) had_job_control=1 ;; esac
   set -m
