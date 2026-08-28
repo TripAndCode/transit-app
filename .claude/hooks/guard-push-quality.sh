@@ -36,7 +36,23 @@ fi
 cd "$CLAUDE_PROJECT_DIR" || { echo "BLOCKED: git push — could not cd to \$CLAUDE_PROJECT_DIR ($CLAUDE_PROJECT_DIR)." >&2; exit 2; }
 
 LOG="$(mktemp)"
-trap 'rm -f "$LOG"' EXIT
+# run_with_timeout's fallback path (below) creates a marker temp file per
+# call; if this script's process receives a catchable termination (an
+# external harness timeout, SIGTERM, or a normal early exit) after a marker
+# is created but before that call's own cleanup runs, it would otherwise
+# leak. Accumulate every marker path here so the EXIT trap sweeps them up
+# alongside $LOG. (A literal SIGKILL still leaks the marker regardless --
+# no shell trap, including EXIT, can catch it; same pre-existing limitation
+# $LOG's own cleanup already had.)
+MARKER_FILES=()
+# Count-guard the array expansion: bash 3.2 (macOS's default /bin/bash,
+# with no Homebrew coreutils -- exactly the environment run_with_timeout's
+# fallback branch targets) treats "${MARKER_FILES[@]}" on an empty array as
+# an unbound-variable error under `set -u`. $LOG's own removal (the first
+# statement) isn't affected -- it's the second statement that would abort
+# with a stray stderr message, leaving that call's marker file unswept.
+# Bash >=4.4 doesn't need this guard, but 3.2 does, so guard for both.
+trap 'rm -f "$LOG"; [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"' EXIT
 FAIL=0
 
 run_with_timeout() {
@@ -59,6 +75,7 @@ run_with_timeout() {
   # orphan.
   local marker; marker="$(mktemp)"
   rm -f "$marker"
+  MARKER_FILES+=("$marker")
   local had_job_control=0
   case $- in *m*) had_job_control=1 ;; esac
   set -m
