@@ -485,6 +485,81 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(ask_client, monkeypatch):
+    """item 16 repro: an unrelated in-scope question with no follow-up
+    phrasing, but with unrelated history from a prior ``top_n`` ranking
+    turn attached, must still be able to surface a fresh tool call.
+
+    Live-observed bug (2026-08-28): with an active conversation showing a
+    route delay ranking table, a plain "停留所はいくつ？" ("how many stops
+    are there?") — on topic but not continuation wording, so
+    ``is_follow_up()`` correctly evaluates False and ``route_or_examples()``
+    runs — came back as a prose non-answer ("the table doesn't include stop
+    counts") instead of dispatching ``describe_data(kind=stops)``, because
+    Stage 3 attached the full history and let the model reason from its
+    (unrelated) table text instead of calling a tool.
+
+    This question has no confident Stage 1/2 match in this test's empty
+    ``rag_chunks``/golden set, so it reaches Stage 3 (``chat_with_tools``)
+    exactly like the live repro. ``chat_with_tools`` is mocked here (as in
+    the other tests in this file) to play the role of a correctly-behaving
+    model — the real prompt-level fix that makes that behaviour likely is
+    pinned separately in ``tests/query/test_chat_null_args.py``. This test
+    pins the surrounding plumbing: not a recognized continuation (so
+    ``force_tool_call`` stays False — tool_choice="auto" — see
+    ``test_ask_router_fallthrough_passes_rag_examples``), history is still
+    threaded through for possible anaphora resolution, and whatever tool
+    call ``chat_with_tools`` returns reaches the client as a real tool call,
+    not a prose non-answer.
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+    ):
+        captured["history"] = history
+        captured["force_tool_call"] = force_tool_call
+        return {
+            "answer": "停留所は123件あります。",
+            "tool_call": {"name": "describe_data", "arguments": {"kind": "stops"}},
+            "result": {"kind": "kv", "summary": "", "rows": [], "columns": [], "series": [], "pairs": []},
+            "success": True,
+        }
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "停留所はいくつ？",
+            "history": [{"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}}],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    # Not a recognized continuation of the prior tool: must not force a call.
+    assert captured["force_tool_call"] is False
+    # History is still threaded through to Stage 3 (it may help resolve
+    # generic anaphora even outside is_follow_up()'s regex) ...
+    assert captured["history"] and captured["history"][0]["question"] == "遅延ランキングを見せて"
+    # ... but the response must be a real tool call, not a prose non-answer
+    # anchored to that unrelated prior turn.
+    assert data["router_stage"] == "llm"
+    assert data["tool_call"] == {"name": "describe_data", "arguments": {"kind": "stops"}}
+
+
+@pytest.mark.asyncio
 async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 

@@ -436,6 +436,22 @@ async def chat_with_tools(
     # turns and truncated per-question to keep the prompt small and the
     # behaviour deterministic. ``history=[]``/``None`` leaves the message
     # list byte-identical to the no-memory path.
+    #
+    # ``history`` is attached whenever the API layer has prior turns to
+    # offer, regardless of whether ``router.is_follow_up()`` matched the
+    # current question — that regex only flags explicit continuation
+    # phrasing, but generic anaphora ("その路線は？") also needs the prior
+    # turn and doesn't match it. That means this block is just as often
+    # attached ahead of a genuinely NEW, unrelated question that merely
+    # failed to get a confident Stage 1/2 match. Reproduced live
+    # (2026-08-28, item 16): with history from an unrelated ranking turn
+    # attached, a plain "停留所はいくつ？" ("how many stops?") came back as
+    # "the table doesn't show stop counts" instead of dispatching
+    # describe_data(kind=stops) — the model answered from the attached
+    # history text rather than recognizing the question needed a fresh tool
+    # call. The trailing guard line below makes the scope of "use history"
+    # explicit so the model doesn't default to treating unrelated prior data
+    # as the answer key for an unrelated question.
     history_block = None
     if history:
         header = "== Conversation so far ==" if locale == "en" else "== これまでの会話 =="
@@ -451,6 +467,23 @@ async def chat_with_tools(
                 lines.append(f"{i}. {q} → {tool}({args_c})")
             else:
                 lines.append(f"{i}. {q}")
+        guard = (
+            (
+                "上記は、現在の質問がそれを明示的に参照している場合"
+                "(「その路線は？」「この結果の続き」など)にのみ解釈の助けとして使う。"
+                "現在の質問が上記と無関係な新しい話題であれば、上記のデータで答えようとせず、"
+                "現在の質問だけに対して適切なツールを呼び出すこと。"
+            )
+            if locale != "en"
+            else (
+                "Only use the above to help interpret the current question when it "
+                'explicitly references it (e.g. "that route", "continue that '
+                'result"). If the current question is a new, unrelated topic, do '
+                "not try to answer it from the data above — call the appropriate "
+                "tool for the current question on its own."
+            )
+        )
+        lines.append(guard)
         history_block = "\n".join(lines)
 
     use_cache = _cache_enabled()
