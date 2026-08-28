@@ -13,6 +13,19 @@
 // split move bytes into a separately-counted, still-statically-imported
 // chunk while the entry file itself stayed small.
 //
+// SCOPE BOUNDARY: the manifest walk above only sees chunks Vite itself
+// processed as JS/CSS module graph nodes. It does NOT see a hand-authored
+// `<script src="...">` or `<link href="...">` tag added directly to
+// index.html that points at a file copied verbatim into dist/ (e.g. from
+// `public/`) — that file ships in the exact same initial HTML load but
+// has no manifest entry at all, so the walk above can't reach it. To
+// close that gap, a second, independent pass below scans the BUILT
+// dist/index.html's own <script>/<link> tags directly (regardless of
+// whether Vite tracked them) for the same MapLibre markers. This is a
+// narrow, deliberate bypass to guard against — not something an
+// accidental refactor would trigger — but it's real and previously
+// undetected.
+//
 // DIST_DIR can be overridden with --dist-dir <path> (used by
 // tests/frontend/check_entry_chunk.test.mjs to run against a fixture
 // dist/ without a real Vite build). Deliberately an explicit CLI arg, not
@@ -59,6 +72,41 @@ const CSS_MARKER = "maplibregl-canvas";
 // sync by hand. MapLibre alone adds ~800 KiB, so 600 KiB catches a
 // MapLibre-scale regression well before it would fit.
 const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
+
+// Matches <script ... src="...">, <link ... href="...">, single- or
+// double-quoted, tag attributes in any order/case. This is a deliberately
+// simple regex scan (not an HTML parser) — good enough for this repo's
+// single, hand-maintained index.html; it is not meant to handle arbitrary
+// HTML (e.g. attribute values split across lines, or src set via JS).
+const SCRIPT_SRC_RE = /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+const LINK_HREF_RE = /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
+
+// A tag pointing at another origin (http(s):, protocol-relative //, or a
+// non-fetchable scheme like data:/mailto:) can't be a locally-shipped
+// MapLibre bundle copied into dist/, so it's out of scope for this check.
+function isExternalOrNonFileUrl(url) {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url);
+}
+
+// index.html's tags reference paths as served from the site root ("/"),
+// which corresponds to DIST_DIR at build output time.
+function resolveHtmlAssetPath(url) {
+  const withoutQueryOrHash = url.split(/[?#]/)[0];
+  const relative = withoutQueryOrHash.startsWith("/") ? withoutQueryOrHash.slice(1) : withoutQueryOrHash;
+  return join(DIST_DIR, relative);
+}
+
+function collectHtmlAssetUrls(html) {
+  const urls = [];
+  for (const re of [SCRIPT_SRC_RE, LINK_HREF_RE]) {
+    re.lastIndex = 0;
+    let match;
+    while ((match = re.exec(html))) {
+      urls.push(match[1]);
+    }
+  }
+  return urls;
+}
 
 function loadManifest() {
   let raw;
@@ -242,6 +290,42 @@ for (const [entryKey] of entries) {
         "STATIC_CLOSURE_BUDGET_BYTES in this file — don't ignore the failure.",
     );
     failed = true;
+  }
+}
+
+// Manifest-graph blind spot guard: scan the BUILT dist/index.html's own
+// <script>/<link> tags directly, independent of whether Vite's manifest
+// tracked them. A hand-authored tag pointing at a file copied verbatim
+// into dist/ (e.g. from public/) ships in the same initial HTML load as
+// the entries checked above but has no manifest node, so the walk above
+// can't see it. See the file-header comment for the full rationale.
+{
+  const indexHtmlPath = join(DIST_DIR, "index.html");
+  const indexHtml = readTextOrNull(indexHtmlPath);
+  if (indexHtml === null) {
+    console.error(
+      `check-entry-chunk: FAIL — could not read ${indexHtmlPath} to check for hand-authored <script>/<link> ` +
+        "tags outside the Vite manifest's import graph.",
+    );
+    failed = true;
+  } else {
+    for (const url of collectHtmlAssetUrls(indexHtml)) {
+      if (isExternalOrNonFileUrl(url)) continue;
+      const assetPath = resolveHtmlAssetPath(url);
+      const content = readTextOrNull(assetPath);
+      // A missing local file here is a different failure mode (a broken
+      // reference) than what this guard targets; leave it unflagged.
+      if (content === null) continue;
+      if (content.includes(JS_MARKER) || content.includes(CSS_MARKER)) {
+        console.error(
+          `check-entry-chunk: FAIL — index.html's <script>/<link> tag references "${url}", which contains ` +
+            "MapLibre and is not part of the Vite manifest's static import graph (likely a hand-authored tag " +
+            "pointing at a file copied verbatim into dist/, e.g. from public/). This bypasses the manifest " +
+            "walk above; remove the tag and load MapLibre only via a dynamic import (React.lazy), like MapTab.",
+        );
+        failed = true;
+      }
+    }
   }
 }
 

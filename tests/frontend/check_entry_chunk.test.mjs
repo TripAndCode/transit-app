@@ -15,13 +15,28 @@ after(() => {
   for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-function makeDist(files) {
+// Real Vite builds always emit dist/index.html alongside .vite/manifest.json
+// (see check-entry-chunk.mjs's "manifest-graph blind spot" scan, which reads
+// it directly). Auto-inject a benign default here so the ~10 existing tests
+// that only care about the manifest-graph behavior don't all need to supply
+// one by hand; tests exercising the index.html scan itself pass an explicit
+// override via the `indexHtml` option.
+const DEFAULT_INDEX_HTML = `<!doctype html>
+<html>
+  <head><link rel="icon" href="/favicon.svg" /></head>
+  <body><script type="module" src="/assets/index.js"></script></body>
+</html>`;
+
+function makeDist(files, { indexHtml = DEFAULT_INDEX_HTML } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "check-entry-chunk-"));
   tmpDirs.push(dir);
   for (const [relPath, content] of Object.entries(files)) {
     const full = join(dir, relPath);
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content);
+  }
+  if (indexHtml !== null) {
+    writeFileSync(join(dir, "index.html"), indexHtml);
   }
   return dir;
 }
@@ -178,4 +193,108 @@ test("missing manifest -> exit 1 with an actionable message", () => {
   const result = run(dist);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /build\.manifest: true/);
+});
+
+// Regression coverage for the manifest-graph blind spot: a hand-authored
+// <script>/<link> tag in index.html pointing at a file copied verbatim into
+// dist/ (e.g. from public/) has no manifest node at all, so the static
+// import-graph walk above can't see it even though it ships in the same
+// initial HTML load. These fixtures otherwise pass a clean manifest (no
+// MapLibre statically imported, under budget) to prove the index.html scan
+// is what's catching the violation, not the manifest walk.
+const CLEAN_MANIFEST = {
+  "index.html": { file: "assets/index.js", isEntry: true, imports: [], dynamicImports: ["src/MapTab.tsx"] },
+  "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+};
+
+test("hand-authored <script src> in index.html bypasses the manifest but is still caught", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      // Not referenced by any manifest node — simulates a file copied
+      // verbatim from public/ and wired up by a hand-authored tag.
+      "vendor-maplibre.js": `${JS_MARKER}();`,
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <body>
+    <script type="module" src="/assets/index.js"></script>
+    <script src="/vendor-maplibre.js"></script>
+  </body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
+});
+
+test("hand-authored <link href> in index.html bypasses the manifest but is still caught", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      "vendor-maplibre.css": BENIGN_LAZY_CSS,
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <head><link rel="stylesheet" href="/vendor-maplibre.css" /></head>
+  <body><script type="module" src="/assets/index.js"></script></body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
+});
+
+test("external <link href> (e.g. Google Fonts) is not resolved against dist/ and does not false-positive", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP" rel="stylesheet">
+  </head>
+  <body><script type="module" src="/assets/index.js"></script></body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("clean index.html with only Vite-managed tags -> exit 0", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+    "assets/index.js": "console.log('hello');",
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("missing dist/index.html -> exit 1 with an actionable message", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      ...MAPTAB_FILES,
+    },
+    { indexHtml: null },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /could not read/);
 });
