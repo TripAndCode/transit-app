@@ -183,13 +183,19 @@ command is the canonical home for review fan-out and retry policy; do not copy t
 here. Add the worktree absolute path to every dispatch and never paste diff text into
 the prompts.
 
-- No Major findings → Step 6.
-- Major findings → dispatch the worker once more (same Agent pattern, same worktree)
-  with only those findings, then re-verify only the affected review group. Cap at 2
-  fix iterations. Still Major after the second: append `- <UTC timestamp>: item N
-  blocked — /review-branch still reports Major findings after 2 fix iterations.
-  Worktree: <path>, branch: vps-loop/item-<N>. Findings: <summary>.`, no push, no PR,
-  stop.
+- No Major findings → run a second, fully independent `/review-branch` pass (fresh
+  `prepare_review.py` manifest, fresh dispatch of both reviewer groups) on the same
+  diff before Step 6 — per CLAUDE.md, every PR gets at least two full passes, even
+  when the first found nothing. No Major findings on the second pass either → Step 6.
+- Major findings (either pass) → dispatch the worker once more (same Agent pattern,
+  same worktree) with only those findings, then re-verify only the affected review
+  group. Cap at 2 fix iterations total across both passes. Still Major after the
+  second fix: append `- <UTC timestamp>: item N blocked — /review-branch still
+  reports Major findings after 2 fix iterations. Worktree: <path>, branch:
+  vps-loop/item-<N>. Findings: <summary>.`, no push, no PR, stop.
+- A Major found and fixed on the second pass still needs the "at least two passes"
+  bar met: treat the fix-and-reverify as satisfying it (do not add a third full
+  pass just to reach the count) and proceed to Step 6 once that group is clean.
 
 ## Step 6 — Ship it
 
@@ -197,7 +203,8 @@ From the worktree (`git -C <worktree-abs-path> ...`):
 
 1. `git push -u origin vps-loop/item-<N>`.
 2. `gh pr create --draft`, per `pr-github.md`'s description style. Note the number.
-   (CLAUDE.md: every PR starts as a draft until its `/review-branch` pass is clean.)
+   (CLAUDE.md: every PR starts as a draft, gets at least two `/review-branch` passes,
+   and is only opened once both are clean.)
 3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
    the same branch, push again.
 4. **Leave the PR in draft.** Step 5 completed the required proportional review, but
