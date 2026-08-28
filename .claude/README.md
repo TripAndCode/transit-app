@@ -12,7 +12,7 @@ Invoke as `/name` from a Claude Code session.
 |---|---|---|
 | `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Read-only + proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
-| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → proportional `/review-branch` verification → draft PR. Never marks ready or merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → two full independent `/review-branch` passes → PR marked ready → squash-merge → `/cleanup-merged`, all gated on both passes being clean and the PR reporting mergeable/clean. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches, opens/readies/merges PRs via `gh`. |
 | `/cleanup-merged` | Post-merge maintenance: syncs `main`, runs an evidence-based dry run, removes only proven-stale local branches/worktrees, and can repeat on a VPS clone. | Deletes clean local refs/worktrees only; never deletes GitHub branches or files. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
@@ -55,8 +55,10 @@ i18n key parity or `agg_*` column renames).
   false-positives on prose that merely mentions those names. Treat the rule in
   `CLAUDE.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead, except
-  `/vps-loop-run`, which runs unattended: it may push feature branches and open
-  draft PRs, but never pushes to `main` and never merges.
+  `/vps-loop-run`, which runs unattended: it may push feature branches, open,
+  ready, and squash-merge PRs once both required `/review-branch` passes are
+  clean and the PR reports mergeable/clean — but it never pushes directly to
+  `main` (only via a reviewed, merged PR) and never force-pushes.
 - `/address-my-pr-comments` never calls the GraphQL `resolveReviewThread`
   mutation — resolving is the reviewer's call.
 
@@ -67,7 +69,9 @@ i18n key parity or `agg_*` column renames).
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
-  cron. The loop operates on one item and never merges its own draft PR.
-- The pre-push backend timeout is 240 seconds, while the small VPS can need roughly
-  6.5 minutes. A timeout with no test failure is an infrastructure limitation, not
-  evidence that tests failed; resolve it before weakening the gate.
+  cron. The loop operates on one item per tick and, since 2026-08-28, may merge
+  its own PR once both review passes are clean and it's mergeable/clean.
+- The pre-push backend timeout is 420 seconds (raised from 240s on 2026-08-28 —
+  the full suite legitimately took ~281s, which the small VPS can run noticeably
+  slower than that). A timeout with no test failure is an infrastructure
+  limitation, not evidence that tests failed; resolve it before weakening the gate.

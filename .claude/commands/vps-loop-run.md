@@ -227,21 +227,35 @@ From the worktree (`git -C <worktree-abs-path> ...`):
 
 1. `git push -u origin vps-loop/item-<N>`.
 2. `gh pr create --draft`, per `pr-github.md`'s description style. Note the number.
-   (CLAUDE.md: every PR starts as a draft, gets at least two `/review-branch` passes,
-   and is only opened once both are clean.)
 3. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`, commit on
    the same branch, push again.
-4. **Leave the PR in draft.** Step 5 completed the required proportional review, but
-   the unattended loop never marks its own PR ready; that remains the human's action.
-5. Append: `- <UTC timestamp>: item N opened as draft PR #<number>; automated review
-   complete, needs human approval before merge.`
+4. `gh pr ready <number>`. Step 5 already completed both required
+   `/review-branch` passes clean before this PR was even created, so there is
+   nothing left gating readiness — mark it ready rather than leaving it in
+   draft.
+5. `gh pr view <number> --json mergeable,mergeStateStatus`. Only proceed to step 6
+   if `mergeable` is `MERGEABLE` and `mergeStateStatus` is `CLEAN`. If it's
+   `CONFLICTING`/`DIRTY` instead: merge latest `main` into the branch, resolve
+   conflicts, re-run Step 5's full two-pass review on the merged result, push, then
+   re-check this condition — do not merge through a conflicting state.
+6. `gh pr merge <number> --squash`. This and step 4 are the exceptions to "never
+   mark its own PR ready or merge" that used to apply here: both are authorized
+   specifically because Step 5's two-pass gate is unconditional and already
+   satisfied by this point (and step 5 above re-confirms no conflicts slipped in
+   since), not a general grant to skip review or force through a bad state.
+7. Run `/cleanup-merged` (this repo) to remove the now-merged branch/worktree.
+8. Append: `- <UTC timestamp>: item N merged as PR #<number>; both /review-branch
+   passes clean, mergeable/clean confirmed, squash-merged and cleaned up.`
 
 ## Boundaries
 
-- Never push to `main`, never force-push, never `git reset --hard`, never delete
-  anything found in Step 1 (stash, don't discard).
-- Never merge the PR you open — every one waits for explicit human merge approval,
-  however clean the verification came back.
+- Never push directly to `main` — only via a reviewed, merged PR. Never force-push,
+  never `git reset --hard`, never delete anything found in Step 1 (stash, don't
+  discard).
+- Marking a PR ready and merging it (Step 6.4/6.6) are authorized, but only after
+  Step 5's two full independent `/review-branch` passes are clean AND GitHub
+  reports the PR mergeable/clean (Step 6.5). Never merge through a `CONFLICTING`/
+  `DIRTY` state, and never skip or shortcut the two-pass gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
   (worktree path/branch if one was created) — don't guess or retry blindly.
