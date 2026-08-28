@@ -125,9 +125,9 @@ worktree, so it resolves against current `main`).
      trust boundary before anything is pushed.
   2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
      two adjustments: note in the PR body that this resumed an interrupted prior
-     run, and replace Step 6's item-5 status line with `- <UTC timestamp>: item N
+     run, and replace Step 6.11's status line with `- <UTC timestamp>: item N
      shipped as PR #<number> (resumed from an interrupted prior run's existing
-     commits).` Step 6's item 3 is conditional — an interrupted worker may never
+     commits).` Step 6.4 is conditional — an interrupted worker may never
      have written the `(PR #pending)` placeholder. This run is done; do not also
      dispatch a new item.
   3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
@@ -231,10 +231,12 @@ avoid confusion with this section's own "Step 6" heading.
      origin/main`) as `MAIN_SHA_AT_REVIEW` — this is the `main` that Step 5's
      passes actually reviewed against.
 6.2. `git push -u origin vps-loop/item-<N>`.
-6.3. `gh pr create --draft --json number -q .number`, per `pr-github.md`'s
-     description style. Capture its structured `number` output directly —
-     don't rely on parsing prose/URLs out of a plain-text invocation, since
-     this number now drives an irreversible merge below.
+6.3. `gh pr create --draft`, per `pr-github.md`'s description style (`gh pr
+     create` has no `--json` output mode, so don't try to parse its stdout
+     URL). Immediately follow with a structured lookup by branch name —
+     `gh pr view vps-loop/item-<N> --json number -q .number` — and use that
+     as `<number>` from here on, not anything parsed from create's own
+     output, since this number now drives an irreversible merge below.
 6.4. Replace `(PR #pending)` in `docs/refactor-log.md` with `(PR #<number>)`,
      commit on the same branch, push again.
 6.5. Immediately before readying or merging, re-derive and re-verify identity:
