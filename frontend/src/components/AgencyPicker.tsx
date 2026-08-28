@@ -2,7 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useMatch, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
+import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
+
+// Module-scope pure function rather than an in-render IIFE — see
+// eslint.config.js's manual-memoization ban comment for why this shape is
+// preferred over an inline immediately-invoked function expression.
+function filterAgencies(agencies: Agency[] | undefined, filter: string): Agency[] {
+  if (!agencies) return [];
+  const q = filter.trim().toLowerCase();
+  if (!q) return agencies;
+  return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
+}
 
 export function AgencyPicker() {
   const { t } = useTranslation();
@@ -26,12 +37,7 @@ export function AgencyPicker() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const filtered = (() => {
-    if (!agencies) return [];
-    const q = filter.trim().toLowerCase();
-    if (!q) return agencies;
-    return agencies.filter((a) => a.agency_name.toLowerCase().includes(q));
-  })();
+  const filtered = filterAgencies(agencies, filter);
 
   if (isLoading) {
     return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;
