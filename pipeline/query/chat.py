@@ -443,15 +443,12 @@ async def chat_with_tools(
     # phrasing, but generic anaphora ("その路線は？") also needs the prior
     # turn and doesn't match it. That means this block is just as often
     # attached ahead of a genuinely NEW, unrelated question that merely
-    # failed to get a confident Stage 1/2 match. Reproduced live
-    # (2026-08-28, item 16): with history from an unrelated ranking turn
-    # attached, a plain "停留所はいくつ？" ("how many stops?") came back as
-    # "the table doesn't show stop counts" instead of dispatching
-    # describe_data(kind=stops) — the model answered from the attached
-    # history text rather than recognizing the question needed a fresh tool
-    # call. The trailing guard line below makes the scope of "use history"
-    # explicit so the model doesn't default to treating unrelated prior data
-    # as the answer key for an unrelated question.
+    # failed to get a confident Stage 1/2 match, which risks the model
+    # answering from the attached (unrelated) history text instead of
+    # recognizing that the current question needs a fresh tool call. The
+    # trailing guard line below makes the scope of "use history" explicit
+    # so the model doesn't default to treating unrelated prior data as the
+    # answer key for an unrelated question.
     history_block = None
     if history:
         header = "== Conversation so far ==" if locale == "en" else "== これまでの会話 =="

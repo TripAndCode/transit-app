@@ -499,14 +499,17 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
     Stage 3 attached the full history and let the model reason from its
     (unrelated) table text instead of calling a tool.
 
-    This question has no confident Stage 1/2 match in this test's empty
-    ``rag_chunks``/golden set, so it reaches Stage 3 (``chat_with_tools``)
-    exactly like the live repro. ``chat_with_tools`` is mocked here (as in
-    the other tests in this file) to play the role of a correctly-behaving
-    model — the real prompt-level fix that makes that behaviour likely is
-    pinned separately in ``tests/query/test_chat_null_args.py``. This test
-    pins the surrounding plumbing: not a recognized continuation (so
-    ``force_tool_call`` stays False — tool_choice="auto" — see
+    This exact question actually matches Stage 1's deterministic
+    ``meta-stops`` rule (``pipeline/query/router.py``), so ``route_or_examples``
+    is monkeypatched here to force a fall-through to Stage 3
+    (``chat_with_tools``) exactly like the live repro, mirroring
+    ``test_ask_writes_query_log_row``'s ``no_decision`` pattern in this same
+    file. ``chat_with_tools`` is mocked here (as in the other tests in this
+    file) to play the role of a correctly-behaving model — the real
+    prompt-level fix that makes that behaviour likely is pinned separately in
+    ``tests/query/test_chat_null_args.py``. This test pins the surrounding
+    plumbing: not a recognized continuation (so ``force_tool_call`` stays
+    False — tool_choice="auto" — see
     ``test_ask_router_fallthrough_passes_rag_examples``), history is still
     threaded through for possible anaphora resolution, and whatever tool
     call ``chat_with_tools`` returns reaches the client as a real tool call,
@@ -536,13 +539,19 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
             "success": True,
         }
 
+    async def no_decision(*a, **kw):
+        return (None, [])
+
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
         json={
             "question": "停留所はいくつ？",
-            "history": [{"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}}],
+            "history": [
+                {"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}}
+            ],
         },
         headers={"Origin": TEST_ORIGIN},
     )
