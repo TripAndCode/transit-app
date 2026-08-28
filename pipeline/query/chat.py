@@ -45,6 +45,7 @@ from pipeline.query.intent_cache import upsert as _cache_upsert
 from pipeline.query.llm_client import get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
+    JSON_MODE_FORCE_TOOL_ADDENDUM,
     LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
     TOOLS,
@@ -273,10 +274,14 @@ async def chat_with_tools(
     that never exercise those specific tool paths.
 
     ``force_tool_call`` is set by the API layer (``api/routers/ask.py``)
-    exactly when ``router.is_follow_up(question)`` matched AND prior-turn
-    history is attached — i.e. bare continuation phrasing ("次の50件",
-    "もっと", "next") that only makes sense as a re-invocation of the
-    previous tool with adjusted args. For that narrow class, a free-text
+    exactly when ``router.is_follow_up(question)`` matched AND the *prior*
+    turn actually carried a tool call — i.e. bare continuation phrasing
+    ("次の50件", "もっと", "next") that only makes sense as a re-invocation of
+    that previous tool with adjusted args. (``is_follow_up()``'s regex also
+    matches ordinary continuation phrasing that can legitimately follow a
+    free-text answer, e.g. an out-of-scope refusal — the API layer excludes
+    that case so a forced tool call is never demanded when there's nothing
+    to continue.) For the narrow class this does fire for, a free-text
     reply is never a correct answer, but ``tool_choice="auto"`` still lets
     the model pick one — observed live as a turn-2 pagination follow-up
     ("次の50件" after a stops listing) coming back with ``tool_call: None``
@@ -287,6 +292,10 @@ async def chat_with_tools(
     mode without touching the router's designed LLM-routing for follow-ups
     (see ``tests/api/test_api_ask.py::test_follow_up_reroutes_to_llm_with_history``)
     or affecting any other question shape, which keeps ``tool_choice="auto"``.
+    Under ``ASK_INTENT_CACHE_ENABLED``, the JSON-mode request can't take a
+    ``tool_choice`` at all (see the ``use_cache`` branch below), so
+    ``force_tool_call`` instead appends ``JSON_MODE_FORCE_TOOL_ADDENDUM`` —
+    a prompt-level instruction rather than an API-level guarantee.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -445,6 +454,12 @@ async def chat_with_tools(
         # native tool_calls request measurably broke tool-calling for some
         # tools.
         system_prompt = system_prompt + "\n" + JSON_MODE_ADDENDUM
+        if force_tool_call:
+            # response_format=json_object can't be combined with tool_choice
+            # (see the comment below), so under the intent-cache flag
+            # force_tool_call has no API-level lever to pull — this prompt
+            # instruction is the JSON-mode equivalent of tool_choice="required".
+            system_prompt = system_prompt + "\n" + JSON_MODE_FORCE_TOOL_ADDENDUM
 
     def _sync():
         """Blocking LLM call executed via ``asyncio.to_thread``.

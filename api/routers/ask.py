@@ -165,6 +165,14 @@ async def ask(
     # last few turns attached. History is capped at 3 turns.
     history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
+    # A forced tool call only makes sense when there is an actual prior tool
+    # invocation to continue (e.g. re-paginating the same describe_data
+    # call). is_follow_up()'s regex also matches ordinary continuation
+    # phrasing ("さらに", "それを", "他には") that can legitimately follow a
+    # free-text answer (e.g. an out-of-scope refusal, history[-1]["tool"] is
+    # None) — forcing a tool call there would remove the model's only
+    # correct move (decline again) and risk a hallucinated call instead.
+    force_tool_call = follow_up and bool(history[-1].get("tool"))
 
     # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
     # continue: short-circuit to a gentle prompt. Otherwise the question
@@ -270,12 +278,7 @@ async def ask(
             rag_examples=examples,
             history=history,
             ch=ch,
-            # A recognized follow-up ("次の50件", "もっと") only makes sense
-            # as a re-invocation of the previous tool — never a free-text
-            # answer — so force a tool call instead of leaving it to
-            # tool_choice="auto" (see chat_with_tools's docstring for the
-            # live-observed "tool_call: None" failure this closes).
-            force_tool_call=follow_up,
+            force_tool_call=force_tool_call,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")

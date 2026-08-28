@@ -86,6 +86,44 @@ async def test_cache_miss_writes_cache_row(pool_with_agency, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_force_tool_call_appends_json_mode_directive_under_cache(pool_with_agency, monkeypatch):
+    """item 8 review finding: force_tool_call was a silent no-op under
+    ASK_INTENT_CACHE_ENABLED, since JSON mode (response_format=json_object)
+    can't be combined with tool_choice at all — the fix only reached the
+    non-cache branch. Pins that force_tool_call=True instead appends
+    JSON_MODE_FORCE_TOOL_ADDENDUM's prompt-level directive so the model is
+    told it must resolve to a real tool, not null/omitted, even in
+    cache-enabled deployments.
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    captured = {}
+
+    class _CapturingClient:
+        def chat_completions(self, *, messages, **kw):
+            captured["system_prompt"] = messages[0]["content"]
+            return _sig_message(tool="capabilities", args={}), None
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _CapturingClient())
+
+    async with pool.acquire() as conn:
+        await chat_with_tools(
+            "次の50件",
+            _ctx(),
+            conn,
+            agency_id,
+            locale="ja",
+            history=[{"question": "路線一覧", "tool": "capabilities", "args": {}}],
+            force_tool_call=True,
+        )
+    assert "MUST name that same tool" in captured["system_prompt"]
+
+    async with pool.acquire() as conn:
+        await chat_with_tools("別の質問です", _ctx(), conn, agency_id, locale="ja", force_tool_call=False)
+    assert "MUST name that same tool" not in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
 async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
     """Same-text repeats hit the pre-LLM question-text lookup → LLM never invoked.
 

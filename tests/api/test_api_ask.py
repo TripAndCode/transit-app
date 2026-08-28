@@ -318,6 +318,52 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask_client, monkeypatch):
+    """Follow-up phrasing after a free-text (tool=None) turn must not force a tool call.
+
+    is_follow_up()'s regex matches ordinary continuation phrasing ("他には")
+    that can legitimately follow an out-of-scope refusal, not just a
+    pagination continuation. Forcing tool_choice="required" there would
+    remove the model's only correct move (decline again) and risk a
+    hallucinated call instead (item 8 review finding).
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+    ):
+        captured["force_tool_call"] = force_tool_call
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for follow-ups")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "他には？",
+            "history": [{"question": "雨天時の比較は？", "tool": None, "args": None}],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["force_tool_call"] is False
+
+
+@pytest.mark.asyncio
 async def test_followup_without_history_does_not_hallucinate(ask_client, monkeypatch):
     """A follow-up phrasing with no history returns a gentle prompt, not an LLM-invented page."""
     client, agency_id = ask_client
