@@ -183,19 +183,36 @@ command is the canonical home for review fan-out and retry policy; do not copy t
 here. Add the worktree absolute path to every dispatch and never paste diff text into
 the prompts.
 
-- No Major findings → run a second, fully independent `/review-branch` pass (fresh
-  `prepare_review.py` manifest, fresh dispatch of both reviewer groups) on the same
-  diff before Step 6 — per CLAUDE.md, every PR gets at least two full passes, even
-  when the first found nothing. No Major findings on the second pass either → Step 6.
-- Major findings (either pass) → dispatch the worker once more (same Agent pattern,
-  same worktree) with only those findings, then re-verify only the affected review
-  group. Cap at 2 fix iterations total across both passes. Still Major after the
-  second fix: append `- <UTC timestamp>: item N blocked — /review-branch still
-  reports Major findings after 2 fix iterations. Worktree: <path>, branch:
-  vps-loop/item-<N>. Findings: <summary>.`, no push, no PR, stop.
-- A Major found and fixed on the second pass still needs the "at least two passes"
-  bar met: treat the fix-and-reverify as satisfying it (do not add a third full
-  pass just to reach the count) and proceed to Step 6 once that group is clean.
+Per CLAUDE.md, every PR gets **at least two full, independent `/review-branch`
+invocations** before Step 6 — unconditionally, even when the first finds nothing.
+Run them as a strict sequence, not a single branching decision:
+
+1. **Pass 1** — the full invocation above.
+   - Major findings → dispatch the worker once more (same Agent pattern, same
+     worktree) with only those findings, then re-verify only the affected review
+     group. Cap at 2 fix iterations (`review-branch.md`'s own per-invocation cap).
+     Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
+     blocked — /review-branch still reports Major findings after 2 fix
+     iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
+     <summary>.`, no push, no PR, stop.
+   - Once pass 1 is clean — whether immediately, or only after the
+     fix-and-reverify cycle above — proceed to pass 2. Do not skip to Step 6
+     here even though pass 1 is clean; the second pass is mandatory regardless.
+2. **Pass 2** — a second, fully independent invocation: fresh `prepare_review.py`
+   manifest, fresh dispatch per `review-branch.md`'s routing for this diff's tier
+   (not necessarily "two reviewer groups" — follow whatever tier the diff
+   actually routes to), run on the current (possibly pass-1-fixed) diff.
+   - Clean → Step 6.
+   - Major findings → same fix-and-reverify cycle as pass 1, capped at 2 fix
+     iterations for pass 2. Once clean, proceed to Step 6 — a Major caught and
+     fixed on pass 2 still satisfies the two-pass bar; do not run a third full
+     pass just to reach the count. Still Major after 2 fix iterations on pass 2:
+     same blocked-and-stop logging as pass 1, above.
+
+(Doubling the mandatory full-pass count roughly doubles this step's reviewer-agent
+cost for every item, including trivial ones — accepted deliberately, since a
+second independent pass catching something pass 1 missed is worth more than the
+extra tokens for how infrequently this coordinator runs.)
 
 ## Step 6 — Ship it
 
