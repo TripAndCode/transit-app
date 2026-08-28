@@ -50,8 +50,9 @@ Write PR descriptions to be **scanned, not read**. Default to structure over pro
   Interactive session` if the work came from a human-driven session, or
   `**Origin:** Autonomous VPS loop (item N)` if `/vps-loop-run` produced it
   (per CLAUDE.md's "Autonomous VPS loop"). Lets a reviewer tell at a glance
-  which review posture applies (VPS-loop PRs never get merged without an
-  explicit human go-ahead, regardless of how clean the review came back).
+  which review posture applies (a VPS-loop PR squash-merges on its own once
+  both `/review-branch` passes are clean and GitHub reports it mergeable/
+  clean — no separate human go-ahead required; see CLAUDE.md).
 - Keep sections short and titled: What · Affected · Behaviour · Fixes · Tests ·
   Verification (include only those that apply). End with the Claude Code trailer.
 

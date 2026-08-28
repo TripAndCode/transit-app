@@ -7,14 +7,18 @@ domain. No box to harden, no Caddy, no SSH.
 
 **Point every Railway service at the `production` branch, not `main`.**
 This repo runs an autonomous VPS loop (see CLAUDE.md "Autonomous VPS loop")
-that continuously opens PRs against `main`; those merge on a human review
-cadence, not instantly. If Railway watched `main` directly, every merge
-— reviewed or not yet fully soak-tested — would auto-deploy and run
-`preDeployCommand` migrations immediately. Instead, `main` is just the
-integration branch; `production` only ever moves when a human deliberately
-promotes a reviewed commit to it (see step 6), and that promotion is what
-actually triggers a Railway deploy. The `production` branch already exists
-in this repo for exactly this purpose.
+that continuously opens PRs against `main`, and — since 2026-08-28 — both the
+loop and interactive sessions may squash-merge a PR themselves once both
+required `/review-branch` passes are clean and it's mergeable/clean, with no
+separate human go-ahead required. If Railway watched `main` directly, every
+one of those merges — reviewed but not yet soak-tested in a real deploy —
+would auto-deploy and run `preDeployCommand` migrations immediately, with no
+remaining checkpoint before production traffic sees it. Instead, `main` is
+just the integration branch; `production` only ever moves when a human
+deliberately promotes a reviewed, merged commit to it (see step 6) — that
+promotion is now the *only* human checkpoint left before a deploy, and that
+is what actually triggers a Railway deploy. The `production` branch already
+exists in this repo for exactly this purpose.
 
 Cost: ~$10–18/mo usage-based, in exchange for zero server ops and git-push
 deploys — pick this if you'd rather not manage a Linux box yourself.
