@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -46,6 +46,7 @@ bootstrap:
 bake:
 	@rm -rf api/static
 	@cp -R frontend/dist api/static
+	@rm -rf api/static/.vite
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
@@ -90,6 +91,14 @@ lint:
 	poetry run ruff check .
 
 check: fmt lint test
+
+# Post-merge local maintenance. Planning is the default; apply rechecks every
+# candidate immediately before removing local refs/worktrees.
+git-cleanup:
+	python3 scripts/cleanup_git_state.py
+
+git-cleanup-apply:
+	python3 scripts/cleanup_git_state.py --apply
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 

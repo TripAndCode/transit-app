@@ -2,6 +2,12 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+// Must come after maplibre-gl's own CSS import above -- these rules
+// override MapLibre's hardcoded-white popup defaults, and both stylesheets
+// land in this same lazy chunk, so import order here is what decides which
+// one wins the cascade (see the file for why they can't live in global.css).
+import "./map/mapOverrides.css";
 import { useForecastHeatmap, useHeatmap, useRouteShape } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { HeatmapProps } from "../api/types";

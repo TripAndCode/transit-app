@@ -13,14 +13,17 @@ Invoke as `/name` from a Claude Code session.
 | `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Read-only + proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
 | `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → proportional `/review-branch` verification → draft PR. Never marks ready or merges. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches + opens PRs via `gh`. |
+| `/cleanup-merged` | Post-merge maintenance: syncs `main`, runs an evidence-based dry run, removes only proven-stale local branches/worktrees, and can repeat on a VPS clone. | Deletes clean local refs/worktrees only; never deletes GitHub branches or files. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
-→ `/address-my-pr-comments` (triage + fix + reply).
+→ `/address-my-pr-comments` (triage + fix + reply) → merge → `/cleanup-merged`.
 
 `scripts/prepare_review.py` is the deterministic front end for `/review-branch`. It
 produces the private diff and JSON routing manifest, so commands should consume its
 output rather than reimplementing path exclusions, line counts, or test-share math.
+`scripts/cleanup_git_state.py` is the deletion authority for `/cleanup-merged` and the
+VPS loop; it defaults to dry-run and rechecks mutable state before applying a plan.
 
 Each command file states its own token-frugality rules inline, in the phase they apply
 to. This README is a map, not a rule store: no command loads it, so nothing here is

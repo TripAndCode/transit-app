@@ -10,7 +10,6 @@ import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
 import { RouteError } from "./components/RouteError";
 import { ChunkLoading } from "./components/RoutePlaceholders";
-import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles/global.css";
 
 // Tabs and pages are code-split per route — MapTab alone pulls in

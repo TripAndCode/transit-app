@@ -180,19 +180,15 @@ summary::-webkit-details-marker { display: none; }
   100% { background-position: -200% 0; }
 }
 
-/* MapLibre's default popup is hardcoded white — its content was inheriting
-   the app's dark-theme --text-primary (tuned for the near-black page
-   background), producing near-invisible pale-on-white text in dark mode.
-   Theme it with our own tokens instead so it adapts to both themes. */
-.maplibregl-popup-content {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
-  color: var(--text-primary);
-}
-.maplibregl-popup-tip {
-  display: none;
-}
+/* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in
+   src/tabs/map/mapOverrides.css now, imported from MapTab.tsx right after
+   maplibre-gl's own CSS — same lazy chunk, so import order (and therefore
+   cascade order against MapLibre's hardcoded-white defaults) is reliable.
+   They used to live here because main.tsx imported maplibre-gl.css before
+   this file; once MapLibre's CSS moved to MapTab's lazy chunk (to keep it
+   out of the entry chunk), staying here would load AFTER MapLibre's own
+   stylesheet with equal specificity and silently lose the cascade. */
+
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
    which emits bare h1-h6/p/ul/table/blockquote/img with no styling of their
    own -- give them the same tokens the rest of the app uses instead of
@@ -239,9 +235,4 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content a {
   color: var(--accent);
-}
-
-.maplibregl-popup-close-button {
-  color: var(--text-secondary);
-  font-size: 16px;
 }

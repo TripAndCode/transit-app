@@ -639,7 +639,14 @@ make fmt       # ruff format
 make lint      # ruff check
 make test      # pytest (requires DATABASE_URL + running container)
 make check     # fmt + lint + test
+make git-cleanup        # post-merge dry run for local branches/worktrees
+make git-cleanup-apply  # apply that plan with deletion-time safety rechecks
 ```
+
+After merging a PR, sync `main`, run the cleanup dry run, then apply it in each
+persistent clone. Claude Code users can run `/cleanup-merged`; pass its `--vps`
+arguments to repeat the same policy remotely. Remote branches and unique local work
+are never deleted by this workflow.
 
 Run a specific test file. **Point `DATABASE_URL` at the throwaway test DB on
 `:5544`, never the dev DB on `:5433`** — the test suite auto-migrates its

@@ -86,6 +86,44 @@ async def test_cache_miss_writes_cache_row(pool_with_agency, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_force_tool_call_appends_json_mode_directive_under_cache(pool_with_agency, monkeypatch):
+    """item 8 review finding: force_tool_call was a silent no-op under
+    ASK_INTENT_CACHE_ENABLED, since JSON mode (response_format=json_object)
+    can't be combined with tool_choice at all — the fix only reached the
+    non-cache branch. Pins that force_tool_call=True instead appends
+    JSON_MODE_FORCE_TOOL_ADDENDUM's prompt-level directive so the model is
+    told it must resolve to a real tool, not null/omitted, even in
+    cache-enabled deployments.
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    captured = {}
+
+    class _CapturingClient:
+        def chat_completions(self, *, messages, **kw):
+            captured["system_prompt"] = messages[0]["content"]
+            return _sig_message(tool="capabilities", args={}), None
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _CapturingClient())
+
+    async with pool.acquire() as conn:
+        await chat_with_tools(
+            "次の50件",
+            _ctx(),
+            conn,
+            agency_id,
+            locale="ja",
+            history=[{"question": "路線一覧", "tool": "capabilities", "args": {}}],
+            force_tool_call=True,
+        )
+    assert "MUST name that same tool" in captured["system_prompt"]
+
+    async with pool.acquire() as conn:
+        await chat_with_tools("別の質問です", _ctx(), conn, agency_id, locale="ja", force_tool_call=False)
+    assert "MUST name that same tool" not in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
 async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
     """Same-text repeats hit the pre-LLM question-text lookup → LLM never invoked.
 
@@ -127,6 +165,60 @@ async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT hit_count FROM ask_intent_cache LIMIT 1")
     assert row["hit_count"] == 3  # 1 (manual) + 2 (two cache hits)
+
+
+@pytest.mark.asyncio
+async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monkeypatch):
+    """PR #243 review finding: the Stage-1 exact-text pre-hit is keyed only on
+    literal question text + agency, with no notion of ``history`` — so a
+    generic continuation phrase like "次の50件" would return whichever
+    (tool, args) was last cached for that exact text by *any* prior question
+    in the agency, ignoring the current conversation's actual prior turn.
+    When force_tool_call=True (a recognized, history-dependent
+    continuation), the pre-hit must be skipped so the LLM call — which
+    actually sees history_block — decides instead of a stale cache row.
+    """
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+
+    from pipeline.query import intent_cache as ic
+    from pipeline.query.intent import IntentSignature, canonicalize
+    from pipeline.query.intent import signature_hash as _sig_hash
+
+    # Pre-populate a stale cache row for the exact literal text "次の50件",
+    # from some unrelated earlier question/tool — this is what a naive
+    # pre-hit lookup would return regardless of the current history.
+    _stale_tool, _stale_args = "capabilities", {}
+    _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
+    _stale_can_args = canonicalize(_stale_tool, _stale_args, _ctx_dict)
+    _stale_hash = _sig_hash(_stale_tool, _stale_can_args)
+    async with pool.acquire() as conn:
+        await ic.upsert(
+            conn,
+            _stale_hash,
+            IntentSignature(tool=_stale_tool, args=_stale_args, confidence=0.9),
+            _stale_can_args,
+            agency_id,
+            question="次の50件",
+        )
+
+    fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "stops", "offset": 50}))
+    monkeypatch.setattr(chat_module, "_get_client", lambda: fake)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools(
+            "次の50件",
+            _ctx(),
+            conn,
+            agency_id,
+            locale="ja",
+            history=[{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}],
+            force_tool_call=True,
+        )
+
+    assert fake.calls == 1, "force_tool_call must skip the stale pre-hit and reach the LLM"
+    assert result["tool_call"]["name"] == "describe_data"
+    assert result["tool_call"]["arguments"].get("offset") == 50
 
 
 @pytest.mark.asyncio

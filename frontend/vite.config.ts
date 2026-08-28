@@ -22,5 +22,10 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    // Emitted to dist/.vite/manifest.json — scripts/check-entry-chunk.mjs
+    // reads it to confirm the entry chunk's static import graph never
+    // pulls in maplibre-gl (CLAUDE.md: "keep MapLibre out of the entry
+    // chunk").
+    manifest: true,
   },
 });

@@ -51,7 +51,16 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
     client, agency_id = ask_client
 
     async def mock_chat(
-        question, ctx, conn, agency_id, model="x", locale="ja", rag_examples=None, history=None, ch=None
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model="x",
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
     ):
         return {
             "answer": "テスト回答",
@@ -228,9 +237,19 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
     captured = {}
 
     async def fake_chat(
-        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
     ):
         captured["rag_examples"] = rag_examples
+        captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
@@ -243,6 +262,9 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
     assert resp.status_code == 200
     # rag_examples is a list (possibly empty if rag_chunks is empty for this agency).
     assert isinstance(captured["rag_examples"], list)
+    # A non-follow-up novel question must NOT force a tool call — a genuine
+    # out-of-scope refusal in free text is still a valid, deliberate answer.
+    assert captured["force_tool_call"] is False
 
 
 @pytest.mark.asyncio
@@ -252,9 +274,19 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     captured = {}
 
     async def fake_chat(
-        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
     ):
         captured["history"] = history
+        captured["force_tool_call"] = force_tool_call
         return {
             "answer": "stub",
             "tool_call": {"name": "describe_data", "arguments": {"kind": "stops", "offset": 50}},
@@ -279,6 +311,152 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     assert resp.status_code == 200
     assert captured["history"] and captured["history"][0]["question"] == "停留所はいくつ？"
     assert resp.json().get("router_stage") == "llm"
+    # Regression pin (item 8 / NEXT_TASK.md): a recognized pagination
+    # follow-up must force a tool call rather than leave tool_choice="auto",
+    # which live-observed a bare "次の50件" coming back with tool_call: None.
+    assert captured["force_tool_call"] is True
+
+
+@pytest.mark.asyncio
+async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask_client, monkeypatch):
+    """Follow-up phrasing after a free-text (tool=None) turn must not force a tool call.
+
+    is_follow_up()'s regex matches ordinary continuation phrasing ("他には")
+    that can legitimately follow an out-of-scope refusal, not just a
+    pagination continuation. Forcing tool_choice="required" there would
+    remove the model's only correct move (decline again) and risk a
+    hallucinated call instead (item 8 review finding).
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+    ):
+        captured["force_tool_call"] = force_tool_call
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for follow-ups")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "他には？",
+            "history": [{"question": "雨天時の比較は？", "tool": None, "args": None}],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["force_tool_call"] is False
+
+
+@pytest.mark.asyncio
+async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, monkeypatch):
+    """A 2+-turn history must gate force_tool_call on the LAST turn only.
+
+    Turn 1 carried a real paginatable tool (describe_data); turn 2 is a
+    free-text aside (tool=None, e.g. an out-of-scope refusal). The current,
+    documented design only inspects history[-1] — so a bare continuation
+    phrase here must NOT force a tool call, even though an earlier turn in
+    the (capped-at-3) history did have one. This pins that as an explicit,
+    tested decision rather than an untested gap (review finding on PR #243).
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+    ):
+        captured["force_tool_call"] = force_tool_call
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for follow-ups")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "他には？",
+            "history": [
+                {"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}},
+                {"question": "雨天時の比較は？", "tool": None, "args": None},
+            ],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["force_tool_call"] is False
+
+
+@pytest.mark.asyncio
+async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_client, monkeypatch):
+    """A prior tool with no continuation axis (no ``offset``) must not force a tool call.
+
+    Only ``describe_data`` supports ``offset`` (see ``_TOOL_DEFAULTS`` in
+    pipeline.query.intent). A bare "もっと" after a tool with no pagination
+    concept (e.g. on_time_rate) has no valid re-invocation, so forcing
+    tool_choice="required" would risk a nonsensical re-call instead of a
+    legitimate prose answer (review finding on PR #243).
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+    ):
+        captured["force_tool_call"] = force_tool_call
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def boom(*a, **k):
+        raise AssertionError("router should be skipped for follow-ups")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={
+            "question": "もっと",
+            "history": [{"question": "定時率は？", "tool": "on_time_rate", "args": {}}],
+        },
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["force_tool_call"] is False
 
 
 @pytest.mark.asyncio
@@ -311,7 +489,16 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     client, agency_id = ask_client
 
     async def fake_chat(
-        question, ctx, conn, agency_id, model=None, locale="ja", rag_examples=None, history=None, ch=None
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 

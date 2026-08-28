@@ -65,17 +65,24 @@ the task needs them.
 ## Git and pull requests
 
 - Base branch is `main`; squash merge with Conventional Commit subjects.
-- Every PR runs `/review-branch` before opening. The command uses one pass and two
-  merged reviewers for normal changes, with extra review only for enforcement,
-  high-risk paths, or material fixes. Human prose outside `.claude/**` may use its
-  direct trivial path; `.claude/**` and this file are executable process docs.
-- Open PRs as drafts. Mark ready only after the proportional review is clean. Every
-  PR body states `**Origin:** Interactive session` or
+- Every PR runs `/review-branch` at least twice before opening as a draft: an
+  initial invocation, then a second full invocation on the (possibly fixed) diff
+  before opening, even if the first found nothing worth fixing. Each invocation
+  uses one pass and two merged reviewers for normal changes, with extra review
+  only for enforcement, high-risk paths, or material fixes. Human prose outside
+  `.claude/**` may use its direct trivial path; `.claude/**` and this file are
+  executable process docs.
+- Open PRs as drafts. Mark ready only after both required `/review-branch` passes
+  are clean. Every PR body states `**Origin:** Interactive session` or
   `**Origin:** Autonomous VPS loop (item N)`.
 - CI is currently skipped: every commit message includes `[skip ci]` as its own
   line/trailer. Local verification and the pre-push hook are therefore mandatory.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
+- After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
+  `scripts/cleanup_git_state.py` dry run is the deletion authority: only clean local
+  worktrees and branches proven recoverable from `main` or an exact merged-PR head
+  may be removed. Remote branches, `production`, and unique post-merge commits stay.
 
 ## Process rules
 
