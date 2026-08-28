@@ -94,6 +94,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   became the branch's pushed tip, so it alone (re-)triggered the same
   billing-failure CI run despite every real work commit on the branch
   correctly carrying the trailer. Always add `[skip ci]` to a merge commit
-  too: either pass `git merge main -m "Merge main into vps-loop/item-N
-
-[skip ci]"` directly, or amend the default merge message before pushing.
+  too: either pass `git merge main -m "Merge main into vps-loop/item-N" -m
+  "[skip ci]"` directly (multiple `-m` flags create a blank-line-separated
+  body, avoiding a literal embedded newline in the shell string), or amend
+  the default merge message before pushing.
