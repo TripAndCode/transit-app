@@ -263,6 +263,7 @@ async def chat_with_tools(
     rag_examples: list | None = None,
     history: list | None = None,
     ch=None,
+    force_tool_call: bool = False,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -270,6 +271,22 @@ async def chat_with_tools(
     :func:`dispatch` call (Task 8 — handlers reading the live `updates`
     table read it from ClickHouse). Defaults to ``None`` for callers/tests
     that never exercise those specific tool paths.
+
+    ``force_tool_call`` is set by the API layer (``api/routers/ask.py``)
+    exactly when ``router.is_follow_up(question)`` matched AND prior-turn
+    history is attached — i.e. bare continuation phrasing ("次の50件",
+    "もっと", "next") that only makes sense as a re-invocation of the
+    previous tool with adjusted args. For that narrow class, a free-text
+    reply is never a correct answer, but ``tool_choice="auto"`` still lets
+    the model pick one — observed live as a turn-2 pagination follow-up
+    ("次の50件" after a stops listing) coming back with ``tool_call: None``
+    instead of ``describe_data(kind=stops, offset=50)``, even though the
+    system prompt already documents that exact rewrite (see rule 7 in
+    ``SYSTEM_PROMPT``). Forcing ``tool_choice="required"`` for this one
+    request removes the model's option to decline, closing that failure
+    mode without touching the router's designed LLM-routing for follow-ups
+    (see ``tests/api/test_api_ask.py::test_follow_up_reroutes_to_llm_with_history``)
+    or affecting any other question shape, which keeps ``tool_choice="auto"``.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -460,7 +477,7 @@ async def chat_with_tools(
         return client.chat_completions(
             messages=messages,
             tools=TOOLS,
-            tool_choice="auto",
+            tool_choice="required" if force_tool_call else "auto",
             temperature=0.0,
             model_override=model,
             allowed_providers=_allowed_providers(),

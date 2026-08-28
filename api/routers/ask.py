@@ -270,6 +270,12 @@ async def ask(
             rag_examples=examples,
             history=history,
             ch=ch,
+            # A recognized follow-up ("次の50件", "もっと") only makes sense
+            # as a re-invocation of the previous tool — never a free-text
+            # answer — so force a tool call instead of leaving it to
+            # tool_choice="auto" (see chat_with_tools's docstring for the
+            # live-observed "tool_call: None" failure this closes).
+            force_tool_call=follow_up,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
