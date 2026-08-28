@@ -316,3 +316,94 @@ async def test_degradation_message_no_providers(monkeypatch):
     out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
     assert out["success"] is False
     assert out["answer"] == chat._chat_str("llm_unconfigured", "ja")
+
+
+@pytest.mark.asyncio
+async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
+    """item 16 fix: the history block must tell the model not to answer an
+    unrelated question from stale prior-turn data.
+
+    Live-observed bug (2026-08-28): with history from an unrelated ranking
+    turn attached, a plain "停留所はいくつ？" ("how many stops?") — on-topic
+    but with no follow-up phrasing, so ``route_or_examples()`` still ran and
+    found no confident match — came back as "the table doesn't show stop
+    counts" instead of dispatching ``describe_data(kind=stops)``. The model
+    answered from the attached history text rather than recognizing it
+    should call a tool. Pin that the history block now carries an explicit
+    "only use this if the current question references it" guard, in both
+    locales, so this instruction can't silently regress out of the prompt.
+    """
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    history = [{"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}}]
+
+    await chat.chat_with_tools("停留所はいくつ？", ctx, conn=None, agency_id=1, locale="ja", history=history)
+    blob_ja = " ".join(m["content"] for m in captured["messages"])
+    assert "現在の質問が上記と無関係な新しい話題であれば" in blob_ja
+    assert "適切なツールを呼び出す" in blob_ja
+
+    await chat.chat_with_tools("how many stops are there?", ctx, conn=None, agency_id=1, locale="en", history=history)
+    blob_en = " ".join(m["content"] for m in captured["messages"])
+    assert "new, unrelated topic" in blob_en
+    assert "call the appropriate tool for the current question on its own" in blob_en
+
+
+@pytest.mark.asyncio
+async def test_unrelated_question_with_unrelated_history_dispatches_tool(conn_with_minimal_seed, monkeypatch):
+    """item 16 repro, end to end: an unrelated in-scope question with no
+    follow-up phrasing must still be able to dispatch a fresh tool call even
+    though unrelated history from a prior ranking turn is attached.
+
+    Mirrors the live repro: history carries a ``top_n`` ranking turn, the
+    current question ("停留所はいくつ？") has no follow-up phrasing (so
+    ``force_tool_call`` is False — this is not a recognized continuation,
+    see ``api/routers/ask.py``), and the fake LLM plays the role of a
+    correctly-instructed model by returning a fresh ``describe_data``
+    tool call instead of prose anchored to the unrelated history. This pins
+    that the orchestrator's plumbing (dispatch + response shaping) actually
+    surfaces that tool call rather than something along the way collapsing
+    it to a prose non-answer.
+    """
+    pool, agency_id = conn_with_minimal_seed
+
+    def _fake_message():
+        func = SimpleNamespace(name="describe_data", arguments='{"kind": "stops"}')
+        call = SimpleNamespace(function=func, id="call_1", type="function")
+        return SimpleNamespace(content=None, tool_calls=[call])
+
+    class _FakeClient:
+        def chat_completions(self, *, tool_choice, **k):
+            assert tool_choice == "auto"  # not a recognized continuation — must not be forced
+            return _fake_message(), None
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
+
+    ctx = _ctx()
+    history = [{"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}}]
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools(
+            "停留所はいくつ？",
+            ctx,
+            conn,
+            agency_id,
+            locale="ja",
+            history=history,
+            force_tool_call=False,
+        )
+
+    assert result["tool_call"] is not None
+    assert result["tool_call"]["name"] == "describe_data"
+    assert result["tool_call"]["arguments"] == {"kind": "stops"}
