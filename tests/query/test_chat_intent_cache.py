@@ -194,8 +194,12 @@ async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monke
     _stale_hash = _sig_hash(_stale_tool, _stale_can_args)
     async with pool.acquire() as conn:
         await ic.upsert(
-            conn, _stale_hash, IntentSignature(tool=_stale_tool, args=_stale_args, confidence=0.9),
-            _stale_can_args, agency_id, question="次の50件",
+            conn,
+            _stale_hash,
+            IntentSignature(tool=_stale_tool, args=_stale_args, confidence=0.9),
+            _stale_can_args,
+            agency_id,
+            question="次の50件",
         )
 
     fake = _FakeClient(_sig_message(tool="describe_data", args={"kind": "stops", "offset": 50}))
