@@ -74,16 +74,26 @@ const CSS_MARKER = "maplibregl-canvas";
 const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
 
 // Matches <script ... src="...">, <link ... href="...">, single- or
-// double-quoted, tag attributes in any order/case. This is a deliberately
+// double-quoted, tag attributes in any order/case. Also matches HTML5's
+// unquoted attribute-value form (e.g. src=vendor-maplibre.js) — browsers
+// execute that identically to a quoted src, so a hand-authored tag using it
+// would otherwise sail through this scan unnoticed. This is a deliberately
 // simple regex scan (not an HTML parser) — good enough for this repo's
 // single, hand-maintained index.html; it is not meant to handle arbitrary
 // HTML (e.g. attribute values split across lines, or src set via JS).
-const SCRIPT_SRC_RE = /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
-const LINK_HREF_RE = /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
+// Each regex has two capture groups (quoted, unquoted); exactly one is
+// populated per match — see collectHtmlAssetUrls below.
+const SCRIPT_SRC_RE = /<script\b[^>]*\bsrc\s*=\s*(?:["']([^"']+)["']|([^\s"'=<>`]+))[^>]*>/gi;
+const LINK_HREF_RE = /<link\b[^>]*\bhref\s*=\s*(?:["']([^"']+)["']|([^\s"'=<>`]+))[^>]*>/gi;
 
 // A tag pointing at another origin (http(s):, protocol-relative //, or a
 // non-fetchable scheme like data:/mailto:) can't be a locally-shipped
 // MapLibre bundle copied into dist/, so it's out of scope for this check.
+// Accepted scope limit: a hand-authored tag using the site's own absolute
+// production URL (e.g. https://app.example.com/vendor-maplibre.js) is also
+// treated as external and skipped here. That requires hardcoding the real
+// deploy origin, which is far more conspicuous in code review than a bare
+// relative path — not worth building same-origin URL resolution to catch.
 function isExternalOrNonFileUrl(url) {
   return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url);
 }
@@ -102,7 +112,7 @@ function collectHtmlAssetUrls(html) {
     re.lastIndex = 0;
     let match;
     while ((match = re.exec(html))) {
-      urls.push(match[1]);
+      urls.push(match[1] ?? match[2]);
     }
   }
   return urls;

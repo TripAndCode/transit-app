@@ -253,6 +253,33 @@ test("hand-authored <link href> in index.html bypasses the manifest but is still
   assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
 });
 
+test("hand-authored unquoted <script src=...> in index.html bypasses the manifest but is still caught", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      // Not referenced by any manifest node — simulates a file copied
+      // verbatim from public/ and wired up by a hand-authored tag using
+      // HTML5's unquoted attribute-value form, which browsers execute
+      // identically to a quoted src.
+      "vendor-maplibre-unquoted.js": `${JS_MARKER}();`,
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <body>
+    <script type="module" src="/assets/index.js"></script>
+    <script src=/vendor-maplibre-unquoted.js></script>
+  </body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
+});
+
 test("external <link href> (e.g. Google Fonts) is not resolved against dist/ and does not false-positive", () => {
   const dist = makeDist(
     {
