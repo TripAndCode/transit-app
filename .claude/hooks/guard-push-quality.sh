@@ -6,7 +6,9 @@
 # be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
 # determine what changed or can't run a required check, it blocks (exit 2)
 # rather than silently letting the push through — set PUSH_GATE_SKIP_TESTS=1
-# for a deliberate, visible opt-out of the DB-dependent backend tests only.
+# for a deliberate, visible opt-out of the DB-dependent backend tests only,
+# or PUSH_GATE_SKIP_BUILD=1 to skip the frontend build:bundle + entry-chunk
+# check specifically.
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
 input="$(cat)"
@@ -41,11 +43,42 @@ run_with_timeout() {
   local secs="$1"; shift
   if command -v timeout >/dev/null 2>&1; then
     timeout "$secs" "$@"
+    return $?
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout "$secs" "$@"
-  else
-    "$@"
+    return $?
   fi
+
+  # Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
+  # coreutils). Running unbounded here would silently defeat this script's
+  # documented fail-closed contract, so enforce the budget with a background
+  # watchdog instead. Every real call site is a compound command (bash -c
+  # "... && ..."), so job control (`set -m`) is required to put it in its
+  # own process group — otherwise TERM/KILL only hits the wrapper shell and
+  # leaves its child process tree (npm/vite/pytest workers) running as an
+  # orphan.
+  local marker; marker="$(mktemp)"
+  rm -f "$marker"
+  local had_job_control=0
+  case $- in *m*) had_job_control=1 ;; esac
+  set -m
+  "$@" &
+  local cmd_pid=$!
+  ( sleep "$secs"; : > "$marker"; kill -TERM -"$cmd_pid" 2>/dev/null; sleep 2; kill -KILL -"$cmd_pid" 2>/dev/null ) &
+  local watchdog_pid=$!
+  wait "$cmd_pid"
+  local status=$?
+  [ "$had_job_control" -eq 1 ] || set +m
+  kill "$watchdog_pid" 2>/dev/null
+  wait "$watchdog_pid" 2>/dev/null
+  if [ -e "$marker" ]; then
+    # Watchdog fired: report GNU timeout's sentinel (124) so call sites'
+    # existing `-eq 124` checks keep working, rather than the SIGTERM exit
+    # status (143) the fallback path would otherwise produce.
+    rm -f "$marker"
+    status=124
+  fi
+  return "$status"
 }
 
 # SCOPE_OK=0 means we couldn't determine what changed (no resolvable base
@@ -72,15 +105,15 @@ if [ "$SCOPE_OK" -eq 1 ]; then
 
   while IFS= read -r line; do
     [ -n "$line" ] && FE_FILES+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json')
+  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs')
 fi
 
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   {
     echo "== poetry run ruff format --check (changed files) =="
-    poetry run ruff format --check -- "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run ruff format --check -- "${PY_FILES[@]}" || FAIL=1
     echo "== poetry run ruff check (changed files) =="
-    poetry run ruff check -- "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run ruff check -- "${PY_FILES[@]}" || FAIL=1
   } >>"$LOG" 2>&1
 fi
 
@@ -105,7 +138,7 @@ fi
 if [ "$RUN_BACKEND" -eq 1 ]; then
   if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p 5544 >/dev/null 2>&1; then
     echo "== poetry run pytest (DATABASE_URL -> :5544 test DB) ==" >>"$LOG"
-    if ! run_with_timeout 240 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
+    if ! run_with_timeout 420 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
     fi
@@ -135,6 +168,21 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
     echo "== npm run lint:i18n-strings =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
+    echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
+    if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
+      echo "WARNING: PUSH_GATE_SKIP_BUILD=1 set — skipping npm run build:bundle + check:entry-chunk for this push (deliberate opt-out; MapLibre-in-entry regressions won't be caught locally)." >&2
+    else
+      echo "== npm run build:bundle && npm run check:entry-chunk (MapLibre must stay out of the entry chunk; typecheck already ran above, so this build step skips tsc -b) =="
+      run_with_timeout 480 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run build:bundle && npm run check:entry-chunk"
+      rc=$?
+      if [ "$rc" -eq 124 ]; then
+        echo "frontend build/check-entry-chunk TIMED OUT after 480s (not a build or check failure)." >&2
+      fi
+      if [ "$rc" -ne 0 ]; then
+        FAIL=1
+      fi
+    fi
   } >>"$LOG" 2>&1
 fi
 

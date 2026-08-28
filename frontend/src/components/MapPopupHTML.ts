@@ -26,9 +26,11 @@ import type { TFunction } from "i18next";
  *
  * Colors are all CSS custom properties (`var(--text-secondary)` etc.),
  * not hardcoded hex — the popup's outer chrome (background/border) is
- * themed globally in `styles/global.css` (`.maplibregl-popup-content`),
- * and every color used here must match that same light/dark-adaptive
- * token set rather than hardcoding a value tuned for one background.
+ * themed in `tabs/map/mapOverrides.css` (`.maplibregl-popup-content`,
+ * imported from MapTab.tsx right after maplibre-gl's own CSS so it wins
+ * the cascade), and every color used here must match that same
+ * light/dark-adaptive token set rather than hardcoding a value tuned for
+ * one background.
  */
 
 type StopPopupData = {

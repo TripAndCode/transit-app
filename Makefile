@@ -46,6 +46,7 @@ bootstrap:
 bake:
 	@rm -rf api/static
 	@cp -R frontend/dist api/static
+	@rm -rf api/static/.vite
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────

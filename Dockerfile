@@ -5,6 +5,11 @@ COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
+# dist/.vite/manifest.json (from vite.config.ts's build.manifest: true,
+# used by scripts/check-entry-chunk.mjs) is a build-time-only artifact —
+# strip it so it doesn't ship into the production static tree, where
+# api/main.py's SPA fallback would serve it publicly.
+RUN rm -rf dist/.vite
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
 FROM python:3.12-slim

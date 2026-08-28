@@ -41,6 +41,21 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+      # Fixture-based positive/negative controls for check-entry-chunk.mjs
+      # itself — doesn't need a real build, just proves the detection logic
+      # (marker scan, static-vs-dynamic closure walk, size budget) still
+      # fires on a violation and stays quiet on a clean tree.
+      - name: Entry-chunk checker unit tests
+        run: npm run test:check-entry-chunk
+
+      # Typecheck already ran above (tsc -b), so this build step skips it
+      # (build:bundle = vite build only) and just enforces CLAUDE.md's
+      # "keep MapLibre out of the entry chunk" rule against the real bundle.
+      - name: Build + entry-chunk check
+        run: |
+          npm run build:bundle
+          npm run check:entry-chunk
+
   test:
     runs-on: ubuntu-latest
 
