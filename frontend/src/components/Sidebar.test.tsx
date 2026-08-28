@@ -167,4 +167,51 @@ describe("Sidebar", () => {
     renderSidebar();
     expect(await screen.findByRole("button", { name: "Account menu" })).toBeTruthy();
   });
+
+  describe("mobile drawer", () => {
+    it("renders the hamburger trigger without mounting a second copy of the nav until opened", () => {
+      renderSidebar();
+      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
+      // Only one "Map" link should exist yet — the drawer body is lazily
+      // mounted on open, so the common (closed) case never duplicates every
+      // nav label in the DOM (which would break the singular getByText/
+      // getByRole assertions used throughout this file).
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+
+    it("mounts a second copy of the nav links once the hamburger is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(2);
+    });
+
+    it("closes the drawer (unmounting the duplicate nav) when a nav link inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      const mapLinks = screen.getAllByRole("link", { name: /Map/ });
+      expect(mapLinks.length).toBe(2);
+      await user.click(mapLinks[1]);
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+
+    it("closes the drawer when the close button inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(2);
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+
+    it("closes the drawer when the backdrop is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(2);
+      await user.click(screen.getByRole("presentation"));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+  });
 });
