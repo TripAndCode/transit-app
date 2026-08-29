@@ -59,9 +59,11 @@ else
 fi
 
 failed=0
+processed=0
 
 for rt in "$BASE_DIR"/data/*/rt; do
     [ -d "$rt" ] || continue
+    processed=$((processed + 1))
     id=$(basename "$(dirname "$rt")")
     if "$AWS" s3 sync "$rt" "s3://$OBJECT_STORE_BUCKET/rt/$id" \
         --endpoint-url "$OBJECT_STORE_ENDPOINT" \
@@ -75,6 +77,7 @@ done
 
 for sdir in "$BASE_DIR"/data/*/static; do
     [ -d "$sdir" ] || continue
+    processed=$((processed + 1))
     id=$(basename "$(dirname "$sdir")")
     if "$AWS" s3 sync "$sdir" "s3://$OBJECT_STORE_BUCKET/static/$id" \
         --endpoint-url "$OBJECT_STORE_ENDPOINT" \
@@ -86,6 +89,16 @@ for sdir in "$BASE_DIR"/data/*/static; do
     fi
 done
 
+# A vacuous "success" (no agency directories found at all -- e.g. a
+# misconfigured COLLECTOR_BASE) must NOT write the marker: prune.sh would
+# otherwise see a fresh marker and delete local data that was never
+# actually looked at, let alone mirrored.
+if [ "$processed" -eq 0 ]; then
+    echo "sync-r2: no agency data directories found under $BASE_DIR/data" \
+        "— refusing to mark success" >&2
+    exit 1
+fi
+
 if [ "$failed" -eq 1 ]; then
     echo "==> sync-r2 completed WITH FAILURES — see above" >&2
     exit 1
@@ -95,6 +108,10 @@ fi
 # and static) -- a partial success must NOT refresh prune.sh's freshness
 # check, or a permanently-failing single agency could still let prune.sh
 # delete data for that agency forever while the marker stays "fresh" from
-# everyone else's successful syncs.
-date -u +%Y-%m-%dT%H:%M:%SZ > "$OK_MARKER"
+# everyone else's successful syncs. Check the write itself too: a failed
+# write (bad path, disk full) must not be reported as "complete".
+if ! date -u +%Y-%m-%dT%H:%M:%SZ > "$OK_MARKER"; then
+    echo "sync-r2: FAILED to write success marker $OK_MARKER" >&2
+    exit 1
+fi
 echo "==> sync-r2 complete"

@@ -30,7 +30,11 @@ if [ ! -f "$OK_MARKER" ]; then
         "a fully-successful run). Local data has not been confirmed mirrored to R2." >&2
     exit 65
 fi
-marker_epoch=$(date -r "$OK_MARKER" +%s 2>/dev/null || stat -f %m "$OK_MARKER" 2>/dev/null)
+if ! marker_epoch=$(date -r "$OK_MARKER" +%s 2>/dev/null || stat -f %m "$OK_MARKER" 2>/dev/null); then
+    echo "prune.sh: REFUSING to run — could not read $OK_MARKER's mtime (neither" \
+        "'date -r' nor 'stat -f' worked on this platform)." >&2
+    exit 65
+fi
 stale_after=$(( MAX_STALE_DAYS * 86400 ))
 if [ $(( $(date -u +%s) - marker_epoch )) -gt "$stale_after" ]; then
     echo "prune.sh: REFUSING to run — $OK_MARKER is more than $MAX_STALE_DAYS day(s) old." \

@@ -131,3 +131,20 @@ if command -v flock >/dev/null 2>&1; then
 else
     echo "SKIP: flock not installed on this platform, overlap-guard behavior not exercised"
 fi
+
+# Vacuous "success" guard: an empty/misconfigured COLLECTOR_BASE (no
+# data/*/rt or data/*/static dirs at all -- e.g. a typo'd env var) must
+# NOT write the marker or exit 0. Otherwise prune.sh would see a fresh
+# marker and delete local data that was never even looked at, let alone
+# mirrored.
+EMPTY_BASE=$(mktemp -d)
+mkdir -p "$EMPTY_BASE/data" # data/ exists, but has no per-agency subdirs
+: > "$AWS_LOG"
+if COLLECTOR_BASE="$EMPTY_BASE" ../bin/sync-r2.sh >/dev/null 2>&1; then
+    fail "sync-r2.sh should exit nonzero when no agency directories exist"
+fi
+[ -s "$AWS_LOG" ] && fail "aws was invoked despite no agency directories existing"
+[ -f "$EMPTY_BASE/.sync-r2.last-ok" ] \
+    && fail "success marker was written despite processing zero agencies"
+rm -rf "$EMPTY_BASE"
+pass "an empty COLLECTOR_BASE exits nonzero and never writes the success marker"
