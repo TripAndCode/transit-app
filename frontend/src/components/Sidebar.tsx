@@ -12,6 +12,7 @@ import {
   SquareDashed,
   ChevronLeft,
   ChevronRight,
+  PanelLeft,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -20,6 +21,8 @@ import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIcon };
 
@@ -63,13 +66,18 @@ export function Sidebar() {
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Narrow-viewport drawer: the desktop rail (below) is CSS-hidden under
-  // 640px (matching ThreadSidebar's breakpoint) since its fixed 230/64px
-  // width would otherwise eat most of a ~390px phone screen, leaving almost
-  // no room for tab content. The drawer body below is only mounted while
-  // open — unlike ThreadSidebar's always-mounted mobile twin — so the
-  // common case (drawer closed) doesn't duplicate every nav label/link in
-  // the DOM and break single-match queries in tests or a11y tooling.
+  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY,
+  // also used by ThreadSidebar) the desktop rail's fixed 230/64px width
+  // would otherwise eat most of a ~390px phone screen, leaving almost no
+  // room for tab content. isMobile conditionally renders only the active
+  // variant — mirroring ThreadSidebar's useMediaQuery-based split — instead
+  // of always mounting both and toggling visibility via CSS `display`,
+  // which used to double the nav's DOM nodes/listeners at every viewport
+  // width. The drawer body itself is additionally only mounted while open
+  // (on top of the desktop/mobile split), so the common case (drawer
+  // closed) doesn't duplicate every nav label/link in the DOM and break
+  // single-match queries in tests or a11y tooling.
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   function toggleCollapsed() {
@@ -305,6 +313,119 @@ export function Sidebar() {
     </Link>
   );
 
+  if (isMobile) {
+    return (
+      <>
+        {/* Narrow-viewport nav: a slim persistent rail (not a floating fixed
+            button) holding just the trigger, plus a slide-in drawer for the
+            rest — same drawer pattern as ThreadSidebar's mobile thread list.
+            A genuine flex-row sibling of <main> (36px wide, same idea as the
+            desktop rail just narrower) rather than position:fixed keeps the
+            trigger from floating on top of the sticky GuestPrompt banner or
+            the Data-staleness/Feed-health banners that stack above the
+            padded content in App.tsx — those already claim the page's
+            actual top-left corner on some agencies/states. */}
+        <div
+          className="app-sidebar-mobile"
+          style={{
+            width: 36,
+            height: "100%",
+            flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            paddingTop: 12,
+            background: "var(--bg-surface)",
+            borderRight: "1px solid var(--border-soft)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            aria-label={t("nav.open_menu")}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 32,
+              height: 32,
+            }}
+          >
+            {/* A distinct glyph from ThreadSidebar's "☰" hamburger trigger —
+                on the Ask tab at mobile widths both this app-nav trigger and
+                ThreadSidebar's thread-list trigger are on screen at once, and
+                two identical unlabeled hamburgers opening different drawers
+                (app navigation vs. conversation list) was confusing. */}
+            <PanelLeft size={18} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+
+          {mobileOpen && (
+            <>
+              <div
+                onClick={() => setMobileOpen(false)}
+                role="presentation"
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: Z_INDEX.drawerBackdrop }}
+              />
+              <aside
+                style={{
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  bottom: 0,
+                  width: 260,
+                  zIndex: Z_INDEX.drawer,
+                  background: "var(--bg-surface)",
+                  borderRight: "1px solid var(--border-soft)",
+                  display: "flex",
+                  flexDirection: "column",
+                  overflowY: "auto",
+                  padding: "16px 0",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 4,
+                    padding: "0 12px 16px 22px",
+                  }}
+                >
+                  {brandBlock(false)}
+                  <button
+                    type="button"
+                    aria-label={t("common.close")}
+                    onClick={() => setMobileOpen(false)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--text-tertiary)",
+                      cursor: "pointer",
+                      display: "flex",
+                      padding: 4,
+                      flexShrink: 0,
+                      fontSize: 18,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+                {renderNavAndFooter(false, () => setMobileOpen(false))}
+              </aside>
+            </>
+          )}
+        </div>
+
+        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      </>
+    );
+  }
+
   return (
     <>
       <aside
@@ -375,116 +496,7 @@ export function Sidebar() {
         {renderNavAndFooter(collapsed)}
       </aside>
 
-      {/* Narrow-viewport nav: a slim persistent rail (not a floating fixed
-          button) holding just the hamburger trigger, plus a slide-in drawer
-          for the rest — same drawer pattern as ThreadSidebar's mobile thread
-          list. A genuine flex-row sibling of <main> (36px wide, same idea as
-          the desktop rail just narrower) rather than position:fixed keeps
-          the trigger from floating on top of the sticky GuestPrompt banner
-          or the Data-staleness/Feed-health banners that stack above the
-          padded content in App.tsx — those already claim the page's actual
-          top-left corner on some agencies/states. */}
-      <div
-        className="app-sidebar-mobile"
-        style={{
-          width: 36,
-          height: "100%",
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          paddingTop: 12,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label={t("nav.open_menu")}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 32,
-            height: 32,
-          }}
-        >
-          <span style={{ fontSize: 18, lineHeight: 1 }}>☰</span>
-        </button>
-
-        {mobileOpen && (
-          <>
-            <div
-              onClick={() => setMobileOpen(false)}
-              role="presentation"
-              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 300 }}
-            />
-            <aside
-              style={{
-                position: "fixed",
-                top: 0,
-                left: 0,
-                bottom: 0,
-                width: 260,
-                zIndex: 301,
-                background: "var(--bg-surface)",
-                borderRight: "1px solid var(--border-soft)",
-                display: "flex",
-                flexDirection: "column",
-                overflowY: "auto",
-                padding: "16px 0",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 4,
-                  padding: "0 12px 16px 22px",
-                }}
-              >
-                {brandBlock(false)}
-                <button
-                  type="button"
-                  aria-label={t("common.close")}
-                  onClick={() => setMobileOpen(false)}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--text-tertiary)",
-                    cursor: "pointer",
-                    display: "flex",
-                    padding: 4,
-                    flexShrink: 0,
-                    fontSize: 18,
-                    lineHeight: 1,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-              {renderNavAndFooter(false, () => setMobileOpen(false))}
-            </aside>
-          </>
-        )}
-      </div>
-
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-
-      <style>{`
-        @media (max-width: 640px) {
-          .app-sidebar-desktop { display: none !important; }
-        }
-        @media (min-width: 641px) {
-          .app-sidebar-mobile { display: none !important; }
-        }
-      `}</style>
     </>
   );
 }

@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
+import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
+import { Z_INDEX } from "../styles/zIndex";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -13,28 +15,6 @@ function isThisWeek(iso: string): boolean {
   const now = Date.now();
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   return now - d < weekMs && d <= now;
-}
-
-const MOBILE_BREAKPOINT_QUERY = "(max-width: 640px)";
-
-/**
- * Tracks a media query's match state so the desktop/mobile sidebar variants
- * can be conditionally rendered instead of both always mounting (previously
- * toggled only via a CSS `display` media query, doubling the conversation
- * list's DOM nodes/listeners at every viewport width). Built on
- * `useSyncExternalStore` rather than a `useState`+`useEffect` pair: `matchMedia`
- * is an external mutable source, so this avoids an extra render-then-resync
- * timer for a value that's already correct at first render.
- */
-function useMediaQuery(query: string): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const mql = window.matchMedia(query);
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(query).matches,
-  );
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -345,7 +325,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
               position: "fixed",
               inset: 0,
               background: "rgba(0,0,0,0.3)",
-              zIndex: 300,
+              zIndex: Z_INDEX.drawerBackdrop,
             }}
           />
         )}
@@ -358,7 +338,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
             left: 0,
             bottom: 0,
             width: 260,
-            zIndex: 301,
+            zIndex: Z_INDEX.drawer,
             transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
             transition: "transform 200ms ease-out",
             background: "var(--bg-surface)",

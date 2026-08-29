@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "./hooks";
+import { routeDisplayName } from "./routeDisplayName";
 
 /** Build a route_code → "K観光通り線 (16071)" lookup map for the agency. */ // i18n-ignore: JSDoc example
 export function useRouteNames(agencyId: number | null): {
@@ -12,13 +13,8 @@ export function useRouteNames(agencyId: number | null): {
   const map = new Map<string, string>();
   if (data) {
     for (const r of data) {
-      // Prefer route_short_name, then route_long_name, before falling back to
-      // the raw route_id (which duplicates the parenthesised code inline and
-      // reads worse than either GTFS name field). Mirrors the backend's own
-      // COALESCE(NULLIF(short,''), NULLIF(long,''), code) order in
-      // api/routers/reports.py's forecast_overview route-label query — empty
-      // strings (not just null/undefined) count as "absent" on both sides.
-      if (r.route_code) map.set(r.route_code, r.route_short_name || r.route_long_name || r.route_id);
+      // See routeDisplayName's doc comment for the fallback order rationale.
+      if (r.route_code) map.set(r.route_code, routeDisplayName(r));
     }
   }
 
