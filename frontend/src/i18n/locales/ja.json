@@ -266,7 +266,8 @@
     }
   },
   "help": {
-    "title": "利用マニュアル"
+    "title": "利用マニュアル",
+    "sections_nav": "マニュアルの目次"
   },
   "account": {
     "admin_link": "管理",

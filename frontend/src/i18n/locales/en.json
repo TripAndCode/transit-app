@@ -266,7 +266,8 @@
     }
   },
   "help": {
-    "title": "User Manual"
+    "title": "User Manual",
+    "sections_nav": "Manual sections"
   },
   "account": {
     "admin_link": "Admin",
