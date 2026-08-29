@@ -37,7 +37,7 @@ export CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-transit_test}"
 
 pytest_args=()
 llm_eval=0
-had_real_groq_key="${GROQ_API_KEY+set}"
+had_real_groq_key="${GROQ_API_KEY:-}"
 for arg in "$@"; do
   case "$arg" in
     --llm-eval)
