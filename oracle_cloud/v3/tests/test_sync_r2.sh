@@ -70,3 +70,34 @@ fi
 grep -q "s3 sync $COLLECTOR_BASE/data/8/static s3://test-bucket/static/8" "$AWS_LOG" \
     || fail "agency 8 was skipped after agency 1's rt sync failed"
 pass "one agency's sync failure doesn't skip the rest, but still exits nonzero"
+
+# Overlap guard: a concurrent holder of the lock file must make this run
+# skip immediately (exit 0, no aws calls), not race it. Every test above
+# already ran on whatever platform this suite executes on -- on a box
+# without `flock` (e.g. macOS), the earlier "sync-r2: WARNING flock not
+# found" message on stderr is the degrade-gracefully path's own coverage.
+# This test only exercises the locking behavior itself, so it skips
+# cleanly (not a failure) where `flock` isn't installed.
+if command -v flock >/dev/null 2>&1; then
+    LOCK_FILE="$COLLECTOR_BASE/sync-r2.lock"
+    (
+        exec 9>"$LOCK_FILE"
+        flock 9
+        sleep 2
+    ) &
+    holder_pid=$!
+    sleep 0.3 # let the background subshell actually acquire the lock first
+
+    : > "$AWS_LOG"
+    out=$(../bin/sync-r2.sh 2>&1)
+    code=$?
+    wait "$holder_pid"
+
+    [ "$code" -eq 0 ] || fail "a concurrent run should skip with exit 0, got $code"
+    [ -s "$AWS_LOG" ] && fail "aws was invoked despite another run holding the lock"
+    echo "$out" | grep -q "already in progress" \
+        || fail "skip message missing when lock was already held"
+    pass "a concurrent run skips cleanly while the lock is held"
+else
+    echo "SKIP: flock not installed on this platform, overlap-guard behavior not exercised"
+fi
