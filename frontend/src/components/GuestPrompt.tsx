@@ -8,7 +8,7 @@ const DISMISSED = "guest_dismissed_at";
 const NUDGE_AFTER_MS = 10 * 60 * 1000;
 const RE_NUDGE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** Sticky banner that nudges anonymous users to log in after 10 min of use. */
+/** Non-sticky engagement nudge that prompts anonymous users to log in after 10 min of use. */
 export function GuestPrompt() {
   const { t } = useTranslation();
   const { data: session, isLoading } = useSession();

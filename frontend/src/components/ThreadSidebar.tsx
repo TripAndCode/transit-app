@@ -252,6 +252,37 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     </div>
   );
 
+  // ── context menu (shared by both variants) ───────────────────────────────
+  const contextMenu = menu && activeConv && (
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        top: menu.y,
+        left: menu.x,
+        zIndex: 500,
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        minWidth: 160,
+        padding: "var(--space-1) 0",
+      }}
+    >
+      <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
+      <ContextMenuItem
+        label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
+        onClick={() => handleTogglePin(activeConv)}
+      />
+      <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
+      <ContextMenuItem
+        label={t("ask.sidebar.delete")}
+        onClick={() => handleDelete(activeConv)}
+        danger
+      />
+    </div>
+  );
+
   if (!isMobile) {
     return (
       <>
@@ -271,36 +302,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           {sidebarContent}
         </aside>
 
-        {/* Context menu */}
-        {menu && activeConv && (
-          <div
-            ref={menuRef}
-            style={{
-              position: "fixed",
-              top: menu.y,
-              left: menu.x,
-              zIndex: 500,
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: "var(--radius)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-              minWidth: 160,
-              padding: "var(--space-1) 0",
-            }}
-          >
-            <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
-            <ContextMenuItem
-              label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
-              onClick={() => handleTogglePin(activeConv)}
-            />
-            <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
-            <ContextMenuItem
-              label={t("ask.sidebar.delete")}
-              onClick={() => handleDelete(activeConv)}
-              danger
-            />
-          </div>
-        )}
+        {contextMenu}
       </>
     );
   }
@@ -395,36 +397,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         </aside>
       </div>
 
-      {/* Context menu */}
-      {menu && activeConv && (
-        <div
-          ref={menuRef}
-          style={{
-            position: "fixed",
-            top: menu.y,
-            left: menu.x,
-            zIndex: 500,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            minWidth: 160,
-            padding: "var(--space-1) 0",
-          }}
-        >
-          <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
-          <ContextMenuItem
-            label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
-            onClick={() => handleTogglePin(activeConv)}
-          />
-          <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
-          <ContextMenuItem
-            label={t("ask.sidebar.delete")}
-            onClick={() => handleDelete(activeConv)}
-            danger
-          />
-        </div>
-      )}
+      {contextMenu}
     </>
   );
 }
