@@ -1,30 +1,11 @@
 """Integration tests for pipeline.static_loader against a live Postgres."""
 
-import io
 import pathlib
-import zipfile
 
 import pytest
 
 from pipeline.static_loader import load_static
-
-
-def _make_zip(tmp_path, stops_rows=None, trips_rows=None, routes_rows=None):
-    """Build a minimal GTFS Static zip for testing."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        if stops_rows is not None:
-            content = "stop_id,stop_name,stop_lat,stop_lon\n" + "\n".join(stops_rows)
-            zf.writestr("stops.txt", content)
-        if trips_rows is not None:
-            content = "trip_id,route_id,trip_headsign,shape_id\n" + "\n".join(trips_rows)
-            zf.writestr("trips.txt", content)
-        if routes_rows is not None:
-            content = "route_id,route_short_name\n" + "\n".join(routes_rows)
-            zf.writestr("routes.txt", content)
-    zip_path = tmp_path / "test_static.zip"
-    zip_path.write_bytes(buf.getvalue())
-    return str(zip_path)
+from tests.fixtures.synthetic_gtfs import build_static_zip as _make_zip
 
 
 def test_load_static_inserts_stops(pg_conn, agency_id, tmp_path):
