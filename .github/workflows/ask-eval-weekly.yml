@@ -170,18 +170,23 @@ jobs:
       # Postgres tables (agencies/static_*/agg_*/rag_chunks/users/...) —
       # so "this step must be last among steps that need seeded
       # Postgres/ClickHouse data" is the real ordering constraint, not just
-      # "watch out for ClickHouse". `if: always()` (rather than no
-      # condition) so this gate still runs and reports independently even
-      # when the golden-set step above fails, since the two check different
-      # failure modes (tool selection vs. numeric-answer correctness) and
-      # this job only runs weekly — a silently-skipped gate here could go
-      # unnoticed for a long time. Talks to api.main.app directly via an
-      # in-process ASGI transport, not the external uvicorn server above,
-      # so RUN_CH_INTEGRATION=1 (not needed by the golden-set step, which
-      # never touches the pytest-level ch_client fixture) is set here
-      # specifically for this step's DB-backed fixtures.
+      # "watch out for ClickHouse". `if: ${{ !cancelled() }}` (rather than
+      # no condition) so this gate still runs and reports independently
+      # even when the golden-set step above fails, since the two check
+      # different failure modes (tool selection vs. numeric-answer
+      # correctness) and this job only runs weekly — a silently-skipped
+      # gate here could go unnoticed for a long time. Deliberately
+      # `!cancelled()` rather than `always()`: unlike the cheap cleanup
+      # below, this step makes real, potentially slow, quota-consuming
+      # live-LLM (Groq) calls, so an explicit run cancellation should still
+      # skip it rather than let it start and burn quota/runtime anyway.
+      # Talks to api.main.app directly via an in-process ASGI transport,
+      # not the external uvicorn server above, so RUN_CH_INTEGRATION=1
+      # (not needed by the golden-set step, which never touches the
+      # pytest-level ch_client fixture) is set here specifically for this
+      # step's DB-backed fixtures.
       - name: Run the numeric-ground-truth eval
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           RUN_LLM_EVAL: "1"
           RUN_CH_INTEGRATION: "1"
