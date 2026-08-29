@@ -62,13 +62,29 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   gap recurred **eight times** before being captured here, well past
   CLAUDE.md's own "a mistake repeated twice is a missing guardrail" rule.
   Symptoms: `poetry run pytest`/`ruff`/`mypy` report "Command not found",
-  a worktree's poetry virtualenv has zero installed packages, and/or
-  `frontend/node_modules` (a symlink shared across worktrees back to the
-  main checkout) is missing a newly-added dependency because `npm install`
-  was never actually run for it. A dispatched worker cannot close this
+  a worktree's poetry virtualenv has zero installed packages (`poetry env
+  info` there reports `Path: NA`), and/or `frontend/node_modules` is
+  missing a newly-added dependency because `npm install` was never
+  actually run for that worktree. A dispatched worker cannot close this
   itself — every workaround it can reach (hand-tracing logic against
-  source instead of running it, vendoring a stub package into the shared
-  `node_modules` symlink) was tried and explicitly rejected/insufficient.
+  source instead of running it, vendoring a stub package into
+  `node_modules`) was tried and explicitly rejected/insufficient.
+- **`node_modules` sharing is NOT guaranteed — verify before relying on
+  it.** A past session found one specific VPS worktree with
+  `frontend/node_modules` set up as a symlink back to the main checkout's
+  copy (confirmed live via `ls -la`) and generalized that into "worktrees
+  share `node_modules`." Re-verified 2026-08-30 and that generalization is
+  **false as a default**: git worktrees do NOT share gitignored/untracked
+  directories automatically, `frontend/node_modules` is a plain directory
+  (not a symlink) in the main checkout and in freshly-created worktrees,
+  and a third worktree had no `node_modules` at all. Check with `ls -la
+  frontend/node_modules` (or `python3 -c "import os;
+  print(os.path.islink('frontend/node_modules'))"`) in the SPECIFIC
+  worktree you're fixing before assuming an `npm install` elsewhere already
+  covers it — if it's a plain directory, you must run `npm install`
+  separately in that worktree's own `frontend/`. If a symlink happens to
+  exist, treat it as a possibly-deliberate, worktree-specific setup detail
+  someone put there, not a repo-wide guarantee to rely on going forward.
 - **What actually works**: an interactive session (not a dispatched
   worker) usually has broader Bash permissions and CAN run `poetry
   install`/`npm install` for real, closing the gap after the fact.
@@ -78,17 +94,19 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   checkout's cwd** pointed at the worktree's file paths (poetry resolves
   its virtualenv by cwd identity, not by the file arguments — running
   `poetry run` from inside a worktree can resolve to a *different*,
-  unprovisioned virtualenv even though `pyproject.toml` looks identical),
-  then `npm install` directly in `frontend/` (this fetches real
-  dependencies and unblocks every worktree sharing that symlinked
-  `node_modules`, not just the one you're fixing). For a Playwright/real-
-  browser e2e test, also: build the SPA (`npm run build`) and bake it
-  (`make bake`) **inside the specific worktree being tested** (`api/static`
-  is untracked/gitignored per-worktree, not shared via git, unlike
-  `node_modules`), install Chromium (`poetry run playwright install
-  --with-deps chromium`), and set a dummy `GROQ_API_KEY` if the app's
-  startup `lifespan` requires one but the test itself never reaches the
-  Ask/LLM code path.
+  unprovisioned virtualenv even though `pyproject.toml` looks identical) —
+  but if that worktree's own branch changed `pyproject.toml`/`poetry.lock`
+  (added/bumped a dependency), the main checkout's venv won't have it
+  either, and a resulting "module not found" is a real dependency gap to
+  close, not a false alarm to explain away. Run `npm install` directly in
+  whichever `frontend/` actually needs it (see the sharing caveat above —
+  don't assume one `npm install` covers every worktree). For a
+  Playwright/real-browser e2e test, also: build the SPA (`npm run build`)
+  and bake it (`make bake`) **inside the specific worktree being tested**
+  (`api/static` is untracked/gitignored per-worktree, not shared via git),
+  install Chromium (`poetry run playwright install --with-deps chromium`),
+  and set a dummy `GROQ_API_KEY` if the app's startup `lifespan` requires
+  one but the test itself never reaches the Ask/LLM code path.
 - **Concurrency risk**: an interactive session fixing a worker's worktree
   can race with the autonomous loop's own next tick resuming the same
   branch (Step 3b's "has commits: resume and ship it yourself" path does
