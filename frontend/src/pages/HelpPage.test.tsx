@@ -126,4 +126,14 @@ describe("HelpPage", () => {
     expect(screen.getByRole("button", { name: "Section two" })).toHaveAttribute("aria-current", "true");
     expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).not.toBeInTheDocument();
   });
+
+  it("skips the Table of contents section for the default (no-hash) view, landing on the first real section", async () => {
+    stubManualFetch(MANUAL_WITH_TOC);
+
+    renderWithProviders(<HelpPage />);
+
+    expect(await screen.findByRole("heading", { name: "Section one", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Section one" })).toHaveAttribute("aria-current", "true");
+    expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).not.toBeInTheDocument();
+  });
 });

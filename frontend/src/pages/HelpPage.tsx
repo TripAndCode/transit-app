@@ -153,7 +153,13 @@ export function HelpPage() {
   }, [tocAnchors]);
 
   const initialHashIndex = tocAnchors.findIndex((a) => a === initialHash);
-  const derivedIndex = explicitIndex ?? (initialHashIndex !== -1 ? initialHashIndex : 0);
+  // When a "Table of contents" section exists (tocAnchors[0] is always
+  // `undefined` in that case -- see tocAnchorsBySectionIndex), the sidebar
+  // already serves the ToC's own navigation purpose, so the default view
+  // (no hash, no sidebar click yet) should land on the first real section
+  // instead of the ToC list of links.
+  const defaultIndex = tocAnchors.length > 0 ? 1 : 0;
+  const derivedIndex = explicitIndex ?? (initialHashIndex !== -1 ? initialHashIndex : defaultIndex);
   const safeIndex = sections.length === 0 ? 0 : Math.min(derivedIndex, sections.length - 1);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -166,7 +172,11 @@ export function HelpPage() {
   useEffect(() => {
     const heading = contentRef.current?.querySelector("h2[id]");
     if (heading?.id) window.history.replaceState(null, "", `#${heading.id}`);
-  }, [safeIndex]);
+    // sections.length also gates this: safeIndex can stay unchanged (e.g. 0
+    // before content loads and 0 is also the eventual default) across the
+    // loading -> loaded transition, so without it this effect would skip
+    // re-running once the real heading exists in the DOM.
+  }, [safeIndex, sections.length]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
