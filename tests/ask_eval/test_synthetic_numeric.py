@@ -51,11 +51,10 @@ from httpx import ASGITransport
 
 from tests.conftest import TEST_ORIGIN
 from tests.fixtures.synthetic_gtfs import (
+    ALL_PATTERNS,
     SyntheticPattern,
     insert_pattern_updates,
     load_pattern_static,
-    null_delays,
-    outlier_spike,
     uniform_delays,
 )
 
@@ -90,6 +89,12 @@ def _extract_avg_min(response_json: dict, route_code: str, service_type: str) ->
     tool returned empty, or the route/service_type didn't match) — the
     caller turns that into a clear assertion message rather than a raw
     ``TypeError`` from indexing a missing column.
+
+    Ignores ``dow`` and returns the first matching row, which is only correct
+    because every item-21 pattern currently in use puts all of its rows on a
+    single calendar day (one ``dow`` group). A future multi-day pattern would
+    produce more than one row here and this would need to pick (or average)
+    across ``dow`` explicitly instead of taking the first match.
     """
     result = response_json.get("result") or {}
     columns = result.get("columns") or []
@@ -150,6 +155,11 @@ async def _ask_about_pattern(
     from api.main import app
 
     load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
+    # `load_static`'s own docstring says "the caller commits" — without this,
+    # the running app's separate asyncpg pool never sees these rows (they're
+    # invisible under MVCC until committed, then rolled back at fixture
+    # teardown), silently making the static seed dead work.
+    pg_conn.commit()
     insert_pattern_updates(pattern, ch_client, agency_id)
 
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
@@ -173,30 +183,16 @@ async def _ask_about_pattern(
 
 @_requires_groq_key
 @_requires_llm_eval_flag
-async def test_uniform_delays_answer_matches_synthetic_ground_truth(
-    tmp_path, pg_conn, agency_id, ch_client, ch_async_client
+@pytest.mark.parametrize("pattern_fn", ALL_PATTERNS)
+async def test_answer_matches_synthetic_ground_truth(
+    pattern_fn, tmp_path, pg_conn, agency_id, ch_client, ch_async_client
 ):
-    pattern = uniform_delays()
-    response_json = await _ask_about_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client)
-    _assert_matches_ground_truth(response_json, pattern)
-
-
-@_requires_groq_key
-@_requires_llm_eval_flag
-async def test_outlier_spike_answer_matches_synthetic_ground_truth(
-    tmp_path, pg_conn, agency_id, ch_client, ch_async_client
-):
-    pattern = outlier_spike()
-    response_json = await _ask_about_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client)
-    _assert_matches_ground_truth(response_json, pattern)
-
-
-@_requires_groq_key
-@_requires_llm_eval_flag
-async def test_null_delays_answer_matches_synthetic_ground_truth(
-    tmp_path, pg_conn, agency_id, ch_client, ch_async_client
-):
-    pattern = null_delays()
+    """One test per item-21 pattern in ``ALL_PATTERNS`` — parametrized directly
+    over that tuple (not a hand-copied list) so a future pattern added there is
+    automatically covered by this LLM-numeric check too, matching the "add a
+    pattern, it's covered" framing ``tests/fixtures/synthetic_gtfs.py`` and
+    item 21's own ``tests/pipeline/test_synthetic_agg_e2e.py`` already use."""
+    pattern = pattern_fn()
     response_json = await _ask_about_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client)
     _assert_matches_ground_truth(response_json, pattern)
 
