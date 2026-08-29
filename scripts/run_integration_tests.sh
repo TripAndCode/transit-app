@@ -37,6 +37,7 @@ export CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-transit_test}"
 
 pytest_args=()
 llm_eval=0
+had_real_groq_key="${GROQ_API_KEY+set}"
 for arg in "$@"; do
   case "$arg" in
     --llm-eval)
@@ -54,8 +55,13 @@ for arg in "$@"; do
 done
 
 # Fail fast with a clear message rather than letting the live-LLM call
-# itself fail confusingly ("no usable providers") mid-test.
-if [ "$llm_eval" = "1" ] && [ -z "${GROQ_API_KEY:-}" ]; then
+# itself fail confusingly ("no usable providers") mid-test. Checks
+# `had_real_groq_key` (captured before the loop), not the current
+# `GROQ_API_KEY` value directly -- --dashboard-e2e's dummy-key default runs
+# during the same loop, so combining both flags would otherwise make
+# GROQ_API_KEY look "set" by the time this check runs and silently defeat
+# it, even though no real key was ever provided.
+if [ "$llm_eval" = "1" ] && [ -z "$had_real_groq_key" ]; then
   echo "run_integration_tests.sh: --llm-eval requires a real GROQ_API_KEY" \
     "already exported in the environment (this script does not fabricate" \
     "one)." >&2
