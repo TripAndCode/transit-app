@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import { useState, useRef, useEffect, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
@@ -21,29 +21,20 @@ const MOBILE_BREAKPOINT_QUERY = "(max-width: 640px)";
  * Tracks a media query's match state so the desktop/mobile sidebar variants
  * can be conditionally rendered instead of both always mounting (previously
  * toggled only via a CSS `display` media query, doubling the conversation
- * list's DOM nodes/listeners at every viewport width).
+ * list's DOM nodes/listeners at every viewport width). Built on
+ * `useSyncExternalStore` rather than a `useState`+`useEffect` pair: `matchMedia`
+ * is an external mutable source, so this avoids an extra render-then-resync
+ * timer for a value that's already correct at first render.
  */
 function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    function handleChange(e: MediaQueryListEvent) {
-      setMatches(e.matches);
-    }
-    // Re-sync in case the viewport changed between the initial render and
-    // this effect mounting; deferred via a 0ms timer so the effect itself
-    // never calls setState synchronously (React Compiler set-state-in-effect
-    // rule) -- same pattern GuestPrompt uses.
-    const t0 = setTimeout(() => setMatches(mql.matches), 0);
-    mql.addEventListener("change", handleChange);
-    return () => {
-      clearTimeout(t0);
-      mql.removeEventListener("change", handleChange);
-    };
-  }, [query]);
-
-  return matches;
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+  );
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
