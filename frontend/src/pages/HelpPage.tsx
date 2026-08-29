@@ -175,8 +175,12 @@ export function HelpPage() {
     // sections.length also gates this: safeIndex can stay unchanged (e.g. 0
     // before content loads and 0 is also the eventual default) across the
     // loading -> loaded transition, so without it this effect would skip
-    // re-running once the real heading exists in the DOM.
-  }, [safeIndex, sections.length]);
+    // re-running once the real heading exists in the DOM. content is needed
+    // too: switching the UI language re-fetches a differently-worded manual
+    // whose heading ids differ (rehype-slug slugs the translated text), even
+    // when safeIndex/sections.length stay the same -- without it the address
+    // bar would keep pointing at the previous locale's slug.
+  }, [safeIndex, sections.length, content]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
