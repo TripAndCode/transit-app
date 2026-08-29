@@ -27,13 +27,24 @@
 #                    requires a key) but never reaches the Ask/LLM code path.
 set -euo pipefail
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://transit:transit@localhost:5544/transit_test}"
+# Force-set, not `${VAR:-default}` fallbacks: this script's whole point is
+# a safe, unattended entry point into the THROWAWAY stack, so an inherited
+# dev-pointing value (e.g. this repo's own tracked `.env`, which sets
+# DATABASE_URL at :5433 and CLICKHOUSE_DATABASE=transit -- the real,
+# read-only dev DBs) must never silently pass through. Postgres has a
+# partial safety net (tests/conftest.py's _redirect_to_test_db() rewrites
+# any non-`_test`-suffixed DATABASE_URL) but ClickHouse has none --
+# pipeline/clickhouse.py reads CLICKHOUSE_DATABASE unconditionally, and
+# --dashboard-e2e's spawned app subprocess would otherwise inherit an
+# ambient dev value straight into a live connection against ~575M real
+# rows across 4 agencies.
+export DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
 export RUN_CH_INTEGRATION=1
-export CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-localhost}"
-export CLICKHOUSE_PORT="${CLICKHOUSE_PORT:-8124}"
-export CLICKHOUSE_USER="${CLICKHOUSE_USER:-transit}"
-export CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-transit}"
-export CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-transit_test}"
+export CLICKHOUSE_HOST=localhost
+export CLICKHOUSE_PORT=8124
+export CLICKHOUSE_USER=transit
+export CLICKHOUSE_PASSWORD=transit
+export CLICKHOUSE_DATABASE=transit_test
 
 pytest_args=()
 llm_eval=0
