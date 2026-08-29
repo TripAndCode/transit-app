@@ -54,7 +54,10 @@ export function GuestPrompt() {
     <div
       role="status"
       style={{
-        position: "sticky", top: 0, zIndex: 50,
+        // Deliberately not `position: sticky` — this is an engagement nudge,
+        // not a data-quality warning, so it shouldn't out-rank
+        // DataStalenessBanner/FeedHealthBanner by staying pinned in view
+        // while those scroll away with the rest of the content.
         padding: "8px 16px", background: "var(--surface-2)",
         display: "flex", alignItems: "center", gap: 12, fontSize: 13,
       }}

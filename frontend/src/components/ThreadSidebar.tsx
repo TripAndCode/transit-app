@@ -15,6 +15,37 @@ function isThisWeek(iso: string): boolean {
   return now - d < weekMs && d <= now;
 }
 
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 640px)";
+
+/**
+ * Tracks a media query's match state so the desktop/mobile sidebar variants
+ * can be conditionally rendered instead of both always mounting (previously
+ * toggled only via a CSS `display` media query, doubling the conversation
+ * list's DOM nodes/listeners at every viewport width).
+ */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    function handleChange(e: MediaQueryListEvent) {
+      setMatches(e.matches);
+    }
+    // Re-sync in case the viewport changed between the initial render and
+    // this effect mounting; deferred via a 0ms timer so the effect itself
+    // never calls setState synchronously (React Compiler set-state-in-effect
+    // rule) -- same pattern GuestPrompt uses.
+    const t0 = setTimeout(() => setMatches(mql.matches), 0);
+    mql.addEventListener("change", handleChange);
+    return () => {
+      clearTimeout(t0);
+      mql.removeEventListener("change", handleChange);
+    };
+  }, [query]);
+
+  return matches;
+}
+
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const parts: string[] = [];
 
@@ -57,6 +88,7 @@ type Props = {
 
 export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const { data: conversations = [], isLoading } = useConversations(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
@@ -229,27 +261,63 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     </div>
   );
 
+  if (!isMobile) {
+    return (
+      <>
+        {/* Desktop sidebar */}
+        <aside
+          style={{
+            width: 240,
+            flexShrink: 0,
+            background: "var(--bg-surface)",
+            borderRight: "1px solid var(--border-soft)",
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+            position: "relative",
+          }}
+        >
+          {sidebarContent}
+        </aside>
+
+        {/* Context menu */}
+        {menu && activeConv && (
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: menu.y,
+              left: menu.x,
+              zIndex: 500,
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+              minWidth: 160,
+              padding: "var(--space-1) 0",
+            }}
+          >
+            <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
+            <ContextMenuItem
+              label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
+              onClick={() => handleTogglePin(activeConv)}
+            />
+            <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
+            <ContextMenuItem
+              label={t("ask.sidebar.delete")}
+              onClick={() => handleDelete(activeConv)}
+              danger
+            />
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside
-        style={{
-          width: 240,
-          flexShrink: 0,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-          position: "relative",
-        }}
-        className="thread-sidebar-desktop"
-      >
-        {sidebarContent}
-      </aside>
-
       {/* Mobile: hamburger + slide-in drawer */}
-      <div className="thread-sidebar-mobile">
+      <div>
         {/* Hamburger button */}
         <button
           type="button"
@@ -366,18 +434,6 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           />
         </div>
       )}
-
-      {/* Responsive CSS */}
-      <style>{`
-        @media (max-width: 640px) {
-          .thread-sidebar-desktop { display: none !important; }
-          .thread-sidebar-mobile { display: block; }
-        }
-        @media (min-width: 641px) {
-          .thread-sidebar-desktop { display: flex !important; }
-          .thread-sidebar-mobile { display: none; }
-        }
-      `}</style>
     </>
   );
 }
