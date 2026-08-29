@@ -36,9 +36,30 @@ rules match generic dataset questions — route lists, date ranges, rankings —
 never a specific route code + "average delay"), and the throwaway agency
 never gets a RAG index built, so Stage 2 (embedding nearest-neighbour) never
 fires either (no ``rag_chunks`` rows to match against). Every question below
-is therefore guaranteed to fall through to Stage 3 (the real LLM call), not
-silently resolved by a deterministic rule that would make this pass without
-ever exercising the model.
+is therefore guaranteed to reach Stage 3 (the real LLM call) with the
+misleading history below attached, not silently resolved by a deterministic
+rule that would make this pass without ever exercising the model.
+
+**Why each question also carries a misleading prior turn** (found in this
+module's own `/review-branch` on PR #261, 2026-08-29): ``pipeline.query.chat``
+only ever lets the LLM pick a ``(tool_name, arguments)`` pair — the actual
+number in a successful tool-call response is rendered deterministically by
+``render_tool_result`` (see ``chat.py``'s ``_dispatch_and_respond``), never
+composed freely by the model. So a *fresh, isolated* question can't exercise
+"the model states a hallucinated number" at all: the model has every
+incentive to call the right tool, and once it does, the number is guaranteed
+correct by construction. The one path where the model DOES emit free,
+unchecked text is when it skips tool dispatch entirely (``tool_calls`` empty,
+see ``chat.py``'s ``body = (msg.content or "").strip()`` fallback) — exactly
+item 16's original bug shape: an unrelated prior turn's result anchoring the
+model into answering from stale context instead of calling a tool. Each
+question therefore seeds a ``top_n`` ranking turn (mirroring item 16's own
+regression tests, e.g. ``tests/api/test_api_ask.py``) for an unrelated route
+before asking about the pattern's own route, so a regression in item 16's
+history-scoping guard has something real to trip on:
+``assert_matches_ground_truth`` checks the tool-call name first, so a model
+that takes the free-text shortcut fails with a clear "expected tool_call
+'route_stats', got None" message, distinct from a wrong-number failure.
 """
 
 from __future__ import annotations
@@ -49,24 +70,17 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.ask_eval.numeric_ground_truth import assert_matches_ground_truth
 from tests.conftest import TEST_ORIGIN
 from tests.fixtures.synthetic_gtfs import (
     ALL_PATTERNS,
     SyntheticPattern,
     insert_pattern_updates,
     load_pattern_static,
-    uniform_delays,
 )
 
-# Applied per-function (NOT as a module-level `pytestmark`) to the three
-# live-LLM tests below only — this module also carries fast, offline
-# assertion-helper tests at the bottom that must always run (no DB
-# connection, no ClickHouse, no network, no RUN_LLM_EVAL — though, like
-# every test under tests/ask_eval/ rather than tests/unit/, `DATABASE_URL`
-# still must be *set* for the root conftest.py's module-level read to
-# succeed at collection; only tests/unit/'s conftest fully bypasses that),
-# to prove the numeric check itself isn't vacuous. A module-level
-# pytestmark would skip those too.
+# Applied per-function (NOT as a module-level `pytestmark`) to the live-LLM
+# test below only.
 _requires_groq_key = pytest.mark.requires_groq_key
 _requires_llm_eval_flag = pytest.mark.skipif(
     os.environ.get("RUN_LLM_EVAL") != "1",
@@ -82,71 +96,25 @@ _QUESTIONS: dict[str, str] = {
     "null_delays": "SYN_NULLMIX系統の平均遅延は何分くらいですか？",
 }
 
-
-def _extract_avg_min(response_json: dict, route_code: str, service_type: str) -> float | None:
-    """Pull the ``avg_min`` value for *(route_code, service_type)* out of an
-    ``/ask`` response's ``result.rows``/``result.columns`` — the shape
-    ``pipeline.query.tools._tool_route_stats`` produces (columns
-    ``["route_code", "service_type", "dow", "avg_min", "samples"]``).
-
-    Returns ``None`` when there's no matching row at all (wrong tool called,
-    tool returned empty, or the route/service_type didn't match) — the
-    caller turns that into a clear assertion message rather than a raw
-    ``TypeError`` from indexing a missing column.
-
-    Ignores ``dow`` and returns the first matching row, which is only correct
-    because every item-21 pattern currently in use puts all of its rows on a
-    single calendar day (one ``dow`` group). A future multi-day pattern would
-    produce more than one row here and this would need to pick (or average)
-    across ``dow`` explicitly instead of taking the first match.
-    """
-    result = response_json.get("result") or {}
-    columns = result.get("columns") or []
-    rows = result.get("rows") or []
-    if "avg_min" not in columns or "route_code" not in columns:
-        return None
-    idx_avg = columns.index("avg_min")
-    idx_route = columns.index("route_code")
-    idx_svc = columns.index("service_type") if "service_type" in columns else None
-    for row in rows:
-        if row[idx_route] != route_code:
-            continue
-        if idx_svc is not None and row[idx_svc] != service_type:
-            continue
-        return row[idx_avg]
-    return None
-
-
-def _assert_matches_ground_truth(response_json: dict, pattern: SyntheticPattern, places: int = 2) -> None:
-    """Assert the API's numeric answer for *pattern* matches its hand-computed
-    ``expected["agg_route_stats"]["avg_min"]`` — the same ground truth
-    ``tests/pipeline/test_synthetic_agg_e2e.py`` (item 21) asserts against.
-
-    Checks the tool call name first so a wrong-tool failure reads distinctly
-    from a wrong-number failure (both are real defects, but the fix differs).
-    """
-    tool_call = response_json.get("tool_call") or {}
-    assert tool_call.get("name") == "route_stats", (
-        f"{pattern.name}: expected tool_call 'route_stats', got {tool_call.get('name')!r} "
-        f"(answer: {response_json.get('answer')!r})"
-    )
-    expected_avg_min = pattern.expected["agg_route_stats"]["avg_min"]
-    assert expected_avg_min is not None, f"{pattern.name}: pattern has no comparable avg_min ground truth"
-    actual = _extract_avg_min(response_json, pattern.route_code, pattern.service_type)
-    assert actual is not None, (
-        f"{pattern.name}: no route_stats row for route={pattern.route_code!r} "
-        f"service_type={pattern.service_type!r} in response (answer: {response_json.get('answer')!r})"
-    )
-    assert round(float(actual), places) == expected_avg_min, (
-        f"{pattern.name}: API-returned avg_min {actual!r} != ground truth {expected_avg_min!r} "
-        f"(answer: {response_json.get('answer')!r})"
-    )
+# A misleading prior turn: an unrelated route-ranking result that has
+# nothing to do with the pattern's own route. Mirrors item 16's own live
+# repro/regression tests (tests/api/test_api_ask.py's
+# test_unrelated_question_with_unrelated_history_gets_fresh_tool_call) — the
+# scenario that actually tempts the model to answer from stale context
+# instead of dispatching a fresh tool call. See the module docstring's "Why
+# each question also carries a misleading prior turn" section for why this
+# is necessary.
+_MISLEADING_HISTORY: list[dict] = [
+    {"question": "遅延ランキングを見せて", "tool": "top_n", "args": {"metric": "avg_delay", "n": 10}},
+]
 
 
 async def _ask_about_pattern(
     pattern: SyntheticPattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client
 ) -> dict:
-    """Seed *pattern* into a throwaway agency and ask the in-process Ask API about it.
+    """Seed *pattern* into a throwaway agency and ask the in-process Ask API
+    about it, with a misleading unrelated-route ranking turn already in the
+    conversation history (see module docstring for why).
 
     Mirrors ``tests/api/test_api_ask.py``'s ``ask_app``/``ask_client`` wiring
     (module-level ``api.main.app`` with a per-test ``asyncpg`` pool +
@@ -175,6 +143,7 @@ async def _ask_about_pattern(
                 f"/api/{agency_id}/ask",
                 json={
                     "question": _QUESTIONS[pattern.name],
+                    "history": _MISLEADING_HISTORY,
                     "ctx": {"from": pattern.date, "to": pattern.date},
                 },
                 headers={"Origin": TEST_ORIGIN},
@@ -198,58 +167,4 @@ async def test_answer_matches_synthetic_ground_truth(
     item 21's own ``tests/pipeline/test_synthetic_agg_e2e.py`` already use."""
     pattern = pattern_fn()
     response_json = await _ask_about_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client)
-    _assert_matches_ground_truth(response_json, pattern)
-
-
-# ---------------------------------------------------------------------------
-# Offline guard: prove `_assert_matches_ground_truth` actually catches a wrong
-# number instead of vacuously passing. This needs no DB connection, no
-# ClickHouse, no network, and no RUN_LLM_EVAL — it exercises the assertion
-# helper itself against fabricated response payloads, so it always runs (the
-# `_requires_*` decorators above are applied per-function, only to the three
-# live-LLM tests, not to these). Note: `DATABASE_URL` must still be set in
-# the environment (even to a throwaway value) for collection to succeed,
-# since these tests live alongside the live-LLM ones rather than under
-# tests/unit/ — see the comment near `_requires_llm_eval_flag` above.
-# ---------------------------------------------------------------------------
-
-
-def _fake_route_stats_response(pattern: SyntheticPattern, avg_min: float) -> dict:
-    return {
-        "answer": "テスト",
-        "tool_call": {"name": "route_stats", "arguments": {"route": pattern.route_code}},
-        "result": {
-            "kind": "table",
-            "summary": "テスト",
-            "rows": [[pattern.route_code, pattern.service_type, "月", avg_min, 25]],
-            "columns": ["route_code", "service_type", "dow", "avg_min", "samples"],
-            "series": [],
-            "pairs": [],
-        },
-    }
-
-
-def test_assert_matches_ground_truth_accepts_correct_number():
-    pattern = uniform_delays()
-    correct = pattern.expected["agg_route_stats"]["avg_min"]
-    _assert_matches_ground_truth(_fake_route_stats_response(pattern, correct), pattern)
-
-
-def test_assert_matches_ground_truth_rejects_wrong_number():
-    """Deliberately corrupt the returned avg_min and confirm the check fails —
-    guards against this test suite silently passing no matter what number
-    comes back (the exact failure mode item 23 exists to catch)."""
-    pattern = uniform_delays()
-    correct = pattern.expected["agg_route_stats"]["avg_min"]
-    wrong = (correct or 0.0) + 100.0
-    with pytest.raises(AssertionError, match="!= ground truth"):
-        _assert_matches_ground_truth(_fake_route_stats_response(pattern, wrong), pattern)
-
-
-def test_assert_matches_ground_truth_rejects_wrong_tool():
-    pattern = uniform_delays()
-    correct = pattern.expected["agg_route_stats"]["avg_min"]
-    response_json = _fake_route_stats_response(pattern, correct)
-    response_json["tool_call"] = {"name": "describe_data", "arguments": {"kind": "routes"}}
-    with pytest.raises(AssertionError, match="expected tool_call 'route_stats'"):
-        _assert_matches_ground_truth(response_json, pattern)
+    assert_matches_ground_truth(response_json, pattern)
