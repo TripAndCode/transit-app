@@ -75,6 +75,24 @@ static IS collected on the VM via `direct_url` curl.
 ## 9. Enable prune (ONLY after step 7 parity + step 8 verification)
     crontab -e   # uncomment the prune line
 
+## 9b. 2026-08-29: direct-to-R2 sync (supersedes step 7's manual gate)
+`bin/sync-r2.sh` now runs daily in cron (see `crontab.snippet`), mirroring
+this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 — no more
+manual `make fetch` + `make sync-r2` from a workstation as prune's parity
+gate. `prune.sh` now also refuses to run (exit 65) unless sync-r2.sh's
+`.sync-r2.last-ok` marker is fresh, so the parity gate is enforced in code,
+not just documented here.
+
+Known gap, unchanged from before: agency 1 (Aomori) has no `static_url` in
+`agencies.tsv` (see the note at the top of this file), so this VM never
+collects new Aomori static GTFS at all — sync-r2.sh only mirrors what the
+VM actually has, so agency 1's R2 `static/1/` prefix stays exactly as
+stale as `data/1/static/` on the VM itself. Check `agencies.tsv` and
+`data/1/static/latest.zip`'s own mtime directly if you need to know how
+stale that specifically is right now — don't trust a date recorded here,
+since this file isn't updated when that staleness changes. Aomori's static
+GTFS still needs its own refresh path if that gap matters.
+
 ## 10. +1 week: remove old tree
     rm -rf /home/opc/app/transportation_analysis/{poller.sh,poller_static.sh,cron.log,poller.log,static_poller.log,static_cron.log,archive,static_archive}
 
