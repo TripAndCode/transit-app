@@ -212,7 +212,8 @@ export function useArchitectureDocs() {
 export function useArchitectureDoc(slug: string | null) {
   return useQuery({
     queryKey: ["adminArchitectureDoc", slug],
-    queryFn: ({ signal }) => apiGet<ArchitectureDoc>(`/api/admin/architecture/docs/${slug}`, { signal }),
+    queryFn: ({ signal }) =>
+      apiGet<ArchitectureDoc>(`/api/admin/architecture/docs/${encodeURIComponent(slug ?? "")}`, { signal }),
     enabled: slug != null,
     staleTime: 30_000,
   });
