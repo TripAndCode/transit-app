@@ -55,7 +55,16 @@ const TOP_HEADING_RE = /^##\s+(.+?)\s*$/;
  *  leading preamble prose plus one section per top-level `## ` heading.
  *  Section titles come from the same heading text rehype-slug anchors when
  *  a section is rendered -- there is no separate hardcoded title list to
- *  keep in sync. */
+ *  keep in sync.
+ *
+ *  The `## `-boundary detection is a plain line-anchored regex, not fence-
+ *  aware -- literal `## `-shaped text inside a fenced/indented code block or
+ *  blockquote would be mis-split into a bogus section. Neither manual
+ *  contains a code fence today (verified against both `public/user-manual/
+ *  {en,ja}.md`), so this is dormant, not an active break; a future manual
+ *  edit demonstrating Markdown heading syntax in a code sample would need to
+ *  either avoid `## ` at fence-column-0 or this function would need to skip
+ *  fenced regions first. */
 function splitIntoSections(markdown: string): SplitResult {
   const firstHeadingAt = markdown.search(/^##\s+/m);
   if (firstHeadingAt === -1) {
@@ -95,6 +104,18 @@ function tocAnchorsBySectionIndex(sections: ManualSection[]): (string | undefine
   if (anchors.length !== sections.length - 1) return [];
   return [undefined, ...anchors];
 }
+
+// The "Table of contents" section itself (index 0) has no resolvable anchor
+// above -- `tocAnchorsBySectionIndex` only ever returns anchors the ToC
+// *links to*, not one for the ToC section itself. So reloading or sharing a
+// URL captured while that section was selected falls back to `defaultIndex`
+// below instead of returning to the ToC page, unlike every other section
+// (which round-trips correctly). Deliberately left as-is rather than
+// resolved via a hand-rolled slugify of the ToC heading's own title: the
+// same reasoning that already rejected a second slug implementation for
+// bilingual (en/ja) text elsewhere in this file applies here too, and the
+// ToC page's own navigation purpose is already superseded by the sidebar,
+// so landing on the first real section instead is a reasonable fallback.
 
 /** Renders the in-app user manual, fetched as a static Markdown asset per
  *  locale (public/user-manual/{en,ja}.md) rather than embedded in JSX. This
@@ -179,8 +200,16 @@ export function HelpPage() {
   // output) rather than a second slug computation -- this covers both
   // sidebar clicks and the initial hash-driven selection above. replaceState
   // (not a real navigation) avoids spamming history with one entry per
-  // section switch and doesn't itself fire `hashchange`.
+  // section switch and doesn't itself fire `hashchange`. Also scrolls the
+  // content pane's own top into view: without this, switching from a long
+  // section to a shorter one left the browser's already-scrolled-down
+  // viewport clamped to the new (shorter) document height, landing the user
+  // near the bottom of the new section instead of its heading.
   useEffect(() => {
+    // Optional-called (not just optional-chained on contentRef) because
+    // jsdom's test environment doesn't implement scrollIntoView at all --
+    // this avoids needing a jsdom stub for a call real browsers always have.
+    contentRef.current?.scrollIntoView?.({ block: "start" });
     const heading = contentRef.current?.querySelector("h2[id]");
     if (heading?.id) window.history.replaceState(null, "", `#${heading.id}`);
     // sections.length also gates this: safeIndex can stay unchanged (e.g. 0
