@@ -62,4 +62,10 @@ if [ "$llm_eval" = "1" ] && [ -z "${GROQ_API_KEY:-}" ]; then
   exit 1
 fi
 
-exec poetry run pytest "${pytest_args[@]}"
+# `${pytest_args[@]+"${pytest_args[@]}"}`, not the plain `"${pytest_args[@]}"`
+# expansion: under `set -u`, bash < 4.4 (e.g. macOS's default bash 3.2)
+# treats an EMPTY array's `[@]` expansion as an unbound-variable error,
+# which would crash this exact script on its own plain "run everything, no
+# extra pytest args" invocation -- the case most likely to end up in a
+# permission allowlist and run unattended.
+exec poetry run pytest ${pytest_args[@]+"${pytest_args[@]}"}
