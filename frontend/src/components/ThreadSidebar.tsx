@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import { useState, useRef, useEffect, useSyncExternalStore, type CSSProperties, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
@@ -13,6 +13,28 @@ function isThisWeek(iso: string): boolean {
   const now = Date.now();
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   return now - d < weekMs && d <= now;
+}
+
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 640px)";
+
+/**
+ * Tracks a media query's match state so the desktop/mobile sidebar variants
+ * can be conditionally rendered instead of both always mounting (previously
+ * toggled only via a CSS `display` media query, doubling the conversation
+ * list's DOM nodes/listeners at every viewport width). Built on
+ * `useSyncExternalStore` rather than a `useState`+`useEffect` pair: `matchMedia`
+ * is an external mutable source, so this avoids an extra render-then-resync
+ * timer for a value that's already correct at first render.
+ */
+function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+  );
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -57,6 +79,7 @@ type Props = {
 
 export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const { data: conversations = [], isLoading } = useConversations(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
@@ -229,27 +252,65 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     </div>
   );
 
+  // ── context menu (shared by both variants) ───────────────────────────────
+  const contextMenu = menu && activeConv && (
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        top: menu.y,
+        left: menu.x,
+        zIndex: 500,
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        minWidth: 160,
+        padding: "var(--space-1) 0",
+      }}
+    >
+      <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
+      <ContextMenuItem
+        label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
+        onClick={() => handleTogglePin(activeConv)}
+      />
+      <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
+      <ContextMenuItem
+        label={t("ask.sidebar.delete")}
+        onClick={() => handleDelete(activeConv)}
+        danger
+      />
+    </div>
+  );
+
+  if (!isMobile) {
+    return (
+      <>
+        {/* Desktop sidebar */}
+        <aside
+          style={{
+            width: 240,
+            flexShrink: 0,
+            background: "var(--bg-surface)",
+            borderRight: "1px solid var(--border-soft)",
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+            position: "relative",
+          }}
+        >
+          {sidebarContent}
+        </aside>
+
+        {contextMenu}
+      </>
+    );
+  }
+
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside
-        style={{
-          width: 240,
-          flexShrink: 0,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-          position: "relative",
-        }}
-        className="thread-sidebar-desktop"
-      >
-        {sidebarContent}
-      </aside>
-
       {/* Mobile: hamburger + slide-in drawer */}
-      <div className="thread-sidebar-mobile">
+      <div>
         {/* Hamburger button */}
         <button
           type="button"
@@ -336,48 +397,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         </aside>
       </div>
 
-      {/* Context menu */}
-      {menu && activeConv && (
-        <div
-          ref={menuRef}
-          style={{
-            position: "fixed",
-            top: menu.y,
-            left: menu.x,
-            zIndex: 500,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            minWidth: 160,
-            padding: "var(--space-1) 0",
-          }}
-        >
-          <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
-          <ContextMenuItem
-            label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
-            onClick={() => handleTogglePin(activeConv)}
-          />
-          <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
-          <ContextMenuItem
-            label={t("ask.sidebar.delete")}
-            onClick={() => handleDelete(activeConv)}
-            danger
-          />
-        </div>
-      )}
-
-      {/* Responsive CSS */}
-      <style>{`
-        @media (max-width: 640px) {
-          .thread-sidebar-desktop { display: none !important; }
-          .thread-sidebar-mobile { display: block; }
-        }
-        @media (min-width: 641px) {
-          .thread-sidebar-desktop { display: flex !important; }
-          .thread-sidebar-mobile { display: none; }
-        }
-      `}</style>
+      {contextMenu}
     </>
   );
 }

@@ -36,10 +36,14 @@ export default function App() {
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
-            that has nothing to do with feed staleness or in-flight mutations). */}
-        <GuestPrompt />
+            that has nothing to do with feed staleness or in-flight mutations).
+            Data-quality warnings render before the guest-login nudge: both are
+            persistent until dismissed, but a warning about the data itself
+            should outrank a suggestion to sign in when more than one banner
+            is showing at once. */}
         <DataStalenessBanner />
         <FeedHealthBanner />
+        <GuestPrompt />
         <ActivityStrip />
         {/* flex: 1, not height: "100%" — main is now a flex column whose
             other children (the banners/strip above) take variable height, so

@@ -86,6 +86,24 @@ describe("FollowupChipsRow free-text input", () => {
     expect(onFollowup).toHaveBeenCalledWith(1, chipPrompt, false);
   });
 
+  it("de-emphasizes only the chip just clicked, not the others, for the current result", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Wrapper
+        messages={messagesWithResult}
+        onFollowup={vi.fn()}
+        draftValue=""
+        onDraftChange={vi.fn()}
+      />,
+    );
+    const clicked = screen.getByRole("button", { name: "Why this pattern?" });
+    const other = screen.getByRole("button", { name: "Other slices?" });
+    expect(clicked).toHaveAttribute("aria-pressed", "false");
+    await user.click(clicked);
+    expect(clicked).toHaveAttribute("aria-pressed", "true");
+    expect(other).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("does not submit a whitespace-only draft", async () => {
     const user = userEvent.setup();
     const onFollowup = vi.fn();

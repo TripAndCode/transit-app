@@ -70,4 +70,43 @@ describe("ThreadSidebar", () => {
     render();
     expect(screen.queryAllByText(/^📌 Pinned$/).length).toBe(0);
   });
+
+  it("renders only the desktop variant (not also a hidden mobile copy) on a wide viewport", () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: false,
+      media: "(max-width: 640px)",
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    } as unknown as MediaQueryList);
+    mockConversations([]);
+    render();
+    // Previously both the desktop <aside> and the mobile drawer mounted
+    // unconditionally (toggled only via a CSS display media query), so the
+    // "New conversation" control existed twice in the DOM at every viewport
+    // width -- getByText throws on more than one match, so this fails loudly
+    // if that regresses.
+    expect(screen.getByText("New conversation")).toBeInTheDocument();
+    expect(screen.queryByLabelText("New conversation")).not.toBeInTheDocument();
+  });
+
+  it("renders only the mobile variant (hamburger + drawer) on a narrow viewport", () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      media: "(max-width: 640px)",
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    } as unknown as MediaQueryList);
+    mockConversations([]);
+    render();
+    expect(screen.getByLabelText("New conversation")).toBeInTheDocument(); // hamburger button
+    expect(screen.getByText("New conversation")).toBeInTheDocument(); // button inside the drawer
+  });
 });
