@@ -151,6 +151,13 @@ migrate-down:
 
 # ── Data fetch (pull from Oracle Cloud collection server) ────────────────────
 # Requires: ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY or ORACLE_SSH_KEY_PATH
+#
+# `fetch` + `sync-r2` were the primary path for mirroring the collector VM's
+# archives to Cloudflare R2 until 2026-08-29, when oracle_cloud/v3/bin/sync-r2.sh
+# started running daily in cron directly on the VM (see MIGRATION.md's 9b).
+# These two targets are now a manual/disaster-recovery fallback (e.g. rebuild
+# a local copy for inspection) — not required for the VM's own R2 mirror to
+# stay current.
 
 fetch:
 	bash scripts/fetch_archives.sh
@@ -159,7 +166,8 @@ fetch-ingest:
 	bash scripts/fetch_and_ingest.sh
 
 # Mirror local raw_archives/raw_archives_static to Cloudflare R2 (see .env's
-# OBJECT_STORE_* vars). Run after `make fetch`.
+# OBJECT_STORE_* vars). Run after `make fetch`. Manual/backup path only — see
+# the note above.
 sync-r2:
 	bash scripts/sync_archives_to_r2.sh
 

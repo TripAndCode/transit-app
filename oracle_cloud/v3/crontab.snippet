@@ -3,8 +3,13 @@ CRON_TZ=Asia/Tokyo
 0  9 * * *  nice -n 10 /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
 5  9 * * *  nice -n 10 /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
 10 9 * * *  nice -n 10 /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
-# prune.sh's retention-based deletion is safe because sync-r2.sh (above)
-# mirrors every rt/static file straight to Cloudflare R2 daily, before this
-# weekly prune ever runs -- replaces the old "workstation mirror" (this
-# repo's make fetch + make sync-r2) as the parity check this waited on.
+# prune.sh's retention-based deletion relies on sync-r2.sh (above) having
+# mirrored every rt/static file to Cloudflare R2 daily, before this weekly
+# prune ever runs -- replaces the old "workstation mirror" (this repo's
+# make fetch + make sync-r2) as the parity check this waited on. sync-r2.sh
+# isolates each agency's sync and exits nonzero (visible in cron.log) if
+# any failed, so a failure doesn't silently mean "everything mirrored" --
+# but nothing pages on that exit code yet; check cron.log after any gap
+# longer than a few days before trusting prune.sh has been safe the whole
+# time.
 30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1
