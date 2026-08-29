@@ -160,6 +160,33 @@ jobs:
           EVAL_API_BASE: http://localhost:8000
         run: poetry run pytest tests/ask_eval/test_baseline.py::test_golden_set_aggregate_score -v
 
+      # item 23: verifies the Ask tab's numeric answers, not just its tool
+      # choice, against item 21's synthetic ground truth. Must run after the
+      # golden-set eval above, never before or in parallel with it: this
+      # test module's fixtures wipe shared state the golden-set step (and
+      # its still-running API server) depend on — `ch_client`
+      # (tests/conftest.py) DROPs and recreates ClickHouse's `updates`
+      # table, and `pg_conn`'s teardown TRUNCATEs the Hiroden fixture's
+      # Postgres tables (agencies/static_*/agg_*/rag_chunks/users/...) —
+      # so "this step must be last among steps that need seeded
+      # Postgres/ClickHouse data" is the real ordering constraint, not just
+      # "watch out for ClickHouse". `if: always()` (rather than no
+      # condition) so this gate still runs and reports independently even
+      # when the golden-set step above fails, since the two check different
+      # failure modes (tool selection vs. numeric-answer correctness) and
+      # this job only runs weekly — a silently-skipped gate here could go
+      # unnoticed for a long time. Talks to api.main.app directly via an
+      # in-process ASGI transport, not the external uvicorn server above,
+      # so RUN_CH_INTEGRATION=1 (not needed by the golden-set step, which
+      # never touches the pytest-level ch_client fixture) is set here
+      # specifically for this step's DB-backed fixtures.
+      - name: Run the numeric-ground-truth eval
+        if: always()
+        env:
+          RUN_LLM_EVAL: "1"
+          RUN_CH_INTEGRATION: "1"
+        run: poetry run pytest tests/ask_eval/test_synthetic_numeric.py -v
+
       - name: Stop the API server
         if: always()
         run: kill "$(cat /tmp/uvicorn.pid)" 2>/dev/null || true
