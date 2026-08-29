@@ -36,6 +36,7 @@ from __future__ import annotations
 import io
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 # ISODOW helper for the fixed dates below (see `date`/`dow` on each pattern) —
 # `date -d 2026-06-01 +%u` => 1 (Monday). Kept as a literal, not computed via
@@ -143,16 +144,22 @@ def insert_pattern_updates(pattern: SyntheticPattern, ch_client, agency_id: int)
     return insert_updates(ch_client, agency_id, pattern.update_rows)
 
 
-def _ts(second: int) -> str:
-    """captured_at string for the *second*-th synthetic row.
+_TS_BASE = datetime(2026, 6, 1, 1, 0, 0, tzinfo=timezone.utc)
 
-    All patterns share the same UTC minute (2026-06-01T01:00 -> JST
-    2026-06-01 10:00), varying only the seconds field so every row gets a
-    distinct, ordered `captured_at` without ever crossing a JST calendar-day
-    boundary (which would split one pattern's rows across two `date` values
-    and break the hand-computed expectations).
+
+def _ts(offset: int) -> str:
+    """captured_at string for the *offset*-th synthetic row (offset in seconds).
+
+    All patterns share the same UTC base instant (2026-06-01T01:00:00 -> JST
+    2026-06-01 10:00), each row `offset` seconds after it, so every row gets a
+    distinct, ordered `captured_at`. `offset` must stay under 82800 (23h) so
+    the JST calendar date never rolls over to 2026-06-02 (which would split a
+    pattern's rows across two `date` values and break its hand-computed
+    expectations) — comfortably above any pattern size in practice, unlike a
+    hardcoded 2-digit seconds field, which would silently produce malformed
+    ISO-8601 past 60 rows.
     """
-    return f"2026-06-01T01:00:{second:02d}Z"
+    return (_TS_BASE + timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def uniform_delays() -> SyntheticPattern:
