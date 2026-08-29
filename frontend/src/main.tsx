@@ -41,6 +41,9 @@ const AdminAgenciesPage = lazy(() =>
 const AdminOpsPage = lazy(() =>
   import("./pages/admin/AdminOpsPage").then((m) => ({ default: m.AdminOpsPage }))
 );
+const AdminArchitecturePage = lazy(() =>
+  import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
+);
 
 /** Wrap a lazy route element in the shared Suspense fallback. */
 function el(node: React.ReactNode) {
@@ -101,6 +104,7 @@ const router = createBrowserRouter([
           { path: "users", element: el(<AdminUsersPage />) },
           { path: "users/:uid", element: el(<AdminUserDetailPage />) },
           { path: "ops", element: el(<AdminOpsPage />) },
+          { path: "architecture", element: el(<AdminArchitecturePage />) },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },
