@@ -144,20 +144,25 @@ def insert_pattern_updates(pattern: SyntheticPattern, ch_client, agency_id: int)
     return insert_updates(ch_client, agency_id, pattern.update_rows)
 
 
-_TS_BASE = datetime(2026, 6, 1, 1, 0, 0, tzinfo=timezone.utc)
+# UTC 2026-05-31T15:00:00 == JST 2026-06-01T00:00:00 (JST = UTC+9) — deliberately
+# pinned to JST midnight, not an arbitrary UTC instant, so the full ~24h/86400s
+# JST day is available as headroom below (an earlier version of this constant
+# started mid-JST-day and only had ~14h of real headroom despite a comment
+# claiming 23h — verified by hand against the UTC+9 offset, not re-derived by
+# code under test).
+_TS_BASE = datetime(2026, 5, 31, 15, 0, 0, tzinfo=timezone.utc)
 
 
 def _ts(offset: int) -> str:
     """captured_at string for the *offset*-th synthetic row (offset in seconds).
 
-    All patterns share the same UTC base instant (2026-06-01T01:00:00 -> JST
-    2026-06-01 10:00), each row `offset` seconds after it, so every row gets a
-    distinct, ordered `captured_at`. `offset` must stay under 82800 (23h) so
-    the JST calendar date never rolls over to 2026-06-02 (which would split a
-    pattern's rows across two `date` values and break its hand-computed
-    expectations) — comfortably above any pattern size in practice, unlike a
-    hardcoded 2-digit seconds field, which would silently produce malformed
-    ISO-8601 past 60 rows.
+    All patterns share the same UTC base instant (`_TS_BASE`, JST midnight),
+    each row `offset` seconds after it, so every row gets a distinct, ordered
+    `captured_at`. `offset` must stay under 86400 (24h) so the JST calendar
+    date never rolls over past `_TS_BASE`'s day (which would split a pattern's
+    rows across two `date` values and break its hand-computed expectations) —
+    comfortably above any pattern size in practice, unlike a hardcoded 2-digit
+    seconds field, which would silently produce malformed ISO-8601 past 60 rows.
     """
     return (_TS_BASE + timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
