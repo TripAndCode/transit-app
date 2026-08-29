@@ -16,6 +16,7 @@ import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 import { RouteForecastSection } from "../components/RouteForecastSection";
+import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -63,7 +64,7 @@ export function AnalysisTab() {
           vertically instead of side-by-side, not to redesign them for
           touch. */}
       <style>{`
-        @media (max-width: 640px) {
+        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
           .analysis-body { flex-direction: column; }
           .analysis-report-list { width: 100% !important; }
           .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }

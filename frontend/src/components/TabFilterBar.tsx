@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { routeDisplayName } from "../api/routeDisplayName";
 import {
   useRangeContext,
   type DowFilter,
@@ -116,9 +117,11 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
     (ctx.service !== "all" ? 1 : 0) +
     (ctx.routes.length > 0 ? 1 : 0);
 
+  // See routeDisplayName's doc comment for the fallback order rationale
+  // (shared with useRouteNames.ts to avoid the two diverging again).
   const routeNameMap = new Map<string, string>();
   if (routes) for (const r of routes) {
-    if (r.route_code) routeNameMap.set(r.route_code, r.route_short_name || r.route_long_name || r.route_id);
+    if (r.route_code) routeNameMap.set(r.route_code, routeDisplayName(r));
   }
 
   // route_short_name → list of route_codes that share it.
