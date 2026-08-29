@@ -31,39 +31,50 @@ type ManualSection = {
    *  [most important]` -- used verbatim as the sidebar label. */
   title: string;
   /** This section's own markdown, from its `## ` line to (exclusive of) the
-   *  next top-level heading. The first section also carries any prose above
-   *  the manual's first `## ` heading (the intro paragraphs) so nothing from
-   *  the source is silently dropped. */
+   *  next top-level heading. Always starts with that `## ` line -- the
+   *  manual's intro prose (if any) is returned separately as `preamble`,
+   *  not folded into this section, so every section's rendered `<h2>` is a
+   *  true first child (see global.css's `.user-manual-content h2:first-child`
+   *  reset) and the intro isn't hidden behind whichever section happens to
+   *  be selected. */
   markdown: string;
+};
+
+type SplitResult = {
+  /** Any prose above the manual's first `## ` heading (e.g. the intro
+   *  paragraphs). Rendered unconditionally, above the section sidebar, so
+   *  it's visible regardless of which section is selected -- nothing from
+   *  the source is silently dropped or hidden behind a non-default section. */
+  preamble: string;
+  sections: ManualSection[];
 };
 
 const TOP_HEADING_RE = /^##\s+(.+?)\s*$/;
 
-/** Splits the manual body (already stripped of its leading H1) into one
- *  section per top-level `## ` heading. Section titles come from the same
- *  heading text rehype-slug anchors when a section is rendered -- there is
- *  no separate hardcoded title list to keep in sync. */
-function splitIntoSections(markdown: string): ManualSection[] {
+/** Splits the manual body (already stripped of its leading H1) into its
+ *  leading preamble prose plus one section per top-level `## ` heading.
+ *  Section titles come from the same heading text rehype-slug anchors when
+ *  a section is rendered -- there is no separate hardcoded title list to
+ *  keep in sync. */
+function splitIntoSections(markdown: string): SplitResult {
   const firstHeadingAt = markdown.search(/^##\s+/m);
   if (firstHeadingAt === -1) {
     // No top-level heading found at all (malformed content) -- render it as
     // a single, unlabeled section rather than crash.
-    return markdown.trim() ? [{ title: "", markdown }] : [];
+    return { preamble: "", sections: markdown.trim() ? [{ title: "", markdown }] : [] };
   }
   const preamble = markdown.slice(0, firstHeadingAt);
   const body = markdown.slice(firstHeadingAt);
   // Split right before every top-level heading; the body starts with one, so
   // the first chunk is never empty.
   const chunks = body.split(/\n(?=##\s+)/);
-  return chunks.map((chunk, i) => {
+  const sections = chunks.map((chunk) => {
     const newlineAt = chunk.indexOf("\n");
     const headingLine = newlineAt === -1 ? chunk : chunk.slice(0, newlineAt);
     const match = TOP_HEADING_RE.exec(headingLine);
-    return {
-      title: match ? match[1] : "",
-      markdown: i === 0 ? preamble + chunk : chunk,
-    };
+    return { title: match ? match[1] : "", markdown: chunk };
   });
+  return { preamble, sections };
 }
 
 /** The manual's own first section is its "Table of contents" heading, which
@@ -100,14 +111,13 @@ function tocAnchorsBySectionIndex(sections: ManualSection[]): (string | undefine
  *  via the manual's own table-of-contents anchors (see
  *  `tocAnchorsBySectionIndex`), so old bookmarks/shared links from the flat-
  *  scrolling page (`#1-choosing-an-agency...` etc., one per top-level
- *  section) still land on the right section. This is not preserved for
- *  anchors into a `###` subsection: those used to be deduped by one slugger
- *  across the whole document, but each section now renders (and slugs its
- *  subheadings) independently, so a subsection anchor that collided with
- *  another section's subsection text before would no longer get a
- *  disambiguating `-1` suffix. In practice no two subsection headings share
- *  text today (see docs/refactor-log.md), so this is a theoretical gap, not
- *  an active break. */
+ *  section) still land on the right section. This is NOT preserved for a
+ *  `###` subsection anchor (e.g. `#5-3-something`): only top-level section
+ *  anchors are matched, so a subsection link falls all the way back to
+ *  `defaultIndex` below -- a different, unrelated section, not merely a lost
+ *  disambiguating suffix. No current in-repo or external link targets a
+ *  subsection anchor (checked both manuals' own cross-references), so this
+ *  is a real but so-far-unexercised gap, not an active break. */
 export function HelpPage() {
   const { t, i18n } = useTranslation();
   // Same fallback chain as api/client.ts's Accept-Language header, not the
@@ -122,7 +132,8 @@ export function HelpPage() {
 
   // React Compiler memoizes derived values automatically -- these are plain
   // function calls, not useMemo, per repo convention.
-  const sections = content == null ? [] : splitIntoSections(stripLeadingH1(content));
+  const { preamble, sections } =
+    content == null ? { preamble: "", sections: [] } : splitIntoSections(stripLeadingH1(content));
   const tocAnchors = tocAnchorsBySectionIndex(sections);
 
   // `explicitIndex` is only ever set from a real event -- a sidebar click or
@@ -188,6 +199,15 @@ export function HelpPage() {
       {error != null && <ErrorBanner error={error} onRetry={() => void refetch()} />}
       {content == null && error == null && (
         <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
+      )}
+      {/* Rendered above the sidebar, unconditionally, regardless of which
+          section is selected -- reuses .user-manual-content for shared
+          p/li/a styling only; it has no <h2> so that class's h2:first-child
+          reset is simply inert here. */}
+      {content != null && sections.length > 0 && preamble.trim() !== "" && (
+        <div className="user-manual-content" style={{ marginBottom: 24 }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
+        </div>
       )}
       {content != null && sections.length > 0 && (
         <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>

@@ -23,6 +23,18 @@ const MANUAL_WITH_TOC =
   "## Section one\n\nSome manual text.\n\n" +
   "## Section two\n\nOther manual text.\n";
 
+// Mirrors the real manuals' shape further: intro prose before the first `## `
+// heading, kept separate from any section so it stays visible regardless of
+// which section is selected (see HelpPage.tsx's `preamble`).
+const MANUAL_WITH_PREAMBLE =
+  "# Delay Dashboard\n\n" +
+  "Intro paragraph before any section.\n\n" +
+  "## Table of contents\n\n" +
+  "1. [Section one](#section-one)\n" +
+  "2. [Section two](#section-two)\n\n" +
+  "## Section one\n\nSome manual text.\n\n" +
+  "## Section two\n\nOther manual text.\n";
+
 function stubManualFetch(markdown: string) {
   vi.stubGlobal(
     "fetch",
@@ -135,5 +147,22 @@ describe("HelpPage", () => {
     expect(await screen.findByRole("heading", { name: "Section one", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Section one" })).toHaveAttribute("aria-current", "true");
     expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).not.toBeInTheDocument();
+  });
+
+  it("renders the manual's intro preamble regardless of which section is selected", async () => {
+    const user = userEvent.setup();
+    stubManualFetch(MANUAL_WITH_PREAMBLE);
+
+    renderWithProviders(<HelpPage />);
+    await screen.findByRole("heading", { name: "Section one", level: 2 });
+    expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Section two" }));
+    await screen.findByRole("heading", { name: "Section two", level: 2 });
+    expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Table of contents" }));
+    await screen.findByRole("heading", { name: "Table of contents", level: 2 });
+    expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
   });
 });
