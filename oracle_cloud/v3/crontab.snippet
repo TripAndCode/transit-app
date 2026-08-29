@@ -2,6 +2,9 @@
 CRON_TZ=Asia/Tokyo
 0  9 * * *  nice -n 10 /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
 5  9 * * *  nice -n 10 /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
-# Enabled in production (see MIGRATION.md step 7) — the workstation mirror
-# (this repo's `make fetch` + `make sync-r2`) is the parity check this waited on.
+10 9 * * *  nice -n 10 /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
+# prune.sh's retention-based deletion is safe because sync-r2.sh (above)
+# mirrors every rt/static file straight to Cloudflare R2 daily, before this
+# weekly prune ever runs -- replaces the old "workstation mirror" (this
+# repo's make fetch + make sync-r2) as the parity check this waited on.
 30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1
