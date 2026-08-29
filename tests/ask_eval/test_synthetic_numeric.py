@@ -60,9 +60,13 @@ from tests.fixtures.synthetic_gtfs import (
 
 # Applied per-function (NOT as a module-level `pytestmark`) to the three
 # live-LLM tests below only — this module also carries fast, offline
-# assertion-helper tests at the bottom that must always run (no DB, no
-# network, no RUN_LLM_EVAL), to prove the numeric check itself isn't
-# vacuous. A module-level pytestmark would skip those too.
+# assertion-helper tests at the bottom that must always run (no DB
+# connection, no ClickHouse, no network, no RUN_LLM_EVAL — though, like
+# every test under tests/ask_eval/ rather than tests/unit/, `DATABASE_URL`
+# still must be *set* for the root conftest.py's module-level read to
+# succeed at collection; only tests/unit/'s conftest fully bypasses that),
+# to prove the numeric check itself isn't vacuous. A module-level
+# pytestmark would skip those too.
 _requires_groq_key = pytest.mark.requires_groq_key
 _requires_llm_eval_flag = pytest.mark.skipif(
     os.environ.get("RUN_LLM_EVAL") != "1",
@@ -199,11 +203,14 @@ async def test_answer_matches_synthetic_ground_truth(
 
 # ---------------------------------------------------------------------------
 # Offline guard: prove `_assert_matches_ground_truth` actually catches a wrong
-# number instead of vacuously passing. This needs no DB, no ClickHouse, no
-# network, and no RUN_LLM_EVAL — it exercises the assertion helper itself
-# against fabricated response payloads, so it always runs (the `_requires_*`
-# decorators above are applied per-function, only to the three live-LLM
-# tests, not to these).
+# number instead of vacuously passing. This needs no DB connection, no
+# ClickHouse, no network, and no RUN_LLM_EVAL — it exercises the assertion
+# helper itself against fabricated response payloads, so it always runs (the
+# `_requires_*` decorators above are applied per-function, only to the three
+# live-LLM tests, not to these). Note: `DATABASE_URL` must still be set in
+# the environment (even to a throwaway value) for collection to succeed,
+# since these tests live alongside the live-LLM ones rather than under
+# tests/unit/ — see the comment near `_requires_llm_eval_flag` above.
 # ---------------------------------------------------------------------------
 
 
