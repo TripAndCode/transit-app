@@ -9,14 +9,22 @@ let mermaidInitPromise: Promise<typeof import("mermaid")> | null = null;
 
 async function loadMermaid() {
   if (!mermaidInitPromise) {
-    mermaidInitPromise = import("mermaid").then((m) => {
-      const mermaid = m.default;
-      // `strict` sanitizes the rendered SVG's own markup (labels etc.) --
-      // relevant even though today's only callers are our own docs/CLAUDE.md
-      // content, not arbitrary user input.
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
-      return m;
-    });
+    mermaidInitPromise = import("mermaid")
+      .then((m) => {
+        const mermaid = m.default;
+        // `strict` sanitizes the rendered SVG's own markup (labels etc.) --
+        // relevant even though today's only callers are our own docs/CLAUDE.md
+        // content, not arbitrary user input.
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+        return m;
+      })
+      .catch((err: unknown) => {
+        // Reset so a transient failure (network blip, stale chunk hash)
+        // doesn't permanently disable mermaid rendering for the rest of
+        // the SPA session -- the next caller gets a fresh import attempt.
+        mermaidInitPromise = null;
+        throw err;
+      });
   }
   return mermaidInitPromise;
 }
