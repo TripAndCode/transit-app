@@ -48,10 +48,16 @@ def assert_avg_min_matches(cell_text: str, expected_avg_min: float, *, label: st
     """Compare a scraped avg-delay cell against item 21's raw (2dp)
     ``agg_route_stats``/``agg_route_daily``-derived ``avg_min`` expectation.
 
-    Rounds the expected side to 1dp (half-up, matching JS ``toFixed``'s
-    behaviour for the clean, non-boundary values item 21's patterns use)
-    before comparing, since every on-screen surface this test checks
-    re-rounds to 1dp for display.
+    Rounds the expected side to 1dp with Python's ``round()`` (round-half-
+    to-even) before comparing, since every on-screen surface this test
+    checks re-rounds to 1dp for display via JS ``toFixed`` (round-half-up).
+    The two algorithms only agree for item 21's current pattern values
+    (0.5/0.88/1.0) because none of them land exactly on a `.x5` boundary in
+    binary floating point — they are NOT equivalent in general. A future
+    pattern whose ``avg_min`` does land on such a boundary (e.g. ``0.85``)
+    could see this comparison disagree with what the frontend actually
+    displays; if that happens, round explicitly half-up here instead of
+    trusting `round()` to match `toFixed`.
     """
     actual = extract_leading_number(cell_text)
     expected_rounded = round(expected_avg_min, 1)

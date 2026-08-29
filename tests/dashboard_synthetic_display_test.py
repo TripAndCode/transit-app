@@ -84,20 +84,18 @@ this test goes red, then reverting and confirming it's green again — see
 `tests/unit/test_dashboard_value_check.py` for a fast, offline, always-run
 version of the same corruption check against the pure comparison helper.
 
-KNOWN GAP (be honest about this until someone with a fully provisioned
-environment closes it): the implementing session could not actually launch
-this test even once. Its `poetry` virtualenv had zero installed packages
-(`poetry install` is outside this session's Bash allowlist — same
-tooling-provisioning gap already logged in `docs/refactor-log.md` for items
-8, 10, 16, 21, and 23), AND — new this time — `frontend/node_modules` was
-itself missing the `mermaid` package `package.json` declares (so `npm run
-build`/`npm run typecheck` both fail even before reaching this test, and
-`npm install` is likewise outside the allowlist). Every selector, query
-param, column index, and rounding rule above was instead traced by hand
-against the actual `frontend/src` and `pipeline`/`api` source referenced
-throughout this docstring — a human or a later session with a working
-`poetry install` + `npm install` should run the command block above for
-real, and perform the corruption check, before trusting this in CI.
+Provisioning history, kept for context: the implementing session could not
+launch this test at all (no `poetry install`/`npm install` in its Bash
+allowlist, and `frontend/node_modules` was missing the `mermaid` package),
+so every selector/query-param/column-index/rounding rule above was traced by
+hand against source instead. A later, fully-provisioned interactive session
+closed that gap for real: built the SPA, installed Playwright's Chromium,
+and ran the command block above against the live throwaway Postgres/
+ClickHouse stack — both tests passed, and the corruption check above was
+performed for real (temporarily forced `uniform_delays`'s `avg_min` from 0.5
+to 99.9 in `tests/fixtures/synthetic_gtfs.py`, confirmed both tests failed
+with a clear mismatch message, then reverted and reconfirmed green). See
+`docs/refactor-log.md` for the full command line and output summary.
 """
 
 from __future__ import annotations
@@ -160,7 +158,7 @@ def seeded_agencies(tmp_path, pg_conn, ch_client) -> dict[str, tuple[int, Synthe
     return out
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def app_server():
     """Launch uvicorn on a free port against the throwaway test DB env already
     resolved by `tests/conftest.py` (DATABASE_URL redirected to `_test`,
@@ -168,7 +166,10 @@ def app_server():
     docstring for the full required env block). Requires
     `api/static/index.html` to exist (build the SPA first); skips with a
     clear message if not. Adapted from `tests/i18n_coverage_test.py`'s
-    identical-shape fixture.
+    identical-shape fixture, including its `scope="module"` — this module's
+    two test functions don't need a fresh server per test (neither depends
+    on any per-test DB-isolation fixture), so module scope halves the
+    subprocess boot/health-poll/teardown cost instead of paying it twice.
     """
     static_index = Path(__file__).parent.parent / _STATIC_INDEX
     if not static_index.exists():
@@ -205,53 +206,63 @@ def app_server():
         proc.kill()
 
 
-def test_overview_headline_matches_synthetic_ground_truth(seeded_agencies, app_server):
+@pytest.fixture(scope="module")
+def browser():
+    """One Chromium instance shared by both test functions in this module —
+    each still gets its own fresh `page` (see each test body), so there's no
+    cross-test state to isolate, just an avoidable second launch/teardown of
+    an already-heavy (real browser + real DB + real subprocess) test tier."""
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        try:
+            yield b
+        finally:
+            b.close()
+
+
+def test_overview_headline_matches_synthetic_ground_truth(seeded_agencies, app_server, browser):
     """Overview hero row's avg-delay tile (`.ov-kpi-value`) for each pattern's
     dedicated, single-route agency must match that pattern's
     `agg_route_stats.avg_min` (rounded to 1dp for display)."""
     base = app_server
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        try:
-            page = browser.new_page()
-            for name, (agency_id, pattern) in seeded_agencies.items():
-                url = f"{base}/agencies/{agency_id}/overview?from={pattern.date}&to={pattern.date}"
-                page.goto(url, wait_until="networkidle", timeout=30_000)
-                page.wait_for_selector(".ov-kpi-row .ov-kpi-tile", timeout=15_000)
-                cell_text = page.locator(".ov-kpi-row .ov-kpi-tile").first.locator(".ov-kpi-value").inner_text()
-                assert_avg_min_matches(
-                    cell_text,
-                    pattern.expected["agg_route_stats"]["avg_min"],
-                    label=f"overview headline / {name}",
-                )
-        finally:
-            browser.close()
+    page = browser.new_page()
+    try:
+        for name, (agency_id, pattern) in seeded_agencies.items():
+            url = f"{base}/agencies/{agency_id}/overview?from={pattern.date}&to={pattern.date}"
+            page.goto(url, wait_until="networkidle", timeout=30_000)
+            page.wait_for_selector(".ov-kpi-row .ov-kpi-tile", timeout=15_000)
+            cell_text = page.locator(".ov-kpi-row .ov-kpi-tile").first.locator(".ov-kpi-value").inner_text()
+            assert_avg_min_matches(
+                cell_text,
+                pattern.expected["agg_route_stats"]["avg_min"],
+                label=f"overview headline / {name}",
+            )
+    finally:
+        page.close()
 
 
-def test_analysis_ranking_table_matches_synthetic_ground_truth(seeded_agencies, app_server):
+def test_analysis_ranking_table_matches_synthetic_ground_truth(seeded_agencies, app_server, browser):
     """Analysis tab's `ranking` report table — each pattern's dedicated
     agency has exactly one route, so the single body row's avg (td index 3)
     and samples (td index 6) columns must match `agg_route_stats` exactly
     (see module docstring for why median/p90, td indices 4/5, are
     deliberately NOT checked here)."""
     base = app_server
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        try:
-            page = browser.new_page()
-            for name, (agency_id, pattern) in seeded_agencies.items():
-                url = f"{base}/agencies/{agency_id}/analysis/ranking?from={pattern.date}&to={pattern.date}"
-                page.goto(url, wait_until="networkidle", timeout=30_000)
-                page.wait_for_selector("table tbody tr", timeout=15_000)
-                rows = page.locator("table tbody tr")
-                assert rows.count() == 1, (
-                    f"{name}: expected exactly 1 ranking row (one route in this dedicated agency), "
-                    f"got {rows.count()} — either the route was filtered out (e.g. the ranking fast "
-                    f"path's `samples > 20` gate) or a stale/leftover row leaked in"
-                )
-                cells = rows.first.locator("td").all_inner_texts()
-                exp = pattern.expected["agg_route_stats"]
-                assert_avg_min_matches(cells[3], exp["avg_min"], label=f"analysis ranking avg / {name}")
-                assert_samples_matches(cells[6], exp["samples"], label=f"analysis ranking samples / {name}")
-        finally:
-            browser.close()
+    page = browser.new_page()
+    try:
+        for name, (agency_id, pattern) in seeded_agencies.items():
+            url = f"{base}/agencies/{agency_id}/analysis/ranking?from={pattern.date}&to={pattern.date}"
+            page.goto(url, wait_until="networkidle", timeout=30_000)
+            page.wait_for_selector("table tbody tr", timeout=15_000)
+            rows = page.locator("table tbody tr")
+            assert rows.count() == 1, (
+                f"{name}: expected exactly 1 ranking row (one route in this dedicated agency), "
+                f"got {rows.count()} — either the route was filtered out (e.g. the ranking fast "
+                f"path's `samples > 20` gate) or a stale/leftover row leaked in"
+            )
+            cells = rows.first.locator("td").all_inner_texts()
+            exp = pattern.expected["agg_route_stats"]
+            assert_avg_min_matches(cells[3], exp["avg_min"], label=f"analysis ranking avg / {name}")
+            assert_samples_matches(cells[6], exp["samples"], label=f"analysis ranking samples / {name}")
+    finally:
+        page.close()
