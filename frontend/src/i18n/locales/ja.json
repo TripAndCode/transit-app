@@ -951,7 +951,8 @@
       "label": "管理ナビゲーション",
       "agencies": "事業者管理",
       "users": "ユーザー管理",
-      "ops": "運用状況"
+      "ops": "運用状況",
+      "architecture": "アーキテクチャ"
     },
     "ops": {
       "title": "運用状況",
@@ -1003,6 +1004,13 @@
       "form_submit_edit": "更新",
       "form_submitting": "保存中...",
       "form_error_feed_url": "フィードURLが無効です"
+    },
+    "architecture": {
+      "title": "アーキテクチャ",
+      "diagram_title": "データフロー",
+      "docs_title": "機能ドキュメント",
+      "docs_nav_label": "機能ドキュメント一覧",
+      "docs_empty": "機能ドキュメントが見つかりません。"
     }
   }
 }

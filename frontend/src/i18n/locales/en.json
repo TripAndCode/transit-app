@@ -951,7 +951,8 @@
       "label": "Admin navigation",
       "agencies": "Agencies",
       "users": "Users",
-      "ops": "Ops"
+      "ops": "Ops",
+      "architecture": "Architecture"
     },
     "ops": {
       "title": "Ops",
@@ -1003,6 +1004,13 @@
       "form_submit_edit": "Update",
       "form_submitting": "Saving...",
       "form_error_feed_url": "Invalid feed URL"
+    },
+    "architecture": {
+      "title": "Architecture",
+      "diagram_title": "Data flow",
+      "docs_title": "Feature docs",
+      "docs_nav_label": "Feature doc list",
+      "docs_empty": "No feature docs found."
     }
   }
 }
