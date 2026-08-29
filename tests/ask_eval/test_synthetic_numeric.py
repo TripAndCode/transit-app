@@ -99,7 +99,7 @@ _QUESTIONS: dict[str, str] = {
 # A misleading prior turn: an unrelated route-ranking result that has
 # nothing to do with the pattern's own route. Mirrors item 16's own live
 # repro/regression tests (tests/api/test_api_ask.py's
-# test_unrelated_question_after_ranking_turn_drops_stale_history) — the
+# test_unrelated_question_with_unrelated_history_gets_fresh_tool_call) — the
 # scenario that actually tempts the model to answer from stale context
 # instead of dispatching a fresh tool call. See the module docstring's "Why
 # each question also carries a misleading prior turn" section for why this
