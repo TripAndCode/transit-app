@@ -33,6 +33,13 @@ export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 AWS="${AWS_CLI:-aws}"
 LOCK_FILE="${SYNC_R2_LOCK:-$BASE_DIR/sync-r2.lock}"
+# prune.sh refuses to delete unless this marker is fresh -- written ONLY on
+# a fully-successful run (see the end of this script), so prune.sh's
+# "R2 already has it" assumption is actually enforced, not just asserted
+# in a comment. A stale/missing marker means prune.sh must not trust that
+# assumption, even though nothing pages a human on that yet (see
+# crontab.snippet).
+OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 
 # Prevent an overlapping run (e.g. a slow first-time backlog upload still
 # running when the next day's cron fires) from racing this one against the
@@ -83,4 +90,11 @@ if [ "$failed" -eq 1 ]; then
     echo "==> sync-r2 completed WITH FAILURES — see above" >&2
     exit 1
 fi
+
+# Only touch the marker on a fully-successful run (every agency, both rt
+# and static) -- a partial success must NOT refresh prune.sh's freshness
+# check, or a permanently-failing single agency could still let prune.sh
+# delete data for that agency forever while the marker stays "fresh" from
+# everyone else's successful syncs.
+date -u +%Y-%m-%dT%H:%M:%SZ > "$OK_MARKER"
 echo "==> sync-r2 complete"

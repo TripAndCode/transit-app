@@ -61,8 +61,14 @@ pass "each agency's rt/static synced to its own R2 path with the right filters a
 grep -q "secrettest" "$AWS_LOG" && fail "secret leaked onto the aws command line"
 pass "secret never appears on the aws command line"
 
+# A fully-successful run writes the marker prune.sh depends on.
+OK_MARKER="$COLLECTOR_BASE/.sync-r2.last-ok"
+[ -f "$OK_MARKER" ] || fail "success marker not written after a fully-successful run"
+pass "success marker written after a fully-successful run"
+
 # One agency's sync failing must not abort the rest of the run, and the
 # script must still exit nonzero overall so cron/monitoring can see it.
+marker_before=$(cat "$OK_MARKER")
 : > "$AWS_LOG"
 if AWS_FAIL_MATCH="rt/1" ../bin/sync-r2.sh >/dev/null 2>&1; then
     fail "sync-r2.sh should exit nonzero when any agency's sync failed"
@@ -70,6 +76,13 @@ fi
 grep -q "s3 sync $COLLECTOR_BASE/data/8/static s3://test-bucket/static/8" "$AWS_LOG" \
     || fail "agency 8 was skipped after agency 1's rt sync failed"
 pass "one agency's sync failure doesn't skip the rest, but still exits nonzero"
+
+# A partial failure must NOT refresh the marker -- otherwise prune.sh would
+# treat a permanently-failing agency as "safe" forever because every other
+# agency keeps succeeding.
+[ "$(cat "$OK_MARKER")" = "$marker_before" ] \
+    || fail "marker was refreshed despite a partial failure"
+pass "a partial failure does not refresh the success marker"
 
 # Overlap guard: a concurrent holder of the lock file must make this run
 # skip immediately (exit 0, no aws calls), not race it. Every test above
@@ -80,17 +93,34 @@ pass "one agency's sync failure doesn't skip the rest, but still exits nonzero"
 # cleanly (not a failure) where `flock` isn't installed.
 if command -v flock >/dev/null 2>&1; then
     LOCK_FILE="$COLLECTOR_BASE/sync-r2.lock"
+    HELD_MARKER="$TEST_BASE/lock-held"
     (
         exec 9>"$LOCK_FILE"
         flock 9
+        touch "$HELD_MARKER"
         sleep 2
     ) &
     holder_pid=$!
-    sleep 0.3 # let the background subshell actually acquire the lock first
+
+    # Poll for the background subshell to actually acquire the lock, rather
+    # than assume a fixed sleep is long enough (avoids flaking under a
+    # slow/loaded runner).
+    acquired=0
+    for _ in $(seq 1 100); do
+        if [ -f "$HELD_MARKER" ]; then
+            acquired=1
+            break
+        fi
+        sleep 0.05
+    done
+    [ "$acquired" -eq 1 ] || fail "background lock holder never acquired the lock (test setup issue)"
 
     : > "$AWS_LOG"
-    out=$(../bin/sync-r2.sh 2>&1)
-    code=$?
+    if out=$(../bin/sync-r2.sh 2>&1); then
+        code=0
+    else
+        code=$?
+    fi
     wait "$holder_pid"
 
     [ "$code" -eq 0 ] || fail "a concurrent run should skip with exit 0, got $code"
