@@ -119,4 +119,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   renders movers' `delta_pct`, so this is a type-only change there). Added
   `test_movers_suppresses_delta_pct_below_prv_avg_floor`, seeding a
   near-zero-baseline route alongside a normal-magnitude one in the same
-  response. (PR #pending)
+  response. (PR #283)
