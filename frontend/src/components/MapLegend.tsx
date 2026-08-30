@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_RAMP } from "../styles/tokens";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 
 export type SeverityKey = "ok" | "mild" | "moderate" | "severe";
 
@@ -20,7 +21,11 @@ type MapLegendProps = {
  * Not draggable — that stays removed as chrome, not real functionality.
  * Collapsible (added back 2026-07-18: the legend takes up more noticeable
  * map space now the map fills the full viewport height) via a chevron
- * toggle in the header; starts expanded on every mount, no persistence.
+ * toggle in the header; starts expanded on every mount, no persistence,
+ * except below the shared MOBILE_BREAKPOINT_QUERY (see useMediaQuery.ts)
+ * where it starts collapsed — on a phone-width first paint the expanded
+ * panel otherwise covers nearly the entire map, which is the whole point
+ * of this tab (item 28, 2026-08-30).
  * Everything else (click-to-filter, per-band counts, the single-sample-stops
  * checkbox, the size/density key, the no-data key, and the explainer text)
  * stays exactly as before.
@@ -37,7 +42,13 @@ export function MapLegend({
   bandCounts,
 }: MapLegendProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  // Default collapsed on phone-width first paint (isMobile is already correct
+  // synchronously — see useMediaQuery's doc comment), expanded everywhere
+  // else. Only the initial value is derived from the viewport; toggling
+  // still has no persistence and resizing after mount doesn't re-collapse
+  // or re-expand it.
+  const [collapsed, setCollapsed] = useState(isMobile);
 
   return (
     <div

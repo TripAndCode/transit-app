@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
@@ -17,6 +17,21 @@ beforeAll(async () => {
 afterAll(async () => {
   await i18n.changeLanguage(prevLanguage);
 });
+
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
+// MOBILE_BREAKPOINT_QUERY ("(max-width: 640px)"), same stub shape.
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
 
 function renderLegend(overrides = {}) {
   const props = {
@@ -75,5 +90,28 @@ describe("MapLegend", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Expand legend" }));
     expect(screen.getByText("< 1.5 min")).toBeTruthy();
+  });
+
+  describe("viewport-dependent default collapsed state", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("defaults to expanded on a desktop-width viewport", () => {
+      mockMatchMedia(false);
+      renderLegend();
+      expect(screen.getByText("< 1.5 min")).toBeTruthy();
+    });
+
+    it("defaults to collapsed on a mobile-width viewport, so the map isn't covered on first paint", () => {
+      mockMatchMedia(true);
+      renderLegend();
+      expect(screen.queryByText("< 1.5 min")).toBeNull();
+      expect(screen.getByText("Legend")).toBeTruthy();
+
+      // Still fully usable: tapping the toggle expands it as before.
+      fireEvent.click(screen.getByRole("button", { name: "Expand legend" }));
+      expect(screen.getByText("< 1.5 min")).toBeTruthy();
+    });
   });
 });
