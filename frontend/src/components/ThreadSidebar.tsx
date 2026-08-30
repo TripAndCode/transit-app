@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import { MessageSquareText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
@@ -289,93 +290,113 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
 
   return (
     <>
-      {/* Mobile: hamburger + slide-in drawer */}
-      <div>
-        {/* Hamburger button */}
+      {/* Mobile: a persistent in-flow trigger row, not a floating
+          position:fixed button. Sidebar.tsx's own mobile nav trigger
+          (its isMobile branch) is deliberately a slim, non-fixed rail so
+          it doesn't float on top of the sticky GuestPrompt/data-staleness/
+          feed-health banners; this trigger used to be position:fixed at a
+          hardcoded top/left, which landed it directly on top of that rail
+          on the Ask tab specifically (the one place both components render
+          together) -- two stacked, near-identical hamburger glyphs opening
+          two different drawers. Keeping this trigger in normal flow at the
+          top of the Ask tab's own content area, with a distinct labeled
+          icon (MessageSquareText, vs. Sidebar's unlabeled PanelLeft), makes
+          the two triggers sit side by side instead of overlapping, and
+          makes their different purposes (app navigation vs. conversation
+          history) obvious. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          height: 36,
+          flexShrink: 0,
+          padding: "0 var(--space-2)",
+          background: "var(--bg-surface)",
+          borderBottom: "1px solid var(--border-soft)",
+        }}
+      >
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          aria-label={t("ask.sidebar.new_thread")}
+          aria-label={t("ask.sidebar.open_threads")}
           style={{
-            position: "fixed",
-            top: 60,
-            left: 12,
-            zIndex: 200,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            width: 36,
-            height: 36,
+            background: "transparent",
+            border: "none",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 500,
+            padding: "4px 8px",
+            borderRadius: "var(--radius)",
           }}
         >
-          <span style={{ fontSize: 18, lineHeight: 1 }}>☰</span>
+          <MessageSquareText size={16} strokeWidth={1.5} aria-hidden="true" />
+          {t("ask.sidebar.open_threads")}
         </button>
+      </div>
 
-        {/* Backdrop */}
-        {mobileOpen && (
-          <div
-            onClick={() => setMobileOpen(false)}
-            role="presentation"
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.3)",
-              zIndex: Z_INDEX.drawerBackdrop,
-            }}
-          />
-        )}
-
-        {/* Drawer */}
-        <aside
+      {/* Backdrop */}
+      {mobileOpen && (
+        <div
+          onClick={() => setMobileOpen(false)}
+          role="presentation"
           style={{
             position: "fixed",
-            top: 0,
-            left: 0,
-            bottom: 0,
-            width: 260,
-            zIndex: Z_INDEX.drawer,
-            transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
-            transition: "transform 200ms ease-out",
-            background: "var(--bg-surface)",
-            borderRight: "1px solid var(--border-soft)",
+            inset: 0,
+            background: "rgba(0,0,0,0.3)",
+            zIndex: Z_INDEX.drawerBackdrop,
+          }}
+        />
+      )}
+
+      {/* Drawer */}
+      <aside
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: 260,
+          zIndex: Z_INDEX.drawer,
+          transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 200ms ease-out",
+          background: "var(--bg-surface)",
+          borderRight: "1px solid var(--border-soft)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Close row */}
+        <div
+          style={{
             display: "flex",
-            flexDirection: "column",
+            justifyContent: "flex-end",
+            padding: "var(--space-2) var(--space-3)",
+            borderBottom: "1px solid var(--border-soft)",
           }}
         >
-          {/* Close row */}
-          <div
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
             style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              padding: "var(--space-2) var(--space-3)",
-              borderBottom: "1px solid var(--border-soft)",
+              background: "none",
+              border: "none",
+              fontSize: 20,
+              cursor: "pointer",
+              color: "var(--text-secondary)",
+              lineHeight: 1,
+              padding: 4,
             }}
+            aria-label={t("common.close")}
           >
-            <button
-              type="button"
-              onClick={() => setMobileOpen(false)}
-              style={{
-                background: "none",
-                border: "none",
-                fontSize: 20,
-                cursor: "pointer",
-                color: "var(--text-secondary)",
-                lineHeight: 1,
-                padding: 4,
-              }}
-              aria-label={t("common.close")}
-            >
-              ×
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "hidden" }}>{sidebarContent}</div>
-        </aside>
-      </div>
+            ×
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: "hidden" }}>{sidebarContent}</div>
+      </aside>
 
       {contextMenu}
     </>

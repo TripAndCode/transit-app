@@ -610,6 +610,7 @@
     },
     "sidebar": {
       "new_thread": "New conversation",
+      "open_threads": "Conversations",
       "pinned": "Pinned",
       "today": "Today",
       "yesterday": "Yesterday",

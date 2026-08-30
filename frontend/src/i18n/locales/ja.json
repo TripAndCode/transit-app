@@ -610,6 +610,7 @@
     },
     "sidebar": {
       "new_thread": "新しい会話",
+      "open_threads": "会話一覧",
       "pinned": "ピン留め",
       "today": "今日",
       "yesterday": "昨日",
