@@ -65,10 +65,9 @@ async def _route_exists(conn, agency_id: int, route_code: str) -> bool:
     """True if ``route_code`` has ever been analyzed for this agency.
 
     Checks ``agg_route_daily``, not ``agg_route_stats``: agg_route_stats is
-    built with ``HAVING COUNT(*) > 20`` and ``WHERE service_type IS NOT
-    NULL`` (pipeline/analyze.py), so it's a LOSSY existence oracle — a real,
-    legitimately-observed route with <=20 lifetime deduped samples or an
-    all-NULL service_type is invisible to it even though
+    built with ``WHERE service_type IS NOT NULL`` (pipeline/analyze.py), so
+    it's a LOSSY existence oracle — a real, legitimately-observed route with
+    an all-NULL service_type is invisible to it even though
     today_route_summary's route list (built from agg_route_daily, no such
     filter) would show it with bucket="no_baseline". Checking agg_route_daily
     instead matches the grain of the table that actually populates the route
@@ -607,8 +606,12 @@ async def today_route_summary(
     ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
     classifier (:func:`api.triage.classify_route`) then assigns each route a
     ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
-    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
-    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    (today vs baseline), and a ``low_confidence`` flag for thin TODAY samples.
+    ``baseline_samples`` is the separate, un-gated sample count backing the
+    baseline itself (``agg_route_stats`` no longer drops thin route/service
+    groups at insert time) — the client decides its own low-confidence
+    treatment for a thin baseline from this field. The client groups by
+    bucket, so the SQL ``ORDER BY`` is only a sensible default.
 
     Reads the precomputed ``agg_route_daily`` (built by ``analyze``) for the
     latest date instead of scanning raw ``updates`` — a small indexed read
@@ -633,7 +636,8 @@ async def today_route_summary(
             -- has no '' row. Mirrors the digest's route-grain baseline.
             SELECT route_code,
                    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
-                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min,
+                   SUM(samples) AS base_samples
             FROM agg_route_stats
             WHERE agency_id = $1 AND samples IS NOT NULL
             GROUP BY route_code
@@ -643,6 +647,12 @@ async def today_route_summary(
             d.trips_observed, d.samples, d.last_seen_at,
             COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
             COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
+            -- agg_route_stats no longer gates out thin (route, service_type)
+            -- groups at insert time, so this baseline can itself now rest on
+            -- very few observations -- surfaced here (not folded into
+            -- classify_route/low_confidence, which judges TODAY's sample
+            -- count) so the client can separately flag a thin baseline.
+            COALESCE(b.samples, rb.base_samples) AS baseline_samples,
             b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
@@ -710,6 +720,7 @@ async def today_route_summary(
                 "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 "baseline_avg_sec": baseline_avg_sec,
                 "baseline_p90_sec": baseline_p90_sec,
+                "baseline_samples": r["baseline_samples"],
                 "deviation_sec": deviation_sec,
                 "bucket": bucket,
                 "low_confidence": low_confidence,

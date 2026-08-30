@@ -56,6 +56,70 @@ def test_analyze_creates_agg_route_stats(pg_conn, agency_id, ch_client):
     assert rows[0][2] is not None
 
 
+def _seed_thin_route(pg_conn, agency_id, route_code, n):
+    """Insert *n* fake rows for a single (route_code, service_type='平日',
+    stop_sequence=1) group — deliberately fewer than both agg_route_stats'
+    former per-(route, service_type) gate (`HAVING COUNT(*) > 20`) and
+    agg_stop_seq's former per-(route, stop_sequence) gate
+    (`HAVING COUNT(*) > 5`). A unique day per row (like _seed_updates) keeps
+    every row a distinct post-dedup (trip_id, date, stop_sequence) key, so
+    the post-dedup sample count is exactly *n*.
+    """
+    with pg_conn.cursor() as cur:
+        for i in range(n):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"thin{i}.pb",
+                    f"2026-04-{i + 1:02d}T09:00:00",
+                    f"平日_9時_系統{route_code}",
+                    "平日",
+                    time(9, 0),
+                    route_code,
+                    1,
+                    30,
+                ),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_keeps_low_sample_agg_route_stats_row(pg_conn, agency_id, ch_client):
+    """analyze() has no insert-time minimum-sample gate on any agg_* table —
+    a (route, service_type) group with only 3 samples must still appear in
+    agg_route_stats (with samples=3), not be silently dropped the way the
+    former `HAVING COUNT(*) > 20` gate would have dropped it."""
+    _seed_thin_route(pg_conn, agency_id, "99999", 3)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples FROM agg_route_stats WHERE agency_id = %s AND route_code = %s",
+            (agency_id, "99999"),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 3
+
+
+def test_analyze_keeps_low_sample_agg_stop_seq_row(pg_conn, agency_id, ch_client):
+    """analyze() has no insert-time minimum-sample gate on any agg_* table —
+    a (route, stop_sequence) group with only 3 samples must still appear in
+    agg_stop_seq (with samples=3), not be silently dropped the way the former
+    `HAVING COUNT(*) > 5` gate would have dropped it."""
+    _seed_thin_route(pg_conn, agency_id, "99998", 3)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples FROM agg_stop_seq WHERE agency_id = %s AND route_code = %s AND stop_sequence = 1",
+            (agency_id, "99998"),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 3
+
+
 def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)

@@ -20,6 +20,13 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
 - agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
+
+None of the builders below gate a group out at insert time by its sample
+count, however thin. Every row carries its own `samples` column instead, so a
+low-sample row still exists for a reader to weight, pool across a coarser
+grain, or flag as low-confidence (see api.triage.LOW_CONFIDENCE_SAMPLES) —
+rather than silently vanishing below some insert-time threshold that varies
+table to table.
 """
 
 import logging
@@ -210,6 +217,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────
+        # No minimum-sample HAVING here — see the module docstring's no-gate
+        # policy.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
             ranked AS (
@@ -229,7 +238,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 COUNT(*) AS samples
             FROM ranked
             GROUP BY route_code, service_type
-            HAVING COUNT(*) > 20
             ORDER BY avg_min DESC
         """
         _build_and_insert(
@@ -478,6 +486,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # join static_stop_times/static_stops for the real name; without it,
         # synthesize a numbered placeholder ("N番停留所") from stop_sequence
         # alone, since there's no other source of stop names to key on.
+        # No minimum-sample HAVING here either — see the module docstring's
+        # no-gate policy.
         if has_static:
             sql = """
                 WITH deduped AS (SELECT * FROM _analyze_deduped)
@@ -498,7 +508,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     AND ss.agency_id = %(agency_id)s
                 WHERE d.stop_sequence IS NOT NULL
                 GROUP BY d.route_code, d.stop_sequence
-                HAVING COUNT(*) > 5
                 ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) DESC
             """
         else:
@@ -513,7 +522,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 FROM deduped
                 WHERE stop_sequence IS NOT NULL
                 GROUP BY route_code, stop_sequence
-                HAVING COUNT(*) > 5
                 ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) DESC
             """
         _build_and_insert(

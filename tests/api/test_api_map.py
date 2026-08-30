@@ -339,10 +339,9 @@ async def _seed_route_existence(conn, agency_id, route_code, service_type="weekd
     existence precheck (map.py) passes for route_code -- real
     avg/worst/trips/samples figures don't matter here, only that a row
     exists. Checks agg_route_daily specifically, not agg_route_stats: the
-    latter is built with a >20-lifetime-sample threshold and a NOT NULL
-    service_type filter (pipeline/analyze.py), making it a lossy existence
-    oracle, whereas agg_route_daily (what today_route_summary's route list
-    is built from) has no such filter."""
+    latter is built with a NOT NULL service_type filter (pipeline/analyze.py),
+    making it a lossy existence oracle, whereas agg_route_daily (what
+    today_route_summary's route list is built from) has no such filter."""
     await conn.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
         "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "

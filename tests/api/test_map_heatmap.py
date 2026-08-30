@@ -125,10 +125,9 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     # agg_route_daily existence row: route_stop_profile prechecks this table
     # (agency_id, route_code) before touching ClickHouse at all — checks
     # agg_route_daily, not agg_route_stats, since the latter is a lossy
-    # existence oracle (built with a >20-lifetime-sample threshold and a NOT
-    # NULL service_type filter — see map.py's route_trips docstring). Real
-    # avg/worst/trips/samples figures don't matter here, only that a row
-    # exists.
+    # existence oracle (built with a NOT NULL service_type filter — see
+    # map.py's route_trips docstring). Real avg/worst/trips/samples figures
+    # don't matter here, only that a row exists.
     await pool.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
         "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "

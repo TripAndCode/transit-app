@@ -120,3 +120,24 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `test_movers_suppresses_delta_pct_below_prv_avg_floor`, seeding a
   near-zero-baseline route alongside a normal-magnitude one in the same
   response. (PR #283)
+- 2026-08-31: Resolved item 37's inconsistent minimum-sample gates across
+  `pipeline/analyze.py`'s `agg_*` builders by standardizing on "no
+  insert-time gate anywhere" — removed `agg_route_stats`'s
+  `HAVING COUNT(*) > 20` and `agg_stop_seq`'s `HAVING COUNT(*) > 5` (both
+  branches); the other five listed tables already had no gate. Every table
+  keeps its `samples` column so readers/UI apply low-confidence handling at
+  read time instead (see `api.triage.LOW_CONFIDENCE_SAMPLES`, the existing
+  pattern this follows). Closed the one real gap this created: threaded a
+  new `baseline_samples` field through `today_route_summary`
+  (`api/routers/map.py`) so a thin `agg_route_stats` baseline is now
+  distinguishable from a thin `agg_route_daily` "today" sample count (the
+  existing `low_confidence` flag only judges the latter); `RouteRow.tsx`
+  renders a separate low-confidence-baseline marker for it. Updated two
+  stale comments that referenced the removed `agg_route_stats` sample
+  threshold (`api/routers/map.py`'s `_route_exists` docstring,
+  `tests/api/test_map_heatmap.py`) and one in `pipeline/query/tool_queries.py`
+  that incorrectly claimed to "match" `agg_stop_seq`'s now-nonexistent gate.
+  Added `tests/pipeline/test_analyze.py` tests proving a 3-sample
+  route/service and a 3-sample route/stop_sequence group are now
+  materialised (previously silently dropped), plus frontend tests for the
+  new baseline-low-confidence marker. (PR #pending)
