@@ -110,7 +110,7 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures.dashboard_value_check import assert_avg_min_matches, assert_samples_matches
-from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, SyntheticPattern, insert_pattern_updates, load_pattern_static
+from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, SyntheticPattern, run_pattern
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_DASHBOARD_E2E_SCAN") != "1",
@@ -139,8 +139,6 @@ def _free_port() -> int:
 @pytest.fixture
 def seeded_agencies(tmp_path, pg_conn, ch_client) -> dict[str, tuple[int, SyntheticPattern]]:
     """Seed one dedicated agency per item-21 pattern; return name -> (agency_id, pattern)."""
-    from pipeline.analyze import analyze
-
     out: dict[str, tuple[int, SyntheticPattern]] = {}
     for pattern_fn in ALL_PATTERNS:
         pattern = pattern_fn()
@@ -151,9 +149,7 @@ def seeded_agencies(tmp_path, pg_conn, ch_client) -> dict[str, tuple[int, Synthe
             )
             agency_id = cur.fetchone()[0]
         pg_conn.commit()
-        load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
-        insert_pattern_updates(pattern, ch_client, agency_id)
-        analyze(agency_id, pg_conn, ch_client)
+        run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
         out[pattern.name] = (agency_id, pattern)
     return out
 

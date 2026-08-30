@@ -23,6 +23,7 @@ from tests.fixtures.dashboard_value_check import (
     assert_samples_matches,
     extract_leading_number,
 )
+from tests.fixtures.synthetic_gtfs import null_delays, outlier_spike
 
 
 def test_extract_leading_number_handles_unit_suffixes_and_grouping():
@@ -38,9 +39,13 @@ def test_extract_leading_number_raises_on_no_number():
 
 
 def test_assert_avg_min_matches_passes_for_correct_value():
-    # 0.88 (item 21's outlier_spike expected avg_min, 2dp) rounds to 0.9 for
-    # display via the frontend's own toFixed(1) — matches a "0.9分" cell.
-    assert_avg_min_matches("0.9分", 0.88, label="outlier_spike")
+    # outlier_spike's expected avg_min (2dp) rounds to 0.9 for display via
+    # the frontend's own toFixed(1) — matches a "0.9分" cell. Read live from
+    # the fixture pattern (not hand-typed) so this test can't silently
+    # desync from a future edit to that pattern -- same convention as
+    # test_ask_eval_numeric_helper.py's use of tests.fixtures.synthetic_gtfs.
+    avg_min = outlier_spike().expected["agg_route_stats"]["avg_min"]
+    assert_avg_min_matches("0.9分", avg_min, label="outlier_spike")
 
 
 def test_assert_avg_min_matches_fails_for_corrupted_expected_value():
@@ -53,14 +58,20 @@ def test_assert_avg_min_matches_fails_for_corrupted_expected_value():
 def test_assert_avg_min_matches_fails_for_wrong_displayed_cell():
     """Same anti-vacuous-pass check from the other direction: a correct
     expected value against a wrong (corrupted) displayed cell must also fail."""
+    avg_min = outlier_spike().expected["agg_route_stats"]["avg_min"]
     with pytest.raises(AssertionError):
-        assert_avg_min_matches("5.0分", 0.88, label="outlier_spike")
+        assert_avg_min_matches("5.0分", avg_min, label="outlier_spike")
 
 
 def test_assert_samples_matches_passes_for_correct_value():
-    assert_samples_matches("22", 22, label="null_delays")
+    # null_delays' expected sample count (22 of 25 rows -- the other 3 carry
+    # a NULL delay and are filtered out). Read live from the fixture pattern
+    # rather than hand-typed, same reasoning as above.
+    n_valid = null_delays().expected["agg_route_stats"]["samples"]
+    assert_samples_matches("22", n_valid, label="null_delays")
 
 
 def test_assert_samples_matches_fails_for_corrupted_value():
+    n_valid = null_delays().expected["agg_route_stats"]["samples"]
     with pytest.raises(AssertionError):
-        assert_samples_matches("22", 25, label="null_delays")
+        assert_samples_matches("22", n_valid + 3, label="null_delays")

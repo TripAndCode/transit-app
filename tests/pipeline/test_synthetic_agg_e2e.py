@@ -14,22 +14,14 @@ the hand-computed `expected` dict shipped with each pattern in
 document as reusable by later frontend/Ask-tab checks (items 22/23) too.
 """
 
-from pipeline.analyze import analyze
 from tests.fixtures.synthetic_gtfs import (
     ALL_PATTERNS,
     SyntheticPattern,
-    insert_pattern_updates,
-    load_pattern_static,
     null_delays,
     outlier_spike,
+    run_pattern,
     uniform_delays,
 )
-
-
-def _run_pattern(pattern: SyntheticPattern, tmp_path, pg_conn, agency_id, ch_client) -> None:
-    load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
-    insert_pattern_updates(pattern, ch_client, agency_id)
-    analyze(agency_id, pg_conn, ch_client)
 
 
 def _assert_numeric(actual, expected, pattern_name: str, label: str, places: int = 2) -> None:
@@ -244,19 +236,19 @@ def _assert_all(pattern: SyntheticPattern, pg_conn, agency_id) -> None:
 
 def test_uniform_delays_pattern_aggregates_match_hand_computed_values(tmp_path, pg_conn, agency_id, ch_client):
     pattern = uniform_delays()
-    _run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
+    run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
     _assert_all(pattern, pg_conn, agency_id)
 
 
 def test_outlier_spike_pattern_aggregates_match_hand_computed_values(tmp_path, pg_conn, agency_id, ch_client):
     pattern = outlier_spike()
-    _run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
+    run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
     _assert_all(pattern, pg_conn, agency_id)
 
 
 def test_null_delays_pattern_aggregates_match_hand_computed_values(tmp_path, pg_conn, agency_id, ch_client):
     pattern = null_delays()
-    _run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
+    run_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client)
     _assert_all(pattern, pg_conn, agency_id)
 
 

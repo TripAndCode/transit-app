@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { SidebarNavList } from "../components/SidebarNavList";
 
 const MANUAL_BASE = "/user-manual";
 
@@ -240,39 +241,14 @@ export function HelpPage() {
       )}
       {content != null && sections.length > 0 && (
         <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
-          <nav
-            aria-label={t("help.sections_nav")}
-            style={{ width: 240, flexShrink: 0, position: "sticky", top: 16 }}
-          >
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {sections.map((section, i) => (
-                <li key={i}>
-                  <button
-                    type="button"
-                    onClick={() => setExplicitIndex(i)}
-                    aria-current={i === safeIndex ? "true" : undefined}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      background: i === safeIndex ? "var(--accent-soft)" : "transparent",
-                      border: "none",
-                      borderLeft: `3px solid ${i === safeIndex ? "var(--accent)" : "transparent"}`,
-                      color: "var(--text-primary)",
-                      fontWeight: i === safeIndex ? 600 : 400,
-                      fontSize: 13,
-                      lineHeight: 1.4,
-                      padding: "8px 12px",
-                      cursor: "pointer",
-                      borderRadius: "var(--radius)",
-                    }}
-                  >
-                    {section.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <SidebarNavList
+            ariaLabel={t("help.sections_nav")}
+            width={240}
+            navStyle={{ position: "sticky", top: 16 }}
+            items={sections.map((section, i) => ({ key: i, label: section.title }))}
+            activeKey={safeIndex}
+            onSelect={setExplicitIndex}
+          />
           <div className="user-manual-content" style={{ flex: 1, minWidth: 0 }} ref={contentRef}>
             <ReactMarkdown
               // GFM adds the table syntax the manual uses (plain CommonMark,

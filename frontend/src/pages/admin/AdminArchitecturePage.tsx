@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { useArchitectureDoc, useArchitectureDocs } from "../../api/admin";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { mermaidMarkdownComponents } from "../../components/MarkdownMermaid";
+import { SidebarNavList } from "../../components/SidebarNavList";
 
 // Rendered as a Mermaid flowchart rather than prose so it matches the
 // approved mockup's data-flow box. This is a MANUAL-SYNC reminder, not an
@@ -64,39 +65,13 @@ export function AdminArchitecturePage() {
         )}
         {docs != null && docs.length > 0 && (
           <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
-            <nav
-              aria-label={t("admin.architecture.docs_nav_label")}
-              style={{ width: 220, flexShrink: 0 }}
-            >
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {docs.map((d) => (
-                  <li key={d.slug}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSlug(d.slug)}
-                      aria-current={d.slug === activeSlug ? "true" : undefined}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        background: d.slug === activeSlug ? "var(--accent-soft)" : "transparent",
-                        border: "none",
-                        borderLeft: `3px solid ${d.slug === activeSlug ? "var(--accent)" : "transparent"}`,
-                        color: "var(--text-primary)",
-                        fontWeight: d.slug === activeSlug ? 600 : 400,
-                        fontSize: 13,
-                        lineHeight: 1.4,
-                        padding: "8px 12px",
-                        cursor: "pointer",
-                        borderRadius: "var(--radius)",
-                      }}
-                    >
-                      {d.title}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </nav>
+            <SidebarNavList
+              ariaLabel={t("admin.architecture.docs_nav_label")}
+              width={220}
+              items={docs.map((d) => ({ key: d.slug, label: d.title }))}
+              activeKey={activeSlug}
+              onSelect={setSelectedSlug}
+            />
             <div style={{ flex: 1, minWidth: 0 }}>
               {docError != null && <ErrorBanner error={docError} />}
               {doc != null && (
