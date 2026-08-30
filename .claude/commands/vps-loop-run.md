@@ -46,6 +46,56 @@ empty:
 3. If either command errors, follow the Boundaries tool-error rule: log it and stop
    this tick. Never replace a retained decision with manual force deletion.
 
+## Step 2b — Detect unshipped work stranded behind an already-merged item
+
+Step 3's per-item check treats any `MERGED` PR for `vps-loop/item-<N>` as "done,
+skip." That's true for the item's *original* scope, but a worktree/branch can
+keep accumulating real commits after its first PR merged — most often a
+follow-up `/review-branch` fix cycle on a resumed branch (Step 3b's own resume
+path) that itself got interrupted before reaching Step 6. Nothing before this
+step ever re-examines an item once Step 3 would call it done, so real,
+already-reviewed follow-up work can sit silently stranded in that worktree
+indefinitely — every subsequent tick keeps correctly reporting the item as
+"MERGED" and moving on without ever looking at the worktree's actual tip.
+
+For every `vps-loop/item-<N>` entry Step 2's `cleanup_git_state.py` run just
+retained specifically for the reason **"local tip differs (possible post-merge
+commits)"** — not any other KEEP reason, and not items with no such worktree —
+check whether that tip actually carries unshipped substance:
+
+1. `git log main..vps-loop/item-<N> --oneline` from the main checkout. A
+   squash-merged branch's original commits always show here even when their
+   content already landed byte-for-byte on `main` — this list alone does NOT
+   prove unshipped work; it only says the tip differs from a squash-merge
+   commit hash, which is expected and harmless on its own.
+2. For each file `git diff main...vps-loop/item-<N> --stat` shows as touched,
+   compare against `main`'s current version of that file (`git show
+   origin/main:<path>`) for the *specific thing the branch's commit messages
+   describe fixing* — not just "is the diff empty." The longer a branch sits,
+   the more likely unrelated later work already absorbed the same fix
+   independently; a mechanical non-empty diff is not evidence of a real gap by
+   itself. This step requires reading both sides, not a scripted check.
+3. **Content already covered on `main` (the common case for an old, stale
+   worktree):** append `- <UTC timestamp>: item N's leftover
+   vps-loop/item-<N> worktree/branch is fully superseded — every change it
+   made is already present on main via later, unrelated work. Removed via
+   git worktree remove --force + git branch -D.`, then actually remove the
+   worktree and branch. Do not leave it for a future tick to re-discover;
+   `cleanup_git_state.py` will not reclaim it on its own since the tip
+   genuinely differs from any merged head by its literal commit hash.
+4. **Genuinely new, unshipped content confirmed:** item N is NOT done despite
+   its merged PR. Append `- <UTC timestamp>: item N's merged PR (#<original
+   number>) doesn't cover all commits on vps-loop/item-<N>; unshipped content
+   found (<short description>). Routing to Step 3b's resume-and-ship path as
+   a follow-up this tick.` and go straight to Step 3b's "real commits exist,
+   worktree exists" branch for item N — skip Step 3's normal top-to-bottom
+   walk for this tick; other items resume their normal queue position next
+   tick once this is resolved.
+
+Skip this step entirely on a tick where Step 2 retained no worktree for this
+reason — it only exists to catch the one blind spot described above, not to
+re-audit every retained worktree on every tick.
+
 ## Step 3 — Pick the next actionable item
 
 Read the "Current task" / "Refactor backlog" sections. Items are numbered; each gets
