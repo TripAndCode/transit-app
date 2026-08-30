@@ -450,6 +450,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # hour-of-day across every route; a service/route filter falls back to
         # the live path on read. (The reports/trend hourly heatmap is the same
         # grain and a natural future consumer, but is not wired here yet.)
+        # `EXTRACT(HOUR FROM scheduled_time)` is always 0-23, same invariant as
+        # the agg_route_hour_dow comment above (see pipeline/strategies/_time.py).
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
