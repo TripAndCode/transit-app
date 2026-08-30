@@ -94,3 +94,14 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   the same schema/migration comment from this session), so that part of the
   original task text is still open for a future session with broader
   permissions. (PR #281)
+- 2026-08-31: Fixed item 35's "samples" ambiguity in `describe_data(kind=sample_counts)`
+  (`pipeline/query/meta_tools.py`): it counted raw ClickHouse `updates` polls
+  directly, while every other Ask-tab tool in the module defines "samples" as
+  the deduped latest-observation-per-stop-event count via
+  `pipeline.reports.filters._dedup_cte_ch`. Routed `sample_counts`'s grouped
+  count and its pagination total through the same `deduped` CTE so the term
+  means one consistent thing everywhere on the Ask surface (option a from the
+  task); left the window-end display clamp reading raw `updates`, since that
+  reflects data-freshness, not sample counting. Added
+  `test_sample_counts_dedupes_repeated_polls` (a stop event polled 3 times
+  plus one polled once must report `samples == 2`, not 4). (PR #282)

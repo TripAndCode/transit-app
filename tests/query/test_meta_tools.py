@@ -240,6 +240,55 @@ async def test_describe_data_sample_counts(conn_with_observations_ch):
     assert result.rows[0][1] == 30
 
 
+@pytest.fixture
+async def conn_with_duplicate_polls_ch(conn_with_seed, ch_client, ch_async_client):
+    """One stop event polled 3 times (only `file_name`/`captured_at` differ,
+    simulating a GTFS-RT feed refining its `dep_delay` estimate as a trip
+    nears a stop) plus a second stop event polled once, mirrored into
+    ClickHouse. Backs the regression test asserting `sample_counts` reports
+    the deduped latest-observation-per-stop-event count (see
+    `pipeline.db.build_dedup_ch_sql`), not a raw poll count — every other
+    tool in `meta_tools`/`tools.py` already defines "samples" that way.
+    """
+    pool, agency_id = conn_with_seed
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, $4, 1, $5, '08:00'::time, '平日', $6)",
+            [
+                # Same stop event (route/trip/stop_sequence/date/scheduled_time/
+                # service_type) polled 3 times as the estimate refines.
+                (agency_id, "poll_a", "T0", "1021", datetime(2026, 5, 10, 7, 55, 0), 30),
+                (agency_id, "poll_b", "T0", "1021", datetime(2026, 5, 10, 7, 58, 0), 45),
+                (agency_id, "poll_c", "T0", "1021", datetime(2026, 5, 10, 8, 0, 0), 60),
+                # A second, distinct stop event polled once.
+                (agency_id, "poll_d", "T1", "1021", datetime(2026, 5, 11, 8, 0, 0), 60),
+            ],
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+    yield pool, agency_id, ch_async_client
+
+
+@pytest.mark.asyncio
+async def test_sample_counts_dedupes_repeated_polls(conn_with_duplicate_polls_ch):
+    """4 raw polls across 2 distinct stop events must report `samples == 2`
+    (the deduped count), not 4 (the raw poll count) — see
+    `pipeline.reports.filters._dedup_cte_ch`, which every other analytic
+    tool in this module already routes through for its own "samples"."""
+    pool, agency_id, ch = conn_with_duplicate_polls_ch
+    async with pool.acquire() as conn:
+        result = await describe_data(
+            {"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja", ch=ch
+        )
+    assert result.kind == "table"
+    assert result.rows[0][0] == "1021"
+    assert result.rows[0][1] == 2
+
+
 @pytest.mark.asyncio
 async def test_sample_counts_ascending(conn_with_observations_ch):
     pool, agency_id, ch = conn_with_observations_ch
