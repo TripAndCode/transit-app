@@ -978,8 +978,16 @@ async def _movers(
     # window, has two routes at -1.7244 and -1.7203, which both round to -1.72.
     # Ranking on the rounded value made the top-10 cutoff between them a
     # coin-flip; ranking on the raw value orders them by their actual deltas.
-    deltas: list[tuple[str, float, float, float]] = []
+    deltas: list[tuple[str, float, float | None, float]] = []
     MIN_SAMPLES = 10
+    # A previous-window average below this floor makes delta_pct meaningless:
+    # dividing by a near-zero baseline can turn a trivial absolute change into
+    # a triple-digit-or-larger swing that reads as a real signal but isn't,
+    # even past the MIN_SAMPLES gate above (a small sample can still average
+    # to a near-zero delay). The floor matches this app's own delay-severity
+    # ramp elsewhere, which already treats anything below it as background
+    # noise rather than a noticeable delay.
+    MIN_PRV_AVG_FOR_PCT_MIN = 1.5
     for code in common:
         cur_avg, cur_n = cur[code]
         prv_avg, prv_n = prv[code]
@@ -988,8 +996,8 @@ async def _movers(
         if cur_n < MIN_SAMPLES or prv_n < MIN_SAMPLES:
             continue
         d_min = cur_avg - prv_avg
-        d_pct = (d_min / prv_avg) * 100.0
-        deltas.append((code, round(d_min, 2), round(d_pct, 1), d_min))
+        d_pct = round((d_min / prv_avg) * 100.0, 1) if abs(prv_avg) >= MIN_PRV_AVG_FOR_PCT_MIN else None
+        deltas.append((code, round(d_min, 2), d_pct, d_min))
     # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
     # they're distinct — which is what makes the ranking reproducible: the order
     # `common` happens to be iterated in cannot influence the result. It used to:
