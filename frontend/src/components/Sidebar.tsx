@@ -355,11 +355,12 @@ export function Sidebar() {
               height: 32,
             }}
           >
-            {/* A distinct glyph from ThreadSidebar's "☰" hamburger trigger —
-                on the Ask tab at mobile widths both this app-nav trigger and
-                ThreadSidebar's thread-list trigger are on screen at once, and
-                two identical unlabeled hamburgers opening different drawers
-                (app navigation vs. conversation list) was confusing. */}
+            {/* A distinct icon from ThreadSidebar's labeled "Conversations"
+                trigger — on the Ask tab at mobile widths both this app-nav
+                trigger and ThreadSidebar's thread-list trigger are on screen
+                at once, and two similar-looking unlabeled hamburgers opening
+                different drawers (app navigation vs. conversation list) was
+                confusing. */}
             <PanelLeft size={18} strokeWidth={1.5} aria-hidden="true" />
           </button>
 
