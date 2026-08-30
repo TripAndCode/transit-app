@@ -120,7 +120,7 @@ the task needs them.
   entries, "found X, fixed Y", slice-by-slice narrative) as permanent repo content —
   that belongs in the PR body or commit message, not a tracked file. `docs/refactor-
   log.md` is the one deliberate exception: it is `/vps-loop-run`'s own required
-  operational trail (see `## Autonomous VPS loop` below), not free-standing dev
+  operational trail (see `.claude/commands/vps-loop-run.md`), not free-standing dev
   narration, and stays out of this rule.
 
 ## Autonomous VPS loop

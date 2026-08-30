@@ -257,8 +257,10 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     fetched separately for ``_peak_hour_by_dow``: adding it to the existing
     group-by costs nothing extra (the cost is all in the scan, not the
     group-by cardinality), whereas a second query genuinely doubles it. Even
-    a full-365-day window stays comfortably inside ``get_ch_client``'s
-    200 k-row ``max_result_rows`` cap.
+    a full-365-day window stays under ``get_ch_client``'s 200 k-row
+    ``max_result_rows`` cap, though not with so much headroom that adding
+    another group-by dimension or widening the window further is free to do
+    without rechecking against the cap.
 
     The hour is read off ``scheduled_time``'s first two characters, exactly as
     ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
@@ -770,7 +772,7 @@ async def _peak_hour_by_dow(
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW), a sample-weighted average across the range — sub-second instead of
-    the raw dedup scan that was ~96% of Overview's cold load. That table is
+    the raw dedup scan that used to dominate Overview's cold load. That table is
     aggregated across all routes/services, so a ``service``/``routes`` filter,
     or any ``time_band`` other than ``'all'``, has to leave it.
 

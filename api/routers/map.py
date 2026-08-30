@@ -333,8 +333,8 @@ async def route_shape(
     # (bounded to the last 30 days off the agency's own latest data — see
     # below), solely to pick a shape for rendering purposes — this only
     # fires on the empty-window edge case (not the common case), so even
-    # its now-bounded form doesn't reintroduce the 32s-per-request problem
-    # the ctx bound above exists to fix. The per-stop delay stats
+    # its now-bounded form doesn't reintroduce the unbounded-full-history-scan
+    # problem the ctx bound above exists to fix. The per-stop delay stats
     # (`avg_min`/`samples`) stay empty regardless, since there really are
     # zero observations in the user's selected window.
     if not trip_counts:

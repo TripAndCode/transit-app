@@ -440,7 +440,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its ~96% cold cost). UNTYPED dedup
+        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost). UNTYPED dedup
         # (all observations, no service filter) since that panel aggregates
         # hour-of-day across every route; a service/route filter falls back to
         # the live path on read. (The reports/trend hourly heatmap is the same
@@ -611,9 +611,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # a real, non-trivial share of keys, enough to lose stops' entire
             # route coverage in practice. `agg_stop_routes` is about which
             # routes serve a stop, independent of whether any of those
-            # observations happened to carry a numeric delay — the extra
-            # ClickHouse round-trip is the correctness-over-perf trade this
-            # table's semantics require.
+            # observations happened to carry a numeric delay — the extra,
+            # non-trivial ClickHouse round-trip (a second full scan of the
+            # agency's keys, not a cheap add-on) is the correctness-over-perf
+            # trade this table's semantics require.
             with conn.cursor() as cur:
                 cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
                 cur.execute(
