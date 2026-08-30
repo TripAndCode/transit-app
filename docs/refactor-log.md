@@ -104,4 +104,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   task); left the window-end display clamp reading raw `updates`, since that
   reflects data-freshness, not sample counting. Added
   `test_sample_counts_dedupes_repeated_polls` (a stop event polled 3 times
-  plus one polled once must report `samples == 2`, not 4). (PR #pending)
+  plus one polled once must report `samples == 2`, not 4). (PR #282)
