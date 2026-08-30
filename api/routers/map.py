@@ -919,7 +919,7 @@ async def route_stop_profile(
                 stop_id,
                 COUNT(DISTINCT route_code) AS cohort_route_count,
                 ROUND(
-                    AVG(delay_sum::float / NULLIF(samples, 0))::numeric, 0
+                    (SUM(delay_sum)::float / NULLIF(SUM(samples), 0))::numeric, 0
                 )::int AS cohort_avg_delay_sec
             FROM agg_route_stop_daily
             WHERE agency_id = $1
