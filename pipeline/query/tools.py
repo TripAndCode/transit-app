@@ -152,6 +152,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_shift_second_half", "en"): "Second-half avg",
     ("trend_shift_delta", "ja"): "変化幅",
     ("trend_shift_delta", "en"): "Delta",
+    ("trend_shift_days", "ja"): "日数",
+    ("trend_shift_days", "en"): "Days",
+    ("trend_shift_days_value", "ja"): "{n}日",
+    ("trend_shift_days_value", "en"): "{n}",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -1082,6 +1086,10 @@ async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             (_summary("trend_shift_first_half", lang=locale), f"{result['first_half_avg_min']:.2f}"),
             (_summary("trend_shift_second_half", lang=locale), f"{result['second_half_avg_min']:.2f}"),
             (_summary("trend_shift_delta", lang=locale), f"{result['delta_min']:+.2f}"),
+            (
+                _summary("trend_shift_days", lang=locale),
+                _summary("trend_shift_days_value", lang=locale, n=result["days"]),
+            ),
         ],
     )
 
