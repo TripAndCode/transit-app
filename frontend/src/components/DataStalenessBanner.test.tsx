@@ -36,6 +36,21 @@ function hoursAgoIso(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
+// max-width:640px query used by useTapToExpandBanner.
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
+
 describe("DataStalenessBanner", () => {
   it("shows a warning when the latest observation is stale (> 24h old)", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
@@ -63,16 +78,7 @@ describe("DataStalenessBanner", () => {
   });
 
   it("renders the message as a single tappable line on a narrow viewport", () => {
-    vi.spyOn(window, "matchMedia").mockReturnValue({
-      matches: true,
-      media: "(max-width: 640px)",
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    } as unknown as MediaQueryList);
+    mockMatchMedia(true);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: summary({ latest_captured_at: hoursAgoIso(48) }),
     } as never);

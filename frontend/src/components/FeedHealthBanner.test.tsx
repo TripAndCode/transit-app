@@ -32,6 +32,21 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
+// max-width:640px query used by useTapToExpandBanner.
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
+
 describe("FeedHealthBanner", () => {
   it("shows the count when clamp_count > 0", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
@@ -43,16 +58,7 @@ describe("FeedHealthBanner", () => {
   });
 
   it("renders the message as a single tappable line on a narrow viewport", () => {
-    vi.spyOn(window, "matchMedia").mockReturnValue({
-      matches: true,
-      media: "(max-width: 640px)",
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    } as unknown as MediaQueryList);
+    mockMatchMedia(true);
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: summary({ clamp_count: 5 }),
     } as never);

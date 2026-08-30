@@ -26,6 +26,21 @@ function seedElapsedStart() {
   localStorage.setItem(STARTED_KEY, String(Date.now() - NUDGE_AFTER_MS - 1_000));
 }
 
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
+// max-width:640px query used by useTapToExpandBanner.
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
+
 describe("GuestPrompt", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -69,16 +84,7 @@ describe("GuestPrompt", () => {
   });
 
   it("renders the message as a single tappable line on a narrow viewport", () => {
-    vi.spyOn(window, "matchMedia").mockReturnValue({
-      matches: true,
-      media: "(max-width: 640px)",
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    } as unknown as MediaQueryList);
+    mockMatchMedia(true);
     seedElapsedStart();
     vi.useFakeTimers();
     renderPrompt();

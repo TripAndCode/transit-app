@@ -12,6 +12,12 @@ type StoredFilter = {
   routes?: string[];
 };
 
+// Single source of truth for the scalar filter param names shared by
+// hasAnyFilterParam/restore/persist below — `routes` is handled separately
+// everywhere since it's array-valued (comma-joined in the URL) rather than
+// a plain string.
+const SCALAR_FILTER_KEYS = ["from", "to", "dow", "time_band", "service"] as const;
+
 const KEY_PREFIX = "transit.lastFilter.";
 
 function storageKey(agencyId: number): string {
@@ -65,26 +71,24 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     if (isLoading || session || agencyId == null) return;
 
     const hasAnyFilterParam = Boolean(
-      params.get("from") ||
-        params.get("to") ||
-        params.get("dow") ||
-        params.get("time_band") ||
-        params.get("service") ||
-        params.get("routes"),
+      SCALAR_FILTER_KEYS.some((key) => params.get(key)) || params.get("routes"),
     );
 
     if (!hasAnyFilterParam && restoredFor.current !== agencyId) {
       restoredFor.current = agencyId;
       const stored = readStored(agencyId);
-      if (stored) {
+      // An all-undefined `{}` can legitimately be what a filterless visit
+      // persisted (see below) — only treat it as restorable if it actually
+      // has a value to restore, otherwise this branch would fire a no-op
+      // `setParams` on every subsequent filterless visit.
+      if (stored && Object.keys(stored).length > 0) {
         setParams(
           (prev) => {
             const next = new URLSearchParams(prev);
-            if (stored.from) next.set("from", stored.from);
-            if (stored.to) next.set("to", stored.to);
-            if (stored.dow) next.set("dow", stored.dow);
-            if (stored.time_band) next.set("time_band", stored.time_band);
-            if (stored.service) next.set("service", stored.service);
+            for (const key of SCALAR_FILTER_KEYS) {
+              const value = stored[key];
+              if (value) next.set(key, value);
+            }
             if (stored.routes && stored.routes.length > 0) next.set("routes", stored.routes.join(","));
             return next;
           },
@@ -99,14 +103,16 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // not stubbornly reapply the first one ever made.
     restoredFor.current = agencyId;
     const routesStr = params.get("routes");
-    writeStored(agencyId, {
-      from: params.get("from") ?? undefined,
-      to: params.get("to") ?? undefined,
-      dow: (params.get("dow") as DowFilter) || undefined,
-      time_band: (params.get("time_band") as TimeBand) || undefined,
-      service: (params.get("service") as ServiceFilter) || undefined,
-      routes: routesStr ? routesStr.split(",").filter(Boolean) : undefined,
-    });
+    const nextStored: StoredFilter = {};
+    for (const key of SCALAR_FILTER_KEYS) {
+      const value = params.get(key);
+      if (value) (nextStored as Record<string, string>)[key] = value;
+    }
+    if (routesStr) {
+      const routes = routesStr.split(",").filter(Boolean);
+      if (routes.length > 0) nextStored.routes = routes;
+    }
+    writeStored(agencyId, nextStored);
     // `params` (not a derived string key) is the dependency, matching
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'
     // return value on `location.search`, so this only re-runs when the URL's
