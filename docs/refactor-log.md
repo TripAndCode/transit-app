@@ -105,3 +105,18 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   reflects data-freshness, not sample counting. Added
   `test_sample_counts_dedupes_repeated_polls` (a stop event polled 3 times
   plus one polled once must report `samples == 2`, not 4). (PR #282)
+- 2026-08-31: Fixed the Overview tab's "movers" `delta_pct` having no
+  denominator floor (`pipeline/reports/overview.py`'s `_movers`): a route
+  whose previous-window average is small-but-nonzero could turn a trivial
+  absolute change into a triple-digit-or-larger, statistically meaningless
+  percentage even past the existing `MIN_SAMPLES` gate. Added a
+  `MIN_PRV_AVG_FOR_PCT_MIN` floor (1.5 minutes, matching this app's own
+  delay-severity "ok" band ceiling elsewhere) below which `delta_pct` is
+  `None` instead of a real-looking number; `delta_min` and the route's
+  ranking position are unaffected. Widened `Mover.delta_pct` to `float |
+  None` in `api/routers/overview.py` and `OverviewMover.delta_pct` in
+  `frontend/src/api/types.ts` to match (no frontend component currently
+  renders movers' `delta_pct`, so this is a type-only change there). Added
+  `test_movers_suppresses_delta_pct_below_prv_avg_floor`, seeding a
+  near-zero-baseline route alongside a normal-magnitude one in the same
+  response. (PR #283)

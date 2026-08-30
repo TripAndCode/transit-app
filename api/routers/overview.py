@@ -41,7 +41,7 @@ class Mover(BaseModel):
     route_code: str
     route_short_name: str | None
     delta_min: float
-    delta_pct: float
+    delta_pct: float | None
     current_avg_min: float
     previous_avg_min: float
     streak_weeks: int

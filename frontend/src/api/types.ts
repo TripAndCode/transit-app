@@ -359,7 +359,9 @@ export type OverviewMover = {
   route_code: string;
   route_short_name: string | null;
   delta_min: number;
-  delta_pct: number;
+  /** Null when the previous-window average is too close to zero for a
+   *  percentage change to be a meaningful figure (see backend). */
+  delta_pct: number | null;
   /** Avg delay (min) in the current 7-day window. */
   current_avg_min: number;
   /** Avg delay (min) in the prior 7-day window. */
