@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from api.range import RangeCtx
 from pipeline.query.results import ToolResult
+from pipeline.reports.filters import _dedup_cte_ch
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -309,23 +310,30 @@ async def describe_data(
         if order not in ("desc", "asc"):
             order = "desc"
         direction = "ASC" if order == "asc" else "DESC"
-        # toDate(captured_at, 'Asia/Tokyo') — the JST civil day, matching
-        # every Postgres connection's `captured_at::date` under
-        # SET TIME ZONE 'Asia/Tokyo'.
+        # Every other tool in this module (route_stats, top_n, on_time_rate,
+        # segment_hotspots, ...) defines "samples" as the deduped
+        # latest-observation-per-stop-event count via
+        # pipeline.reports.filters._dedup_cte_ch, not a raw poll count. A raw
+        # count() off `updates` counts every GTFS-RT poll, which can be many
+        # times the deduped figure for the same route/period — sharing this
+        # tool's `deduped` CTE keeps "samples" meaning one consistent thing
+        # across the whole Ask surface. This also applies ctx's dow/
+        # time_band/service/routes scoping like every other ctx-driven tool
+        # in this file, instead of only date-range like this kind previously
+        # did.
+        cte_sql, ch_params = _dedup_cte_ch(ctx)
         ch_result = await ch.query(
             f"""
+            WITH {cte_sql}
             SELECT route_code, count() AS samples
-            FROM updates
-            WHERE agency_id = {{agency_id:UInt16}}
-              AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {{from_date:Date}} AND {{to_date:Date}}
+            FROM deduped
             GROUP BY route_code
             ORDER BY samples {direction}, route_code
             LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
             """,
             parameters={
                 "agency_id": agency_id,
-                "from_date": ctx.from_date,
-                "to_date": ctx.to_date,
+                **ch_params,
                 "limit": limit,
                 "offset": offset,
             },
@@ -353,11 +361,15 @@ async def describe_data(
         data_end = data_end_ts.astimezone(_JST).date() if data_end_ts is not None else None
         window_end = data_end if (data_end is not None and data_end < ctx.to_date) else ctx.to_date
         if offset > 0:
+            # Counts over the same `deduped` population as the paginated rows
+            # above, so "total" agrees with what pagination is walking over —
+            # a route with only NULL/implausible-delay polls contributes rows
+            # to the grouped query above but wouldn't to a raw-`updates`
+            # count, which would otherwise overstate `total` relative to the
+            # actually-paginated route set.
             total_ch = await ch.query(
-                "SELECT COUNT(DISTINCT route_code) FROM updates "
-                "WHERE agency_id = {agency_id:UInt16} "
-                "  AND toDate(captured_at, 'Asia/Tokyo') BETWEEN {from_date:Date} AND {to_date:Date}",
-                parameters={"agency_id": agency_id, "from_date": ctx.from_date, "to_date": ctx.to_date},
+                f"WITH {cte_sql}\nSELECT COUNT(DISTINCT route_code) FROM deduped",
+                parameters={"agency_id": agency_id, **ch_params},
             )
             total = total_ch.result_rows[0][0]
             shown_from = offset + 1
