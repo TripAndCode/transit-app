@@ -140,9 +140,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   says this explicitly.
 - `[skip ci]` must be on EVERY commit you might push as a branch's tip,
   including intermediate fix-and-reverify commits mid-branch, not just the
-  first/last one. Confirmed live (2026-08-28, item 9/PR #248): 2 of 5 commits
-  on a `/review-branch` fix-iteration cycle were missing the trailer, but only
-  **one push** actually triggered CI — GitHub's skip-ci check is evaluated
+  first/last one. A multi-commit push where only some commits carry the
+  trailer can still trigger CI — GitHub's skip-ci check is evaluated
   once per push event against that push's *tip* commit message, not
   retroactively for every individual commit in a multi-commit push. Here,
   `84a984c` (missing the trailer) and `4ed7a7b` (also missing it) were pushed
@@ -156,8 +155,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   whatever ends up as a push's tip is the only thing standing between "CI is
   dormant" and "CI actually runs and immediately fails for an unrelated
   reason," which could look like a real regression if not checked.
-  Confirmed again live (2026-08-28, item 10/PR #250): resolving a conflict by
-  running `git merge main` produces an auto-generated commit message
+  The same gap shows up when resolving a conflict: running `git merge main`
+  produces an auto-generated commit message
   ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`
   trailer — `git merge` never adds it automatically. That merge commit
   became the branch's pushed tip, so it alone (re-)triggered the same
