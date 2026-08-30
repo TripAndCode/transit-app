@@ -90,7 +90,7 @@ describe("ThreadSidebar", () => {
     // width -- getByText throws on more than one match, so this fails loudly
     // if that regresses.
     expect(screen.getByText("New conversation")).toBeInTheDocument();
-    expect(screen.queryByLabelText("New conversation")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Conversations")).not.toBeInTheDocument();
   });
 
   it("renders only the mobile variant (hamburger + drawer) on a narrow viewport", () => {
@@ -106,7 +106,11 @@ describe("ThreadSidebar", () => {
     } as unknown as MediaQueryList);
     mockConversations([]);
     render();
-    expect(screen.getByLabelText("New conversation")).toBeInTheDocument(); // hamburger button
+    // Trigger is a distinct, labeled "Conversations" control (not reusing
+    // "New conversation"), so it can sit alongside Sidebar.tsx's own mobile
+    // nav trigger without being confused for it or for the drawer's own
+    // "New conversation" button.
+    expect(screen.getByLabelText("Conversations")).toBeInTheDocument(); // persistent trigger row
     expect(screen.getByText("New conversation")).toBeInTheDocument(); // button inside the drawer
   });
 });
