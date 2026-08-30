@@ -144,6 +144,24 @@ def insert_pattern_updates(pattern: SyntheticPattern, ch_client, agency_id: int)
     return insert_updates(ch_client, agency_id, pattern.update_rows)
 
 
+def run_pattern(pattern: SyntheticPattern, tmp_path, pg_conn, agency_id, ch_client) -> None:
+    """Seed *pattern* end-to-end and build its aggregates: load the static
+    fragment, insert the synthetic RT updates, then run ``analyze()``.
+
+    The shared "seed one pattern -> run analyze()" sequence originally
+    duplicated between ``tests/pipeline/test_synthetic_agg_e2e.py``'s
+    ``_run_pattern`` and ``tests/dashboard_synthetic_display_test.py``'s
+    ``seeded_agencies`` fixture (which additionally has to insert its own
+    ``agencies`` row per pattern — that part stays at each call site since
+    it isn't part of the pattern-seeding sequence itself).
+    """
+    from pipeline.analyze import analyze
+
+    load_pattern_static(pattern, tmp_path, agency_id, pg_conn)
+    insert_pattern_updates(pattern, ch_client, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+
+
 # UTC 2026-05-31T15:00:00 == JST 2026-06-01T00:00:00 (JST = UTC+9) — deliberately
 # pinned to JST midnight, not an arbitrary UTC instant, so the full ~24h/86400s
 # JST day is available as headroom below (an earlier version of this constant

@@ -9,7 +9,7 @@ need a reachable Postgres at all.
 
 from __future__ import annotations
 
-from api.routers.admin import _feature_doc_title, _list_feature_docs
+from api.routers.admin import _feature_doc_title, _has_real_content, _list_feature_docs
 
 
 def test_feature_doc_title_uses_leading_h1():
@@ -43,3 +43,28 @@ def test_list_feature_docs_finds_real_repo_docs():
 def test_list_feature_docs_sorted_by_filename():
     paths = _list_feature_docs()
     assert paths == sorted(paths)
+
+
+def test_list_feature_docs_skips_html_comment_only_placeholders():
+    """docs/features/zzz-path-test.md is an HTML-comment-only placeholder
+    file in the repo tree -- filtered out here so it never reaches the
+    admin UI."""
+    slugs = {p.stem for p in _list_feature_docs()}
+    assert "zzz-path-test" not in slugs
+
+
+def test_has_real_content_true_for_normal_markdown():
+    assert _has_real_content("# Title\n\nBody text.\n") is True
+
+
+def test_has_real_content_false_for_comment_only():
+    assert _has_real_content("<!-- just a comment -->\n") is False
+
+
+def test_has_real_content_false_for_empty_or_whitespace():
+    assert _has_real_content("") is False
+    assert _has_real_content("   \n\n  \n") is False
+
+
+def test_has_real_content_true_when_comment_plus_real_text():
+    assert _has_real_content("<!-- note -->\n# Title\nBody\n") is True
