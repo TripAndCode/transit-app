@@ -732,8 +732,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency avoids that: it doesn't depend on which route or which window
     # was asked about, so it can't reintroduce the conflation, and it's
     # tighter than a fixed constant (typically "yesterday", not 30 days
-    # back). Residual gap, same shape as agg_stop_routes' documented ~3.7%
-    # trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # back). Residual gap, same shape as agg_stop_routes' own NULL/implausible-
+    # delay trade-off (pipeline/analyze.py): a route whose EVERY observation ever
     # recorded was NULL/implausible delay (permanently invisible to
     # agg_route_daily's dedup filter, regardless of recency) still reads as
     # unregistered if its last observation predates the horizon. Accepted —

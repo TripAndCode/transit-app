@@ -254,12 +254,11 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     that are too narrow to be covered.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
-    fetched separately for ``_peak_hour_by_dow``: measured on live agency-8
-    data, adding it costs nothing (the group-by cardinality rises 4.8 k → 10 k
-    rows on a 30-day morning window while wall time stays ~7.7 s — the cost is
-    all in the scan), whereas a second query genuinely doubles it. Even a
-    full-365-day window stays around 120 k grain rows, inside
-    ``get_ch_client``'s 200 k ``max_result_rows`` cap.
+    fetched separately for ``_peak_hour_by_dow``: adding it to the existing
+    group-by costs nothing extra (the cost is all in the scan, not the
+    group-by cardinality), whereas a second query genuinely doubles it. Even
+    a full-365-day window stays comfortably inside ``get_ch_client``'s
+    200 k-row ``max_result_rows`` cap.
 
     The hour is read off ``scheduled_time``'s first two characters, exactly as
     ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
@@ -450,9 +449,8 @@ async def _route_weekly_history(
     default ``weeks_back=4`` the grain covers it whenever ``ctx`` is at least
     ~21 days wide — i.e. every default 30-day request, which is the common
     case. That matters because this was the second ClickHouse round trip of an
-    otherwise one-round-trip slow path (measured at 5-19 s on live data, on top
-    of the grain's own 8-19 s), and it fires whenever ``_movers`` has any
-    candidate routes at all.
+    otherwise one-round-trip slow path, on top of the grain's own scan cost,
+    and it fires whenever ``_movers`` has any candidate routes at all.
 
     The live fallback (narrow ``ctx`` only) is ONE dedup scan over the full
     ``weeks_back * 7``-day span, bucketed by week index, rather than

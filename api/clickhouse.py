@@ -130,9 +130,10 @@ async def max_captured_at_before_by_agency(
     so a failing agency's probe must degrade that agency to `None` rather
     than fail the whole batch (`is_stale(agg_day, None)` is defined as "not
     stale" — the correct degrade). Concurrent because these are independent
-    round trips on the same client (measured ~4s serial for 4 agencies vs
-    ~1 for the slowest single probe); `gather` never raises here since each
-    probe catches its own failure internally.
+    round trips on the same client, so running them serially would cost
+    roughly the sum of every agency's probe instead of the slowest one;
+    `gather` never raises here since each probe catches its own failure
+    internally.
     """
 
     async def _probe(aid: int) -> tuple[int, datetime | None]:

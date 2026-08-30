@@ -19,8 +19,9 @@ become Nullable.
 - Daily aggregates beat per-row scans. Slow analytical endpoints were fixed by
   materializing per-day aggregate tables (`agg_stop_daily`, `agg_route_daily`,
   `agg_route_stop_daily`, `agg_feed_health`, …) instead of scanning raw
-  observations. a1 5.8s→0.09s, a8 35–48s→0.24s. Build aggregates in the analyze
-  step. The default (`time_band=all`, no service/route filter) request on every
+  observations — a per-day aggregate turns an O(rows) scan into an O(days) read.
+  Build aggregates in the analyze step. The default (`time_band=all`, no
+  service/route filter) request on every
   read endpoint serves from an `agg_*` table — but a `time_band`/custom-threshold/
   narrow-ctx filter falls back to a LIVE ClickHouse scan of `updates` (see
   `pipeline/reports/filters.py::_dedup_cte_ch`); those live-fallback paths are
@@ -54,8 +55,8 @@ become Nullable.
   timeout rather than bounding by a guessed constant.
 - Prefer `ORDER BY captured_at DESC LIMIT 1` over `maxOrNull(captured_at)` for a
   single-agency max: `captured_at` is the 2nd sort-key column, so the `LIMIT 1`
-  form is index-served (~20-40ms) while the aggregate form is a full per-agency
-  scan (~300-900ms). See `api/clickhouse.py::max_captured_at_before`.
+  form is index-served while the aggregate form is a full per-agency scan.
+  See `api/clickhouse.py::max_captured_at_before`.
 
 ## Known traps
 - `GROUP BY` binds the input column, not the output alias. A COALESCE-sentinel

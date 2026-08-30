@@ -29,12 +29,11 @@ from pipeline.url_guard import _redact_url, safe_urlopen
 logger = logging.getLogger(__name__)
 
 # Flush a ClickHouse insert after accumulating this many rows across files —
-# large enough that per-insert overhead (~100ms fixed cost, confirmed
-# empirically: 50x20-row inserts = 4.98s total vs. 1x1000-row insert = 0.10s)
-# is amortized across thousands of rows instead of dozens, small enough to
-# keep a single flush's memory footprint and latency modest even for a dense
-# agency's file. See Task 8.9 — one-insert-per-source-file previously made a
-# real agency-1 backfill run 7h36m wall-clock for 14m52s of actual CPU work.
+# large enough that per-insert's fixed overhead is amortized across
+# thousands of rows instead of dozens (one insert per source file makes a
+# large backfill dominated by per-insert overhead rather than actual CPU
+# work), small enough to keep a single flush's memory footprint and latency
+# modest even for a dense agency's file.
 _BATCH_ROWS = 20_000
 
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to

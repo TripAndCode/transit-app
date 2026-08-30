@@ -429,9 +429,9 @@ async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is
     endpoint would still draw the route from its all-time shape. The
     fallback shape-vote query (fired only on this empty-window edge case)
     restores that behavior — bounded to the last 30 days off the agency's
-    OWN latest captured_at (not an unbounded all-time scan: a security
-    review found the bound must be tight enough to matter, since no agency
-    yet has more than ~130 days of history for a wider bound to exclude).
+    OWN latest captured_at (not an unbounded all-time scan: the bound must
+    be tight enough to actually exclude older history, not just wide enough
+    to look bounded on paper).
     The endpoint's existence precheck (at the top of the function, ahead of
     ANY ClickHouse call, not just this fallback) means a fabricated
     route_code never reaches ClickHouse at all -- R1 needs an agg_route_daily

@@ -1065,8 +1065,8 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper used to run its OWN dedup scan of `updates`
-# (~12 per request; 8-22s each on real agency-8 data, enough to blow the
-# ClickHouse client's 30s max_execution_time). They now all derive from a
+# (~12 per request), each one slow enough on its own to risk blowing the
+# ClickHouse client's 30s max_execution_time. They now all derive from a
 # single `_fetch_grain` round trip. These tests pin both halves of that: the
 # round-trip count, and the semantics that the consolidation had to preserve
 # (per-consumer date windows, per-consumer DOW, hour-of-day extraction).
