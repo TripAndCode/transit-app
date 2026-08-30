@@ -527,9 +527,11 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
     assert result.kind == "kv"
     labels = [p[0] for p in result.pairs]
     values = [p[1] for p in result.pairs]
-    assert labels == ["前半平均", "後半平均", "変化幅"]
+    assert labels == ["前半平均", "後半平均", "変化幅", "日数"]
     assert float(values[0]) < float(values[1])
     assert float(values[2]) == pytest.approx(4.15, abs=0.1)
+    # 4 seeded days, all with samples, none filtered out.
+    assert values[3] == "4日"
 
 
 @pytest.mark.asyncio

@@ -319,17 +319,17 @@ async def route_trend_shift(
     through the window (regime shift); a small delta_min means the pattern
     has been consistent throughout (chronic). Backs tools._tool_trend_shift.
 
-    Returns None when there are no daily buckets for the route in ctx.
+    Returns None when there are fewer than two daily buckets for the route in
+    ctx — a single day has no first/second half to compare, so a mechanical
+    0.00 delta would misreport "not enough data" as "stable, no change."
     """
     route_ctx = replace(ctx, routes=(str(route),))
     series = await compute_trend_series(agency_id, route_ctx, conn, ch=ch)
     days = [d for d in series.get("days", []) if d.get("samples")]
-    if not days:
+    if len(days) < 2:
         return None
     midpoint = len(days) // 2
-    if midpoint == 0:
-        midpoint = 1
-    first_half, second_half = days[:midpoint], days[midpoint:] or days[midpoint - 1 :]
+    first_half, second_half = days[:midpoint], days[midpoint:]
 
     def _weighted_mean(bucket: list[dict]) -> float:
         total_samples = sum(d["samples"] for d in bucket)
