@@ -133,8 +133,9 @@ async def compute_ranking(
     # avg_min is element 2; None never occurs (samples > 20), so plain sort.
     # Two-pass stable sort: pre-sort by route_code (element 0) so ties on
     # avg_min break deterministically in ascending route_code order
-    # regardless of `reverse` — same non-determinism this replaces as
-    # `_movers`/`_concentration` in overview.py (see docs/refactor-notes.md).
+    # regardless of `reverse` — `rows` comes from a GROUP BY with no ordering
+    # guarantee, and an arbitrary tie order would make the ranking unstable
+    # run to run.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
@@ -240,8 +241,8 @@ async def compute_on_time(
             )
         )
     # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # on_time_pct in ascending order regardless of `reverse` — see
-    # compute_ranking above / docs/refactor-notes.md.
+    # on_time_pct in ascending order regardless of `reverse` — same
+    # unordered-GROUP-BY source as compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
@@ -313,7 +314,8 @@ async def compute_worst_5min(
             )
         )
     # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # late5_count in ascending order — see compute_ranking above / docs/refactor-notes.md.
+    # late5_count in ascending order — same unordered-GROUP-BY source as
+    # compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=True)
     return out[:limit]
@@ -723,8 +725,8 @@ async def compute_trend_series(
         # None (no data) sorts last; among real values, worst delay first.
         # Two-pass stable sort: pre-sort by route_code so ties on avg_min
         # break deterministically in ascending route_code order — `per_day`
-        # comes from a GROUP BY with no ordering guarantee, same fix class
-        # as PR #196 (see docs/refactor-notes.md).
+        # comes from a GROUP BY with no ordering guarantee, so leaving ties
+        # unresolved would make the top-offenders cut unstable run to run.
         offenders = sorted(
             sorted(by_date.get(r["date"], []), key=lambda x: x["route_code"]),
             key=lambda x: (x["avg_min"] is None, -(x["avg_min"] or 0)),

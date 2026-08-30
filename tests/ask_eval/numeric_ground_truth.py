@@ -1,11 +1,10 @@
-"""Shared assertion helpers for item-23's numeric-ground-truth checks.
+"""Shared assertion helpers for numeric-ground-truth checks.
 
-Split out of ``test_synthetic_numeric.py`` (per a `/review-branch` Minor
-finding on PR #261) so the pure-logic assertion helper and its self-tests
-can live in ``tests/unit/`` (no DB fixtures) while the live-LLM tests that
-actually exercise the Ask API stay in ``tests/ask_eval/`` (DB-backed).
-Neither side re-derives this logic, keeping one source of truth for "is the
-number right" across both tiers.
+Split out of ``test_synthetic_numeric.py`` so the pure-logic assertion
+helper and its self-tests can live in ``tests/unit/`` (no DB fixtures)
+while the live-LLM tests that actually exercise the Ask API stay in
+``tests/ask_eval/`` (DB-backed). Neither side re-derives this logic,
+keeping one source of truth for "is the number right" across both tiers.
 """
 
 from __future__ import annotations

@@ -419,10 +419,10 @@ async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is
     render its topology (geometry + unobserved_stops) even though there is
     zero delay data to show for the selected window.
 
-    Commit 724ab7e bounded the shape-vote query by ctx so it stops
-    scanning the route's entire history on every request (was 32.1s on real
-    data). That fix has a side effect: if the ctx window itself has zero
-    observations for the route (e.g. it only ran on days outside the
+    The shape-vote query is bounded by ctx so it stops scanning the route's
+    entire history on every request. That has a side effect: if the ctx
+    window itself has zero observations for the route (e.g. it only ran on
+    days outside the
     selected range), the ctx-bounded dedup query returns nothing, so there
     is no shape-vote signal and `chosen_shape_id` stays None — geometry and
     unobserved_stops silently go empty too, even though pre-migration the
@@ -650,9 +650,9 @@ class _ExplodingChClient:
     just that the two happen to produce the same output. A prior version of
     this precheck sat inside the empty-window fallback branch instead, so a
     fabricated route_code under a wide ctx window still paid for the
-    ctx-bounded dedup query's full cost (measured 336,368,237 rows / 923 MiB
-    / 2.35s on real data) before ever reaching the precheck -- an assertion
-    on the response body alone can't tell those two placements apart."""
+    ctx-bounded dedup query's full cost before ever reaching the precheck --
+    an assertion on the response body alone can't tell those two placements
+    apart."""
 
     async def query(self, *args, **kwargs):
         raise AssertionError("agg_route_daily precheck should have short-circuited before any ClickHouse query")

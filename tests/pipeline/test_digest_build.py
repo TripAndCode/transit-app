@@ -156,10 +156,9 @@ def test_multi_service_type_dedups_to_one_mover(pg_conn, agency_id):
 
 def test_movers_tie_break_is_deterministic(pg_conn, agency_id):
     """Two routes tied on deviation_min must sort by route_code, ascending,
-    regardless of insertion order — see docs/refactor-notes.md's "Comment-pass slice 10"
-    entry and PR #196's tie-break fix for the reports family. Insert route
-    "9" before "1" so an unguarded sort's tie order would depend on
-    insertion/scan order rather than route_code."""
+    regardless of insertion order, since `route_entries` gives no ordering
+    guarantee of its own. Insert route "9" before "1" so an unguarded sort's
+    tie order would depend on insertion/scan order rather than route_code."""
     with pg_conn.cursor() as cur:
         for route in ("9", "1"):
             _insert_daily(cur, agency_id, route, "平日", 480, 50)

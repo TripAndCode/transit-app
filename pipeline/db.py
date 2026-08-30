@@ -54,8 +54,8 @@ def build_dedup_ch_sql(
     which is semantically identical (both keep the row with the maximal
     `(captured_at, file_name)` per group) but forces ClickHouse to fully
     SORT the entire filtered row set before taking the first row of each
-    group. At agency-8 scale (336M rows, full history, no date filter —
-    what `analyze()` runs) that sort didn't complete inside a 300s budget.
+    group. At full-history scale with no date filter — what `analyze()`
+    runs — that sort did not complete in a reasonable time.
     `argMax(dep_delay, (captured_at, file_name))` returns the `dep_delay`
     from the row where the tuple `(captured_at, file_name)` is maximal
     within the group — same latest-observation-wins, `file_name DESC`

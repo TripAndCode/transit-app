@@ -103,6 +103,26 @@ the task needs them.
 - Keep one canonical home per rule. Other files should point to it instead of copying
   its rationale and edge cases.
 
+## Durable content only
+
+- Comments and docs state current, permanent facts, never who changed what or when.
+  Do not cite a PR/issue number, a past bug, or a date as the reason code looks the
+  way it does; state the underlying invariant directly instead (e.g. "ties break on
+  route_code ascending because the GROUP BY gives no ordering guarantee within a tie"
+  — not "fixed in PR #196"). The task/PR narrative belongs in the PR description and
+  commit history, not the source tree.
+- Do not hardcode a measured benchmark (a specific row count, latency, or duration) as
+  if it were a fixed fact — live datasets and hardware drift, so a "measured 46.5s on
+  574M rows" comment goes stale silently and misleads the next reader. State the
+  durable design rationale instead; an order-of-magnitude scale ("hundreds of millions
+  of rows") is fine when it adds real intuition, a specific decaying number is not.
+- Do not commit a markdown file that is a log of a past dev/refactor session (dated
+  entries, "found X, fixed Y", slice-by-slice narrative) as permanent repo content —
+  that belongs in the PR body or commit message, not a tracked file. `docs/refactor-
+  log.md` is the one deliberate exception: it is `/vps-loop-run`'s own required
+  operational trail (see `## Autonomous VPS loop` below), not free-standing dev
+  narration, and stays out of this rule.
+
 ## Autonomous VPS loop
 
 - `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked

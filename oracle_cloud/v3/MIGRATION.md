@@ -75,7 +75,7 @@ static IS collected on the VM via `direct_url` curl.
 ## 9. Enable prune (ONLY after step 7 parity + step 8 verification)
     crontab -e   # uncomment the prune line
 
-## 9b. 2026-08-29: direct-to-R2 sync (supersedes step 7's manual gate)
+## 9b. Direct-to-R2 sync (supersedes step 7's manual gate)
 `bin/sync-r2.sh` now runs daily in cron (see `crontab.snippet`), mirroring
 this VM's own `data/<id>/{rt,static}` straight to Cloudflare R2 — no more
 manual `make fetch` + `make sync-r2` from a workstation as prune's parity

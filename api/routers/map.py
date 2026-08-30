@@ -241,13 +241,12 @@ async def route_shape(
     # Cheap existence precheck FIRST, before touching ClickHouse at all -- ahead
     # of the ctx-bounded dedup query below, not just inside the empty-window
     # fallback branch further down. A fabricated route_code must cost ~0
-    # ClickHouse work: measured on real data, with the precheck misplaced
-    # inside the fallback branch, a fabricated route_code under a wide ctx
-    # window still cost 336,368,237 rows / 923 MiB / 2.35s, because the
-    # ctx-bounded dedup query ran to completion first regardless (it's
-    # bounded, but still real, unnecessary work for a route that doesn't
-    # exist at all). See `_route_exists` for why this checks agg_route_daily
-    # rather than agg_route_stats.
+    # ClickHouse work: with the precheck misplaced inside the fallback branch,
+    # a fabricated route_code under a wide ctx window still pays the full
+    # ctx-bounded dedup query's cost, because that query runs to completion
+    # first regardless (it's bounded, but still real, unnecessary work for a
+    # route that doesn't exist at all). See `_route_exists` for why this
+    # checks agg_route_daily rather than agg_route_stats.
     if not await _route_exists(conn, agency_id, str(route)):
         return {"route": route, "geometry": None, "stops": [], "unobserved_stops": []}
 
@@ -283,10 +282,10 @@ async def route_shape(
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
     # / service) honored by every other analytical endpoint — an earlier
-    # version scanned the route's ENTIRE history here with no date bound
-    # (measured 32.1s on agency 8's real data for one route, returning only
-    # ~100 rows), even though the shape should reflect what's actually being
-    # shown for the user's selected range, not all-time history.
+    # version scanned the route's ENTIRE history here with no date bound,
+    # paying for a full-table scan to return only a handful of rows, even
+    # though the shape should reflect what's actually being shown for the
+    # user's selected range, not all-time history.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
     # only one non-key column (dep_delay) is read off the winning row, so a
@@ -746,10 +745,10 @@ async def route_trips(
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (measured: a date bound alone still
-    # read ~170M rows here, since no agency yet has more than ~130 days of
-    # history for the bound to actually exclude). See `_latest_route_observation`
-    # for the full existence-check and bound rationale.
+    # just a bounded-but-still-huge scan (a date bound alone isn't enough
+    # while every agency's full history still fits inside the bound's
+    # window). See `_latest_route_observation` for the full existence-check
+    # and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "trips": []}

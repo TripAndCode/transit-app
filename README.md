@@ -197,8 +197,9 @@ Both paths land in the same `updates` (ClickHouse) / `static_*` / `agg_*`
 
 Data is stored in a named Docker volume (`transit-app_transit_pgdata`) — it survives container restarts.
 
-`make db` also brings up ClickHouse (raw `updates`, ~575M rows across 4
-agencies) and applies `db/clickhouse/schema.sql` via `make ch-bootstrap` —
+`make db` also brings up ClickHouse (raw `updates`, hundreds of millions of
+rows across 4 agencies) and applies `db/clickhouse/schema.sql` via
+`make ch-bootstrap` —
 see [`db/clickhouse/`](db/clickhouse/). `make ch-test` starts the separate
 throwaway ClickHouse instance tests run against (`:8124`); set
 `RUN_CH_INTEGRATION=1` to include ClickHouse-gated tests in a `pytest` run.
@@ -524,7 +525,7 @@ flowchart TD
 
     subgraph RAILWAY["Railway project · private network"]
         job["Daily ingest job · cron 1×/day<br/>ingest → analyze_all → prune"]
-        ch["ClickHouse · MergeTree<br/>raw: updates (~575M rows, 4 agencies)<br/>sort key: agency_id, captured_at, route_code, ..."]
+        ch["ClickHouse · MergeTree<br/>raw: updates (hundreds of millions of rows, 4 agencies)<br/>sort key: agency_id, captured_at, route_code, ..."]
         subgraph DB["Postgres · PostGIS + pgvector"]
             static["static_* tables"]
             agg["precomputed: agg_* tables"]
@@ -555,8 +556,9 @@ Five things this encodes:
   — those fall back to a live ClickHouse scan, since `agg_*` doesn't carry an
   hour-of-day column.
 - **Raw `updates` lives in ClickHouse, not Postgres.** A columnar MergeTree
-  table gives better compression and scan throughput at ~575M-row scale than
-  Postgres did; Postgres keeps `static_*`/`agg_*`/OLTP/PostGIS/pgvector, none
+  table gives better compression and scan throughput at this table's scale
+  (hundreds of millions of rows and growing) than Postgres did; Postgres
+  keeps `static_*`/`agg_*`/OLTP/PostGIS/pgvector, none
   of which benefit from a columnar store. `analyze` reads ClickHouse and
   writes `agg_*` back into Postgres — every downstream aggregate-builder query
   is otherwise unchanged.

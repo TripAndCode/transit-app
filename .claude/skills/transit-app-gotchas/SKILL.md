@@ -6,9 +6,10 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 # transit-app gotchas
 
 ## Databases
-- The raw GTFS-RT `updates` fact table (~575M rows, 4 agencies) lives in
-  ClickHouse, not Postgres — migrated; the old Postgres `updates` table still
-  exists as a rollback safety net but has zero production readers.
+- The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
+  agencies, and growing) lives in ClickHouse, not Postgres — migrated; the old
+  Postgres `updates` table still exists as a rollback safety net but has zero
+  production readers.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
 - NEVER run write SQL / migrations-down / resets against dev Postgres
   `postgresql://transit:transit@localhost:5433/transit` (wiped twice). Read-only
@@ -16,8 +17,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   agency + a few days via read-only
   `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
   throwaway DB on a spare port, then migrate + analyze there.
-- Same read-only rule for dev ClickHouse (`transit-ch`, ~575M real rows across 4
-  agencies): no manual `INSERT`/`ALTER`/`DROP`. The one sanctioned exception is
+- Same read-only rule for dev ClickHouse (`transit-ch`, hundreds of millions
+  of real rows across 4 agencies): no manual `INSERT`/`ALTER`/`DROP`. The one
+  sanctioned exception is
   `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see
   `db/clickhouse/bootstrap.py`).
 - Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —

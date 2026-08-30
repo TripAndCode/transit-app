@@ -9,6 +9,9 @@ need a reachable Postgres at all.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from api.routers import admin
 from api.routers.admin import _feature_doc_title, _has_real_content, _list_feature_docs
 
 
@@ -21,9 +24,8 @@ def test_feature_doc_title_skips_leading_blank_lines():
 
 
 def test_feature_doc_title_falls_back_when_first_line_not_h1():
-    # First non-blank line is an HTML comment, not a `# ` heading (matches
-    # docs/features/zzz-path-test.md's own shape) -- never raises, falls
-    # back to the slug instead of guessing.
+    # First non-blank line is an HTML comment, not a `# ` heading -- never
+    # raises, falls back to the slug instead of guessing.
     assert _feature_doc_title("<!-- a comment -->\n# Real Title\n", "fallback-slug") == "fallback-slug"
 
 
@@ -45,12 +47,14 @@ def test_list_feature_docs_sorted_by_filename():
     assert paths == sorted(paths)
 
 
-def test_list_feature_docs_skips_html_comment_only_placeholders():
-    """docs/features/zzz-path-test.md is an HTML-comment-only placeholder
-    file in the repo tree -- filtered out here so it never reaches the
-    admin UI."""
+def test_list_feature_docs_skips_html_comment_only_placeholders(tmp_path, monkeypatch):
+    """An HTML-comment-only `.md` file must never reach the admin UI."""
+    (tmp_path / "real-tab.md").write_text("# Real Tab\n\nBody text.\n")
+    (tmp_path / "placeholder-tab.md").write_text("<!-- just a comment -->\n")
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+
     slugs = {p.stem for p in _list_feature_docs()}
-    assert "zzz-path-test" not in slugs
+    assert slugs == {"real-tab"}
 
 
 def test_has_real_content_true_for_normal_markdown():

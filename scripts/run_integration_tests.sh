@@ -36,8 +36,8 @@ set -euo pipefail
 # any non-`_test`-suffixed DATABASE_URL) but ClickHouse has none --
 # pipeline/clickhouse.py reads CLICKHOUSE_DATABASE unconditionally, and
 # --dashboard-e2e's spawned app subprocess would otherwise inherit an
-# ambient dev value straight into a live connection against ~575M real
-# rows across 4 agencies.
+# ambient dev value straight into a live connection against the real,
+# hundreds-of-millions-of-rows dev dataset across 4 agencies.
 export DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
 export RUN_CH_INTEGRATION=1
 export CLICKHOUSE_HOST=localhost

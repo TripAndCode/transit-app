@@ -92,8 +92,8 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
     # the whole `updates` table: the GROUP BY form has no `agency_id`
     # predicate at all, so it reads the `captured_at` column for every row in
-    # the table (measured 46.5s / 574M rows on real dev data) — worse than
-    # even a per-agency full scan. `agencies` here is already filtered to
+    # the table — worse than even a per-agency full scan, and it gets worse
+    # as the table grows. `agencies` here is already filtered to
     # non-deleted agencies (the query above), so no separate active-id filter
     # is needed. The "only a COMPLETED day counts" cutoff is baked into the
     # helper's `before` predicate (see its docstring and `pipeline.freshness`'s

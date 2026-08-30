@@ -372,7 +372,7 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
     documented design only inspects history[-1] — so a bare continuation
     phrase here must NOT force a tool call, even though an earlier turn in
     the (capped-at-3) history did have one. This pins that as an explicit,
-    tested decision rather than an untested gap (review finding on PR #243).
+    tested decision rather than an untested gap.
     """
     client, agency_id = ask_client
     captured = {}
@@ -421,7 +421,7 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
     pipeline.query.intent). A bare "もっと" after a tool with no pagination
     concept (e.g. on_time_rate) has no valid re-invocation, so forcing
     tool_choice="required" would risk a nonsensical re-call instead of a
-    legitimate prose answer (review finding on PR #243).
+    legitimate prose answer.
     """
     client, agency_id = ask_client
     captured = {}

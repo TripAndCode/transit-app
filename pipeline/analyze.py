@@ -171,8 +171,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # dedup result in memory at once. `.query()` buffers the ENTIRE
             # result as a Python list (`result_rows`) before returning it, and
             # the tzinfo fixup below used to build a SECOND full-size list from
-            # that — two live copies of a set measured at 5.3M rows / 1.6-3.4GB
-            # for agency 8. Streaming yields one block (a list of row-tuples)
+            # that — two live copies of a set that scales with the agency's
+            # total row count. Streaming yields one block (a list of row-tuples)
             # at a time, so peak memory is bounded by one block, not the whole
             # table. Each block is tzinfo-fixed and INSERTed independently;
             # `execute_values`'s own page_size=10_000 chunking of the Postgres
@@ -608,12 +608,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # BETWEEN -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`),
             # so a (route_code, trip_id, stop_sequence) whose every observation
             # was NULL/implausible would silently drop out of stop coverage —
-            # measured on real agency-8 data at ~3.7% of keys, 39 stops losing
-            # ALL route coverage. `agg_stop_routes` is about which routes serve
-            # a stop, independent of whether any of those observations happened
-            # to carry a numeric delay — the extra ClickHouse round-trip
-            # (measured ~113s on agency 8's 336M rows) is the correctness-over-
-            # perf trade this table's semantics require.
+            # a real, non-trivial share of keys, enough to lose stops' entire
+            # route coverage in practice. `agg_stop_routes` is about which
+            # routes serve a stop, independent of whether any of those
+            # observations happened to carry a numeric delay — the extra
+            # ClickHouse round-trip is the correctness-over-perf trade this
+            # table's semantics require.
             with conn.cursor() as cur:
                 cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
                 cur.execute(
@@ -621,12 +621,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "ON COMMIT DROP"
                 )
                 # `query_row_block_stream` (not `query`), same rationale as
-                # _analyze_deduped above: this key set is ~3.7% LARGER than
-                # _analyze_deduped by design (that's the correctness fix this
-                # block exists for), so buffering the whole thing in
-                # `.query()`'s result_rows would be the same 5.3M-row /
-                # 1.6-3.4GB-for-agency-8 shape that streaming was introduced
-                # to eliminate 40 lines up, just for a bigger set.
+                # _analyze_deduped above: this key set is deliberately LARGER
+                # than _analyze_deduped by design (that's the correctness fix
+                # this block exists for), so buffering the whole thing in
+                # `.query()`'s result_rows would hit the same unbounded-memory
+                # shape that streaming was introduced to eliminate 40 lines
+                # up, just for a bigger set.
                 ch_keys_sql = (
                     "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
                     "WHERE agency_id = {agency_id:UInt16}"

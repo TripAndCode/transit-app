@@ -28,10 +28,10 @@ The shared slow-path grain
 --------------------------
 Every slow-path helper used to issue its OWN ``_dedup_cte_ch`` scan of
 ``updates``, so one Overview request fanned out ~12 independent full dedup
-scans of *substantially the same rows* — measured at 8-22 s and ~170 M rows
-read EACH on agency 8 over a 30-day window, which put several of them over
-``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a real
-500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
+scans of *substantially the same rows* — each one reading a large fraction
+of an agency's history over even a 30-day window, which put several of them
+over ``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a
+real 500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
 dedup output to ``(date, route_code, service_type, hour)`` once, and each
 helper derives its own answer from that grain in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three

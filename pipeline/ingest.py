@@ -275,10 +275,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 done.update(pending_files)
             except DataError as e:
                 # Client-side columnar serialization failure — the insert
-                # provably never reached the server (0 rows land in every
-                # case, per empirical driver testing up to 40k rows / 2
-                # driver blocks), so it's safe to narrow the retry to just
-                # the file(s) actually carrying the bad row.
+                # provably never reached the server (0 rows land in any
+                # case, confirmed empirically across batch sizes), so it's
+                # safe to narrow the retry to just the file(s) actually
+                # carrying the bad row.
                 logger.error(
                     f"  [ERROR] batch insert of {len(pending_files)} files failed with a "
                     f"DataError, retrying file-by-file: {e}"
