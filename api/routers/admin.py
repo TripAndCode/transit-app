@@ -387,6 +387,7 @@ async def list_admin_agencies(
 _FEATURE_DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "features"
 
 _DOC_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 class ArchitectureDocSummary(BaseModel):
@@ -414,15 +415,29 @@ def _feature_doc_title(text: str, fallback_slug: str) -> str:
     return fallback_slug
 
 
+def _has_real_content(text: str) -> bool:
+    """Return whether ``text`` has anything beyond HTML comments/whitespace --
+    filters placeholder/scratch files (e.g. docs/features/zzz-path-test.md,
+    a leftover artifact this sandbox's destructive-op restrictions couldn't
+    `git rm`; see docs/refactor-log.md's item 27 entry) out of the admin doc
+    listing without needing to delete them from git history."""
+    return bool(_HTML_COMMENT_RE.sub("", text).strip())
+
+
 def _list_feature_docs() -> list[Path]:
     """Enumerate `docs/features/*.md` fresh on every call, never cached at
     import time -- a doc file added while the server is already running
     (this directory grows over time; see docs/refactor-log.md item 26)
     shows up on the next request with no restart needed. Sorted by filename
-    for a stable, deterministic sidebar order across requests."""
+    for a stable, deterministic sidebar order across requests. Skips files
+    with no real content (e.g. HTML-comment-only placeholders)."""
     if not _FEATURE_DOCS_DIR.is_dir():
         return []
-    return sorted(_FEATURE_DOCS_DIR.glob("*.md"))
+    return sorted(
+        path
+        for path in _FEATURE_DOCS_DIR.glob("*.md")
+        if _has_real_content(path.read_text(encoding="utf-8"))
+    )
 
 
 @router.get("/architecture/docs", response_model=list[ArchitectureDocSummary])
