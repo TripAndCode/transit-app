@@ -123,6 +123,37 @@ async def test_aggregate_freshness_falls_back_to_latest_completed_day_when_today
 
 
 @pytest.mark.asyncio
+async def test_aggregate_freshness_never_analyzed_reports_real_backlog_span(health_pool, ch_client, ch_async_client):
+    """Regression: a never-analyzed agency (no agg_route_daily rows at all)
+    with N days of accumulated live data must report agg_behind_days == N,
+    not a flat 1 — a freshly-onboarded or long-broken-then-recovered agency
+    with, say, 10 days of backlog is genuinely 10 days behind, not the same
+    "1 day behind" a truly-just-one-day-behind agency reports (see the other
+    never-analyzed case above, which spans a single day and still expects 1).
+    """
+    async with health_pool.acquire() as conn:
+        a = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('NeverAnalyzed', 'http://never') "
+            "RETURNING agency_id"
+        )
+        aid = a["agency_id"]
+        # Five distinct completed days of unaggregated backlog, 2026-04-01..05.
+        for day in ("2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05"):
+            await _insert_update(conn, aid, day)
+
+        from tests.conftest import mirror_updates_to_ch
+
+        mirror_updates_to_ch(ch_client, aid)
+
+        result = await aggregate_freshness(conn, ch_async_client)
+
+    row = next(r for r in result if r.agency_id == aid)
+    assert row.data_to == "2026-04-05"
+    assert row.is_stale is True
+    assert row.agg_behind_days == 5
+
+
+@pytest.mark.asyncio
 async def test_aggregate_freshness_degrades_only_failing_agency_on_ch_error(health_pool, ch_async_client, monkeypatch):
     """A ClickHouse probe failure for ONE agency must not blank the whole
     result or crash the whole call — same "degrade the one CH-derived
