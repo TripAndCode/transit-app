@@ -66,10 +66,6 @@ async def test_route_trend_shift_days_matches_half_window_sizes(monkeypatch):
 
     assert result is not None
     assert result["days"] == len(day_avgs)
-    # Midpoint split used internally: first_half gets len // 2, second_half
-    # gets the remainder — together they must reconstruct the reported count.
-    midpoint = len(day_avgs) // 2
-    assert midpoint + (len(day_avgs) - midpoint) == result["days"]
     assert result["first_half_avg_min"] < result["second_half_avg_min"]
 
 
