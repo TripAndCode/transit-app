@@ -303,7 +303,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # Per route × service × day-of-week × hour, for the Forecast heatmap.
         # `scheduled_time IS NOT NULL` guards the NOT NULL `hour` column: a typed
         # row lacking a scheduled time would otherwise yield a NULL hour and abort
-        # the whole-agency analyze transaction.
+        # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
+        # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
+        # notation, e.g. "25:30:00") is rejected at ingest time (see
+        # pipeline/strategies/_time.py) and never reaches `_analyze_deduped`, so
+        # a late-night continuation trip is absent from this aggregate rather
+        # than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
                 SELECT * FROM _analyze_deduped
