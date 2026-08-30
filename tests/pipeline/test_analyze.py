@@ -508,8 +508,9 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
 
     Regression: agg_stop_routes was derived from _analyze_deduped for one
     perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
-    silently dropped this exact case (measured on real data: ~3.7% of keys,
-    39 stops losing all route coverage). Restored to the ClickHouse-sourced
+    silently dropped this exact case (a real, non-trivial share of keys,
+    enough to lose stops' entire route coverage in practice). Restored to
+    the ClickHouse-sourced
     _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
     only and never touches dep_delay."""
     with pg_conn.cursor() as cur:

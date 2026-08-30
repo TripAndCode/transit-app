@@ -540,8 +540,8 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
 async def test_dispatch_missing_route_arg_returns_empty(aconn, aagency_id, tool_name):
     """Route-required tools must short-circuit with the 'route_arg_required'
     message (not attempt registration/data lookup) when no route arg is
-    given. Characterization test pinning this branch ahead of slice 2's
-    ``_resolve_and_check_route`` guard consolidation (docs/refactor-plan.md)."""
+    given. Characterization test pinning ``_resolve_and_check_route``'s
+    shared guard behavior across all five route-required tools."""
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
     result = await dispatch(tool_name, {}, ctx, aconn, aagency_id, locale="ja")
     assert result.kind == "empty"

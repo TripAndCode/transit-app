@@ -1,7 +1,7 @@
-"""Offline self-tests for the item-23 numeric-ground-truth assertion helper.
+"""Offline self-tests for the numeric-ground-truth assertion helper.
 
-Moved here (from ``tests/ask_eval/test_synthetic_numeric.py``, per a
-`/review-branch` Minor finding on PR #261) because these tests only exercise
+Lives here (separate from ``tests/ask_eval/test_synthetic_numeric.py``)
+because these tests only exercise
 ``assert_matches_ground_truth`` against fabricated dicts — no Postgres, no
 ClickHouse, no network. The parent ``tests/conftest.py``'s session-scoped,
 autouse ``apply_schema`` fixture runs for every test collected under

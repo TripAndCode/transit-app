@@ -465,8 +465,7 @@ async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency_id):
     """Two routes tied on total_late_min (agg_daily_trend fast path) must
-    rank by route_code, ascending — the fast path used to lack the
-    route_code tie-break its own slow path already had (see docs/refactor-notes.md);
+    rank by route_code, ascending, matching its slow-path counterpart;
     without it, Postgres's GROUP BY order for a tie is unspecified.
     """
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TIE_B", "平日", 5.0, 2)  # total=10
@@ -504,9 +503,9 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
 @pytest.mark.asyncio
 async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aagency_id):
     """Two routes tied on weighted avg_min (agg_daily_trend fast path) must
-    rank by route_code, ascending — same fix as concentration's fast path
-    (see docs/refactor-notes.md); each route here is a single-day row, so its weighted
-    average is just its own avg_min.
+    rank by route_code, ascending — same tie-break as concentration's fast
+    path; each route here is a single-day row, so its weighted average is
+    just its own avg_min.
     """
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 2)
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 3)  # tied avg, diff samples
@@ -1066,8 +1065,8 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper used to run its OWN dedup scan of `updates`
-# (~12 per request; 8-22s each on real agency-8 data, enough to blow the
-# ClickHouse client's 30s max_execution_time). They now all derive from a
+# (~12 per request), each one slow enough on its own to risk blowing the
+# ClickHouse client's 30s max_execution_time. They now all derive from a
 # single `_fetch_grain` round trip. These tests pin both halves of that: the
 # round-trip count, and the semantics that the consolidation had to preserve
 # (per-consumer date windows, per-consumer DOW, hour-of-day extraction).

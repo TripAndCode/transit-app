@@ -40,9 +40,9 @@ is therefore guaranteed to reach Stage 3 (the real LLM call) with the
 misleading history below attached, not silently resolved by a deterministic
 rule that would make this pass without ever exercising the model.
 
-**Why each question also carries a misleading prior turn** (found in this
-module's own `/review-branch` on PR #261, 2026-08-29): ``pipeline.query.chat``
-only ever lets the LLM pick a ``(tool_name, arguments)`` pair — the actual
+**Why each question also carries a misleading prior turn**:
+``pipeline.query.chat`` only ever lets the LLM pick a ``(tool_name,
+arguments)`` pair — the actual
 number in a successful tool-call response is rendered deterministically by
 ``render_tool_result`` (see ``chat.py``'s ``_dispatch_and_respond``), never
 composed freely by the model. So a *fresh, isolated* question can't exercise

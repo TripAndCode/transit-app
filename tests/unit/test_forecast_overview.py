@@ -57,9 +57,8 @@ def test_routes_ranked_desc_low_conf_last_and_capped():
 
 def test_routes_tie_break_by_route_code_regardless_of_input_order():
     """Two routes tied on expected_avg_min must rank by route_code, ascending
-    — deterministic regardless of route_rows' incoming order. See docs/refactor-notes.md's
-    "same unguarded-tie shape, three more sites" entry (fix extends PR #196's
-    tie-break convention here).
+    — deterministic regardless of route_rows' incoming order, since the
+    caller gives no ordering guarantee of its own.
     """
     route_rows = [
         {"route_code": "R_Z", "route_name": "Zulu", "avg_min": 5.0, "samples": 100},

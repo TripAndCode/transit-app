@@ -3,7 +3,7 @@ chain needed yet — CREATE TABLE IF NOT EXISTS is naturally idempotent.
 If this schema needs to evolve later, add versioned migrations then;
 building that machinery now for a single table is premature.
 
-NOTE: the live dev ClickHouse instance (~575M-row real-data `updates` table)
+NOTE: the live dev ClickHouse instance (a large, real-data `updates` table)
 predates the trip_id/scheduled_time LowCardinality change in schema.sql and
 still has the old String/Nullable(String) types — apply_schema only affects
 newly created tables (fresh dev setups, CI, future prod), it does NOT alter

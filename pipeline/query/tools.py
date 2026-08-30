@@ -183,9 +183,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("more_rows", "en"): "…{n} more",
     ("route_prefix", "ja"): "路線{route}",
     ("route_prefix", "en"): "route {route}",
-    # pipeline.query.meta_tools's describe_data/capabilities strings —
-    # migrated onto this shared table so the merged tool-calling surface
-    # has one localization mechanism instead of two (see docs/refactor-notes.md).
+    # pipeline.query.meta_tools's describe_data/capabilities strings live here
+    # too, so the merged tool-calling surface (tools.py + meta_tools.py share
+    # one TOOLS/_HANDLERS namespace) has a single localization mechanism
+    # instead of two.
     ("mt_unknown_kind", "ja"): "未知の kind: {kind}。有効値: {valid}",
     ("mt_unknown_kind", "en"): "unknown kind: {kind}. valid: {valid}",
     ("mt_routes_filter_no_match", "ja"): "「{substring}」に該当する路線がありません。",
@@ -685,8 +686,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency_id/date/route_code/service_type) rather than going straight to a
     # live ClickHouse scan of `updates`: route_code there is the 3rd sort-key
     # column behind an unconstrained captured_at, so proving a route was
-    # never observed forces a full-column scan — measured at 336M rows read /
-    # 400-1500ms on real data. Most Ask-tab queries name a route that HAS
+    # never observed forces a full-column scan of the whole table. Most
+    # Ask-tab queries name a route that HAS
     # been analyzed at least once, so this fast path resolves the common case
     # without ever touching ClickHouse.
     fast_row = await conn.fetchrow(
@@ -711,10 +712,9 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # Bounded the same way api/routers/map.py's route-scoped fallback probes
     # are: route_code sits behind an unconstrained captured_at in the sort
     # key, so an unbounded scan for a route that genuinely doesn't exist
-    # reads the whole agency partition (336M rows / 400-1500ms measured on
-    # real data) — and this path is reached on arbitrary, LLM/user-supplied
-    # route strings from the anonymous /ask endpoint, the cheapest input for
-    # a client to produce repeatedly.
+    # reads the whole agency partition — and this path is reached on
+    # arbitrary, LLM/user-supplied route strings from the anonymous /ask
+    # endpoint, the cheapest input for a client to produce repeatedly.
     #
     # The bound must NOT be derived from a fixed window or from the user's
     # ctx: this fallback exists ONLY to catch observations analyze() hasn't
@@ -732,8 +732,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency avoids that: it doesn't depend on which route or which window
     # was asked about, so it can't reintroduce the conflation, and it's
     # tighter than a fixed constant (typically "yesterday", not 30 days
-    # back). Residual gap, same shape as agg_stop_routes' documented ~3.7%
-    # trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # back). Residual gap, same shape as agg_stop_routes' own NULL/implausible-
+    # delay trade-off (pipeline/analyze.py): a route whose EVERY observation ever
     # recorded was NULL/implausible delay (permanently invisible to
     # agg_route_daily's dedup filter, regardless of recency) still reads as
     # unregistered if its last observation predates the horizon. Accepted —

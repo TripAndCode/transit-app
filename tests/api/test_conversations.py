@@ -126,9 +126,8 @@ async def test_get_others_conversation_is_404(conv_app):
 
 @pytest.mark.asyncio
 async def test_others_conversation_patch_delete_messages_are_404(conv_app):
-    """Characterization test for the ownership-mask-as-404 pattern repeated
-    across update/delete/list_messages/append_message — pinned before
-    slice 8's dedup into a shared helper (docs/refactor-plan.md)."""
+    """Characterization test for `_owned_or_404`'s shared ownership-mask-as-404
+    behavior across update/delete/list_messages/append_message."""
     app, agency, uid, pool = conv_app
     async with _authed_client(app, uid) as c:
         r = await c.post(f"/api/{agency}/conversations", json={"title": "X", "filter_ctx": {}}, headers=_CSRF)
@@ -638,10 +637,10 @@ async def test_append_message_postgres_error_in_dispatch_does_not_poison_transac
 
 # ─── followup_endpoint (kill-switch gated LLM follow-up) ──────────────────────
 #
-# Characterization tests written before deduping followup_endpoint's ownership
-# check onto _owned_or_404() and consolidating its too_long/llm_error mapping
-# (see docs/refactor-notes.md "Slice 8"). These pin current behavior exactly; the LLM client
-# is never called live — pipeline.query.followup.answer_followup is mocked.
+# Characterization tests pinning followup_endpoint's ownership check
+# (shared via _owned_or_404()) and its too_long/llm_error mapping. The LLM
+# client is never called live — pipeline.query.followup.answer_followup is
+# mocked.
 
 
 @pytest.mark.asyncio

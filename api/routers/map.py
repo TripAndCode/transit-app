@@ -74,9 +74,9 @@ async def _route_exists(conn, agency_id: int, route_code: str) -> bool:
     instead matches the grain of the table that actually populates the route
     list users click through from. No secondary index on route_code
     (agg_route_daily's PK leads with (agency_id, date)), but the table holds
-    per-agency route×day×service rows, not raw `updates` — measured ~1ms on
-    real data even for agency 8's ~14k rows, for both a fabricated and a real
-    route_code. Accepted trade-off: a brand-new route that's been ingested
+    per-agency route×day×service rows, not raw `updates`, so this stays cheap
+    regardless of agency size, for both a fabricated and a real route_code.
+    Accepted trade-off: a brand-new route that's been ingested
     but not yet analyzed (no agg_route_daily row yet) reads as "not found"
     (or renders with no shape, for route_shape) for one cron cycle.
     """
@@ -134,8 +134,8 @@ async def live_delays(
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring),
     # matching the mechanism used at the other 3 sort-based-dedup sites in
     # this file (route_shape, route_trips, route_stop_profile). Unlike those,
-    # this query is always bounded to one JST day off the sort index (measured
-    # ~1s on real data, nowhere near the 30s max_execution_time cap) — the old
+    # this query is always bounded to one JST day off the sort index, well
+    # inside the 30s max_execution_time cap — the old
     # `ORDER BY ... LIMIT 1 BY` form was never a timeout risk here. The reason
     # to rewrite it anyway is consistency (one dedup idiom across the file,
     # not two) and determinism, per the tiebreak note below. Multiple non-key
@@ -161,10 +161,9 @@ async def live_delays(
     # live board. `scheduled_time` is the field this tie *most commonly*
     # touches (it's per-stop, so it differs across a trip's stop_sequence rows
     # whenever the poll spans multiple stops) — but `dep_delay` is ALSO
-    # per-stop and can differ across those tied rows too: measured on real
-    # data, a handful of tied trips (4/1245 on one agency, 7/266 on another)
-    # had a different dep_delay between stop_sequences, by as much as a few
-    # hundred seconds. route_code/service_type are trip-level and unaffected.
+    # per-stop and can differ across those tied rows too, by a real margin
+    # when it happens, not just noise. route_code/service_type are
+    # trip-level and unaffected.
     rows_result = await ch.query(
         """
         SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
@@ -241,13 +240,12 @@ async def route_shape(
     # Cheap existence precheck FIRST, before touching ClickHouse at all -- ahead
     # of the ctx-bounded dedup query below, not just inside the empty-window
     # fallback branch further down. A fabricated route_code must cost ~0
-    # ClickHouse work: measured on real data, with the precheck misplaced
-    # inside the fallback branch, a fabricated route_code under a wide ctx
-    # window still cost 336,368,237 rows / 923 MiB / 2.35s, because the
-    # ctx-bounded dedup query ran to completion first regardless (it's
-    # bounded, but still real, unnecessary work for a route that doesn't
-    # exist at all). See `_route_exists` for why this checks agg_route_daily
-    # rather than agg_route_stats.
+    # ClickHouse work: with the precheck misplaced inside the fallback branch,
+    # a fabricated route_code under a wide ctx window still pays the full
+    # ctx-bounded dedup query's cost, because that query runs to completion
+    # first regardless (it's bounded, but still real, unnecessary work for a
+    # route that doesn't exist at all). See `_route_exists` for why this
+    # checks agg_route_daily rather than agg_route_stats.
     if not await _route_exists(conn, agency_id, str(route)):
         return {"route": route, "geometry": None, "stops": [], "unobserved_stops": []}
 
@@ -283,10 +281,10 @@ async def route_shape(
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
     # / service) honored by every other analytical endpoint — an earlier
-    # version scanned the route's ENTIRE history here with no date bound
-    # (measured 32.1s on agency 8's real data for one route, returning only
-    # ~100 rows), even though the shape should reflect what's actually being
-    # shown for the user's selected range, not all-time history.
+    # version scanned the route's ENTIRE history here with no date bound,
+    # paying for a full-table scan to return only a small number of rows,
+    # even though the shape should reflect what's actually being shown for the
+    # user's selected range, not all-time history.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
     # only one non-key column (dep_delay) is read off the winning row, so a
@@ -335,8 +333,8 @@ async def route_shape(
     # (bounded to the last 30 days off the agency's own latest data — see
     # below), solely to pick a shape for rendering purposes — this only
     # fires on the empty-window edge case (not the common case), so even
-    # its now-bounded form doesn't reintroduce the 32s-per-request problem
-    # the ctx bound above exists to fix. The per-stop delay stats
+    # its now-bounded form doesn't reintroduce the unbounded-full-history-scan
+    # problem the ctx bound above exists to fix. The per-stop delay stats
     # (`avg_min`/`samples`) stay empty regardless, since there really are
     # zero observations in the user's selected window.
     if not trip_counts:
@@ -746,10 +744,10 @@ async def route_trips(
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (measured: a date bound alone still
-    # read ~170M rows here, since no agency yet has more than ~130 days of
-    # history for the bound to actually exclude). See `_latest_route_observation`
-    # for the full existence-check and bound rationale.
+    # just a bounded-but-still-huge scan (a date bound alone isn't enough
+    # while every agency's full history still fits inside the bound's
+    # window). See `_latest_route_observation` for the full existence-check
+    # and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "trips": []}
@@ -1026,8 +1024,9 @@ async def delay_heatmap(
     # each land alone). `cluster_id` is DBSCAN's within-partition cluster label.
     # Computed once over `static_stops` (a few thousand rows/agency) rather
     # than inline against the agg join — running the window function per
-    # *stop* instead of per (stop, date, time_band) agg row it joins to
-    # measured ~4x faster on real data (429ms vs 1.86s for one agency-month).
+    # *stop* instead of per (stop, date, time_band) agg row it joins to is
+    # cheaper by construction, since the stop set is far smaller than the
+    # agg join it would otherwise run against.
     # `name_key` is computed in an inner SELECT so PARTITION BY can reference
     # its alias once, rather than repeating the CASE expression.
     stop_clusters_cte = """

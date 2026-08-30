@@ -28,10 +28,10 @@ The shared slow-path grain
 --------------------------
 Every slow-path helper used to issue its OWN ``_dedup_cte_ch`` scan of
 ``updates``, so one Overview request fanned out ~12 independent full dedup
-scans of *substantially the same rows* — measured at 8-22 s and ~170 M rows
-read EACH on agency 8 over a 30-day window, which put several of them over
-``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a real
-500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
+scans of *substantially the same rows* — each one reading a large fraction
+of an agency's history over even a 30-day window, which put several of them
+over ``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a
+real 500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
 dedup output to ``(date, route_code, service_type, hour)`` once, and each
 helper derives its own answer from that grain in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three
@@ -254,12 +254,13 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     that are too narrow to be covered.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
-    fetched separately for ``_peak_hour_by_dow``: measured on live agency-8
-    data, adding it costs nothing (the group-by cardinality rises 4.8 k → 10 k
-    rows on a 30-day morning window while wall time stays ~7.7 s — the cost is
-    all in the scan), whereas a second query genuinely doubles it. Even a
-    full-365-day window stays around 120 k grain rows, inside
-    ``get_ch_client``'s 200 k ``max_result_rows`` cap.
+    fetched separately for ``_peak_hour_by_dow``: adding it to the existing
+    group-by costs nothing extra (the cost is all in the scan, not the
+    group-by cardinality), whereas a second query genuinely doubles it. Even
+    a full-365-day window stays under ``get_ch_client``'s 200 k-row
+    ``max_result_rows`` cap, though not with so much headroom that adding
+    another group-by dimension or widening the window further is free to do
+    without rechecking against the cap.
 
     The hour is read off ``scheduled_time``'s first two characters, exactly as
     ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
@@ -450,9 +451,8 @@ async def _route_weekly_history(
     default ``weeks_back=4`` the grain covers it whenever ``ctx`` is at least
     ~21 days wide — i.e. every default 30-day request, which is the common
     case. That matters because this was the second ClickHouse round trip of an
-    otherwise one-round-trip slow path (measured at 5-19 s on live data, on top
-    of the grain's own 8-19 s), and it fires whenever ``_movers`` has any
-    candidate routes at all.
+    otherwise one-round-trip slow path, on top of the grain's own scan cost,
+    and it fires whenever ``_movers`` has any candidate routes at all.
 
     The live fallback (narrow ``ctx`` only) is ONE dedup scan over the full
     ``weeks_back * 7``-day span, bucketed by week index, rather than
@@ -772,7 +772,7 @@ async def _peak_hour_by_dow(
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW), a sample-weighted average across the range — sub-second instead of
-    the raw dedup scan that was ~96% of Overview's cold load. That table is
+    the raw dedup scan that used to dominate Overview's cold load. That table is
     aggregated across all routes/services, so a ``service``/``routes`` filter,
     or any ``time_band`` other than ``'all'``, has to leave it.
 

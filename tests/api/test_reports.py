@@ -250,9 +250,9 @@ async def test_reports_compare_ranking_reads_agg(reports_client, ch_client):
 @pytest.mark.asyncio
 async def test_ranking_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on avg_min (agg fast path) must sort by route_code,
-    ascending — regardless of `sort_order`. Ties used to fall back to
-    whatever order Postgres's GROUP BY happened to return them in. See
-    docs/refactor-notes.md's "inconsistent tie-break on ranking sorts" entry.
+    ascending — regardless of `sort_order`. Without this, ties fall back to
+    whatever order Postgres's GROUP BY happens to return them in, which is
+    not guaranteed to be stable run to run.
     """
     client, agency_id, pool = reports_client
     day = "2026-05-06"
@@ -287,7 +287,7 @@ async def test_reports_ranking_live_ties_break_by_route_code(reports_client, ch_
 @pytest.mark.asyncio
 async def test_on_time_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on on_time_pct (agg fast path) must sort by
-    route_code, ascending. See docs/refactor-notes.md."""
+    route_code, ascending, for a reproducible top-N cut."""
     client, agency_id, pool = reports_client
     day = "2026-05-07"
     await _seed_route(pool, agency_id, "OTIE_B", "平日", day, [30] * 25)
@@ -302,7 +302,7 @@ async def test_on_time_ties_break_by_route_code(reports_client, ch_client):
 @pytest.mark.asyncio
 async def test_worst_5min_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on late5_count (agg fast path) must sort by
-    route_code, ascending. See docs/refactor-notes.md."""
+    route_code, ascending, for a reproducible top-N cut."""
     client, agency_id, pool = reports_client
     day = "2026-05-08"
     await _seed_route(pool, agency_id, "WTIE_B", "平日", day, [600] * 25)
@@ -317,7 +317,7 @@ async def test_worst_5min_ties_break_by_route_code(reports_client, ch_client):
 @pytest.mark.asyncio
 async def test_dow_ranking_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on avg_min (dow_weekend, agg fast path) must sort by
-    route_code, ascending. See docs/refactor-notes.md."""
+    route_code, ascending, for a reproducible top-N cut."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "DTIE_B", "土日祝", "2026-05-23", [300] * 15)
     await _seed_route(pool, agency_id, "DTIE_A", "土日祝", "2026-05-23", [300] * 15)
@@ -331,7 +331,7 @@ async def test_dow_ranking_ties_break_by_route_code(reports_client, ch_client):
 @pytest.mark.asyncio
 async def test_compare_ranking_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on abs_delta (agg fast path) must sort by route_code,
-    ascending. See docs/refactor-notes.md."""
+    ascending, for a reproducible top-N cut."""
     client, agency_id, pool = reports_client
     await _seed_route(pool, agency_id, "CTIE_B", "平日", "2026-05-19", [120] * 15)
     await _seed_route(pool, agency_id, "CTIE_B", "土日祝", "2026-05-23", [360] * 15)
@@ -714,8 +714,7 @@ async def test_compute_trend_series_live_path_without_ch_raises(aconn, aagency_i
 async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aconn, aagency_id):
     """Two routes tied on avg_min within the same bucket (agg_daily_trend
     fast path) must rank in top_offenders by route_code, ascending —
-    `per_day` comes from a GROUP BY with no ordering guarantee. Extends
-    PR #196's tie-break convention (see docs/refactor-notes.md).
+    `per_day` comes from a GROUP BY with no ordering guarantee.
     """
     from datetime import date
 

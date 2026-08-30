@@ -23,8 +23,6 @@ raw_archives_static/
 docs/*
 !docs/deploy-railway.md
 !docs/refactor-log.md
-!docs/refactor-plan.md
-!docs/refactor-notes.md
 !docs/features/
 specs/
 .worktrees/

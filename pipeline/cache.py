@@ -1,7 +1,7 @@
 """Tiny async LRU+TTL cache for the compute_* functions.
 
-Reports become live queries in v2 (1.5M-row scans on Aomori) which is fast
-enough for the first hit but wasteful on repeats. Wrap each compute_*
+Reports become live queries in v2 (a full ClickHouse scan per request) which
+is fast enough for the first hit but wasteful on repeats. Wrap each compute_*
 with :func:`async_lru_cache` so identical (agency, ctx, kwargs) requests
 served within ``ttl_seconds`` reuse the previous result. Bounded so the
 cache never grows beyond ``maxsize`` entries.

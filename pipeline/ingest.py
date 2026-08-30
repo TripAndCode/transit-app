@@ -29,12 +29,11 @@ from pipeline.url_guard import _redact_url, safe_urlopen
 logger = logging.getLogger(__name__)
 
 # Flush a ClickHouse insert after accumulating this many rows across files —
-# large enough that per-insert overhead (~100ms fixed cost, confirmed
-# empirically: 50x20-row inserts = 4.98s total vs. 1x1000-row insert = 0.10s)
-# is amortized across thousands of rows instead of dozens, small enough to
-# keep a single flush's memory footprint and latency modest even for a dense
-# agency's file. See Task 8.9 — one-insert-per-source-file previously made a
-# real agency-1 backfill run 7h36m wall-clock for 14m52s of actual CPU work.
+# large enough that per-insert's fixed overhead is amortized across
+# thousands of rows instead of dozens (one insert per source file makes a
+# large backfill dominated by per-insert overhead rather than actual CPU
+# work), small enough to keep a single flush's memory footprint and latency
+# modest even for a dense agency's file.
 _BATCH_ROWS = 20_000
 
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
@@ -275,10 +274,10 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 done.update(pending_files)
             except DataError as e:
                 # Client-side columnar serialization failure — the insert
-                # provably never reached the server (0 rows land in every
-                # case, per empirical driver testing up to 40k rows / 2
-                # driver blocks), so it's safe to narrow the retry to just
-                # the file(s) actually carrying the bad row.
+                # provably never reached the server (0 rows land in any
+                # case, confirmed empirically across batch sizes), so it's
+                # safe to narrow the retry to just the file(s) actually
+                # carrying the bad row.
                 logger.error(
                     f"  [ERROR] batch insert of {len(pending_files)} files failed with a "
                     f"DataError, retrying file-by-file: {e}"

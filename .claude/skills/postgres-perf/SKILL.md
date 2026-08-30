@@ -6,7 +6,8 @@ description: Performance patterns and known traps for this repo's Postgres/PostG
 # Postgres + ClickHouse performance — transit-app
 
 Postgres 16 + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
-The raw GTFS-RT `updates` fact table (~575M rows, 4 agencies) lives in ClickHouse
+The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
+agencies, and growing) lives in ClickHouse
 instead (migrated from Postgres; the old Postgres `updates` table still exists as
 a rollback safety net but has zero production readers). MergeTree/partition-key/
 ORDER-BY-key advice DOES apply to `updates` — its `ORDER BY (agency_id,
@@ -18,8 +19,9 @@ become Nullable.
 - Daily aggregates beat per-row scans. Slow analytical endpoints were fixed by
   materializing per-day aggregate tables (`agg_stop_daily`, `agg_route_daily`,
   `agg_route_stop_daily`, `agg_feed_health`, …) instead of scanning raw
-  observations. a1 5.8s→0.09s, a8 35–48s→0.24s. Build aggregates in the analyze
-  step. The default (`time_band=all`, no service/route filter) request on every
+  observations — a per-day aggregate turns an O(rows) scan into an O(days) read.
+  Build aggregates in the analyze step. The default (`time_band=all`, no
+  service/route filter) request on every
   read endpoint serves from an `agg_*` table — but a `time_band`/custom-threshold/
   narrow-ctx filter falls back to a LIVE ClickHouse scan of `updates` (see
   `pipeline/reports/filters.py::_dedup_cte_ch`); those live-fallback paths are
@@ -27,18 +29,20 @@ become Nullable.
 - Materialize the dedup ONCE per agency. `analyze()` builds `_analyze_deduped` (a
   Postgres TEMP table, `ON COMMIT DROP`) from ClickHouse via
   `pipeline/db.py::build_dedup_ch_sql`, streamed in blocks (not `.query()`, which
-  buffers the whole ~5.3M-row/agency-8 result), and every builder reads that temp
-  table instead of re-scanning ClickHouse. Exception: `agg_stop_routes` reads a
-  SEPARATE unfiltered ClickHouse scan (`_analyze_raw_keys`) — `_analyze_deduped`
-  is pre-filtered by the delay clamp below, which would silently drop stops whose
-  every observation was NULL/implausible delay (~3.7% of keys, measured).
+  buffers the whole result in memory, scaling with the agency's row count), and
+  every builder reads that temp table instead of re-scanning ClickHouse.
+  Exception: `agg_stop_routes` reads a SEPARATE unfiltered ClickHouse scan
+  (`_analyze_raw_keys`) — `_analyze_deduped` is pre-filtered by the delay clamp
+  below, which would silently drop stops whose every observation was
+  NULL/implausible delay (a real, non-trivial share of keys).
 - Data-quality clamp lives in `build_dedup_ch_sql` (`MAX_PLAUSIBLE_DELAY_SEC`,
   120min): frozen/stale-feed delay spikes (e.g. 976min) are dropped before any
   averaging, so they can't skew means/counts on any surface.
 - ClickHouse route-scoped probes MUST be date-bounded. `route_code` is the 3rd
   sort-key column behind an unconstrained `captured_at`, so an unbounded
-  `WHERE route_code = ...` forces a full-partition scan (336M rows / 400-1500ms
-  measured for agency 8) even for a route that doesn't exist. `api/routers/map.py`'s
+  `WHERE route_code = ...` forces a full-partition scan (hundreds of millions
+  of rows, hundreds of milliseconds to low seconds) even for a route that
+  doesn't exist. `api/routers/map.py`'s
   route_trips/route_stop_profile/route_shape bound to
   `max_captured_at(ch, agency_id) - 30 days` — a route ingested but not yet
   analyzed is by definition within the last cron cycle, so 30 days loses
@@ -51,8 +55,8 @@ become Nullable.
   timeout rather than bounding by a guessed constant.
 - Prefer `ORDER BY captured_at DESC LIMIT 1` over `maxOrNull(captured_at)` for a
   single-agency max: `captured_at` is the 2nd sort-key column, so the `LIMIT 1`
-  form is index-served (~20-40ms) while the aggregate form is a full per-agency
-  scan (~300-900ms). See `api/clickhouse.py::max_captured_at_before`.
+  form is index-served while the aggregate form is a full per-agency scan.
+  See `api/clickhouse.py::max_captured_at_before`.
 
 ## Known traps
 - `GROUP BY` binds the input column, not the output alias. A COALESCE-sentinel
@@ -62,7 +66,7 @@ become Nullable.
   quick win FAILED here due to agency×captured_at correlation — the planner's row
   estimate is off regardless. Benchmark before assuming an index/sargable win.
 - NULL `service_type` was silently dropped from typed aggregates until explicitly
-  handled (real bug, PR #60). `route_code` is Nullable too (both ClickHouse and
+  handled. `route_code` is Nullable too (both ClickHouse and
   the underlying GTFS-RT feeds) — check whether a new aggregate/live-fallback
   query needs the same COALESCE-sentinel or explicit-filter treatment.
 - ClickHouse's `quantileExact`/`round()` do NOT reproduce Postgres semantics.
@@ -78,9 +82,9 @@ become Nullable.
 
 ## DB safety
 - Dev Postgres `:5433` (`transit-pg`) is READ-ONLY: EXPLAIN/SELECT only.
-- Dev ClickHouse (`transit-ch`, ~575M real rows across 4 agencies) is ALSO
-  READ-ONLY for anything outside `make ch-bootstrap`: no manual `INSERT`/`ALTER`/
-  `DROP` against it. `db/clickhouse/bootstrap.py` documents the one-time
+- Dev ClickHouse (`transit-ch`, hundreds of millions of real rows across 4
+  agencies) is ALSO READ-ONLY for anything outside `make ch-bootstrap`: no
+  manual `INSERT`/`ALTER`/`DROP` against it. `db/clickhouse/bootstrap.py` documents the one-time
   `ALTER TABLE ... MODIFY COLUMN` needed to bring its column types in sync with
   `db/clickhouse/schema.sql` — that's the one sanctioned exception.
 - Tests run against throwaway Postgres `:5544` (built from `db/`, needs

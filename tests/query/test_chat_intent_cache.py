@@ -169,8 +169,8 @@ async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monkeypatch):
-    """PR #243 review finding: the Stage-1 exact-text pre-hit is keyed only on
-    literal question text + agency, with no notion of ``history`` — so a
+    """The Stage-1 exact-text pre-hit is keyed only on literal question text
+    + agency, with no notion of ``history`` — so a
     generic continuation phrase like "次の50件" would return whichever
     (tool, args) was last cached for that exact text by *any* prior question
     in the agency, ignoring the current conversation's actual prior turn.
