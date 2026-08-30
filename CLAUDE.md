@@ -121,3 +121,18 @@ the task needs them.
   `.claude/settings.local.json` and must never be committed.
 - Operational setup, non-interactive-shell environment rules, and current timeout
   limitations are documented in `.claude/README.md`, not repeated in every session.
+- For a `NEXT_TASK.md`-tracked backlog item, the VPS loop is the default place
+  that work happens, not an interactive session (this doesn't apply to ordinary
+  interactive feature work outside the backlog, e.g. work requested directly in
+  a session — see `## Git and pull requests` above). Prefer reporting status and
+  letting the next tick continue over fixing/finishing a stuck or blocked item
+  yourself; only take over in-progress worker state when explicitly asked to. A
+  specific ask to intervene ("if it stops, resolve it" / "fix the root cause")
+  authorizes that one intervention — not a chain into full interactive
+  development of everything downstream. After finishing the thing that was
+  actually asked for, check whether the loop's next tick can plausibly continue
+  from here; if so, stop and let it, rather than proactively continuing the
+  chain of related fixes yourself. (This is a session-discipline rule, not a
+  code-enforceable one, so it skips the usual skill-first promotion ladder in
+  `## Process rules` — there's no existing skill for session behavior to have
+  captured it in.)
