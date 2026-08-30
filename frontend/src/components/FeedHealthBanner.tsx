@@ -17,6 +17,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
+import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 
 const SESSION_DISMISS_KEY = "fh_banner_dismissed_at";
 
@@ -28,6 +29,7 @@ export function FeedHealthBanner() {
   const [dismissed, setDismissed] = useState(
     () => sessionStorage.getItem(SESSION_DISMISS_KEY) != null,
   );
+  const { messageProps } = useTapToExpandBanner();
 
   if (agencyId == null) return null;
   const count = data?.clamp_count ?? 0;
@@ -62,7 +64,7 @@ export function FeedHealthBanner() {
       }}
     >
       <span aria-hidden="true">⚠</span>
-      <span style={{ flex: 1 }}>{t("app.feed_health.banner", { count })}</span>
+      <span {...messageProps}>{t("app.feed_health.banner", { count })}</span>
       <button
         type="button"
         onClick={handleDismiss}
