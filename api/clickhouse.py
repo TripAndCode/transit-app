@@ -118,6 +118,49 @@ async def max_captured_at_before(ch, agency_id: int, before: datetime) -> dateti
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
+async def min_captured_at(ch, agency_id: int) -> datetime | None:
+    """Earliest `captured_at` ever recorded for an agency.
+
+    Same index-served single-row-read shape as `max_captured_at` (see its
+    docstring), just `ORDER BY captured_at ASC`: `captured_at` is the second
+    column in `updates`' sort key, so this is served off the sort index
+    rather than a table scan regardless of direction. Used only for
+    agencies with zero `agg_route_daily` rows (never analyzed), to size
+    `pipeline.health.aggregate_freshness`'s `agg_behind_days` off the actual
+    span of unaggregated data instead of a hardcoded placeholder — so it
+    stays a rare, single-agency probe rather than a query run for every
+    agency on every call.
+    """
+    result = await ch.query(
+        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
+        parameters={"agency_id": agency_id},
+    )
+    if not result.result_rows:
+        return None
+    value = result.result_rows[0][0]
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+async def min_captured_at_by_agency(ch, agency_ids: list[int], log: logging.Logger) -> dict[int, datetime | None]:
+    """Per-agency `min_captured_at`, run concurrently.
+
+    Same degrade-on-failure shape as `max_captured_at_before_by_agency`: a
+    failing probe degrades that one agency to `None` rather than failing the
+    whole batch. Callers pass only the (normally small) subset of agencies
+    with no `agg_route_daily` rows at all, since that's the only case this
+    backs.
+    """
+
+    async def _probe(aid: int) -> tuple[int, datetime | None]:
+        try:
+            return aid, await min_captured_at(ch, aid)
+        except Exception:
+            log.warning("ClickHouse earliest-day probe failed for agency %s — degrading", aid, exc_info=True)
+            return aid, None
+
+    return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))
+
+
 async def max_captured_at_before_by_agency(
     ch, agency_ids: list[int], before: datetime, log: logging.Logger
 ) -> dict[int, datetime | None]:
