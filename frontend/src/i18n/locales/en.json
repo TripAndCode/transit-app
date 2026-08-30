@@ -267,7 +267,10 @@
   },
   "help": {
     "title": "User Manual",
-    "sections_nav": "Manual sections"
+    "sections_nav": "Manual sections",
+    "hint_text": "New here? Check out the User Manual for a walkthrough.",
+    "hint_cta": "View Help",
+    "hint_dismiss_aria": "Dismiss help hint"
   },
   "account": {
     "admin_link": "Admin",

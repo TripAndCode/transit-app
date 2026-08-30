@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { Outlet, useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
+import { HelpHint } from "./components/HelpHint";
 import { Sidebar } from "./components/Sidebar";
 
 /**
@@ -28,7 +30,9 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  useDefaultRangeAnchor(agencyId ? Number(agencyId) : null);
+  const agencyIdNum = agencyId ? Number(agencyId) : null;
+  useDefaultRangeAnchor(agencyIdNum);
+  useAnonymousFilterPersistence(agencyIdNum);
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar />
@@ -44,6 +48,7 @@ export default function App() {
         <DataStalenessBanner />
         <FeedHealthBanner />
         <GuestPrompt />
+        <HelpHint />
         <ActivityStrip />
         {/* flex: 1, not height: "100%" — main is now a flex column whose
             other children (the banners/strip above) take variable height, so

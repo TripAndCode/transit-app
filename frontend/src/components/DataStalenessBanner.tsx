@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
+import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 
 export const STALE_THRESHOLD_HOURS = 24;
 const SESSION_DISMISS_KEY = "ds_banner_dismissed_at";
@@ -35,6 +36,7 @@ export function DataStalenessBanner() {
   const [dismissed, setDismissed] = useState(
     () => sessionStorage.getItem(SESSION_DISMISS_KEY) != null,
   );
+  const { messageProps } = useTapToExpandBanner();
 
   if (agencyId == null) return null;
   const captured = data?.latest_captured_at;
@@ -77,7 +79,7 @@ export function DataStalenessBanner() {
       }}
     >
       <span aria-hidden="true">⚠</span>
-      <span style={{ flex: 1 }}>{t("app.data_stale.banner", { when: ageLabel })}</span>
+      <span {...messageProps}>{t("app.data_stale.banner", { when: ageLabel })}</span>
       <button
         type="button"
         onClick={handleDismiss}

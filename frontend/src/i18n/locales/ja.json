@@ -267,7 +267,10 @@
   },
   "help": {
     "title": "利用マニュアル",
-    "sections_nav": "マニュアルの目次"
+    "sections_nav": "マニュアルの目次",
+    "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
+    "hint_cta": "ヘルプを見る",
+    "hint_dismiss_aria": "ヘルプのヒントを閉じる"
   },
   "account": {
     "admin_link": "管理",
