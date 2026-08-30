@@ -46,10 +46,9 @@ def test_list_feature_docs_sorted_by_filename():
 
 
 def test_list_feature_docs_skips_html_comment_only_placeholders():
-    """docs/features/zzz-path-test.md is a committed leftover placeholder
-    (see docs/refactor-log.md's item 27 entry) this sandbox's destructive-op
-    restrictions couldn't `git rm` -- filtered out here instead so it never
-    reaches the admin UI."""
+    """docs/features/zzz-path-test.md is an HTML-comment-only placeholder
+    file in the repo tree -- filtered out here so it never reaches the
+    admin UI."""
     slugs = {p.stem for p in _list_feature_docs()}
     assert "zzz-path-test" not in slugs
 
