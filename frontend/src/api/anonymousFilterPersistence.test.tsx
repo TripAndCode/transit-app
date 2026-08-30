@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter, useSearchParams } from "react-router-dom";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter, useNavigate, useSearchParams } from "react-router-dom";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
 
 const useSessionMock = vi.fn();
@@ -22,6 +22,19 @@ function renderProbe(agencyId: number | null, initialPath: string) {
     <MemoryRouter initialEntries={[initialPath]}>
       <Probe agencyId={agencyId} />
     </MemoryRouter>,
+  );
+}
+
+// Mirrors AgencyPicker's `selectAgency`, which navigates to the same or a
+// different agency without preserving any filter query params (unlike
+// Sidebar's nav links, which always carry `ctxToQueryString`).
+function NavigatingProbe({ agencyId }: { agencyId: number }) {
+  useAnonymousFilterPersistence(agencyId);
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(`/agencies/${agencyId}/overview`)}>
+      reselect
+    </button>
   );
 }
 
@@ -101,5 +114,23 @@ describe("useAnonymousFilterPersistence", () => {
   it("does nothing when agencyId is null", () => {
     renderProbe(null, "/");
     expect(screen.getByTestId("params")).toHaveTextContent("");
+  });
+
+  it("does not wipe a previously persisted filter when re-navigating to the same agency with no filter params", () => {
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/overview?dow=weekend&time_band=evening"]}>
+        <NavigatingProbe agencyId={1} />
+      </MemoryRouter>,
+    );
+    expect(JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}")).toMatchObject({
+      dow: "weekend",
+      time_band: "evening",
+    });
+
+    fireEvent.click(screen.getByText("reselect"));
+
+    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.dow).toBe("weekend");
+    expect(stored.time_band).toBe("evening");
   });
 });

@@ -73,8 +73,11 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     const hasAnyFilterParam = Boolean(
       SCALAR_FILTER_KEYS.some((key) => params.get(key)) || params.get("routes"),
     );
+    // Captured before either branch below mutates the ref: true only on the
+    // very first time this hook processes this agency in the session.
+    const isFirstAttemptForAgency = restoredFor.current !== agencyId;
 
-    if (!hasAnyFilterParam && restoredFor.current !== agencyId) {
+    if (!hasAnyFilterParam && isFirstAttemptForAgency) {
       restoredFor.current = agencyId;
       const stored = readStored(agencyId);
       // An all-undefined `{}` can legitimately be what a filterless visit
@@ -111,6 +114,19 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     if (routesStr) {
       const routes = routesStr.split(",").filter(Boolean);
       if (routes.length > 0) nextStored.routes = routes;
+    }
+    if (Object.keys(nextStored).length === 0 && !isFirstAttemptForAgency) {
+      // A bare "no filter params" URL for an agency we've already processed
+      // this session is ambiguous — it can mean an explicit in-session
+      // clear-all, but it's also exactly what a same-agency re-navigation
+      // with a dropped query string (e.g. AgencyPicker's `selectAgency`,
+      // which doesn't preserve filter params the way Sidebar's nav links
+      // do) looks like. Since we can't tell those apart, never let this
+      // ambiguous case silently overwrite an already-stored non-empty
+      // filter; only an agency's genuine first attempt (or storage that was
+      // already empty) can persist an empty object.
+      const existing = readStored(agencyId);
+      if (existing && Object.keys(existing).length > 0) return;
     }
     writeStored(agencyId, nextStored);
     // `params` (not a derived string key) is the dependency, matching
