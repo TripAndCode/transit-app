@@ -52,14 +52,24 @@ client_secret_*.json
 .playwright-mcp/
 .coverage
 # scripts/prepare_review.py's own --output-dir, and any ad-hoc scratch
-# directory a review pass creates when it can't write outside the repo
+# file/directory a review pass creates when it can't write outside the repo
 # (a sandboxed worker/coordinator without /tmp access falls back to a
-# repo-relative path) — naming has never been consistent across sessions,
-# so match every variant actually seen rather than one canonical name.
-# These hold nothing but a diff/manifest of already-reviewed, already-
-# public code, never secrets.
-/review-scratch*/
-/.review-scratch*/
-/tmp-review-item*/
+# repo-relative path) — naming has never been consistent across sessions
+# and has included both directories and loose files, so match every shape
+# actually seen rather than one canonical name. No trailing slash on the
+# root-level patterns below: some historical leftovers were bare `.diff`
+# files, not directories, and a directory-only pattern silently misses
+# those. These hold nothing but a diff/manifest of already-reviewed,
+# already-public code, never secrets.
+/review-scratch*
+/.review-scratch*
+/tmp-review-item*
+/tmp_review_item*
+# mktemp -d's own unthemed default template (10 random alphanumeric
+# chars) when a scratch dir is created directly in the repo root instead
+# of under a real tmpdir — this shape carries no "review"/"scratch"/"item"
+# substring to match on, so it needs its own pattern; kept root-anchored
+# and exactly 10 chars to avoid matching an unrelated real path.
+/tmp.??????????
 scripts/review-*-pass*/
 scripts/.review-scratch/
