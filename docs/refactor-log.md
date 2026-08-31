@@ -120,3 +120,105 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `test_movers_suppresses_delta_pct_below_prv_avg_floor`, seeding a
   near-zero-baseline route alongside a normal-magnitude one in the same
   response. (PR #283)
+- 2026-08-31: Resolved item 37's inconsistent minimum-sample gates across
+  `pipeline/analyze.py`'s `agg_*` builders by standardizing on "no
+  insert-time gate anywhere" — removed `agg_route_stats`'s
+  `HAVING COUNT(*) > 20` and `agg_stop_seq`'s `HAVING COUNT(*) > 5` (both
+  branches); the other five listed tables already had no gate. Every table
+  keeps its `samples` column so readers/UI apply low-confidence handling at
+  read time instead (see `api.triage.LOW_CONFIDENCE_SAMPLES`, the existing
+  pattern this follows). Closed the one real gap this created: threaded a
+  new `baseline_samples` field through `today_route_summary`
+  (`api/routers/map.py`) so a thin `agg_route_stats` baseline is now
+  distinguishable from a thin `agg_route_daily` "today" sample count (the
+  existing `low_confidence` flag only judges the latter); `RouteRow.tsx`
+  renders a separate low-confidence-baseline marker for it. Updated two
+  stale comments that referenced the removed `agg_route_stats` sample
+  threshold (`api/routers/map.py`'s `_route_exists` docstring,
+  `tests/api/test_map_heatmap.py`) and one in `pipeline/query/tool_queries.py`
+  that incorrectly claimed to "match" `agg_stop_seq`'s now-nonexistent gate.
+  Added `tests/pipeline/test_analyze.py` tests proving a 3-sample
+  route/service and a 3-sample route/stop_sequence group are now
+  materialised (previously silently dropped), plus frontend tests for the
+  new baseline-low-confidence marker. (PR #284)
+- 2026-08-31: `/vps-loop-run` coordinator, resuming item 37's branch (found
+  with a real commit in a leftover worktree, no PR yet — an interrupted
+  prior run per Step 3b). Ran this item's own required two-pass
+  `/review-branch` gate. Pass 1 (`bugs+logic+consistency+security`;
+  `perf+practices+alternatives`) found zero Majors (two non-blocking
+  Minors, left unfixed: a missing `baseline_samples` test assertion, and a
+  UI marker-precedence note on `RouteRow.tsx` suppressing the new
+  low-confidence-baseline marker when the today-samples marker already
+  shows). Pass 2 (fresh, independent dispatch, both groups) found one
+  Major: `today_route_summary`'s baseline query (`api/routers/map.py`)
+  independently `COALESCE`d `baseline_avg_min`/`baseline_p90_min`/
+  `baseline_samples` column-by-column between the exact (route,
+  service_type) match (`b`) and a route-grain pooled-across-service_types
+  fallback (`rb`) — two different statistical populations. Because
+  `agg_route_stats` no longer gates out thin groups (this same item's own
+  change), `PERCENT_RANK`'s documented single-row/tied-group behavior
+  means `b.p90_min` can now routinely be null while `b.avg_min` isn't,
+  so a route could get `baseline_avg_sec` from `b` while
+  `baseline_p90_sec` silently fell back to `rb`'s pooled figure — feeding
+  `api.triage.classify_route`'s anomaly/watch classification a mismatched
+  baseline pair with no visible signal of the mismatch. Fixed directly
+  (coordinator-direct, via `EnterWorktree` to resolve the same
+  worktree Edit-permission-anchor mismatch documented in prior items'
+  entries above, after a freshly-dispatched general-purpose fix agent hit
+  the identical mismatch and made no changes): replaced the three
+  independent `COALESCE`s with a single `CASE WHEN b.avg_min IS NOT NULL`
+  condition shared by all three columns, so `baseline_avg_min`/
+  `baseline_p90_min`/`baseline_samples` always come from the same source;
+  `baseline_p90_sec` can still legitimately end up `None` when `b`'s own
+  `p90_min` is null (`classify_route` already treats any null baseline
+  input as `no_baseline` — verified, no change needed there), which is
+  correct and strictly better than silently mixing populations. Added
+  `tests/api/test_api_map.py::test_route_summary_baseline_columns_stay_same_source`
+  (seeds a same-route, different-service_type baseline with a real,
+  non-null p90 specifically to prove it does NOT leak into the exact
+  match's null p90), plus `baseline_samples` assertions on the two
+  existing exact-match/pooled-fallback tests. Verified for real against
+  the live `:5544`/`:8124` throwaway containers: full `make test
+  DATABASE_URL=... RUN_CH_INTEGRATION=1` run — 1058 passed, 9 skipped, 2
+  pre-existing failures unrelated to this diff (`test_clickhouse_dep.py`'s
+  missing `CLICKHOUSE_USER` env var; `test_cleanup_git_state.py`'s
+  `git push` fixture issue) — plus `poetry run ruff check`/`poetry run
+  mypy` clean on both changed files. (PR #284)
+- 2026-08-31: `/vps-loop-run` coordinator, second fix-and-reverify cycle on
+  item 37 (this pass's own 2-iteration cap). Re-verifying the first fix
+  above against the same reviewer group that raised it surfaced two further
+  Majors, both direct consequences of this item's own core change (removing
+  `agg_route_stats`'s insert-time sample gate) that the first fix didn't
+  cover: (1) `today_route_summary`'s `has_baseline` was still computed only
+  from `baseline_avg_sec is not None`, but a thin group can now have a real
+  `avg_min` and a null `p90_min` at the same time — `classify_route` then
+  correctly returns `bucket="no_baseline"` while `has_baseline` stayed
+  `True`, so the client could render a "baseline pending" note and a
+  concrete today-vs-baseline comparison for the same row simultaneously
+  (`tests/pipeline/live/bucket.test.tsx`'s own fixture helper already
+  encoded `has_baseline: bucket !== "no_baseline"` as the intended
+  invariant). Fixed by deriving `has_baseline` from `bucket != "no_baseline"`
+  directly. (2) Both the route-grain pooled baseline in
+  `today_route_summary` (`api/routers/map.py`'s `rb` CTE) and the identical
+  `_ROUTE_BASELINE_SQL` in `pipeline/digest/build.py` computed
+  `SUM(p90_min * samples) / NULLIF(SUM(samples), 0)` — since a thin
+  service_type group's `p90_min` can now be null while its `samples` isn't,
+  `SUM()` silently skips the null numerator term but NOT that row's sample
+  count in the denominator, biasing the pooled `base_p90_min` down whenever
+  any contributing service_type is thin. Fixed both sites identically:
+  `SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL) /
+  NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0)`, restricting
+  numerator and denominator to the same contributing rows. Added
+  `tests/api/test_api_map.py::test_route_summary_pooled_p90_ignores_null_p90_rows`
+  and `tests/pipeline/test_digest_build.py::test_route_baseline_sql_p90_pooling_ignores_null_p90_rows`
+  (seeding a thin null-p90 contributor alongside a healthy one, asserting
+  the pooled figure matches the healthy contributor's own p90 exactly, not
+  a diluted value), plus a `has_baseline is False` assertion on the
+  existing null-p90 exact-match test. Verified for real against the live
+  `:5544`/`:8124` throwaway containers: full `make test DATABASE_URL=...
+  RUN_CH_INTEGRATION=1` — 1060 passed (2 more than the prior fix's run,
+  matching the 2 new tests), 9 skipped, same 2 pre-existing unrelated
+  failures as before; `poetry run ruff check`/`poetry run mypy` clean on
+  all four changed files. Re-verifying only the owning reviewer group
+  again against this second fix is this pass's final allowed iteration
+  per this repo's 2-fix-iteration cap. (PR #284)

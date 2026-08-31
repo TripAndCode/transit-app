@@ -261,6 +261,35 @@ def test_null_service_route_gets_route_grain_baseline(pg_conn, agency_id):
     assert matching[0].baseline_avg_min == 3.0
 
 
+def test_route_baseline_sql_p90_pooling_ignores_null_p90_rows(pg_conn, agency_id):
+    """_ROUTE_BASELINE_SQL's base_p90_min must not be diluted by a
+    contributing service_type whose own p90_min is null (a degenerate
+    PERCENT_RANK result for a thin/tied group -- agg_route_stats no longer
+    gates those out at insert time). SUM(p90_min * samples) silently skips a
+    null numerator term, but the denominator must be FILTERed the same way,
+    or that row's samples still count against a p90 it contributed nothing
+    to -- biasing the pooled figure down."""
+    from pipeline.digest.build import _ROUTE_BASELINE_SQL
+
+    with pg_conn.cursor() as cur:
+        # Thin/degenerate group: real avg, but a null p90 (samples still count).
+        _insert_stats(cur, agency_id, "R1", "平日", 2.0, None, samples=3)
+        # Healthy group: real avg and p90.
+        _insert_stats(cur, agency_id, "R1", "土日", 4.0, 10.0, samples=500)
+    pg_conn.commit()
+
+    with pg_conn.cursor() as cur:
+        cur.execute(_ROUTE_BASELINE_SQL, {"aid": agency_id})
+        (route_code, base_avg_min, base_p90_min) = cur.fetchone()
+
+    assert route_code == "R1"
+    assert base_avg_min == pytest.approx((2.0 * 3 + 4.0 * 500) / 503)
+    # Must equal the healthy group's own p90 exactly (the only contributor) --
+    # NOT diluted to 10.0*500/503 ~= 9.94 by including the null-p90 row's
+    # samples in the denominator.
+    assert base_p90_min == pytest.approx(10.0)
+
+
 def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):
     """delta_min must compare today's avg against the baseline using the SAME
     route population on both sides. Previously today's avg was weighted over

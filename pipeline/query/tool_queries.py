@@ -145,8 +145,10 @@ async def segment_hotspots(
 
     Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
     avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
-    are returned (matches agg_stop_seq's own noise gate in
-    pipeline/analyze.py). Backs tools._tool_segment_hotspots.
+    are returned — this tool's own noise gate on its live ClickHouse scan
+    (independent of agg_stop_seq, which this tool does not read and which
+    carries no insert-time sample gate of its own). Backs
+    tools._tool_segment_hotspots.
 
     `updates` lives in ClickHouse; static_stop_times/static_stops live in
     Postgres — no cross-database join, so this runs in two steps: (1) a

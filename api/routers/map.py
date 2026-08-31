@@ -65,10 +65,9 @@ async def _route_exists(conn, agency_id: int, route_code: str) -> bool:
     """True if ``route_code`` has ever been analyzed for this agency.
 
     Checks ``agg_route_daily``, not ``agg_route_stats``: agg_route_stats is
-    built with ``HAVING COUNT(*) > 20`` and ``WHERE service_type IS NOT
-    NULL`` (pipeline/analyze.py), so it's a LOSSY existence oracle — a real,
-    legitimately-observed route with <=20 lifetime deduped samples or an
-    all-NULL service_type is invisible to it even though
+    built with ``WHERE service_type IS NOT NULL`` (pipeline/analyze.py), so
+    it's a LOSSY existence oracle — a real, legitimately-observed route with
+    an all-NULL service_type is invisible to it even though
     today_route_summary's route list (built from agg_route_daily, no such
     filter) would show it with bucket="no_baseline". Checking agg_route_daily
     instead matches the grain of the table that actually populates the route
@@ -607,8 +606,12 @@ async def today_route_summary(
     ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
     classifier (:func:`api.triage.classify_route`) then assigns each route a
     ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
-    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
-    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    (today vs baseline), and a ``low_confidence`` flag for thin TODAY samples.
+    ``baseline_samples`` is the separate, un-gated sample count backing the
+    baseline itself (``agg_route_stats`` no longer drops thin route/service
+    groups at insert time) — the client decides its own low-confidence
+    treatment for a thin baseline from this field. The client groups by
+    bucket, so the SQL ``ORDER BY`` is only a sensible default.
 
     Reads the precomputed ``agg_route_daily`` (built by ``analyze``) for the
     latest date instead of scanning raw ``updates`` — a small indexed read
@@ -631,9 +634,19 @@ async def today_route_summary(
             -- Route-grain baseline (across service_types), so a NULL-service daily
             -- row (stored as '') still finds a baseline even though agg_route_stats
             -- has no '' row. Mirrors the digest's route-grain baseline.
+            -- base_p90_min's numerator/denominator are both FILTERed to the same
+            -- p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin
+            -- groups, so a service_type's p90_min can itself be null (a degenerate
+            -- PERCENT_RANK result) while its samples are not -- SUM() silently
+            -- skips a null numerator term but NOT its row's sample count in the
+            -- denominator, which would otherwise bias base_p90_min down whenever
+            -- any contributing service_type is thin. base_avg_min needs no such
+            -- filter since AVG() is never null for a non-empty group.
             SELECT route_code,
                    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
-                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+                   SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
+                       / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
+                   SUM(samples) AS base_samples
             FROM agg_route_stats
             WHERE agency_id = $1 AND samples IS NOT NULL
             GROUP BY route_code
@@ -641,8 +654,28 @@ async def today_route_summary(
         SELECT
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
-            COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
-            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
+            -- All three baseline columns are picked from the SAME source
+            -- (b or rb) via one shared condition, never coalesced
+            -- independently per column -- b.avg_min IS NOT NULL is the
+            -- correct "does b have a matching row" test (AVG() over a real
+            -- joined row is never null). agg_route_stats no longer gates out
+            -- thin (route, service_type) groups at insert time, so b.p90_min
+            -- can legitimately be null (a degenerate PERCENT_RANK result for
+            -- a thin or tied group) while b.avg_min is not; independently
+            -- coalescing each column would then silently mix b's exact-match
+            -- avg with rb's pooled-across-service_types p90 -- two different
+            -- statistical populations reported as one baseline. Picking all
+            -- three from the same side means baseline_p90_min can be null
+            -- even when baseline_avg_min isn't (classify_route already
+            -- treats any null baseline input as "no_baseline"), which is
+            -- correct: a missing same-source p90 must not be papered over
+            -- with a different population's figure.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
+            CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
+            -- baseline_samples backs whichever source above was actually used,
+            -- so the client can flag a thin baseline -- not folded into
+            -- classify_route/low_confidence, which judges TODAY's sample count.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
             b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
@@ -710,10 +743,16 @@ async def today_route_summary(
                 "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 "baseline_avg_sec": baseline_avg_sec,
                 "baseline_p90_sec": baseline_p90_sec,
+                "baseline_samples": r["baseline_samples"],
                 "deviation_sec": deviation_sec,
                 "bucket": bucket,
                 "low_confidence": low_confidence,
-                "has_baseline": baseline_avg_sec is not None,
+                # bucket=="no_baseline" whenever classify_route treats any of
+                # avg/p90 as missing -- has_baseline must track that exactly
+                # (not just baseline_avg_sec) so a thin group with a real avg
+                # but a null p90 doesn't render as both "no baseline yet" and
+                # a concrete today-vs-baseline comparison at once.
+                "has_baseline": bucket != "no_baseline",
                 "late5_pct": r["late5_pct"],
             }
         )

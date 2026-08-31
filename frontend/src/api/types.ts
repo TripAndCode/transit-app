@@ -18,6 +18,10 @@ export type RouteSummary = {
   last_seen_at: string | null;
   baseline_avg_sec: number | null;
   baseline_p90_sec: number | null;
+  // Sample count backing the baseline itself (agg_route_stats), independent
+  // of `samples` (today's count) and of `low_confidence` (which judges only
+  // today's count) — null when there is no baseline at all.
+  baseline_samples: number | null;
   deviation_sec: number | null;
   bucket: RouteBucket;
   low_confidence: boolean;

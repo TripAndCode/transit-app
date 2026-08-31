@@ -34,10 +34,19 @@ _DAY_ROUTES_SQL = """
 # Route-grain baseline: aggregate agg_route_stats ACROSS service_types per route,
 # weighted by the baseline's OWN samples. Keyed by route_code so a NULL-service
 # ('') daily row still finds the route's overall baseline.
+# base_p90_min's numerator/denominator are both FILTERed to the same
+# p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin groups, so
+# a service_type's p90_min can itself be null (a degenerate PERCENT_RANK
+# result) while its samples are not -- SUM() silently skips a null numerator
+# term but NOT its row's sample count in the denominator, which would
+# otherwise bias base_p90_min down whenever any contributing service_type is
+# thin. base_avg_min needs no such filter since AVG() is never null for a
+# non-empty group.
 _ROUTE_BASELINE_SQL = """
     SELECT route_code,
            SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
-           SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+           SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
+               / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min
     FROM agg_route_stats
     WHERE agency_id = %(aid)s AND samples IS NOT NULL
     GROUP BY route_code
