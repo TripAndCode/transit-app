@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""Plan or apply daily git hygiene: local, remote, and backup-branch cleanup.
+
+This closes three gaps `/vps-loop-run` only handles reactively:
+
+1. Local branch/worktree cleanup (`scripts/cleanup_git_state.py`) currently
+   only runs as a side effect of a loop tick, so it never runs during a long
+   idle stretch or while the loop is stuck.
+2. Merged `vps-loop/item-<N>` branches on GitHub are never deleted by the
+   loop itself (accepted operational debt, batched by a human "when it's
+   worth the time").
+3. `vps-loop/item-<N>-superseded-<sha>` backup branches (created by the
+   loop's Step 2b before a judgment-based delete) have no automated prune
+   path at all.
+
+This script must never race a live `/vps-loop-run` tick: it acquires the
+same `/tmp/claude-loop.lock` lock file non-blockingly before touching
+anything and skips cleanly (not an error) if the loop is mid-tick.
+
+Every deletion (local or remote) is appended to a dedicated hygiene log
+(default `/root/git-hygiene.log`) -- not `docs/refactor-log.md`, which is
+`/vps-loop-run`'s own per-item narrative trail, not a general housekeeping
+log.
+
+Like `cleanup_git_state.py`, planning is the default; pass `--apply` to
+actually delete anything.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fcntl
+import importlib.util
+import io
+import json
+import re
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, Literal, Sequence
+
+# Import cleanup_git_state.py directly (not a shell-out) so this script
+# reuses its exact, already-reviewed planning/apply safety logic for local
+# branches/worktrees rather than duplicating it. Loaded by file path since
+# `scripts/` has no `__init__.py` and isn't guaranteed to be on `sys.path`.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_CLEANUP_SPEC = importlib.util.spec_from_file_location("cleanup_git_state", _SCRIPT_DIR / "cleanup_git_state.py")
+assert _CLEANUP_SPEC and _CLEANUP_SPEC.loader
+cleanup_git_state = importlib.util.module_from_spec(_CLEANUP_SPEC)
+sys.modules[_CLEANUP_SPEC.name] = cleanup_git_state
+_CLEANUP_SPEC.loader.exec_module(cleanup_git_state)
+
+PullRequest = cleanup_git_state.PullRequest
+CleanupError = cleanup_git_state.CleanupError
+
+DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
+DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
+DEFAULT_RETENTION_DAYS = 30
+
+# `vps-loop/item-<N>` (no suffix): the branch shape the loop pushes and opens
+# PRs from. `vps-loop/item-<N>-superseded-<sha>`: Step 2b's own local-only
+# backup-ref convention, deliberately not `cleanup_git_state.py`-managed.
+VPS_LOOP_ITEM_BRANCH_RE = re.compile(r"^vps-loop/item-\d+$")
+SUPERSEDED_BRANCH_RE = re.compile(r"^vps-loop/item-\d+-superseded-[0-9a-f]+$")
+
+
+class HygieneError(RuntimeError):
+    """Raised when the hygiene job cannot make a conservative decision."""
+
+
+@dataclass(frozen=True)
+class RemoteBranchDecision:
+    """A keep/delete decision for one remote `vps-loop/item-<N>` branch."""
+
+    branch: str
+    action: Literal["keep", "delete"]
+    reason: str
+
+
+@dataclass(frozen=True)
+class BackupBranchDecision:
+    """A keep/delete decision for one local `...-superseded-<sha>` branch."""
+
+    branch: str
+    action: Literal["keep", "delete"]
+    reason: str
+    commit_epoch: int
+
+
+# ---------------------------------------------------------------------------
+# Concurrency guard
+# ---------------------------------------------------------------------------
+
+
+def try_acquire_lock(lock_path: Path) -> IO[str] | None:
+    """Return an open, exclusively-locked file handle, or None if held elsewhere.
+
+    Non-blocking (`LOCK_EX | LOCK_NB`) on the same lock file
+    `/root/claude-loop.sh` itself uses to guard against overlapping ticks --
+    this job must skip cleanly rather than wait or retry for a live
+    `/vps-loop-run` tick to finish.
+    """
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def release_lock(handle: IO[str]) -> None:
+    """Release and close a lock handle obtained from `try_acquire_lock`."""
+
+    fcntl.flock(handle, fcntl.LOCK_UN)
+    handle.close()
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+
+def log_line(log_file: Path, message: str) -> None:
+    """Append one UTC-timestamped line to the hygiene log."""
+
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with log_file.open("a", encoding="utf-8") as handle:
+        handle.write(f"{timestamp} {message}\n")
+
+
+# ---------------------------------------------------------------------------
+# 1. Local branch/worktree cleanup -- delegates to cleanup_git_state.py
+# ---------------------------------------------------------------------------
+
+
+def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> None:
+    """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes."""
+
+    print("== Local branch/worktree cleanup (cleanup_git_state) ==")
+    decisions = cleanup_git_state.build_plan(repo, base=base, remote=remote, protected=protected)
+    cleanup_git_state.print_plan(decisions, applying=apply)
+    if not apply:
+        return
+
+    # Capture apply_plan's own "DELETED ..." lines so the hygiene log records
+    # exactly what it actually removed (post its own immediate re-check),
+    # not merely what was planned -- and keep echoing them to real stdout.
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            cleanup_git_state.apply_plan(repo, decisions)
+    finally:
+        output = buffer.getvalue()
+        sys.stdout.write(output)
+        for line in output.splitlines():
+            if line.startswith("DELETED "):
+                log_line(log_file, f"local cleanup: {line}")
+
+
+# ---------------------------------------------------------------------------
+# 2. Remote vps-loop/item-* branch cleanup
+# ---------------------------------------------------------------------------
+
+
+def list_remote_vps_loop_branches(repo: Path, remote: str) -> list[str]:
+    """List `vps-loop/item-<N>` branch names that currently exist on `remote`."""
+
+    output = cleanup_git_state.run_command(("git", "ls-remote", "--heads", remote, "vps-loop/item-*"), cwd=repo).stdout
+    branches = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        _, ref = line.split("\t", 1)
+        name = ref.removeprefix("refs/heads/")
+        if VPS_LOOP_ITEM_BRANCH_RE.match(name):
+            branches.append(name)
+    return sorted(branches)
+
+
+def dependent_open_pr_numbers(repo: Path, branch: str) -> tuple[int, ...]:
+    """Return open PR numbers whose base branch is `branch` (stacked PRs)."""
+
+    result = cleanup_git_state.run_command(
+        ("gh", "pr", "list", "--base", branch, "--state", "open", "--json", "number"), cwd=repo
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise HygieneError(f"gh pr list --base {branch} returned invalid JSON: {exc}") from exc
+    return tuple(sorted(int(item["number"]) for item in payload))
+
+
+def decide_remote_branch(
+    branch: str, pull_requests: tuple[PullRequest, ...], dependent_open_prs: tuple[int, ...]
+) -> RemoteBranchDecision:
+    """Decide whether one remote `vps-loop/item-<N>` branch is safe to delete.
+
+    Deletable only with a merged-PR paper trail for this exact branch name
+    and no open PR still based on it. A branch with no PR history at all (a
+    stray manually-pushed branch) or only an open/closed-unmerged PR is a
+    human's judgment call, not this job's.
+    """
+
+    own_open = [pr for pr in pull_requests if pr.state == "OPEN"]
+    if own_open:
+        numbers = ", ".join(f"#{pr.number}" for pr in own_open)
+        return RemoteBranchDecision(branch, "keep", f"branch has its own open PR {numbers}")
+
+    merged = [pr for pr in pull_requests if pr.state == "MERGED"]
+    if not merged:
+        return RemoteBranchDecision(branch, "keep", "no merged PR evidence for this branch")
+
+    if dependent_open_prs:
+        numbers = ", ".join(f"#{number}" for number in dependent_open_prs)
+        return RemoteBranchDecision(branch, "keep", f"open PR {numbers} still bases off this branch")
+
+    numbers = ", ".join(f"#{pr.number}" for pr in merged)
+    return RemoteBranchDecision(branch, "delete", f"merged PR {numbers} with no open dependent PR")
+
+
+def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
+    """Delete one branch on `remote`."""
+
+    cleanup_git_state.run_git(repo, "push", remote, "--delete", branch)
+
+
+def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> None:
+    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches."""
+
+    print(f"== Remote vps-loop/item-* branch cleanup ({remote}) ==")
+    branches = list_remote_vps_loop_branches(repo, remote)
+    pull_requests = cleanup_git_state.load_pull_requests(repo)
+
+    decisions = [
+        decide_remote_branch(branch, pull_requests.get(branch, ()), dependent_open_pr_numbers(repo, branch))
+        for branch in branches
+    ]
+    for decision in decisions:
+        print(f"{decision.action.upper():6} {remote}/{decision.branch} — {decision.reason}")
+    delete_count = sum(decision.action == "delete" for decision in decisions)
+    print(f"Summary: {delete_count} deletable, {len(decisions) - delete_count} retained")
+    if delete_count and not apply:
+        print(f"Dry run only. Re-run with --apply to delete the listed {remote} branches.")
+    if not apply:
+        return
+
+    for decision in decisions:
+        if decision.action != "delete":
+            continue
+        # Re-check for a newly-opened stacked PR immediately before deleting;
+        # a daily cadence makes this unlikely but cheap to guard anyway.
+        recheck = dependent_open_pr_numbers(repo, decision.branch)
+        if recheck:
+            numbers = ", ".join(f"#{number}" for number in recheck)
+            message = f"remote cleanup: SKIPPED {remote}/{decision.branch} — open PR {numbers} appeared since planning"
+            print(message)
+            log_line(log_file, message)
+            continue
+        delete_remote_branch(repo, remote, decision.branch)
+        print(f"DELETED {remote}/{decision.branch}")
+        log_line(log_file, f"remote cleanup: DELETED {remote}/{decision.branch} — {decision.reason}")
+
+
+# ---------------------------------------------------------------------------
+# 3. Stale superseded-backup branch pruning
+# ---------------------------------------------------------------------------
+
+
+def list_local_superseded_branches(repo: Path) -> list[str]:
+    """List local `vps-loop/item-<N>-superseded-<sha>` branches."""
+
+    branches = cleanup_git_state.local_branches(repo)
+    return sorted(name for name in branches if SUPERSEDED_BRANCH_RE.match(name))
+
+
+def branch_commit_epoch(repo: Path, branch: str) -> int:
+    """Return the backing commit's timestamp (`%ct`) for `branch`, as a unix epoch.
+
+    A branch-creation timestamp isn't directly available from a bare ref, so
+    this uses the commit's own recorded time instead.
+    """
+
+    output = cleanup_git_state.run_git(repo, "log", "-1", "--format=%ct", branch).stdout.strip()
+    return int(output)
+
+
+def decide_backup_branch(
+    branch: str, commit_epoch: int, *, now_epoch: int, retention_days: int
+) -> BackupBranchDecision:
+    """Decide whether a superseded-backup branch has aged past its retention window."""
+
+    age_days = (now_epoch - commit_epoch) / 86400
+    if age_days > retention_days:
+        return BackupBranchDecision(
+            branch, "delete", f"backing commit is {age_days:.1f}d old, past {retention_days}d retention", commit_epoch
+        )
+    return BackupBranchDecision(
+        branch, "keep", f"backing commit is {age_days:.1f}d old, within {retention_days}d retention", commit_epoch
+    )
+
+
+def delete_local_branch(repo: Path, branch: str) -> None:
+    """Delete one local branch."""
+
+    cleanup_git_state.run_git(repo, "branch", "-D", "--", branch)
+
+
+def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> None:
+    """Plan (and optionally apply) removal of superseded-backup branches past retention."""
+
+    print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
+    now_epoch = int(time.time())
+    decisions = [
+        decide_backup_branch(
+            branch, branch_commit_epoch(repo, branch), now_epoch=now_epoch, retention_days=retention_days
+        )
+        for branch in list_local_superseded_branches(repo)
+    ]
+    for decision in decisions:
+        print(f"{decision.action.upper():6} {decision.branch} — {decision.reason}")
+    delete_count = sum(decision.action == "delete" for decision in decisions)
+    print(f"Summary: {delete_count} deletable, {len(decisions) - delete_count} retained")
+    if delete_count and not apply:
+        print("Dry run only. Re-run with --apply to remove the listed backup branches.")
+    if not apply:
+        return
+
+    for decision in decisions:
+        if decision.action != "delete":
+            continue
+        # Rechecking the branch still exists immediately beforehand -- a
+        # concurrent interactive session could have already removed it.
+        exists = cleanup_git_state.run_git(repo, "rev-parse", "--verify", f"refs/heads/{decision.branch}", check=False)
+        if exists.returncode != 0:
+            continue
+        delete_local_branch(repo, decision.branch)
+        print(f"DELETED {decision.branch}")
+        log_line(log_file, f"backup pruning: DELETED {decision.branch} — {decision.reason}")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entry point."""
+
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--repo", type=Path, default=Path("/root/transit-app"), help="Any worktree in the target repo")
+    parser.add_argument("--base", default="main", help="Up-to-date integration branch (default: main)")
+    parser.add_argument("--remote", default="origin", help="Remote used for both base validation and branch cleanup")
+    parser.add_argument("--protect", action="append", default=[], metavar="BRANCH", help="Extra local branch to retain")
+    parser.add_argument("--apply", action="store_true", help="Apply the printed plans; default is a dry run")
+    parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE, help="Lock shared with claude-loop.sh")
+    parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_FILE, help="Deletion log (not refactor-log.md)")
+    parser.add_argument(
+        "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS, help="Backup-branch retention window in days"
+    )
+    args = parser.parse_args(argv)
+
+    log_file: Path = args.log_file
+    lock_handle = try_acquire_lock(args.lock_file)
+    if lock_handle is None:
+        message = f"SKIP: {args.lock_file} is held (a /vps-loop-run tick is likely mid-flight); not touching git state"
+        print(message)
+        log_line(log_file, message)
+        return 0
+
+    try:
+        repo_root = cleanup_git_state.run_git(args.repo.resolve(), "rev-parse", "--show-toplevel").stdout.strip()
+        repo = Path(repo_root).resolve()
+        protected = {args.base, "production", *args.protect}
+        exit_code = 0
+
+        stages: tuple[tuple[str, Callable[[], None]], ...] = (
+            (
+                "local cleanup",
+                lambda: run_local_cleanup(
+                    repo, base=args.base, remote=args.remote, protected=protected, apply=args.apply, log_file=log_file
+                ),
+            ),
+            (
+                "remote branch cleanup",
+                lambda: run_remote_branch_cleanup(repo, remote=args.remote, apply=args.apply, log_file=log_file),
+            ),
+            (
+                "backup branch pruning",
+                lambda: run_backup_branch_pruning(
+                    repo, retention_days=args.retention_days, apply=args.apply, log_file=log_file
+                ),
+            ),
+        )
+        for stage, runner in stages:
+            try:
+                runner()
+            except (CleanupError, HygieneError, OSError) as exc:
+                print(f"ERROR ({stage}): {exc}", file=sys.stderr)
+                log_line(log_file, f"ERROR: {stage} failed: {exc}")
+                exit_code = 2
+
+        return exit_code
+    finally:
+        release_lock(lock_handle)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
