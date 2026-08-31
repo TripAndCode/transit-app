@@ -142,6 +142,27 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
       const existing = readStored(agencyId);
       if (existing && Object.keys(existing).length > 0) return;
     }
+    // A field missing from the CURRENT params (e.g. dow/time_band/service/
+    // routes when this render's URL only carries the from/to
+    // useDefaultRangeAnchor just wrote, before this hook ever got a chance
+    // to restore them — see this hook's deferral to computeAnchorRange
+    // above) must not silently drop that field's last known stored value.
+    // The current params always win for whichever field they DO carry; this
+    // only fills in what's genuinely absent. `from`/`to` are deliberately
+    // excluded from this merge — reviving a stale stored date range here
+    // would reintroduce exactly the guaranteed-empty-view problem
+    // useDefaultRangeAnchor exists to prevent.
+    const existingForMerge = readStored(agencyId);
+    if (existingForMerge) {
+      for (const key of ["dow", "time_band", "service"] as const) {
+        if (nextStored[key] === undefined && existingForMerge[key] !== undefined) {
+          (nextStored as Record<string, string>)[key] = existingForMerge[key] as string;
+        }
+      }
+      if (nextStored.routes === undefined && existingForMerge.routes && existingForMerge.routes.length > 0) {
+        nextStored.routes = existingForMerge.routes;
+      }
+    }
     writeStored(agencyId, nextStored);
     // `params` (not a derived string key) is the dependency, matching
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'

@@ -133,4 +133,33 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
     expect(params.get("dow")).toBe("weekend");
     expect(params.get("time_band")).toBe("evening");
   });
+
+  it("a previously-stored dow/time_band (no stored from/to) survives a visit where the anchor rewrites from/to", () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [agency({ latest_data_date: "2026-05-01" })],
+      isPending: false,
+    } as never);
+    localStorage.setItem(
+      "transit.lastFilter.1",
+      JSON.stringify({ dow: "weekend", time_band: "evening" }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+        <CombinedProbe agencyId={1} />
+      </MemoryRouter>,
+    );
+    // The anchor wins the URL's from/to (same outcome as the first test in
+    // this block) ...
+    const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+    expect(params.get("to")).toBe("2026-05-01");
+    expect(params.get("from")).toBe("2026-04-02");
+    // ... but the persist branch that then runs (once the anchor's rewrite
+    // has landed and computeAnchorRange stops deferring) must not silently
+    // drop dow/time_band just because this particular render's URL only
+    // carries the anchor's own from/to -- those fields never conflicted
+    // with anything the anchor did.
+    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.dow).toBe("weekend");
+    expect(stored.time_band).toBe("evening");
+  });
 });

@@ -414,13 +414,38 @@ async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
     from pipeline.query.tool_queries import route_hour_dow_pattern
 
     await aconn.execute(
-        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
-        "VALUES ($1, 'R1', '平日', 1, 8, 2.0, 20), ($1, 'R1', '平日', 5, 18, 6.5, 40)",
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, 'R1', '平日', 1, 8, 2.0, 20, 2400), ($1, 'R1', '平日', 5, 18, 6.5, 40, 15600)",
         aagency_id,
     )
     result = await route_hour_dow_pattern(aagency_id, aconn, route="R1")
     assert result[0][:2] == (5, 18)
     assert result[0][2] == 6.5
+
+
+@pytest.mark.asyncio
+async def test_route_hour_dow_pattern_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
+    """route_hour_dow_pattern pools multiple service_type rows for the same
+    (dow, hour) via SUM(sum_delay_sec)/SUM(samples) (exact), not the old
+    SUM(avg_min * samples)/SUM(samples) reweighting of an already-rounded
+    per-row average -- mirrors api/routers/reports.py's forecast_heatmap
+    identical fix (migration 0028's sum_delay_sec rollout)."""
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, 'R1', '平日', 2, 9, 1.61, 3, 290), ($1, 'R1', '土日', 2, 9, 2.0, 1000, 100000)",
+        aagency_id,
+    )
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="R1")
+    assert result[0][:2] == (2, 9)
+    assert result[0][3] == 1003
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.66650 -> Postgres's own numeric
+    # division scale rounds this to 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert float(result[0][2]) == pytest.approx(1.67, abs=1e-9)
 
 
 @pytest.mark.asyncio
