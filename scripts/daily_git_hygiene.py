@@ -141,9 +141,16 @@ def log_line(log_file: Path, message: str) -> None:
 
 
 def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> None:
-    """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes."""
+    """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes.
+
+    Fetches `remote` first: `build_plan`'s `validate_base` requires local
+    `refs/heads/{base}` to exactly match `refs/remotes/{remote}/{base}`, and
+    this job is specifically meant to run during idle stretches where nothing
+    else has refreshed that remote-tracking ref recently.
+    """
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
+    cleanup_git_state.run_git(repo, "fetch", "--prune", remote)
     decisions = cleanup_git_state.build_plan(repo, base=base, remote=remote, protected=protected)
     cleanup_git_state.print_plan(decisions, applying=apply)
     if not apply:
@@ -169,43 +176,62 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
 # ---------------------------------------------------------------------------
 
 
-def list_remote_vps_loop_branches(repo: Path, remote: str) -> list[str]:
-    """List `vps-loop/item-<N>` branch names that currently exist on `remote`."""
+def list_remote_vps_loop_branches(repo: Path, remote: str) -> dict[str, str]:
+    """Return `vps-loop/item-<N>` branch names on `remote`, mapped to their tip SHA."""
 
     output = cleanup_git_state.run_command(("git", "ls-remote", "--heads", remote, "vps-loop/item-*"), cwd=repo).stdout
-    branches = []
+    branches: dict[str, str] = {}
     for line in output.splitlines():
         if not line.strip():
             continue
-        _, ref = line.split("\t", 1)
+        sha, ref = line.split("\t", 1)
         name = ref.removeprefix("refs/heads/")
         if VPS_LOOP_ITEM_BRANCH_RE.match(name):
-            branches.append(name)
-    return sorted(branches)
+            branches[name] = sha
+    return dict(sorted(branches.items()))
 
 
-def dependent_open_pr_numbers(repo: Path, branch: str) -> tuple[int, ...]:
-    """Return open PR numbers whose base branch is `branch` (stacked PRs)."""
+def load_dependent_open_prs(repo: Path) -> dict[str, tuple[int, ...]]:
+    """Return open PR numbers grouped by their exact base branch name.
+
+    Fetches every open PR once and groups locally by `baseRefName`, the same
+    exact-match-in-Python pattern `cleanup_git_state.load_pull_requests` uses
+    for `headRefName` -- `gh`'s own `--base <branch>` filter is a search
+    qualifier, not guaranteed exact-equality matching, so trusting it alone
+    could produce a false negative that lets a real dependent branch be
+    deleted out from under an open PR.
+    """
 
     result = cleanup_git_state.run_command(
-        ("gh", "pr", "list", "--base", branch, "--state", "open", "--json", "number"), cwd=repo
+        ("gh", "pr", "list", "--state", "open", "--limit", "1000", "--json", "number,baseRefName"), cwd=repo
     )
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise HygieneError(f"gh pr list --base {branch} returned invalid JSON: {exc}") from exc
-    return tuple(sorted(int(item["number"]) for item in payload))
+        raise HygieneError(f"gh pr list --state open returned invalid JSON: {exc}") from exc
+
+    grouped: dict[str, list[int]] = {}
+    for item in payload:
+        base = item.get("baseRefName")
+        if not isinstance(base, str):
+            continue
+        grouped.setdefault(base, []).append(int(item["number"]))
+    return {base: tuple(sorted(numbers)) for base, numbers in grouped.items()}
 
 
 def decide_remote_branch(
-    branch: str, pull_requests: tuple[PullRequest, ...], dependent_open_prs: tuple[int, ...]
+    branch: str, head: str, pull_requests: tuple[PullRequest, ...], dependent_open_prs: tuple[int, ...]
 ) -> RemoteBranchDecision:
     """Decide whether one remote `vps-loop/item-<N>` branch is safe to delete.
 
-    Deletable only with a merged-PR paper trail for this exact branch name
-    and no open PR still based on it. A branch with no PR history at all (a
-    stray manually-pushed branch) or only an open/closed-unmerged PR is a
-    human's judgment call, not this job's.
+    Deletable only when its remote tip exactly matches a merged PR's head
+    commit and no open PR still bases off it -- mirroring
+    `cleanup_git_state.decide_branch`'s exact-tip-match requirement for local
+    branches (a merged PR whose head no longer matches the branch's current
+    tip means real commits landed after the merge, which is not provably
+    recoverable). A branch with no PR history at all (a stray manually-pushed
+    branch) or only an open/closed-unmerged PR is a human's judgment call,
+    not this job's.
     """
 
     own_open = [pr for pr in pull_requests if pr.state == "OPEN"]
@@ -217,18 +243,25 @@ def decide_remote_branch(
     if not merged:
         return RemoteBranchDecision(branch, "keep", "no merged PR evidence for this branch")
 
+    matching_merges = [pr for pr in merged if pr.head_oid == head]
+    if not matching_merges:
+        numbers = ", ".join(f"#{pr.number}" for pr in merged)
+        return RemoteBranchDecision(
+            branch, "keep", f"merged PR {numbers} exists, but remote tip differs (possible post-merge commits)"
+        )
+
     if dependent_open_prs:
         numbers = ", ".join(f"#{number}" for number in dependent_open_prs)
         return RemoteBranchDecision(branch, "keep", f"open PR {numbers} still bases off this branch")
 
-    numbers = ", ".join(f"#{pr.number}" for pr in merged)
-    return RemoteBranchDecision(branch, "delete", f"merged PR {numbers} with no open dependent PR")
+    numbers = ", ".join(f"#{pr.number}" for pr in matching_merges)
+    return RemoteBranchDecision(branch, "delete", f"remote tip exactly matches merged PR {numbers}")
 
 
 def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
     """Delete one branch on `remote`."""
 
-    cleanup_git_state.run_git(repo, "push", remote, "--delete", branch)
+    cleanup_git_state.run_git(repo, "push", remote, "--delete", "--", branch)
 
 
 def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> None:
@@ -237,10 +270,11 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
     print(f"== Remote vps-loop/item-* branch cleanup ({remote}) ==")
     branches = list_remote_vps_loop_branches(repo, remote)
     pull_requests = cleanup_git_state.load_pull_requests(repo)
+    dependents = load_dependent_open_prs(repo)
 
     decisions = [
-        decide_remote_branch(branch, pull_requests.get(branch, ()), dependent_open_pr_numbers(repo, branch))
-        for branch in branches
+        decide_remote_branch(branch, head, pull_requests.get(branch, ()), dependents.get(branch, ()))
+        for branch, head in branches.items()
     ]
     for decision in decisions:
         print(f"{decision.action.upper():6} {remote}/{decision.branch} — {decision.reason}")
@@ -251,19 +285,27 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
     if not apply:
         return
 
+    # Re-fetch dependent-PR evidence once right before applying (not once per
+    # branch) to catch a stacked PR opened during planning, without regressing
+    # back to one `gh` call per branch.
+    fresh_dependents = load_dependent_open_prs(repo)
     for decision in decisions:
         if decision.action != "delete":
             continue
-        # Re-check for a newly-opened stacked PR immediately before deleting;
-        # a daily cadence makes this unlikely but cheap to guard anyway.
-        recheck = dependent_open_pr_numbers(repo, decision.branch)
+        recheck = fresh_dependents.get(decision.branch, ())
         if recheck:
             numbers = ", ".join(f"#{number}" for number in recheck)
             message = f"remote cleanup: SKIPPED {remote}/{decision.branch} — open PR {numbers} appeared since planning"
             print(message)
             log_line(log_file, message)
             continue
-        delete_remote_branch(repo, remote, decision.branch)
+        try:
+            delete_remote_branch(repo, remote, decision.branch)
+        except (CleanupError, OSError) as exc:
+            message = f"remote cleanup: ERROR deleting {remote}/{decision.branch}: {exc}"
+            print(message, file=sys.stderr)
+            log_line(log_file, message)
+            continue
         print(f"DELETED {remote}/{decision.branch}")
         log_line(log_file, f"remote cleanup: DELETED {remote}/{decision.branch} — {decision.reason}")
 
@@ -340,7 +382,13 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
         exists = cleanup_git_state.run_git(repo, "rev-parse", "--verify", f"refs/heads/{decision.branch}", check=False)
         if exists.returncode != 0:
             continue
-        delete_local_branch(repo, decision.branch)
+        try:
+            delete_local_branch(repo, decision.branch)
+        except (CleanupError, OSError) as exc:
+            message = f"backup pruning: ERROR deleting {decision.branch}: {exc}"
+            print(message, file=sys.stderr)
+            log_line(log_file, message)
+            continue
         print(f"DELETED {decision.branch}")
         log_line(log_file, f"backup pruning: DELETED {decision.branch} — {decision.reason}")
 
@@ -375,8 +423,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        repo_root = cleanup_git_state.run_git(args.repo.resolve(), "rev-parse", "--show-toplevel").stdout.strip()
-        repo = Path(repo_root).resolve()
+        try:
+            repo_root = cleanup_git_state.run_git(args.repo.resolve(), "rev-parse", "--show-toplevel").stdout.strip()
+            repo = Path(repo_root).resolve()
+        except (CleanupError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            log_line(log_file, f"ERROR: could not resolve --repo {args.repo}: {exc}")
+            return 2
+
         protected = {args.base, "production", *args.protect}
         exit_code = 0
 
