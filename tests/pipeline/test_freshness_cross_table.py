@@ -33,13 +33,16 @@ import asyncpg
 from pipeline.analyze import analyze
 from pipeline.health import aggregate_freshness
 from pipeline.reports.network import compute_network_summary
+from tests.conftest import mirror_updates_to_ch
 
 
 def _seed_two_days(pg_conn, agency_id):
     """Insert mid-day rows across two completed civil days into Postgres
-    `updates` (analyze()'s agg_feed_health/agg_stop_routes/agg_meta builders
-    still read raw Postgres `updates` directly). Mid-day (11:37) keeps the
-    JST/UTC civil date identical regardless of session timezone.
+    `updates`, for consistency with other fixtures in this suite. analyze()
+    itself reads only ClickHouse, so `mirror_updates_to_ch` (called
+    separately) is what actually makes this data visible to analyze(). Mid-day
+    (11:37) keeps the JST/UTC civil date identical regardless of session
+    timezone.
     """
     with pg_conn.cursor() as cur:
         for day in (1, 2):
@@ -63,32 +66,9 @@ def _seed_two_days(pg_conn, agency_id):
     pg_conn.commit()
 
 
-def _seed_two_days_ch(ch_client, agency_id):
-    """Mirror the same two completed civil days into ClickHouse `updates`,
-    the source both freshness computations' live-side probe reads.
-    """
-    from pipeline.clickhouse import insert_updates
-
-    rows = [
-        (
-            f"f{day}_{seq}.pb",
-            f"2026-04-0{day}T02:37:00Z",
-            "平日_11時37分_系統44372",
-            "平日",
-            "11:37",
-            "44372",
-            seq,
-            seq * 60,
-        )
-        for day in (1, 2)
-        for seq in (1, 2, 3)
-    ]
-    insert_updates(ch_client, agency_id, rows)
-
-
 async def test_health_and_network_freshness_agree_after_atomic_analyze(pg_conn, ch_client, ch_async_client, agency_id):
     _seed_two_days(pg_conn, agency_id)
-    _seed_two_days_ch(ch_client, agency_id)
+    mirror_updates_to_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
 
     with pg_conn.cursor() as cur:
