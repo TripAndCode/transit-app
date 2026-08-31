@@ -51,3 +51,15 @@ client_secret_*.json
 /*.pdf
 .playwright-mcp/
 .coverage
+# scripts/prepare_review.py's own --output-dir, and any ad-hoc scratch
+# directory a review pass creates when it can't write outside the repo
+# (a sandboxed worker/coordinator without /tmp access falls back to a
+# repo-relative path) — naming has never been consistent across sessions,
+# so match every variant actually seen rather than one canonical name.
+# These hold nothing but a diff/manifest of already-reviewed, already-
+# public code, never secrets.
+/review-scratch*/
+/.review-scratch*/
+/tmp-review-item*/
+scripts/review-*-pass*/
+scripts/.review-scratch/
