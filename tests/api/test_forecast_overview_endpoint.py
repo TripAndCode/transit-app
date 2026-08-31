@@ -52,8 +52,8 @@ async def overview_client(apply_schema):
     await pool.executemany(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        "trips_observed, samples, last_seen_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())",
+        "trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$5*$8)",
         [
             # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
             # 7-day window at agency, not route, grain — but only route 100

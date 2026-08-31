@@ -191,8 +191,8 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-            "VALUES (%s, %s, %s, '平日', 60, 120, 1, 1, %s)",
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES (%s, %s, %s, '平日', 60, 120, 1, 1, %s, 60)",
             (agency_id, date(2026, 1, 1), "44372", "2026-01-01T16:30:00+00:00"),
         )
     pg_conn.commit()

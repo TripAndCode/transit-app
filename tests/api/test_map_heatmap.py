@@ -130,8 +130,8 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     # don't matter here, only that a row exists.
     await pool.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'K31', '平日', 0, 0, 1, 1, NOW())",
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'K31', '平日', 0, 0, 1, 1, NOW(), 0)",
         aid,
     )
     # Raw updates for today (K31 with big delay at S1)
@@ -281,8 +281,8 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
     # before touching ClickHouse at all (see stop_profile_client above).
     await pool.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'R_W', '平日', 0, 0, 1, 1, NOW())",
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'R_W', '平日', 0, 0, 1, 1, NOW(), 0)",
         aid,
     )
     today = date.today()

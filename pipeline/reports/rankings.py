@@ -380,7 +380,7 @@ async def compute_dow_ranking(
     sql = (
         # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
         f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
-        "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
+        "       ROUND((SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0), 2) AS avg_min,\n"
         "       SUM(samples)::int AS samples\n"
         "FROM agg_daily_trend\n"
         f"WHERE agency_id = $1 AND {where}\n"
@@ -452,11 +452,11 @@ async def compute_compare_ranking(
     sql = (
         "WITH per_route AS (\n"
         "    SELECT route_code,\n"
-        f"           SUM(avg_min * samples) FILTER (WHERE {wd})\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd}), 0) AS wd_avg,\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {wd})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd}), 0) / 60.0 AS wd_avg,\n"
         f"           SUM(samples) FILTER (WHERE {wd}) AS wd_n,\n"
-        f"           SUM(avg_min * samples) FILTER (WHERE {we})\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {we}), 0) AS we_avg,\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {we})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {we}), 0) / 60.0 AS we_avg,\n"
         f"           SUM(samples) FILTER (WHERE {we}) AS we_n\n"
         "    FROM agg_daily_trend\n"
         f"    WHERE agency_id = $1 AND {where}\n"
@@ -657,11 +657,16 @@ async def compute_trend_series(
 
     if ctx.time_band == "all":
         # Sum agg_daily_trend (already per date/route/service) into time buckets.
+        # A week/month bucket pools MULTIPLE agg_daily_trend rows, so this reads
+        # each row's exact sum_delay_sec (not its rounded avg_min) and divides
+        # once at the end — see analyze.py's module docstring for why pooling
+        # already-rounded per-bucket means would otherwise drift from the true
+        # pooled mean.
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
             f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
             "       route_code, NULLIF(service_type, '') AS service_type,\n"
-            "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
+            "       SUM(sum_delay_sec)::bigint AS sum_delay_sec,\n"
             "       SUM(samples)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
@@ -682,7 +687,7 @@ async def compute_trend_series(
             f"WITH {cte_sql}\n"
             f"SELECT {bucket_expr} AS bucket,\n"
             "       route_code, service_type,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min,\n"
+            "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "GROUP BY bucket, route_code, service_type\n"
@@ -692,19 +697,19 @@ async def compute_trend_series(
         per_day = _ch_rows(result)
 
     by_date_samples: dict = {}
-    by_date_weighted: dict = {}
+    by_date_weighted_sec: dict = {}
     by_date: dict = {}
     for r in per_day:
         # SQL now aliases the time-bucketed column as "bucket".
         d = r["bucket"]
-        # Round in Python (half-up) to match Postgres ROUND() — see
-        # _ranking_live. Idempotent on the fast path (agg_daily_trend's
-        # avg_min is already rounded to 2 dp by the SQL above).
-        avg = float(_round2(r["avg_min"])) if r["avg_min"] is not None else None
         n = r["samples"]
+        sum_sec = r["sum_delay_sec"]
+        # Per-(bucket, route, service) display average, rounded once straight
+        # from the exact raw-seconds sum (half-up, matching Postgres ROUND()).
+        avg = float(_round2(sum_sec / n / 60.0)) if n and sum_sec is not None else None
         by_date_samples[d] = by_date_samples.get(d, 0) + n
-        if avg is not None:
-            by_date_weighted[d] = by_date_weighted.get(d, 0.0) + avg * n
+        if sum_sec is not None:
+            by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
         by_date.setdefault(d, []).append(
             {
                 "route_code": r["route_code"],
@@ -717,7 +722,10 @@ async def compute_trend_series(
     daily = []
     for d in sorted(by_date.keys()):
         n = by_date_samples[d]
-        avg = round(by_date_weighted.get(d, 0.0) / n, 2) if n else None
+        # Whole-bucket total pooled from every route/service group's exact
+        # raw-seconds sum, dividing once at the end — NOT from re-weighting
+        # each group's already-rounded display avg_min above.
+        avg = round((by_date_weighted_sec.get(d, 0) / n) / 60, 2) if n else None
         daily.append({"date": d, "avg_min": avg, "samples": n})
 
     days = []

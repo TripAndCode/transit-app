@@ -29,20 +29,29 @@ async def _seed_agg_daily(
 
     ``date_`` may be a :class:`datetime.date` or an ISO string;
     ``agg_daily_trend.date`` is TEXT per schema, so we coerce both shapes.
+
+    ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)`` —
+    the exact raw-seconds sum a real analyze() run would have stored for an
+    ``avg_min`` that is itself already exact (true of every value seeded by
+    this helper), so the fast path's ``SUM(sum_delay_sec) / SUM(samples)``
+    reproduces the same figure these tests were already asserting on.
     """
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
+    samples = int(samples)
+    sum_delay_sec = round(float(avg_min) * 60 * samples)
     await aconn.execute(
         "INSERT INTO agg_daily_trend "
-        "(agency_id, date, route_code, service_type, avg_min, samples) "
-        "VALUES ($1, $2, $3, $4, $5, $6) "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
         iso,
         route_code,
         service_type,
         float(avg_min),
-        int(samples),
+        samples,
+        sum_delay_sec,
     )
 
 
@@ -127,8 +136,8 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) "
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO NOTHING",
         agency_id,
         date_,
@@ -139,6 +148,7 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
         1,
         int(samples),
         datetime.combine(date_, time(12, 0), tzinfo=timezone.utc),
+        int(avg_delay_sec) * int(samples),
     )
 
 
@@ -218,6 +228,43 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     # equals ctx.to_date in this test, so window is last 7 days of ctx.
     assert h["window_from"] == "2026-05-18"
     assert h["window_to"] == "2026-05-24"
+
+
+@pytest.mark.asyncio
+async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aagency_id):
+    """_headline_stats' fast path must pool the EXACT sum_delay_sec across
+    agg_daily_trend rows, not re-weight each day's own already-rounded
+    avg_min.
+
+    Day 1 (3 samples, raw-seconds sum 124 -> analyze() rounds that day's own
+    avg_min to 0.69 min) and day 2 (7 samples, raw-seconds sum 700 -> rounds
+    to 1.67 min). Pooling the exact sums gives (124+700)/10/60 = 1.37333...
+    -> rounds to 1.37; re-weighting the rounded 0.69/1.67 instead (the
+    pre-fix pattern) gives (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
+    measurably different (and wrong) answer that exists purely from the
+    intermediate rounding.
+    """
+    for day, avg_min, samples, sum_delay_sec in (
+        (date(2026, 5, 23), 0.69, 3, 124),
+        (date(2026, 5, 24), 1.67, 7, 700),
+    ):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R_HL', '平日', $3, $4, $5)",
+            aagency_id,
+            day.isoformat(),
+            avg_min,
+            samples,
+            sum_delay_sec,
+        )
+
+    from pipeline.reports.overview import _headline_stats
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
+    assert samples_out == 10
+    assert avg == 1.37  # NOT the buggy re-weighted 1.38
 
 
 @pytest.mark.asyncio

@@ -344,8 +344,8 @@ async def _seed_route_existence(conn, agency_id, route_code, service_type="weekd
     today_route_summary's route list is built from) has no such filter."""
     await conn.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, $2, $3, 0, 0, 1, 1, NOW())",
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, $2, $3, 0, 0, 1, 1, NOW(), 0)",
         agency_id,
         route_code,
         service_type,
@@ -724,8 +724,8 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
         delays = [d for (_, _, d, _) in day_rows]
         await conn.execute(
             "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-            "VALUES ($1, DATE '2026-06-09', $2, $3, $4, $5, $6, $7, $8)",
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES ($1, DATE '2026-06-09', $2, $3, $4, $5, $6, $7, $8, $9)",
             agency_id,
             route_code,
             service_type,
@@ -734,6 +734,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
             len({t for (t, _, _, _) in day_rows}),
             len(delays),
             seeded_at,
+            sum(delays),
         )
         avg_min, p90_min, samples = baseline if baseline is not None else (None, None, None)
         await conn.execute(

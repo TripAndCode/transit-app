@@ -27,6 +27,18 @@ low-sample row still exists for a reader to weight, pool across a coarser
 grain, or flag as low-confidence (see api.triage.LOW_CONFIDENCE_SAMPLES) —
 rather than silently vanishing below some insert-time threshold that varies
 table to table.
+
+agg_route_stats / agg_route_hour / agg_route_dow / agg_route_hour_dow /
+agg_daily_trend / agg_route_daily each carry a `sum_delay_sec` column
+alongside their pre-rounded `avg_min` (or, for agg_route_daily,
+`avg_delay_sec`) — the exact SUM(dep_delay) in seconds behind that mean. A
+reader pooling MULTIPLE rows of one of these tables must divide
+SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than re-weighting
+the already-rounded avg_min/avg_delay_sec (SUM(avg_min * samples) /
+SUM(samples)) — the latter pools a mean of ROUNDED per-row values, which is
+not the same as the true pooled mean over the underlying raw observations.
+agg_route_daily_dist already followed this pattern from the start (see its
+own `sum_delay_sec`); these six tables now match it.
 """
 
 import logging
@@ -235,7 +247,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,
                 ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,
                 ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS late5_pct,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM ranked
             GROUP BY route_code, service_type
             ORDER BY avg_min DESC
@@ -254,6 +267,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "on_time_pct",
                 "late5_pct",
                 "samples",
+                "sum_delay_sec",
             ],
             p,
             conn,
@@ -273,7 +287,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
                 ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM ranked
             GROUP BY route_code, service_type, scheduled_time
             ORDER BY route_code, scheduled_time
@@ -281,7 +296,17 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_route_hour",
-            ["agency_id", "route_code", "service_type", "scheduled_time", "avg_min", "p50_min", "p90_min", "samples"],
+            [
+                "agency_id",
+                "route_code",
+                "service_type",
+                "scheduled_time",
+                "avg_min",
+                "p50_min",
+                "p90_min",
+                "samples",
+                "sum_delay_sec",
+            ],
             p,
             conn,
         )
@@ -294,7 +319,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 route_code, service_type,
                 EXTRACT(ISODOW FROM date::date)::smallint AS dow,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
             ORDER BY route_code
@@ -302,7 +328,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_route_dow",
-            ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples"],
+            ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -328,7 +354,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 EXTRACT(ISODOW FROM date::date)::smallint AS dow,
                 EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             GROUP BY route_code, service_type,
                      EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
@@ -337,7 +364,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_route_hour_dow",
-            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples"],
+            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -357,7 +384,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 date::text, route_code,
                 COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
@@ -365,7 +393,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_daily_trend",
-            ["agency_id", "date", "route_code", "service_type", "avg_min", "samples"],
+            ["agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -384,7 +412,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 MAX(dep_delay)             AS worst_delay_sec,
                 COUNT(DISTINCT trip_id)    AS trips_observed,
                 COUNT(*)                   AS samples,
-                MAX(captured_at)           AS last_seen_at
+                MAX(captured_at)           AS last_seen_at,
+                SUM(dep_delay)             AS sum_delay_sec
             FROM deduped
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
@@ -402,6 +431,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "trips_observed",
                 "samples",
                 "last_seen_at",
+                "sum_delay_sec",
             ],
             p,
             conn,

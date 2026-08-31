@@ -6,9 +6,13 @@ agg_route_hour_dow across service types per (dow, hour) — and passes the
 per-cell rows here.
 
 This is a seasonal-naive baseline ("expected delay"), NOT a prediction — see
-DELAY_ANALYSIS.md. Only the sample-weighted mean is reported: a weighted mean of
-per-departure averages equals the pooled mean, so it is exact. Percentiles are
-not reported (a weighted mean of per-bucket percentiles is not the pooled
+DELAY_ANALYSIS.md. Only the sample-weighted mean is reported. Pooling is exact
+only when each contributing bucket's exact raw-seconds sum is divided once at
+the end (SUM(sum_delay_sec) / SUM(samples)); re-weighting an already-rounded
+per-bucket avg_min instead (SUM(avg_min * samples) / SUM(samples)) carries a
+small but real systematic rounding error, since a weighted mean of ROUNDED
+per-bucket averages does not equal the true pooled mean. Percentiles are not
+reported (a weighted mean of per-bucket percentiles is not the pooled
 percentile, and percentiles cannot be recovered from per-bucket percentiles).
 """
 
@@ -138,10 +142,14 @@ def summarize_agency_overview(
     — attached per route as `recent_daily`, sorted oldest first. Missing calendar
     days (no agg_route_daily row, e.g. no service that day) are simply omitted
     rather than null-padded, so `recent_daily`'s point spacing reflects "days
-    observed," not a calendar-uniform week. Pooling is exact (a sample-weighted
-    mean of per-bucket means is the pooled mean). The worst window excludes
-    low-confidence buckets so a small-sample fluke can never headline. No
-    percentile (cannot pool per-bucket percentiles).
+    observed," not a calendar-uniform week. Pooling a bucket's sample-weighted
+    mean is exact only when it divides an exact raw-seconds sum once, at the
+    end; re-weighting an already-rounded per-bucket avg_min instead (what
+    `grid_rows`/`route_rows` carry in) has a small but real systematic
+    rounding error, since a weighted mean of ROUNDED per-bucket averages does
+    not equal the true pooled mean. The worst window excludes low-confidence
+    buckets so a small-sample fluke can never headline. No percentile (cannot
+    pool per-bucket percentiles).
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}

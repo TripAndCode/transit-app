@@ -343,7 +343,7 @@ async def _headline_stats(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT CASE WHEN SUM(samples) > 0\n"
-            "            THEN ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2)\n"
+            "            THEN ROUND((SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
             "       COALESCE(SUM(samples), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
@@ -378,12 +378,12 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min,\n"
+            "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg_min,\n"
             "       SUM(samples)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(avg_min * samples) IS NOT NULL"
+            "HAVING SUM(samples) > 0 AND SUM(sum_delay_sec) IS NOT NULL"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -482,7 +482,7 @@ async def _route_weekly_history(
             where_clause = f" AND ({where})" if where else ""
             rows = await conn.fetch(
                 "SELECT route_code,\n"
-                "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+                "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg_min\n"
                 "FROM agg_daily_trend\n"
                 f"WHERE agency_id=$1{where_clause}\n"
                 f"  AND route_code = ANY(${n}::text[])\n"
@@ -916,7 +916,7 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT date, service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg\n"
+            "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date, service_type\n"
@@ -1058,7 +1058,7 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY service_type",
@@ -1095,7 +1095,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT date AS day,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date\n"

@@ -26,7 +26,7 @@ TOP_MOVERS = 5
 _AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
 
 _DAY_ROUTES_SQL = """
-    SELECT route_code, avg_delay_sec, samples
+    SELECT route_code, avg_delay_sec, samples, sum_delay_sec
     FROM agg_route_daily
     WHERE agency_id = %(aid)s AND date = %(day)s
 """
@@ -34,17 +34,23 @@ _DAY_ROUTES_SQL = """
 # Route-grain baseline: aggregate agg_route_stats ACROSS service_types per route,
 # weighted by the baseline's OWN samples. Keyed by route_code so a NULL-service
 # ('') daily row still finds the route's overall baseline.
+# base_avg_min pools each service_type's EXACT sum_delay_sec (raw seconds),
+# dividing once at the end, rather than re-weighting each service_type's
+# already-rounded avg_min — see pipeline/analyze.py's module docstring.
+# It needs no NULL FILTER (unlike base_p90_min below): SUM(dep_delay) is never
+# null for a non-empty GROUP BY group, so sum_delay_sec is never null wherever
+# samples is non-null.
 # base_p90_min's numerator/denominator are both FILTERed to the same
 # p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin groups, so
 # a service_type's p90_min can itself be null (a degenerate PERCENT_RANK
 # result) while its samples are not -- SUM() silently skips a null numerator
 # term but NOT its row's sample count in the denominator, which would
 # otherwise bias base_p90_min down whenever any contributing service_type is
-# thin. base_avg_min needs no such filter since AVG() is never null for a
-# non-empty group.
+# thin. Percentiles don't compose exactly across buckets (unlike the mean), so
+# base_p90_min stays a sample-weighted approximation of the rounded p90_min.
 _ROUTE_BASELINE_SQL = """
     SELECT route_code,
-           SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
+           (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS base_avg_min,
            SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
                / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min
     FROM agg_route_stats
@@ -67,18 +73,20 @@ def _aggregate_by_route(rows):
     The baseline is NOT part of this helper — it is looked up per route_code from a
     route-grain aggregate of agg_route_stats in build_digest.
 
-    ``rows`` are tuples ``(route_code, avg_delay_sec, samples)`` from
-    ``_DAY_ROUTES_SQL``; avg_delay_sec is sample-weighted across service_types.
+    ``rows`` are tuples ``(route_code, avg_delay_sec, samples, sum_delay_sec)`` from
+    ``_DAY_ROUTES_SQL``; pools each service_type's EXACT sum_delay_sec and divides
+    once at the end, rather than re-weighting each service_type's already-rounded
+    avg_delay_sec — see pipeline/analyze.py's module docstring.
     """
     acc: dict[str, dict] = {}
     order: list[str] = []
-    for route_code, avg_delay_sec, samples in rows:
+    for route_code, _avg_delay_sec, samples, sum_delay_sec in rows:
         e = acc.get(route_code)
         if e is None:
-            e = {"route_code": route_code, "_delay_w": 0.0, "samples": 0}
+            e = {"route_code": route_code, "_delay_sum": 0, "samples": 0}
             acc[route_code] = e
             order.append(route_code)
-        e["_delay_w"] += avg_delay_sec * samples
+        e["_delay_sum"] += sum_delay_sec
         e["samples"] += samples
 
     out: list[dict] = []
@@ -88,7 +96,7 @@ def _aggregate_by_route(rows):
         out.append(
             {
                 "route_code": rc,
-                "avg_delay_sec": round(e["_delay_w"] / samples) if samples else 0,
+                "avg_delay_sec": round(e["_delay_sum"] / samples) if samples else 0,
                 "samples": samples,
             }
         )
