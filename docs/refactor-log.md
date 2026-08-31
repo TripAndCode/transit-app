@@ -140,7 +140,7 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   Added `tests/pipeline/test_analyze.py` tests proving a 3-sample
   route/service and a 3-sample route/stop_sequence group are now
   materialised (previously silently dropped), plus frontend tests for the
-  new baseline-low-confidence marker. (PR #pending)
+  new baseline-low-confidence marker. (PR #284)
 - 2026-08-31: `/vps-loop-run` coordinator, resuming item 37's branch (found
   with a real commit in a leftover worktree, no PR yet — an interrupted
   prior run per Step 3b). Ran this item's own required two-pass
@@ -183,7 +183,7 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   pre-existing failures unrelated to this diff (`test_clickhouse_dep.py`'s
   missing `CLICKHOUSE_USER` env var; `test_cleanup_git_state.py`'s
   `git push` fixture issue) — plus `poetry run ruff check`/`poetry run
-  mypy` clean on both changed files. (PR #pending)
+  mypy` clean on both changed files. (PR #284)
 - 2026-08-31: `/vps-loop-run` coordinator, second fix-and-reverify cycle on
   item 37 (this pass's own 2-iteration cap). Re-verifying the first fix
   above against the same reviewer group that raised it surfaced two further
@@ -221,4 +221,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   failures as before; `poetry run ruff check`/`poetry run mypy` clean on
   all four changed files. Re-verifying only the owning reviewer group
   again against this second fix is this pass's final allowed iteration
-  per this repo's 2-fix-iteration cap. (PR #pending)
+  per this repo's 2-fix-iteration cap. (PR #284)
