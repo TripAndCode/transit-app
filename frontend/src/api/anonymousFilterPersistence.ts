@@ -152,15 +152,28 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // excluded from this merge — reviving a stale stored date range here
     // would reintroduce exactly the guaranteed-empty-view problem
     // useDefaultRangeAnchor exists to prevent.
-    const existingForMerge = readStored(agencyId);
-    if (existingForMerge) {
-      for (const key of ["dow", "time_band", "service"] as const) {
-        if (nextStored[key] === undefined && existingForMerge[key] !== undefined) {
-          (nextStored as Record<string, string>)[key] = existingForMerge[key] as string;
+    //
+    // Gated to `isFirstAttemptForAgency`, same as the ambiguity guard just
+    // above and for the identical reason: the anchor-handoff scenario this
+    // merge exists for can ONLY happen on an agency's first effect run this
+    // session (computeAnchorRange only ever fires before any filter
+    // interaction, so by construction this hook can defer to it — see line
+    // 85 above — at most once per agency, on that very first render).
+    // Beyond the first attempt, a field absent from `nextStored` reflects a
+    // real, later, in-session change (e.g. the user explicitly clearing just
+    // `dow` while `from`/`to`/`time_band` stay put) that must be allowed to
+    // stick, not be silently undone by resurrecting the old stored value.
+    if (isFirstAttemptForAgency) {
+      const existingForMerge = readStored(agencyId);
+      if (existingForMerge) {
+        for (const key of ["dow", "time_band", "service"] as const) {
+          if (nextStored[key] === undefined && existingForMerge[key] !== undefined) {
+            (nextStored as Record<string, string>)[key] = existingForMerge[key] as string;
+          }
         }
-      }
-      if (nextStored.routes === undefined && existingForMerge.routes && existingForMerge.routes.length > 0) {
-        nextStored.routes = existingForMerge.routes;
+        if (nextStored.routes === undefined && existingForMerge.routes && existingForMerge.routes.length > 0) {
+          nextStored.routes = existingForMerge.routes;
+        }
       }
     }
     writeStored(agencyId, nextStored);

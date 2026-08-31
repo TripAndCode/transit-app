@@ -40,6 +40,30 @@ function NavigatingProbe({ agencyId }: { agencyId: number }) {
   );
 }
 
+// Simulates a mid-session UI action that explicitly removes one param from
+// an otherwise-unchanged URL (e.g. clearing just the DOW filter while a
+// date range/time-band stay selected) — a real re-render of the SAME
+// component instance (so `restoredFor`'s ref state persists across it),
+// unlike remounting with a different `initialEntries`.
+function ClearParamProbe({ agencyId, paramToClear }: { agencyId: number; paramToClear: string }) {
+  useAnonymousFilterPersistence(agencyId);
+  const [, setParams] = useSearchParams();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        setParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete(paramToClear);
+          return next;
+        })
+      }
+    >
+      clear {paramToClear}
+    </button>
+  );
+}
+
 describe("useAnonymousFilterPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -141,5 +165,64 @@ describe("useAnonymousFilterPersistence", () => {
     const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
     expect(stored.dow).toBe("weekend");
     expect(stored.time_band).toBe("evening");
+  });
+
+  it("a mid-session explicit clear of one field is not resurrected by a later persist write", () => {
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/overview?from=2026-01-01&to=2026-01-07&dow=weekend&time_band=evening"]}>
+        <ClearParamProbe agencyId={1} paramToClear="dow" />
+      </MemoryRouter>,
+    );
+    // First render already persisted the full filter and marked agency 1 as
+    // no longer a first attempt (isFirstAttemptForAgency only ever true on
+    // the very first render this hook processes for an agency).
+    let stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.dow).toBe("weekend");
+
+    fireEvent.click(screen.getByText("clear dow"));
+
+    // The merge that backfills a field missing from the current params must
+    // NOT run here (isFirstAttemptForAgency is now false) -- otherwise the
+    // user's explicit clear would be silently undone by the stale value
+    // still sitting in storage from the render just above.
+    stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.dow).toBeUndefined();
+    expect(stored.time_band).toBe("evening");
+    expect(stored.from).toBe("2026-01-01");
+    expect(stored.to).toBe("2026-01-07");
+  });
+
+  it("a mid-session explicit clear of routes is not resurrected by a later persist write", () => {
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/overview?from=2026-01-01&to=2026-01-07&routes=A1,B2"]}>
+        <ClearParamProbe agencyId={1} paramToClear="routes" />
+      </MemoryRouter>,
+    );
+    let stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.routes).toEqual(["A1", "B2"]);
+
+    fireEvent.click(screen.getByText("clear routes"));
+
+    stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.routes).toBeUndefined();
+    expect(stored.from).toBe("2026-01-01");
+  });
+
+  it("still fills in a missing field from storage on a genuine first attempt with a partial explicit URL (e.g. a deep link)", () => {
+    // Not the anchor-handoff case (no from/to at all here), but still a
+    // first-ever effect run for this agency this session -- the merge is
+    // gated on `isFirstAttemptForAgency`, not on whether the anchor fired,
+    // so any first-attempt partial URL benefits from the same "remember
+    // what I was looking at" fill-in the restore branch already provides
+    // for a fully-empty URL.
+    localStorage.setItem(
+      "transit.lastFilter.1",
+      JSON.stringify({ time_band: "evening", service: "weekday" }),
+    );
+    renderProbe(1, "/agencies/1/overview?dow=weekend");
+    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    expect(stored.dow).toBe("weekend"); // current param always wins
+    expect(stored.time_band).toBe("evening"); // filled in, absent from the URL
+    expect(stored.service).toBe("weekday"); // filled in, absent from the URL
   });
 });
