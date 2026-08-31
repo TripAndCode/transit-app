@@ -617,15 +617,21 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
     """Top-20 routes by total positive delay contribution + rest share.
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
-    approximates ``SUM(GREATEST(dep_delay, 0))`` as
-    ``SUM(GREATEST(avg_min, 0) * samples)`` per route, in minutes. Routes
-    that ran early on net (negative ``avg_min``) contribute zero — same
-    intent as the per-row metric: contribution to LATENESS, not the
-    signed sum.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``'s
+    ``sum_late_sec`` — the exact per-row ``SUM(GREATEST(dep_delay, 0))`` — and
+    sums it directly per route, in minutes. This is a TOTAL, not a mean, so
+    pooling multiple day-rows is a plain SUM with no division; unlike
+    ``avg_min``, clamping a signed value to zero BEFORE summing across
+    observations would understate (never overstate) a route's true lateness
+    contribution whenever a day mixes early and late trips — the day's mean
+    can land at or below zero while individual late trips still contributed
+    real lateness. ``sum_late_sec`` avoids that by clamping each observation
+    before it is ever summed, so the fast and slow paths agree exactly on this
+    metric (mirroring ``sum_delay_sec``'s exact-vs-rounded pooling fix, but for
+    the clamped total rather than the signed mean).
 
     Slow path (any non-default time band) reads the shared grain
-    (:func:`_fetch_grain`), whose ``sum_late_sec`` column is the per-row
+    (:func:`_fetch_grain`), whose ``sum_late_sec`` column is the same per-row
     ``SUM(GREATEST(dep_delay, 0))`` computed exactly, so the hour-of-day filter
     is honored.
     """
@@ -634,7 +640,11 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT route_code,\n"
-            "       SUM(GREATEST(avg_min, 0) * samples)::float AS total_late_min\n"
+            # sum_late_sec is nullable (not backfilled — see migration 0029):
+            # a row analyze() hasn't rewritten since that migration contributes
+            # 0 here (Postgres SUM skips NULLs), understating rather than
+            # crashing or looking like a genuine zero-lateness day.
+            "       (SUM(sum_late_sec)::numeric / 60.0) AS total_late_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"

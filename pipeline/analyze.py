@@ -39,6 +39,15 @@ SUM(samples)) — the latter pools a mean of ROUNDED per-row values, which is
 not the same as the true pooled mean over the underlying raw observations.
 agg_route_daily_dist already followed this pattern from the start (see its
 own `sum_delay_sec`); these six tables now match it.
+
+agg_daily_trend additionally carries `sum_late_sec`, the exact
+SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
+a reader pooling multiple rows sums it directly (no division). A route's
+total lateness contribution must be computed by summing this per-observation
+clamped value, never by clamping an already-pooled avg_min/sum_delay_sec to
+zero first: a day (or route) whose trips mix early and late running can
+average out to near zero, which would silently zero out that day's real
+lateness contribution instead of counting it.
 """
 
 import logging
@@ -385,7 +394,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
+                SUM(dep_delay) AS sum_delay_sec,
+                SUM(GREATEST(dep_delay, 0)) AS sum_late_sec
             FROM deduped
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
@@ -393,7 +403,16 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_daily_trend",
-            ["agency_id", "date", "route_code", "service_type", "avg_min", "samples", "sum_delay_sec"],
+            [
+                "agency_id",
+                "date",
+                "route_code",
+                "service_type",
+                "avg_min",
+                "samples",
+                "sum_delay_sec",
+                "sum_late_sec",
+            ],
             p,
             conn,
         )

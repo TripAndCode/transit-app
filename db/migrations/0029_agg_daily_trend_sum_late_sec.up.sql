@@ -1,0 +1,26 @@
+-- agg_daily_trend's avg_min is the day's ROUNDED, SIGNED mean delay. Clamping
+-- that mean to zero before weighting by samples (SUM(GREATEST(avg_min, 0) *
+-- samples), pipeline/reports/overview.py's _concentration fast path) is not
+-- the same metric as summing each observation's own clamped delay
+-- (SUM(GREATEST(dep_delay, 0)), what the slow/live path computes from raw
+-- `updates`, and what the shared ClickHouse grain's sum_late_sec column
+-- already carries): a day whose trips mix early and late running can
+-- average out to near zero or negative, zeroing the fast path's
+-- contribution for that day, while the true per-observation sum over the
+-- same rows stays strictly positive whenever any trip ran late at all.
+--
+-- sum_late_sec is the exact SUM(GREATEST(dep_delay, 0)) in seconds behind
+-- each row, mirroring sum_delay_sec (migration 0028) but for the clamped
+-- total rather than the signed one. A downstream reader sums sum_late_sec
+-- directly (no division — it is itself a total, not a mean) instead of
+-- re-deriving a clamped total from the already-rounded, already-signed
+-- avg_min.
+--
+-- Nullable, not backfilled — same rollout rationale as migration 0028's
+-- sum_delay_sec: analyze() unconditionally DELETEs + re-INSERTs every
+-- agg_daily_trend row for an agency, so any value computed here at migration
+-- time would be discarded by the very next `make analyze-all` anyway. Until
+-- that rebuild runs, a NULL sum_late_sec contributes 0 to a SUM(sum_late_sec)
+-- read (understating, never overstating, that route's total) rather than
+-- crashing or looking like a genuine zero-lateness day.
+ALTER TABLE agg_daily_trend ADD COLUMN IF NOT EXISTS sum_late_sec BIGINT;
