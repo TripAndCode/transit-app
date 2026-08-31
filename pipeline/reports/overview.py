@@ -495,14 +495,14 @@ async def _route_weekly_history(
             rows = await conn.fetch(
                 "SELECT route_code,\n"
                 # sum_delay_sec is nullable (unlike samples); a row can have
-            # samples set but sum_delay_sec still NULL (pre-backfill row,
-            # hand-seeded fixture, or any row analyze() hasn't rewritten
-            # since migration 0028) — FILTER both sides to the same row
-            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
-            # silently dropped, matching pipeline/digest/build.py's
-            # _ROUTE_BASELINE_SQL.
-            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
-            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
+                # samples set but sum_delay_sec still NULL (pre-backfill row,
+                # hand-seeded fixture, or any row analyze() hasn't rewritten
+                # since migration 0028) — FILTER both sides to the same row
+                # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+                # silently dropped, matching pipeline/digest/build.py's
+                # _ROUTE_BASELINE_SQL.
+                "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+                "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
                 "FROM agg_daily_trend\n"
                 f"WHERE agency_id=$1{where_clause}\n"
                 f"  AND route_code = ANY(${n}::text[])\n"

@@ -26,7 +26,7 @@ TOP_MOVERS = 5
 _AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
 
 _DAY_ROUTES_SQL = """
-    SELECT route_code, avg_delay_sec, samples, sum_delay_sec
+    SELECT route_code, samples, sum_delay_sec
     FROM agg_route_daily
     WHERE agency_id = %(aid)s AND date = %(day)s
 """
@@ -79,13 +79,15 @@ def _aggregate_by_route(rows):
     The baseline is NOT part of this helper — it is looked up per route_code from a
     route-grain aggregate of agg_route_stats in build_digest.
 
-    ``rows`` are tuples ``(route_code, avg_delay_sec, samples, sum_delay_sec)`` from
+    ``rows`` are tuples ``(route_code, samples, sum_delay_sec)`` from
     ``_DAY_ROUTES_SQL``; pools each service_type's EXACT sum_delay_sec and divides
     once at the end, rather than re-weighting each service_type's already-rounded
-    avg_delay_sec — see pipeline/analyze.py's module docstring. ``sum_delay_sec`` is
-    also returned (exact, raw seconds) so build_digest's own further pooling across
-    routes into an agency/network average can sum it directly instead of
-    re-weighting this function's rounded per-route ``avg_delay_sec`` a second time.
+    per-row average — see pipeline/analyze.py's module docstring. This function's
+    OWN ``avg_delay_sec`` output key is derived from the pooled sum, not read from
+    a row. ``sum_delay_sec`` is also returned (exact, raw seconds) so build_digest's
+    own further pooling across routes into an agency/network average can sum it
+    directly instead of re-weighting this function's rounded per-route
+    ``avg_delay_sec`` a second time.
 
     ``sum_delay_sec`` is nullable (migration 0028) — a row can have ``samples``
     set but ``sum_delay_sec`` still NULL (any ``agg_route_daily`` row analyze()
@@ -96,7 +98,7 @@ def _aggregate_by_route(rows):
     """
     acc: dict[str, dict] = {}
     order: list[str] = []
-    for route_code, _avg_delay_sec, samples, sum_delay_sec in rows:
+    for route_code, samples, sum_delay_sec in rows:
         if sum_delay_sec is None:
             continue
         e = acc.get(route_code)

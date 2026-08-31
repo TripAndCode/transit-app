@@ -9,8 +9,8 @@ from pipeline.digest.build import _aggregate_by_route
 
 
 def test_single_route_single_service_type_passthrough():
-    # Row tuple: (route_code, avg_delay_sec, samples, sum_delay_sec)
-    rows = [("44372", 480, 50, 480 * 50)]
+    # Row tuple: (route_code, samples, sum_delay_sec)
+    rows = [("44372", 50, 480 * 50)]
     out = _aggregate_by_route(rows)
     assert len(out) == 1
     e = out[0]
@@ -24,8 +24,8 @@ def test_single_route_single_service_type_passthrough():
 
 def test_two_service_types_collapse_to_one_weighted_entry():
     rows = [
-        ("44372", 480, 50, 480 * 50),
-        ("44372", 600, 30, 600 * 30),
+        ("44372", 50, 480 * 50),
+        ("44372", 30, 600 * 30),
     ]
     out = _aggregate_by_route(rows)
     assert len(out) == 1
@@ -38,8 +38,8 @@ def test_two_service_types_collapse_to_one_weighted_entry():
 
 def test_multiple_routes_preserve_order():
     rows = [
-        ("44372", 480, 50, 480 * 50),
-        ("12", 120, 40, 120 * 40),
+        ("44372", 50, 480 * 50),
+        ("12", 40, 120 * 40),
     ]
     out = _aggregate_by_route(rows)
     assert [e["route_code"] for e in out] == ["44372", "12"]
@@ -61,8 +61,8 @@ def test_pools_exact_sum_delay_sec_not_rounded_avg_delay_sec():
     this helper's sum_delay_sec-based pooling avoids.
     """
     rows = [
-        ("44372", 100, 7, 703),  # exact sum: 100.4 * 7 = 702.8 -> 703 (nearest int)
-        ("44372", 101, 3, 303),  # exact sum: 100.9 * 3 = 302.7 -> 303 (nearest int)
+        ("44372", 7, 703),  # exact sum: 100.4 * 7 = 702.8 -> 703 (nearest int)
+        ("44372", 3, 303),  # exact sum: 100.9 * 3 = 302.7 -> 303 (nearest int)
     ]
     out = _aggregate_by_route(rows)
     assert len(out) == 1
@@ -86,8 +86,8 @@ def test_null_sum_delay_sec_row_is_skipped_not_crashed_on():
     the numerator) so the surviving route-level entry is undistorted.
     """
     rows = [
-        ("44372", None, 50, None),  # not yet rewritten by analyze() -- must not crash
-        ("44372", 480, 50, 480 * 50),
+        ("44372", 50, None),  # not yet rewritten by analyze() -- must not crash
+        ("44372", 50, 480 * 50),
     ]
     out = _aggregate_by_route(rows)
     assert len(out) == 1
@@ -102,6 +102,6 @@ def test_null_sum_delay_sec_row_is_skipped_not_crashed_on():
 def test_all_rows_null_sum_delay_sec_yields_no_entry():
     """A route with every service_type row still unbackfilled must vanish
     from the output entirely, not appear with a misleading zeroed average."""
-    rows = [("44372", None, 50, None)]
+    rows = [("44372", 50, None)]
     out = _aggregate_by_route(rows)
     assert out == []

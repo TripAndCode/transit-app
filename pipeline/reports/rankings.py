@@ -675,17 +675,26 @@ async def compute_trend_series(
         # each row's exact sum_delay_sec (not its rounded avg_min) and divides
         # once at the end — see analyze.py's module docstring for why pooling
         # already-rounded per-bucket means would otherwise drift from the true
-        # pooled mean.
+        # pooled mean. sum_delay_sec is nullable (unlike samples), so a week/
+        # month bucket spanning a date whose row analyze() hasn't rewritten
+        # since migration 0028 could otherwise mix a populated date with a
+        # NULL one; FILTER both sides to the same row population — see
+        # pipeline/reports/overview.py's _route_weekly_history for the
+        # identical rationale (this SQL-level pooling is a separate, coarser
+        # grain from this function's own Python-side by_date_samples/
+        # by_date_weighted_sec pooling further below, which already applies
+        # the same guard one level up, across route/service groups within a
+        # bucket rather than across dates within one route/service group).
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
             f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
             "       route_code, NULLIF(service_type, '') AS service_type,\n"
-            "       SUM(sum_delay_sec)::bigint AS sum_delay_sec,\n"
-            "       SUM(samples)::int AS samples\n"
+            "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::bigint AS sum_delay_sec,\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
             "GROUP BY bucket, route_code, service_type\n"
-            "HAVING SUM(samples) > 5"
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5"
         )
         per_day = await conn.fetch(sql, agency_id, *params)
     else:

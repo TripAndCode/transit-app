@@ -864,6 +864,61 @@ async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucke
     assert days[0]["avg_min"] == 1.0  # NOT the buggy 0.5 from counting R_NULL's samples
 
 
+async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_date(aconn, aagency_id):
+    """A week/month bucket's own SQL-level pooling (SUM(sum_delay_sec) /
+    SUM(samples) per bucket/route/service, BEFORE the Python-side pooling
+    across route/service groups) must also FILTER both sides to the same
+    row population. This is a distinct guard from
+    ``test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucket_avg``
+    above: that test covers pooling ACROSS route/service groups within one
+    bucket; this one covers pooling ACROSS DATES within one route/service
+    group for a 'week'/'month' bucket, which happens one layer earlier, at
+    the SQL GROUP BY itself.
+
+    Same ISO week, same route/service, two dates: day 1 (6 samples,
+    sum_delay_sec NULL) must contribute 0 to this row's own avg_min; day 2
+    (6 samples, raw-seconds sum 360 -> exact 1.0 min) is the only date that
+    should determine it. Pre-fix, day 1's 6 samples would still land in the
+    SQL's own SUM(samples) while contributing nothing to SUM(sum_delay_sec),
+    giving (0+360)/12/60=0.5 instead of the correct 360/6/60=1.0 -- silently
+    reproducing the exact bug this whole item exists to eliminate, one
+    aggregation layer beneath where the Python-side fix already guards.
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    # 2026-05-18 (Mon) and 2026-05-19 (Tue) fall in the same ISO week.
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        date(2026, 5, 18).isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        6,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, $5)",
+        aagency_id,
+        date(2026, 5, 19).isoformat(),
+        1.0,
+        6,
+        360,
+    )
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 19))
+    out = await compute_trend_series(aagency_id, ctx, aconn, granularity="week")
+    days = out["days"]
+    assert len(days) == 1
+    offender = next(o for o in days[0]["top_offenders"] if o["route_code"] == "R_WKNULL")
+    assert offender["samples"] == 6  # the NULL date's samples excluded
+    assert offender["avg_min"] == 1.0  # NOT the buggy 0.5 from counting the NULL date's samples
+
+
 # ---------------------------------------------------------------------------
 # GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
 # tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_
