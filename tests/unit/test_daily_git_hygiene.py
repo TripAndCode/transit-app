@@ -92,6 +92,11 @@ def test_run_local_cleanup_fetches_remote_before_validating_base(
     git(other, "push", "origin", "main")
     new_tip = git(other, "rev-parse", "HEAD")
 
+    # `update-ref` requires the target object to already exist in `repository`'s own
+    # object database -- it won't fetch it for us. Fetch the bare SHA directly (not
+    # through the `origin` remote) so the object lands locally without moving
+    # `refs/remotes/origin/main`, which is exactly the ref this test needs to stay stale.
+    git(repository, "fetch", str(tmp_path / "remote.git"), new_tip)
     git(repository, "update-ref", "refs/heads/main", new_tip)
     assert git(repository, "rev-parse", "refs/remotes/origin/main") != new_tip
 
