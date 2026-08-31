@@ -141,3 +141,46 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   route/service and a 3-sample route/stop_sequence group are now
   materialised (previously silently dropped), plus frontend tests for the
   new baseline-low-confidence marker. (PR #pending)
+- 2026-08-31: `/vps-loop-run` coordinator, resuming item 37's branch (found
+  with a real commit in a leftover worktree, no PR yet — an interrupted
+  prior run per Step 3b). Ran this item's own required two-pass
+  `/review-branch` gate. Pass 1 (`bugs+logic+consistency+security`;
+  `perf+practices+alternatives`) found zero Majors (two non-blocking
+  Minors, left unfixed: a missing `baseline_samples` test assertion, and a
+  UI marker-precedence note on `RouteRow.tsx` suppressing the new
+  low-confidence-baseline marker when the today-samples marker already
+  shows). Pass 2 (fresh, independent dispatch, both groups) found one
+  Major: `today_route_summary`'s baseline query (`api/routers/map.py`)
+  independently `COALESCE`d `baseline_avg_min`/`baseline_p90_min`/
+  `baseline_samples` column-by-column between the exact (route,
+  service_type) match (`b`) and a route-grain pooled-across-service_types
+  fallback (`rb`) — two different statistical populations. Because
+  `agg_route_stats` no longer gates out thin groups (this same item's own
+  change), `PERCENT_RANK`'s documented single-row/tied-group behavior
+  means `b.p90_min` can now routinely be null while `b.avg_min` isn't,
+  so a route could get `baseline_avg_sec` from `b` while
+  `baseline_p90_sec` silently fell back to `rb`'s pooled figure — feeding
+  `api.triage.classify_route`'s anomaly/watch classification a mismatched
+  baseline pair with no visible signal of the mismatch. Fixed directly
+  (coordinator-direct, via `EnterWorktree` to resolve the same
+  worktree Edit-permission-anchor mismatch documented in prior items'
+  entries above, after a freshly-dispatched general-purpose fix agent hit
+  the identical mismatch and made no changes): replaced the three
+  independent `COALESCE`s with a single `CASE WHEN b.avg_min IS NOT NULL`
+  condition shared by all three columns, so `baseline_avg_min`/
+  `baseline_p90_min`/`baseline_samples` always come from the same source;
+  `baseline_p90_sec` can still legitimately end up `None` when `b`'s own
+  `p90_min` is null (`classify_route` already treats any null baseline
+  input as `no_baseline` — verified, no change needed there), which is
+  correct and strictly better than silently mixing populations. Added
+  `tests/api/test_api_map.py::test_route_summary_baseline_columns_stay_same_source`
+  (seeds a same-route, different-service_type baseline with a real,
+  non-null p90 specifically to prove it does NOT leak into the exact
+  match's null p90), plus `baseline_samples` assertions on the two
+  existing exact-match/pooled-fallback tests. Verified for real against
+  the live `:5544`/`:8124` throwaway containers: full `make test
+  DATABASE_URL=... RUN_CH_INTEGRATION=1` run — 1058 passed, 9 skipped, 2
+  pre-existing failures unrelated to this diff (`test_clickhouse_dep.py`'s
+  missing `CLICKHOUSE_USER` env var; `test_cleanup_git_state.py`'s
+  `git push` fixture issue) — plus `poetry run ruff check`/`poetry run
+  mypy` clean on both changed files. (PR #pending)

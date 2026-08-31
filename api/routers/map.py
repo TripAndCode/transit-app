@@ -645,14 +645,28 @@ async def today_route_summary(
         SELECT
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
-            COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
-            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
-            -- agg_route_stats no longer gates out thin (route, service_type)
-            -- groups at insert time, so this baseline can itself now rest on
-            -- very few observations -- surfaced here (not folded into
-            -- classify_route/low_confidence, which judges TODAY's sample
-            -- count) so the client can separately flag a thin baseline.
-            COALESCE(b.samples, rb.base_samples) AS baseline_samples,
+            -- All three baseline columns are picked from the SAME source
+            -- (b or rb) via one shared condition, never coalesced
+            -- independently per column -- b.avg_min IS NOT NULL is the
+            -- correct "does b have a matching row" test (AVG() over a real
+            -- joined row is never null). agg_route_stats no longer gates out
+            -- thin (route, service_type) groups at insert time, so b.p90_min
+            -- can legitimately be null (a degenerate PERCENT_RANK result for
+            -- a thin or tied group) while b.avg_min is not; independently
+            -- coalescing each column would then silently mix b's exact-match
+            -- avg with rb's pooled-across-service_types p90 -- two different
+            -- statistical populations reported as one baseline. Picking all
+            -- three from the same side means baseline_p90_min can be null
+            -- even when baseline_avg_min isn't (classify_route already
+            -- treats any null baseline input as "no_baseline"), which is
+            -- correct: a missing same-source p90 must not be papered over
+            -- with a different population's figure.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
+            CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
+            -- baseline_samples backs whichever source above was actually used,
+            -- so the client can flag a thin baseline -- not folded into
+            -- classify_route/low_confidence, which judges TODAY's sample count.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
             b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b

@@ -786,6 +786,7 @@ async def test_route_summary_buckets_and_deviation(map_app_ch, ch_client):
     assert anom["has_baseline"] is True
     assert anom["baseline_avg_sec"] == 120
     assert anom["baseline_p90_sec"] == 360
+    assert anom["baseline_samples"] == 500
     assert anom["deviation_sec"] == 300  # 420 - 120
     assert anom["low_confidence"] is False
 
@@ -825,7 +826,49 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, 
     r = {x["route_code"]: x for x in resp.json()["routes"]}["R_NULLSVC"]
     assert r["has_baseline"] is True
     assert r["baseline_avg_sec"] == 120  # route-grain 2.0 min, not no_baseline
+    assert r["baseline_samples"] == 500  # pooled SUM(samples) across service_types
     assert r["bucket"] == "anomaly"
+
+
+@pytest.mark.asyncio
+async def test_route_summary_baseline_columns_stay_same_source(map_app_ch, ch_client):
+    """agg_route_stats no longer gates out thin (route, service_type) groups, so
+    a group's p90_min can itself be null (a degenerate PERCENT_RANK result for a
+    thin/tied group) while avg_min isn't. baseline_avg_min/baseline_p90_min/
+    baseline_samples must all come from the SAME source (the exact (route,
+    service_type) match, here) rather than independently falling back column-by-
+    column to the route-grain pooled baseline -- even though the route DOES have
+    a real, non-null p90 available from a different service_type's pooled figure,
+    it must not be silently substituted in."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    # Exact-match baseline for today's own service_type has a null p90 (thin
+    # group) but a real avg and sample count.
+    await _seed_route(
+        pool,
+        agency_id,
+        "R_THINP90",
+        "平日",
+        [(f"y{i}", 1, 420, "10:00") for i in range(40)],
+        baseline=(2.0, None, 1),
+        ch_client=ch_client,
+    )
+    # A different service_type's baseline for the SAME route has a real,
+    # non-null p90 -- this populates the route-grain pooled fallback (rb) with
+    # a value that must NOT leak into baseline_p90_sec above.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, p90_min, samples) "
+            "VALUES ($1, 'R_THINP90', '土日', 2.0, 6.0, 500)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    r = {x["route_code"]: x for x in resp.json()["routes"]}["R_THINP90"]
+    assert r["baseline_avg_sec"] == 120  # exact-match avg (b), not the pooled rb figure
+    assert r["baseline_p90_sec"] is None  # must stay null, not rb's pooled 360
+    assert r["baseline_samples"] == 1  # exact-match samples (b), not rb's pooled 501
+    assert r["bucket"] == "no_baseline"  # classify_route treats a null p90 as no baseline
 
 
 @pytest.mark.asyncio
