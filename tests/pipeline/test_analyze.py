@@ -331,6 +331,55 @@ def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, 
     assert fixed_avg == raw_avg
 
 
+def test_analyze_sum_late_sec_is_clamped_per_observation_not_clamped_average(pg_conn, agency_id, ch_client):
+    """analyze() must store the exact per-observation clamped sum
+    (SUM(GREATEST(dep_delay, 0))) alongside avg_min, so a downstream reader
+    computing a route's total lateness contribution never has to clamp the
+    already-signed, already-rounded avg_min instead.
+
+    5 observations at +600s (10 min) and 5 at -480s (-8 min): the day's
+    signed average is (5*600 + 5*(-480)) / 10 / 60 = 1.0 min. Clamping THAT
+    average (the bug this column fixes) would score the day as
+    ``1.0 * 10 = 10`` late-minutes. The true per-observation clamped sum is
+    ``5 * 600 = 3000`` seconds = 50 minutes -- the -480s trips contribute 0,
+    never a negative offset.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for dep in [600, 600, 600, 600, 600, -480, -480, -480, -480, -480]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"mix{i}.pb",
+                    "2026-04-01T09:00:00",
+                    f"trip_mix_{i}",
+                    "平日",
+                    time(9, 0),
+                    "MIX1",
+                    1,
+                    dep,
+                ),
+            )
+            i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples, avg_min, sum_delay_sec, sum_late_sec FROM agg_daily_trend "
+            "WHERE agency_id = %s AND route_code = 'MIX1'",
+            (agency_id,),
+        )
+        samples, avg_min, sum_delay_sec, sum_late_sec = cur.fetchone()
+    assert samples == 10
+    assert float(avg_min) == 1.0
+    assert sum_delay_sec == 600
+    assert sum_late_sec == 3000
+
+
 def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
     # _seed_updates schedules every row at 11:37 → all land in hour 11.
     _seed_updates(pg_conn, agency_id)

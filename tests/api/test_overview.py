@@ -24,6 +24,7 @@ async def _seed_agg_daily(
     service_type: str,
     avg_min: float,
     samples: int,
+    sum_late_sec: int | None = None,
 ):
     """Insert (or upsert) one ``agg_daily_trend`` row.
 
@@ -35,16 +36,28 @@ async def _seed_agg_daily(
     ``avg_min`` that is itself already exact (true of every value seeded by
     this helper), so the fast path's ``SUM(sum_delay_sec) / SUM(samples)``
     reproduces the same figure these tests were already asserting on.
+
+    ``sum_late_sec`` defaults to ``round(max(avg_min, 0) * 60 * samples)`` —
+    exact whenever every observation behind this row shares ``avg_min``'s
+    sign (true of every caller that seeds a uniformly early or uniformly
+    late day). A caller exercising a day that MIXES early and late trips —
+    exactly the case where the per-observation clamped sum and the
+    clamped-average approximation this column replaced used to diverge —
+    must pass the true value explicitly; there is no way to derive it from
+    ``avg_min``/``samples`` alone.
     """
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
     samples = int(samples)
     sum_delay_sec = round(float(avg_min) * 60 * samples)
+    if sum_late_sec is None:
+        sum_late_sec = round(max(float(avg_min), 0.0) * 60 * samples)
     await aconn.execute(
         "INSERT INTO agg_daily_trend "
-        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7) "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec, sum_late_sec) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec, "
+        "sum_late_sec = EXCLUDED.sum_late_sec",
         agency_id,
         iso,
         route_code,
@@ -52,6 +65,7 @@ async def _seed_agg_daily(
         float(avg_min),
         samples,
         sum_delay_sec,
+        sum_late_sec,
     )
 
 
@@ -581,10 +595,12 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
     """6 routes all surfaced (limit is now 20); rest_share is 0%.
 
-    Concentration is computed as ``SUM(GREATEST(avg_min, 0) * samples)``
-    per route on ``agg_daily_trend`` — directly proportional to total
-    positive delay minutes. The card variant on the frontend slices the
-    top 5; the modal variant uses all 20.
+    Concentration is computed as ``SUM(sum_late_sec) / 60`` per route on
+    ``agg_daily_trend`` — directly proportional to total positive delay
+    minutes (every row seeded here is uniformly late, so this coincides
+    with ``avg_min * samples``; see the mixed-day tests below for where the
+    two diverge). The card variant on the frontend slices the top 5; the
+    modal variant uses all 20.
     """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
@@ -643,6 +659,82 @@ async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     codes = [r["route_code"] for r in out["concentration"]["top_routes"] if r["route_code"].startswith("R_TIE")]
     assert codes == ["R_TIE_A", "R_TIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_concentration_fast_path_counts_clamped_observations_not_clamped_average(aconn, aagency_id):
+    """A day whose trips mix early and late running must score its true
+    per-observation clamped lateness, not its already-signed average
+    clamped to zero.
+
+    R_MIX runs 5 trips at +10 min and 5 at -8 min: avg_min = +1.0. The old
+    ``SUM(GREATEST(avg_min, 0) * samples)`` approximation would have scored
+    this as ``1.0 * 10 = 10`` late-minutes. The true clamped sum — what
+    ``sum_late_sec`` now stores exactly — is ``5 * 10 = 50`` (the -8 min
+    trips contribute 0, never a negative offset). R_OTHER runs uniformly at
+    +2 min for the same 10 samples: true total ``2.0 * 10 = 20``.
+
+    Under the old approximation R_OTHER (20) would have outranked R_MIX
+    (10) — backwards, since R_MIX's real contribution (50) is more than
+    double R_OTHER's. The fix must rank R_MIX first.
+    """
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_MIX", "平日", 1.0, 10, sum_late_sec=3000)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OTHER", "平日", 2.0, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    top = out["concentration"]["top_routes"]
+    assert [r["route_code"] for r in top] == ["R_MIX", "R_OTHER"]
+    # grand_total = 50 + 20 = 70 late-minutes.
+    assert top[0]["share_pct"] == pytest.approx(50.0 / 70.0 * 100.0, abs=0.05)
+    assert top[1]["share_pct"] == pytest.approx(20.0 / 70.0 * 100.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_concentration_fast_and_slow_paths_agree_on_mixed_early_late_day(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """The fast (``time_band='all'``) and slow (any other ``time_band``) paths
+    must score an identical mixed early/late day identically — the exact
+    case ``SUM(GREATEST(avg_min, 0) * samples)`` used to understate relative
+    to the slow path's per-observation ``SUM(GREATEST(dep_delay, 0))``, which
+    could rank routes differently depending only on which ``time_band`` a
+    request happened to use, not on the underlying data.
+
+    Same R_MIX (5 trips +10 min, 5 trips -8 min -> true total 50 min) /
+    R_OTHER (10 trips uniformly +2 min -> true total 20 min) shape as
+    :func:`test_concentration_fast_path_counts_clamped_observations_not_clamped_average`,
+    seeded into BOTH ``agg_daily_trend`` (what a real analyze() run over
+    this data would store) and raw ``updates``/ClickHouse (what the slow
+    path reads directly), then asserted to agree.
+    """
+    when = datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc)
+    for i in range(5):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=i), "R_MIX", 600, seq=i + 1)
+    for i in range(5):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=5 + i), "R_MIX", -480, seq=6 + i)
+    for i in range(10):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=i), "R_OTHER", 120, seq=100 + i)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 20), "R_MIX", "平日", 1.0, 10, sum_late_sec=3000)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 20), "R_OTHER", "平日", 2.0, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    fast_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    fast_out = await compute_overview_summary(aagency_id, fast_ctx, aconn, "ja")
+    slow_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    slow_out = await compute_overview_summary(aagency_id, slow_ctx, aconn, "ja", ch=ch_async_client)
+
+    for out in (fast_out, slow_out):
+        top = out["concentration"]["top_routes"]
+        assert [r["route_code"] for r in top] == ["R_MIX", "R_OTHER"]
+        assert top[0]["share_pct"] == pytest.approx(50.0 / 70.0 * 100.0, abs=0.05)
+        assert top[1]["share_pct"] == pytest.approx(20.0 / 70.0 * 100.0, abs=0.05)
 
 
 @pytest.mark.asyncio
