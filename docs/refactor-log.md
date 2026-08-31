@@ -184,3 +184,41 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   missing `CLICKHOUSE_USER` env var; `test_cleanup_git_state.py`'s
   `git push` fixture issue) — plus `poetry run ruff check`/`poetry run
   mypy` clean on both changed files. (PR #pending)
+- 2026-08-31: `/vps-loop-run` coordinator, second fix-and-reverify cycle on
+  item 37 (this pass's own 2-iteration cap). Re-verifying the first fix
+  above against the same reviewer group that raised it surfaced two further
+  Majors, both direct consequences of this item's own core change (removing
+  `agg_route_stats`'s insert-time sample gate) that the first fix didn't
+  cover: (1) `today_route_summary`'s `has_baseline` was still computed only
+  from `baseline_avg_sec is not None`, but a thin group can now have a real
+  `avg_min` and a null `p90_min` at the same time — `classify_route` then
+  correctly returns `bucket="no_baseline"` while `has_baseline` stayed
+  `True`, so the client could render a "baseline pending" note and a
+  concrete today-vs-baseline comparison for the same row simultaneously
+  (`tests/pipeline/live/bucket.test.tsx`'s own fixture helper already
+  encoded `has_baseline: bucket !== "no_baseline"` as the intended
+  invariant). Fixed by deriving `has_baseline` from `bucket != "no_baseline"`
+  directly. (2) Both the route-grain pooled baseline in
+  `today_route_summary` (`api/routers/map.py`'s `rb` CTE) and the identical
+  `_ROUTE_BASELINE_SQL` in `pipeline/digest/build.py` computed
+  `SUM(p90_min * samples) / NULLIF(SUM(samples), 0)` — since a thin
+  service_type group's `p90_min` can now be null while its `samples` isn't,
+  `SUM()` silently skips the null numerator term but NOT that row's sample
+  count in the denominator, biasing the pooled `base_p90_min` down whenever
+  any contributing service_type is thin. Fixed both sites identically:
+  `SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL) /
+  NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0)`, restricting
+  numerator and denominator to the same contributing rows. Added
+  `tests/api/test_api_map.py::test_route_summary_pooled_p90_ignores_null_p90_rows`
+  and `tests/pipeline/test_digest_build.py::test_route_baseline_sql_p90_pooling_ignores_null_p90_rows`
+  (seeding a thin null-p90 contributor alongside a healthy one, asserting
+  the pooled figure matches the healthy contributor's own p90 exactly, not
+  a diluted value), plus a `has_baseline is False` assertion on the
+  existing null-p90 exact-match test. Verified for real against the live
+  `:5544`/`:8124` throwaway containers: full `make test DATABASE_URL=...
+  RUN_CH_INTEGRATION=1` — 1060 passed (2 more than the prior fix's run,
+  matching the 2 new tests), 9 skipped, same 2 pre-existing unrelated
+  failures as before; `poetry run ruff check`/`poetry run mypy` clean on
+  all four changed files. Re-verifying only the owning reviewer group
+  again against this second fix is this pass's final allowed iteration
+  per this repo's 2-fix-iteration cap. (PR #pending)

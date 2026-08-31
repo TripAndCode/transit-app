@@ -634,9 +634,18 @@ async def today_route_summary(
             -- Route-grain baseline (across service_types), so a NULL-service daily
             -- row (stored as '') still finds a baseline even though agg_route_stats
             -- has no '' row. Mirrors the digest's route-grain baseline.
+            -- base_p90_min's numerator/denominator are both FILTERed to the same
+            -- p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin
+            -- groups, so a service_type's p90_min can itself be null (a degenerate
+            -- PERCENT_RANK result) while its samples are not -- SUM() silently
+            -- skips a null numerator term but NOT its row's sample count in the
+            -- denominator, which would otherwise bias base_p90_min down whenever
+            -- any contributing service_type is thin. base_avg_min needs no such
+            -- filter since AVG() is never null for a non-empty group.
             SELECT route_code,
                    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
-                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min,
+                   SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
+                       / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
                    SUM(samples) AS base_samples
             FROM agg_route_stats
             WHERE agency_id = $1 AND samples IS NOT NULL
@@ -738,7 +747,12 @@ async def today_route_summary(
                 "deviation_sec": deviation_sec,
                 "bucket": bucket,
                 "low_confidence": low_confidence,
-                "has_baseline": baseline_avg_sec is not None,
+                # bucket=="no_baseline" whenever classify_route treats any of
+                # avg/p90 as missing -- has_baseline must track that exactly
+                # (not just baseline_avg_sec) so a thin group with a real avg
+                # but a null p90 doesn't render as both "no baseline yet" and
+                # a concrete today-vs-baseline comparison at once.
+                "has_baseline": bucket != "no_baseline",
                 "late5_pct": r["late5_pct"],
             }
         )
