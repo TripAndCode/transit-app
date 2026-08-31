@@ -464,6 +464,43 @@ def test_run_remote_branch_cleanup_retains_branch_with_mismatched_tip(
     assert not log_path.exists()
 
 
+def test_run_remote_branch_cleanup_skips_branch_whose_tip_changed_since_planning(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A commit landing on the branch between planning and delete must not be discarded.
+
+    Simulates the TOCTOU window entirely within one `run_remote_branch_cleanup` call:
+    `list_remote_vps_loop_branches` is patched to return the tip as it was at planning
+    time, while the branch is genuinely advanced on `origin` before the apply loop's own
+    real, unpatched `remote_branch_head` recheck runs.
+    """
+
+    planned_tip = git(repository, "rev-parse", "HEAD")
+    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-17")
+
+    monkeypatch.setattr(
+        hygiene, "list_remote_vps_loop_branches", lambda _repo, _remote: {"vps-loop/item-17": planned_tip}
+    )
+    pull_requests = {"vps-loop/item-17": (cleanup.PullRequest(117, "MERGED", planned_tip),)}
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    # A real new commit lands on the branch on `origin` after planning would have run.
+    (repository / "tracked.txt").write_text("advanced on the branch\n", encoding="utf-8")
+    git(repository, "commit", "-am", "advance the branch after planning")
+    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-17")
+    advanced_tip = git(repository, "rev-parse", "HEAD")
+    assert advanced_tip != planned_tip
+
+    log_path = tmp_path / "git-hygiene.log"
+    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+
+    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-17")
+    assert advanced_tip in remaining  # branch survives with its newer, unshipped commit intact
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "tip changed since planning" in log_contents
+
+
 def test_run_remote_branch_cleanup_dry_run_deletes_nothing(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):

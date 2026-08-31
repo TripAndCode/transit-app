@@ -76,6 +76,7 @@ class RemoteBranchDecision:
     """A keep/delete decision for one remote `vps-loop/item-<N>` branch."""
 
     branch: str
+    head: str
     action: Literal["keep", "delete"]
     reason: str
 
@@ -237,25 +238,42 @@ def decide_remote_branch(
     own_open = [pr for pr in pull_requests if pr.state == "OPEN"]
     if own_open:
         numbers = ", ".join(f"#{pr.number}" for pr in own_open)
-        return RemoteBranchDecision(branch, "keep", f"branch has its own open PR {numbers}")
+        return RemoteBranchDecision(branch, head, "keep", f"branch has its own open PR {numbers}")
 
     merged = [pr for pr in pull_requests if pr.state == "MERGED"]
     if not merged:
-        return RemoteBranchDecision(branch, "keep", "no merged PR evidence for this branch")
+        return RemoteBranchDecision(branch, head, "keep", "no merged PR evidence for this branch")
 
     matching_merges = [pr for pr in merged if pr.head_oid == head]
     if not matching_merges:
         numbers = ", ".join(f"#{pr.number}" for pr in merged)
         return RemoteBranchDecision(
-            branch, "keep", f"merged PR {numbers} exists, but remote tip differs (possible post-merge commits)"
+            branch, head, "keep", f"merged PR {numbers} exists, but remote tip differs (possible post-merge commits)"
         )
 
     if dependent_open_prs:
         numbers = ", ".join(f"#{number}" for number in dependent_open_prs)
-        return RemoteBranchDecision(branch, "keep", f"open PR {numbers} still bases off this branch")
+        return RemoteBranchDecision(branch, head, "keep", f"open PR {numbers} still bases off this branch")
 
     numbers = ", ".join(f"#{pr.number}" for pr in matching_merges)
-    return RemoteBranchDecision(branch, "delete", f"remote tip exactly matches merged PR {numbers}")
+    return RemoteBranchDecision(branch, head, "delete", f"remote tip exactly matches merged PR {numbers}")
+
+
+def remote_branch_head(repo: Path, remote: str, branch: str) -> str | None:
+    """Return one branch's current tip SHA on `remote`, or None if it no longer exists.
+
+    Queried by exact branch name (not the `vps-loop/item-*` glob) so this can be
+    used as a cheap, single-branch immediately-before-delete recheck.
+    """
+
+    output = cleanup_git_state.run_command(("git", "ls-remote", "--heads", remote, branch), cwd=repo).stdout
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        sha, ref = line.split("\t", 1)
+        if ref.removeprefix("refs/heads/") == branch:
+            return sha
+    return None
 
 
 def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
@@ -296,6 +314,16 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
         if recheck:
             numbers = ", ".join(f"#{number}" for number in recheck)
             message = f"remote cleanup: SKIPPED {remote}/{decision.branch} — open PR {numbers} appeared since planning"
+            print(message)
+            log_line(log_file, message)
+            continue
+        current_head = remote_branch_head(repo, remote, decision.branch)
+        if current_head != decision.head:
+            observed = current_head[:12] if current_head else "branch gone"
+            message = (
+                f"remote cleanup: SKIPPED {remote}/{decision.branch} — tip changed since planning "
+                f"(planned {decision.head[:12]}, now {observed})"
+            )
             print(message)
             log_line(log_file, message)
             continue
