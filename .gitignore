@@ -59,8 +59,16 @@ client_secret_*.json
 # actually seen rather than one canonical name. No trailing slash on the
 # root-level patterns below: some historical leftovers were bare `.diff`
 # files, not directories, and a directory-only pattern silently misses
-# those. These hold nothing but a diff/manifest of already-reviewed,
-# already-public code, never secrets.
+# those. These are meant to hold only a diff/manifest and command-output
+# logs from `/review-branch`'s own process — treat as scratch, not as a
+# guaranteed-secret-free location; `review-branch.md` itself captures raw
+# command output here, which could echo more than a diff ever would.
+# Naming here is an ongoing enumeration, not a closed set — if a future
+# incident produces yet another shape, add it here rather than
+# re-deriving the reasoning from git history; the more durable fix is
+# standardizing scratch-dir creation in `review-branch.md`/
+# `prepare_review.py` itself so this list stops growing, which is a
+# separate, not-yet-done follow-up.
 /review-scratch*
 /.review-scratch*
 /tmp-review-item*
@@ -71,5 +79,8 @@ client_secret_*.json
 # substring to match on, so it needs its own pattern; kept root-anchored
 # and exactly 10 chars to avoid matching an unrelated real path.
 /tmp.??????????
+# No loose-file leftover has been observed directly under scripts/ (only
+# directories) — kept directory-only here unlike the root-level patterns
+# above; broaden the same way if that ever changes.
 scripts/review-*-pass*/
 scripts/.review-scratch/
