@@ -317,7 +317,13 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
             print(message)
             log_line(log_file, message)
             continue
-        current_head = remote_branch_head(repo, remote, decision.branch)
+        try:
+            current_head = remote_branch_head(repo, remote, decision.branch)
+        except (CleanupError, OSError) as exc:
+            message = f"remote cleanup: ERROR checking {remote}/{decision.branch} tip: {exc}"
+            print(message, file=sys.stderr)
+            log_line(log_file, message)
+            continue
         if current_head != decision.head:
             observed = current_head[:12] if current_head else "branch gone"
             message = (
@@ -343,22 +349,37 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
 # ---------------------------------------------------------------------------
 
 
-def list_local_superseded_branches(repo: Path) -> list[str]:
-    """List local `vps-loop/item-<N>-superseded-<sha>` branches."""
+def load_local_superseded_branches(repo: Path) -> dict[str, int]:
+    """Return local `vps-loop/item-<N>-superseded-<sha>` branches mapped to their
+    backing commit's timestamp, as a unix epoch.
 
-    branches = cleanup_git_state.local_branches(repo)
-    return sorted(name for name in branches if SUPERSEDED_BRANCH_RE.match(name))
-
-
-def branch_commit_epoch(repo: Path, branch: str) -> int:
-    """Return the backing commit's timestamp (`%ct`) for `branch`, as a unix epoch.
-
-    A branch-creation timestamp isn't directly available from a bare ref, so
-    this uses the commit's own recorded time instead.
+    One bulk `git for-each-ref` call, mirroring the same bulk-read idiom
+    `cleanup_git_state.local_branches` already uses for the analogous local-branch
+    listing, instead of one `git log` subprocess per branch. A branch-creation
+    timestamp isn't directly available from a bare ref, so this uses the commit's
+    own recorded committer time instead. Being a single atomic read, it also has no
+    per-branch window in which a concurrently-deleted branch could abort the whole
+    listing -- unlike a per-branch loop, where one vanished branch would raise and
+    stop every subsequent one from being read.
     """
 
-    output = cleanup_git_state.run_git(repo, "log", "-1", "--format=%ct", branch).stdout.strip()
-    return int(output)
+    output = cleanup_git_state.run_command(
+        (
+            "git",
+            "for-each-ref",
+            "--format=%(refname:short)\t%(committerdate:unix)",
+            "refs/heads/vps-loop/item-*-superseded-*",
+        ),
+        cwd=repo,
+    ).stdout
+    branches: dict[str, int] = {}
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        name, epoch = line.split("\t", 1)
+        if SUPERSEDED_BRANCH_RE.match(name):
+            branches[name] = int(epoch)
+    return dict(sorted(branches.items()))
 
 
 def decide_backup_branch(
@@ -388,10 +409,8 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
     print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
     now_epoch = int(time.time())
     decisions = [
-        decide_backup_branch(
-            branch, branch_commit_epoch(repo, branch), now_epoch=now_epoch, retention_days=retention_days
-        )
-        for branch in list_local_superseded_branches(repo)
+        decide_backup_branch(branch, commit_epoch, now_epoch=now_epoch, retention_days=retention_days)
+        for branch, commit_epoch in load_local_superseded_branches(repo).items()
     ]
     for decision in decisions:
         print(f"{decision.action.upper():6} {decision.branch} — {decision.reason}")

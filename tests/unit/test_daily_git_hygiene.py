@@ -350,18 +350,21 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
 # ---------------------------------------------------------------------------
 
 
-def test_branch_commit_epoch_reads_committer_time(repository: Path):
-    """`branch_commit_epoch` returns the exact `%ct` of the branch tip."""
+def test_load_local_superseded_branches_reads_committer_time_in_bulk(repository: Path):
+    """One `for-each-ref` call returns the exact committer-time epoch per backup branch,
+    and excludes a plain (non-superseded) `vps-loop/item-<N>` branch.
+    """
 
     when = "2000-01-01T00:00:00+0000"
     git(repository, "branch", "vps-loop/item-1-superseded-deadbee", "main")
     git(repository, "checkout", "vps-loop/item-1-superseded-deadbee")
     commit_at(repository, "old superseded backup", when)
     git(repository, "checkout", "main")
+    git(repository, "branch", "vps-loop/item-2", "main")  # not a backup branch; must be excluded
 
-    epoch = hygiene.branch_commit_epoch(repository, "vps-loop/item-1-superseded-deadbee")
+    branches = hygiene.load_local_superseded_branches(repository)
 
-    assert epoch == 946_684_800
+    assert branches == {"vps-loop/item-1-superseded-deadbee": 946_684_800}
 
 
 def test_run_backup_branch_pruning_deletes_only_stale_branches(tmp_path: Path, repository: Path):
@@ -573,6 +576,47 @@ def test_run_remote_branch_cleanup_continues_after_one_delete_error(
     log_contents = log_path.read_text(encoding="utf-8")
     assert "ERROR deleting origin/vps-loop/item-15" in log_contents
     assert "DELETED origin/vps-loop/item-16" in log_contents
+
+
+def test_run_remote_branch_cleanup_continues_after_one_tip_check_error(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A transient failure checking one branch's tip must not stop the rest of the stage.
+
+    Distinct from the delete-failure test above: this injects the failure at the
+    immediately-before-delete `remote_branch_head` recheck itself, not at
+    `delete_remote_branch`.
+    """
+
+    tip = git(repository, "rev-parse", "HEAD")
+    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-18")
+    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-19")
+
+    pull_requests = {
+        "vps-loop/item-18": (cleanup.PullRequest(118, "MERGED", tip),),
+        "vps-loop/item-19": (cleanup.PullRequest(119, "MERGED", tip),),
+    }
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    real_remote_branch_head = hygiene.remote_branch_head
+
+    def _flaky_head_check(repo: Path, remote: str, branch: str) -> str | None:
+        if branch == "vps-loop/item-18":
+            raise cleanup.CleanupError("simulated transient network error")
+        return real_remote_branch_head(repo, remote, branch)
+
+    monkeypatch.setattr(hygiene, "remote_branch_head", _flaky_head_check)
+
+    log_path = tmp_path / "git-hygiene.log"
+    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+
+    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
+    assert "vps-loop/item-18" in remaining  # the failed tip check leaves it in place
+    assert "vps-loop/item-19" not in remaining  # the other branch still gets checked and swept
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "ERROR checking origin/vps-loop/item-18 tip" in log_contents
+    assert "DELETED origin/vps-loop/item-19" in log_contents
 
 
 def test_run_backup_branch_pruning_continues_after_one_delete_error(
