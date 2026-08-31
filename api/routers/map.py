@@ -642,6 +642,14 @@ async def today_route_summary(
             -- denominator, which would otherwise bias base_p90_min down whenever
             -- any contributing service_type is thin. base_avg_min needs no such
             -- filter since AVG() is never null for a non-empty group.
+            -- base_p90_min itself is a samples-weighted average of each
+            -- service_type's already-computed p90_min, not a percentile
+            -- recomputed over the pooled raw delay observations across
+            -- service_types -- agg_route_stats stores only a per-group p90
+            -- and sample count, never the raw distribution, so an exact
+            -- pooled percentile isn't computable from it. Same defensible-
+            -- approximation shape as the heatmap's p90_delay_min elsewhere
+            -- in this file.
             SELECT route_code,
                    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
                    SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
@@ -1099,6 +1107,15 @@ async def delay_heatmap(
                 AS stop_codes,
             string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
             ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
+            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
+            -- own per-row averages (delay_sum/samples for each pre-cluster
+            -- stop/date/time_band row), not over the underlying raw
+            -- per-observation delays -- the agg schema stores only a summed
+            -- delay and a sample count per row, never the raw distribution,
+            -- so an exact percentile of individual observations isn't
+            -- computable from it. This is a percentile of row-level
+            -- averages: a defensible approximation given the schema, but a
+            -- different statistic from a true p90 of raw delays.
             ROUND(
                 PERCENTILE_CONT(0.9) WITHIN GROUP (
                     ORDER BY delay_sum::float / NULLIF(samples, 0)
