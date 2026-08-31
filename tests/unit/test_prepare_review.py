@@ -153,6 +153,24 @@ def test_process_doc_and_enforcement_flags_are_deterministic(repository: Path, t
     assert manifest["enforcement"] is True
 
 
+def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: Path, tmp_path: Path):
+    """frontend/scripts/check-entry-chunk.mjs enforces "MapLibre stays out of
+    the entry chunk" -- a real quality gate outside the top-level scripts/
+    directory and the settings/hooks/CI paths touches_enforcement already
+    recognized, so a diff touching only this file must still route as
+    enforcement (extra review), not silently fall through as an ordinary
+    change."""
+
+    gate = repository / "frontend" / "scripts" / "check-entry-chunk.mjs"
+    gate.parent.mkdir(parents=True)
+    gate.write_text("// placeholder gate\n", encoding="utf-8")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["frontend/scripts/check-entry-chunk.mjs"]
+    assert manifest["enforcement"] is True
+
+
 def test_output_directory_inside_repository_is_rejected(repository: Path):
     """Review artifacts cannot recursively become part of a later review diff."""
 

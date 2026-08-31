@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, useNavigate, useSearchParams } from "react-router-dom";
+import * as hooks from "./hooks";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
 
 const useSessionMock = vi.fn();
 vi.mock("./auth", () => ({
   useSession: () => useSessionMock(),
 }));
+
 
 // Probe shares the same router context as the hook so it reactively sees
 // whatever setSearchParams call the hook makes, mirroring
@@ -42,6 +44,13 @@ describe("useAnonymousFilterPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
     useSessionMock.mockReturnValue({ data: null, isLoading: false });
+    // The hook now also reads useAgencies (to defer to useDefaultRangeAnchor
+    // via the shared computeAnchorRange — see anonymousFilterPersistence.ts's
+    // docstring); mock it as "not loaded" so computeAnchorRange is always a
+    // no-op here and these tests keep exercising restore/persist in
+    // isolation. The dedicated interaction coverage lives in
+    // defaultRangeAnchor.test.tsx.
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
   });
   afterEach(() => vi.restoreAllMocks());
 

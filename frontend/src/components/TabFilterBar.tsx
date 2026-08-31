@@ -12,6 +12,7 @@ import {
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
+import { buildTimeBandOptions } from "./timeBandOptions";
 
 const pill = (active: boolean): CSSProperties => ({
   background: active ? "var(--accent-soft)" : "var(--bg-surface)",
@@ -68,16 +69,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
     { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
   ];
 
-  const timeBandOptions: { value: TimeBand; label: string }[] = [
-    { value: "all", label: t("filters.time_band.all") },
-    { value: "morning", label: t("filters.time_band.morning") },
-    { value: "forenoon", label: t("filters.time_band.forenoon") },
-    { value: "noon", label: t("filters.time_band.noon") },
-    { value: "afternoon", label: t("filters.time_band.afternoon") },
-    { value: "evening", label: t("filters.time_band.evening") },
-    { value: "night", label: t("filters.time_band.night") },
-    { value: "late_night", label: t("filters.time_band.late_night") },
-  ];
+  const timeBandOptions = buildTimeBandOptions(t);
 
   const timeBandLabel = Object.fromEntries(
     timeBandOptions.map((o) => [o.value, o.label]),

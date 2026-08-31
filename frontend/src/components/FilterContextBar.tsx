@@ -1,10 +1,11 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
-import type { DowFilter, TimeBand } from "../api/rangeContext";
+import type { DowFilter } from "../api/rangeContext";
 import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
+import { buildTimeBandOptions } from "./timeBandOptions";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -137,16 +138,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
     { value: "weekend", label: t("ask.filter_bar.dow_weekend") },
   ];
 
-  const timeBandOptions: { value: TimeBand; label: string }[] = [
-    { value: "all", label: t("filters.time_band.all") },
-    { value: "morning", label: t("filters.time_band.morning") },
-    { value: "forenoon", label: t("filters.time_band.forenoon") },
-    { value: "noon", label: t("filters.time_band.noon") },
-    { value: "afternoon", label: t("filters.time_band.afternoon") },
-    { value: "evening", label: t("filters.time_band.evening") },
-    { value: "night", label: t("filters.time_band.night") },
-    { value: "late_night", label: t("filters.time_band.late_night") },
-  ];
+  const timeBandOptions = buildTimeBandOptions(t);
 
   function handleEdit() {
     // Sync draft to current value when opening editor

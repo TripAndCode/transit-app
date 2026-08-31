@@ -633,15 +633,21 @@ async def today_route_summary(
         WITH rb AS (
             -- Route-grain baseline (across service_types), so a NULL-service daily
             -- row (stored as '') still finds a baseline even though agg_route_stats
-            -- has no '' row. Mirrors the digest's route-grain baseline.
+            -- has no '' row. Mirrors the digest's route-grain baseline
+            -- (pipeline/digest/build.py's _ROUTE_BASELINE_SQL) for both columns.
+            -- base_avg_min is FILTERed the same way as base_p90_min below:
+            -- sum_delay_sec is nullable (unlike samples, unlike AVG()-backed
+            -- avg_min), so a pre-backfill NULL row's samples must not count in
+            -- the denominator without also contributing to the numerator, or
+            -- base_avg_min would be biased toward zero whenever any
+            -- contributing service_type hasn't been backfilled yet.
             -- base_p90_min's numerator/denominator are both FILTERed to the same
             -- p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin
             -- groups, so a service_type's p90_min can itself be null (a degenerate
             -- PERCENT_RANK result) while its samples are not -- SUM() silently
             -- skips a null numerator term but NOT its row's sample count in the
             -- denominator, which would otherwise bias base_p90_min down whenever
-            -- any contributing service_type is thin. base_avg_min needs no such
-            -- filter since AVG() is never null for a non-empty group.
+            -- any contributing service_type is thin.
             -- base_p90_min itself is a samples-weighted average of each
             -- service_type's already-computed p90_min, not a percentile
             -- recomputed over the pooled raw delay observations across
@@ -651,7 +657,8 @@ async def today_route_summary(
             -- approximation shape as the heatmap's p90_delay_min elsewhere
             -- in this file.
             SELECT route_code,
-                   SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
+                   SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
                    SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
                        / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
                    SUM(samples) AS base_samples

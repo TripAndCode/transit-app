@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { routeDisplayName } from "../api/routeDisplayName";
 import type { Route } from "../api/types";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
@@ -35,7 +36,7 @@ function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
   const m = new Map<string, RouteVariant[]>();
   for (const r of data) {
     if (!r.route_code) continue;
-    const name = r.route_short_name || r.route_long_name || r.route_id || r.route_code;
+    const name = routeDisplayName(r) || r.route_code;
     const arr = m.get(name) || [];
     if (!arr.some((v) => v.code === r.route_code)) {
       arr.push({

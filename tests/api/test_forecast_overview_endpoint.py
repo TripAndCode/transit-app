@@ -39,14 +39,17 @@ async def overview_client(apply_schema):
     )
     await pool.executemany(
         "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
         [
-            # route 100: Mon midday pooled (8*200 + 2*50)/250 = 6.8
-            (aid, "100", "平日", 1, 12, 8.0, 200),
-            (aid, "100", "平日", 1, 9, 2.0, 50),
+            # route 100: Mon midday pooled (8*200 + 2*50)/250 = 6.8. sum_delay_sec
+            # is an exact multiple of avg_min*60*samples here, so exact-sum
+            # pooling agrees with the values above (dedicated exactness
+            # coverage lives in test_forecast_heatmap.py).
+            (aid, "100", "平日", 1, 12, 8.0, 200, int(8.0 * 60 * 200)),
+            (aid, "100", "平日", 1, 9, 2.0, 50, int(2.0 * 60 * 50)),
             # route 200: huge but low-sample (4 < 30) -> excluded from worst, muted, sorted last
-            (aid, "200", "平日", 3, 17, 40.0, 4),
+            (aid, "200", "平日", 3, 17, 40.0, 4, int(40.0 * 60 * 4)),
         ],
     )
     daily_rows = [

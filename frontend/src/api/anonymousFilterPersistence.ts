@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "./auth";
+import { computeAnchorRange } from "./defaultRangeAnchor";
+import { useAgencies } from "./hooks";
 import type { DowFilter, ServiceFilter, TimeBand } from "./rangeContext";
 
 type StoredFilter = {
@@ -58,10 +60,21 @@ function writeStored(agencyId: number, value: StoredFilter): void {
  * Logged-in users are intentionally unaffected (this hook no-ops once
  * `session` is present) — their filters already benefit from the explicit,
  * durable presets feature instead.
+ *
+ * Defers entirely to `useDefaultRangeAnchor` (via the shared, pure
+ * `computeAnchorRange`) whenever both would act on the same fresh visit: a
+ * verified-non-empty anchored window is a correctness floor (never show a
+ * guaranteed-empty default), while restoring a remembered filter is a
+ * convenience on top that must not silently reintroduce the empty-view
+ * problem the anchor exists to prevent. Both hooks read the same
+ * already-cached `agencies` data and the same `params` at the same render,
+ * so this produces a deterministic precedence without either hook needing
+ * to know about the other's internal state or effect timing.
  */
 export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();
   const [params, setParams] = useSearchParams();
+  const { data: agencies } = useAgencies();
   // Tracks which agency we've already attempted a restore for, so an
   // explicit in-session reset (which clears every filter param) doesn't
   // immediately get overwritten by a re-restore of the old stored value.
@@ -69,6 +82,7 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
 
   useEffect(() => {
     if (isLoading || session || agencyId == null) return;
+    if (computeAnchorRange(agencyId, agencies, params)) return;
 
     const hasAnyFilterParam = Boolean(
       SCALAR_FILTER_KEYS.some((key) => params.get(key)) || params.get("routes"),
@@ -133,5 +147,5 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'
     // return value on `location.search`, so this only re-runs when the URL's
     // query string actually changes, not on every unrelated render.
-  }, [agencyId, isLoading, session, params, setParams]);
+  }, [agencyId, isLoading, session, params, setParams, agencies]);
 }

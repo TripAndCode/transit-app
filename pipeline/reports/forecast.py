@@ -6,14 +6,16 @@ agg_route_hour_dow across service types per (dow, hour) — and passes the
 per-cell rows here.
 
 This is a seasonal-naive baseline ("expected delay"), NOT a prediction — see
-DELAY_ANALYSIS.md. Only the sample-weighted mean is reported. Pooling is exact
-only when each contributing bucket's exact raw-seconds sum is divided once at
-the end (SUM(sum_delay_sec) / SUM(samples)); re-weighting an already-rounded
-per-bucket avg_min instead (SUM(avg_min * samples) / SUM(samples)) carries a
-small but real systematic rounding error, since a weighted mean of ROUNDED
-per-bucket averages does not equal the true pooled mean. Percentiles are not
-reported (a weighted mean of per-bucket percentiles is not the pooled
-percentile, and percentiles cannot be recovered from per-bucket percentiles).
+DELAY_ANALYSIS.md. Only the sample-weighted mean is reported. The endpoint SQL
+pools each contributing bucket's exact raw-seconds sum once, at the end
+(SUM(sum_delay_sec) / SUM(samples)), so the `avg_min` this module receives is
+already the exact pooled mean, not a re-weighting of an already-rounded
+per-bucket average — further Python-side pooling of these already-exact
+per-bucket means (see `_pooled` below) stays exact for the same reason: a
+weighted mean of EXACT per-bucket averages equals the true pooled mean, unlike
+a weighted mean of rounded ones. Percentiles are not reported (a weighted mean
+of per-bucket percentiles is not the pooled percentile, and percentiles cannot
+be recovered from per-bucket percentiles).
 """
 
 from collections.abc import Iterable, Mapping
@@ -56,10 +58,11 @@ def summarize_expected_delay_heatmap(
     """Fill a full ISODOW(1..7) × hour(0..23) grid — 168 cells. Pure.
 
     `rows`: per-(dow,hour) pooled mappings with keys ``dow``, ``hour``,
-    ``avg_min`` (may be None), ``samples``. The endpoint SQL sample-weights
-    ``avg_min`` across service types, so it is already the exact pooled mean;
-    this lays it on the grid (missing cells → null/0) and flags low confidence.
-    No percentile (cannot pool per-bucket percentiles).
+    ``avg_min`` (may be None), ``samples``. The endpoint SQL pools
+    ``avg_min`` across service types via the exact raw-seconds sum
+    (SUM(sum_delay_sec) / SUM(samples)), so it is already the exact pooled
+    mean; this lays it on the grid (missing cells → null/0) and flags low
+    confidence. No percentile (cannot pool per-bucket percentiles).
     """
     by = {(int(r["dow"]), int(r["hour"])): r for r in rows if r["avg_min"] is not None and r["samples"]}
     cells: list[dict[str, Any]] = []
@@ -142,14 +145,13 @@ def summarize_agency_overview(
     — attached per route as `recent_daily`, sorted oldest first. Missing calendar
     days (no agg_route_daily row, e.g. no service that day) are simply omitted
     rather than null-padded, so `recent_daily`'s point spacing reflects "days
-    observed," not a calendar-uniform week. Pooling a bucket's sample-weighted
-    mean is exact only when it divides an exact raw-seconds sum once, at the
-    end; re-weighting an already-rounded per-bucket avg_min instead (what
-    `grid_rows`/`route_rows` carry in) has a small but real systematic
-    rounding error, since a weighted mean of ROUNDED per-bucket averages does
-    not equal the true pooled mean. The worst window excludes low-confidence
-    buckets so a small-sample fluke can never headline. No percentile (cannot
-    pool per-bucket percentiles).
+    observed," not a calendar-uniform week. `grid_rows`/`route_rows` carry in
+    each bucket's exact pooled mean (the endpoint SQL divides an exact
+    raw-seconds sum once, at the end: SUM(sum_delay_sec) / SUM(samples)), so
+    the further Python-side sample-weighted pooling done here stays exact — a
+    weighted mean of EXACT per-bucket averages equals the true pooled mean.
+    The worst window excludes low-confidence buckets so a small-sample fluke
+    can never headline. No percentile (cannot pool per-bucket percentiles).
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     buckets: dict[tuple[int, str], list[tuple[float, int]]] = {}
