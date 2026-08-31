@@ -349,7 +349,7 @@ async def test_dow_ranking_pools_exact_sum_not_rounded_avg_min(reports_client, c
     resp = await client.get(f"/api/{agency_id}/reports/dow_weekday?from=2026-05-01&to=2026-05-07")
     rows = resp.json()["rows"]
     row = next(r for r in rows if r[0] == "R_POOL")
-    assert row[3] == 1.37  # avg_min column -- NOT the buggy re-weighted 1.38
+    assert float(row[3]) == 1.37  # avg_min column -- NOT the buggy re-weighted 1.38
 
 
 @pytest.mark.asyncio

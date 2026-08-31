@@ -18,6 +18,7 @@ def test_single_route_single_service_type_passthrough():
         "route_code": "44372",
         "avg_delay_sec": 480,
         "samples": 50,
+        "sum_delay_sec": 24000,
     }
 
 

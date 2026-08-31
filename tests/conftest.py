@@ -81,6 +81,13 @@ def _redirect_to_test_db() -> None:
         conn.close()
 
 
+os.environ.setdefault("DATABASE_URL", "postgresql://transit:transit@localhost:5544/transit_test")
+os.environ.setdefault("RUN_CH_INTEGRATION", "1")
+os.environ.setdefault("CLICKHOUSE_HOST", "localhost")
+os.environ.setdefault("CLICKHOUSE_PORT", "8124")
+os.environ.setdefault("CLICKHOUSE_USER", "transit")
+os.environ.setdefault("CLICKHOUSE_PASSWORD", "transit")
+os.environ.setdefault("CLICKHOUSE_DATABASE", "transit_test")
 _redirect_to_test_db()
 DATABASE_URL = os.environ["DATABASE_URL"]
 

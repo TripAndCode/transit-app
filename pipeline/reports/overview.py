@@ -669,8 +669,10 @@ async def _top_delayed_routes(
     three stats and the routes list all describe the same snapshot.
 
     Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
-    each route's true weighted average (SUM(avg_min*samples)/SUM(samples)),
-    not _concentration()'s "total lateness contribution" sum — a route with
+    each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
+    dividing once at the end rather than re-weighting each day's already-
+    rounded avg_min — see pipeline/analyze.py's module docstring), not
+    _concentration()'s "total lateness contribution" sum — a route with
     few samples but a high average must outrank a route with more samples
     but a lower average, which _concentration()'s metric would get backwards.
     Slow path reads the shared grain (:func:`_fetch_grain`) for a non-default
@@ -681,11 +683,13 @@ async def _top_delayed_routes(
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT route_code,\n"
-            "       SUM(avg_min * samples)::float / NULLIF(SUM(samples), 0) AS avg_min\n"
+            "       SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0 AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0\n"
+            # sum_delay_sec is nullable (unlike samples); guard against a NULL
+            # pooled average reaching the unguarded round(float(...)) below.
+            "HAVING SUM(samples) > 0 AND SUM(sum_delay_sec) IS NOT NULL\n"
             # Ties broken by route_code, same as the slow path just below and
             # as _concentration()'s fast path.
             "ORDER BY avg_min DESC NULLS LAST, route_code",
@@ -755,7 +759,7 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     where_clause = (" AND " + " AND ".join(parts)) if parts else ""
     sql = (
         "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+        "       (SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0) AS avg_min\n"
         "FROM agg_route_hour\n"
         f"WHERE agency_id=$1{where_clause}\n"
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)"

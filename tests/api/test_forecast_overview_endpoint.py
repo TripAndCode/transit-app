@@ -49,21 +49,27 @@ async def overview_client(apply_schema):
             (aid, "200", "平日", 3, 17, 40.0, 4),
         ],
     )
+    daily_rows = [
+        # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
+        # 7-day window at agency, not route, grain — but only route 100
+        # has any agg_route_daily rows here). Window is
+        # (latest-7, latest] = (2026-05-26, 2026-06-02].
+        (aid, date(2026, 5, 26), "100", "平日", 600, 600, 5, 50),  # 10.0 min — latest-7, EXCLUDED
+        (aid, date(2026, 5, 27), "100", "平日", 60, 60, 5, 50),  # 1.0 min — latest-6, INCLUDED (oldest in-window)
+        (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
+        (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
+    ]
     await pool.executemany(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
         "trips_observed, samples, last_seen_at, sum_delay_sec) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$5*$8)",
-        [
-            # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
-            # 7-day window at agency, not route, grain — but only route 100
-            # has any agg_route_daily rows here). Window is
-            # (latest-7, latest] = (2026-05-26, 2026-06-02].
-            (aid, date(2026, 5, 26), "100", "平日", 600, 600, 5, 50),  # 10.0 min — latest-7, EXCLUDED
-            (aid, date(2026, 5, 27), "100", "平日", 60, 60, 5, 50),  # 1.0 min — latest-6, INCLUDED (oldest in-window)
-            (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
-            (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
-        ],
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)",
+        # sum_delay_sec computed in Python (avg_delay_sec * samples, exact
+        # reconstruction) rather than in SQL: asyncpg's prepared-statement
+        # type inference can't resolve a bare "$5*$8" (both operands
+        # deduced as "unknown" from position alone) without conflicting
+        # explicit casts on a parameter already typed by its own column.
+        [(*row, row[4] * row[7]) for row in daily_rows],
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, aid, aid_empty

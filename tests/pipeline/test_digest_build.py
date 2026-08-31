@@ -64,9 +64,9 @@ def _seed(pg_conn, agency_id):
         for route, avg_min, p90_min in (("44372", 3.0, 5.0), ("12", 2.0, 4.0)):
             cur.execute(
                 "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-                "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples) "
-                "VALUES (%s, %s, '平日', %s, %s, %s, 0, 90.0, 1.0, 500)",
-                (agency_id, route, avg_min, avg_min, p90_min),
+                "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples, sum_delay_sec) "
+                "VALUES (%s, %s, '平日', %s, %s, %s, 0, 90.0, 1.0, 500, %s)",
+                (agency_id, route, avg_min, avg_min, p90_min, round(avg_min * 60 * 500)),
             )
         cur.execute(
             "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, 3400, 12)",
@@ -139,12 +139,19 @@ def _insert_daily(cur, agency_id, route, service_type, avg_sec, samples, sum_del
     )
 
 
-def _insert_stats(cur, agency_id, route, service_type, avg_min, p90_min, samples=500):
+def _insert_stats(cur, agency_id, route, service_type, avg_min, p90_min, samples=500, sum_delay_sec=None):
+    """Seed one agg_route_stats row. ``sum_delay_sec`` defaults to the exact
+    ``avg_min * 60 * samples`` reconstruction (matching what analyze() would
+    emit when ``avg_min`` is itself exact) so _ROUTE_BASELINE_SQL's FILTERed
+    pooling has a real value to sum, not a NULL that would drop the route to
+    no_baseline; pass it explicitly to test rounding divergence."""
+    if sum_delay_sec is None:
+        sum_delay_sec = round(avg_min * 60 * samples)
     cur.execute(
         "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-        "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples) "
-        "VALUES (%s, %s, %s, %s, %s, %s, 0, 90.0, 1.0, %s)",
-        (agency_id, route, service_type, avg_min, avg_min, p90_min, samples),
+        "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples, sum_delay_sec) "
+        "VALUES (%s, %s, %s, %s, %s, %s, 0, 90.0, 1.0, %s, %s)",
+        (agency_id, route, service_type, avg_min, avg_min, p90_min, samples, sum_delay_sec),
     )
 
 
@@ -299,7 +306,11 @@ def test_route_baseline_sql_p90_pooling_ignores_null_p90_rows(pg_conn, agency_id
         (route_code, base_avg_min, base_p90_min) = cur.fetchone()
 
     assert route_code == "R1"
-    assert base_avg_min == pytest.approx((2.0 * 3 + 4.0 * 500) / 503)
+    # base_avg_min comes back as decimal.Decimal (the SQL's ::numeric cast);
+    # pytest.approx can't subtract a Decimal from a float expected value, so
+    # cast to float first, matching this file's other base_avg_min assertion
+    # (test_route_baseline_sql_pools_exact_sum_delay_sec_not_rounded_avg_min).
+    assert float(base_avg_min) == pytest.approx((2.0 * 3 + 4.0 * 500) / 503)
     # Must equal the healthy group's own p90 exactly (the only contributor) --
     # NOT diluted to 10.0*500/503 ~= 9.94 by including the null-p90 row's
     # samples in the denominator.
