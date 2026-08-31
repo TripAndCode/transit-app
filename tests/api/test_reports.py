@@ -814,6 +814,56 @@ async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_
     assert offender["avg_min"] == 1.37
 
 
+async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucket_avg(aconn, aagency_id):
+    """A bucket's Python-side pooling (``by_date_samples`` /
+    ``by_date_weighted_sec``) must exclude a (route, service) group whose
+    ``sum_delay_sec`` is still NULL (migration 0028's column is nullable —
+    any ``agg_daily_trend`` row analyze() hasn't rewritten since that
+    migration can be in this state) from BOTH the numerator and the
+    denominator, not just the numerator.
+
+    Same day, two routes each clearing the ``HAVING SUM(samples) > 5`` gate
+    on their own: R_NULL (6 samples, sum_delay_sec NULL) must contribute 0
+    to the bucket average; R_OK (6 samples, raw-seconds sum 360 -> exact
+    1.0 min) is the only group that should determine it. Pre-fix, R_NULL's
+    6 samples would still land in ``by_date_samples`` while contributing
+    nothing to ``by_date_weighted_sec``, giving (0+360)/12/60=0.5 instead of
+    the correct 360/6/60=1.0.
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    day = date(2026, 5, 20)
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        day.isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        6,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_OK', '平日', $3, $4, $5)",
+        aagency_id,
+        day.isoformat(),
+        1.0,
+        6,
+        360,
+    )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    out = await compute_trend_series(aagency_id, ctx, aconn)
+    days = out["days"]
+    assert len(days) == 1
+    assert days[0]["samples"] == 6  # R_NULL's samples excluded, not counted alongside R_OK's
+    assert days[0]["avg_min"] == 1.0  # NOT the buggy 0.5 from counting R_NULL's samples
+
+
 # ---------------------------------------------------------------------------
 # GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
 # tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_

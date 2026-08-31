@@ -276,6 +276,54 @@ async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aag
 
 
 @pytest.mark.asyncio
+async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples(aconn, aagency_id):
+    """A row with ``samples`` set but ``sum_delay_sec`` still NULL (migration
+    0028's column is nullable on every table — any ``agg_daily_trend`` row
+    analyze() hasn't rewritten since that migration can be in this state)
+    must be excluded from BOTH avg_min's numerator AND denominator, not just
+    silently dropped from the numerator while still counted in the
+    denominator (which would bias avg_min down). The returned ``samples``
+    count, by contrast, stays the TRUE total across every row regardless of
+    whether sum_delay_sec is populated — a distinct "how much data backs
+    this figure" count, per pipeline/reports/overview.py's _per_route_avg
+    docstring convention.
+
+    Day 1 (5 samples, sum_delay_sec NULL) must contribute 0 to avg_min's
+    pooling; day 2 (5 samples, raw-seconds sum 300 -> exact avg 1.0 min) is
+    the only day that should determine avg_min. Pre-fix, day 1's 5 samples
+    would still land in SUM(samples) while contributing nothing to
+    SUM(sum_delay_sec), giving (0+300)/10/60=0.5 instead of the correct
+    (300)/5/60=1.0.
+    """
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        date(2026, 5, 23).isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        5,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, $5)",
+        aagency_id,
+        date(2026, 5, 24).isoformat(),
+        1.0,
+        5,
+        300,
+    )
+
+    from pipeline.reports.overview import _headline_stats
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
+    assert samples_out == 10  # true total across both rows
+    assert avg == 1.0  # NOT the buggy 0.5 from counting the NULL row's samples
+
+
+@pytest.mark.asyncio
 async def test_baseline_is_shifted_one_week_back(aconn, aagency_id):
     """This-week avg = 4.0 min; baseline-week avg = 2.0 min ->
     delta = +2.0 min, +100%.

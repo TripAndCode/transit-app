@@ -14,41 +14,25 @@
 -- over the same raw rows — dividing once instead of re-weighting an
 -- intermediate rounded average.
 --
--- Nullable to match each table's existing avg_min/samples nullability (all were
--- left nullable back in migration 0001, even though a GROUP BY row always has
--- >= 1 sample in practice) — except agg_route_daily, whose avg_delay_sec/samples
--- were declared NOT NULL from the start (migration 0018), so sum_delay_sec
--- follows suit there.
+-- Nullable on every table, including agg_route_daily (whose avg_delay_sec/
+-- samples are themselves NOT NULL, migration 0018) — this column is populated
+-- going forward by pipeline/analyze.py, not by this migration, so it must
+-- tolerate being NULL on any row analyze() hasn't rewritten yet.
 --
--- Backfilled from the existing (rounded) avg_min/avg_delay_sec so the column is
--- never silently NULL against a non-NULL samples count before the next
--- analyze() run (which unconditionally DELETEs + re-INSERTs every agg_* row
--- for an agency, so this backfill is only ever a stopgap for the
--- this-migration to next-analyze() window). The backfilled value carries the
--- SAME rounding error the fix eliminates going forward — analyze() must be
--- re-run (`make analyze-all`) per agency for sum_delay_sec to become exact.
+-- Deliberately NOT backfilled: analyze() unconditionally DELETEs + re-INSERTs
+-- every agg_* row for an agency, so any value this migration computed here
+-- would carry the SAME rounding error the fix eliminates going forward and
+-- get immediately discarded by the next `make analyze-all` (which must run
+-- after this migration regardless, per this repo's own aggregate-rebuild
+-- convention). A bare ADD COLUMN with no default is a metadata-only change on
+-- Postgres — skipping the backfill avoids rewriting all six tables, and
+-- skipping NOT NULL avoids a table lock held for a validating full-table scan
+-- and a window where analyze() code older than this migration would violate
+-- the constraint. Every reader of sum_delay_sec must already treat it as
+-- nullable until `make analyze-all` completes.
 ALTER TABLE agg_route_stats ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_route_stats SET sum_delay_sec = ROUND(avg_min::numeric * samples * 60)
-    WHERE sum_delay_sec IS NULL AND avg_min IS NOT NULL AND samples IS NOT NULL;
-
 ALTER TABLE agg_route_hour ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_route_hour SET sum_delay_sec = ROUND(avg_min::numeric * samples * 60)
-    WHERE sum_delay_sec IS NULL AND avg_min IS NOT NULL AND samples IS NOT NULL;
-
 ALTER TABLE agg_route_dow ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_route_dow SET sum_delay_sec = ROUND(avg_min::numeric * samples * 60)
-    WHERE sum_delay_sec IS NULL AND avg_min IS NOT NULL AND samples IS NOT NULL;
-
 ALTER TABLE agg_route_hour_dow ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_route_hour_dow SET sum_delay_sec = ROUND(avg_min::numeric * samples * 60)
-    WHERE sum_delay_sec IS NULL AND avg_min IS NOT NULL AND samples IS NOT NULL;
-
 ALTER TABLE agg_daily_trend ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_daily_trend SET sum_delay_sec = ROUND(avg_min::numeric * samples * 60)
-    WHERE sum_delay_sec IS NULL AND avg_min IS NOT NULL AND samples IS NOT NULL;
-
--- avg_delay_sec is already whole seconds (not minutes), so no *60 here.
 ALTER TABLE agg_route_daily ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
-UPDATE agg_route_daily SET sum_delay_sec = ROUND(avg_delay_sec::numeric * samples)
-    WHERE sum_delay_sec IS NULL;
-ALTER TABLE agg_route_daily ALTER COLUMN sum_delay_sec SET NOT NULL;

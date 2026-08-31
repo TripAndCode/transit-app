@@ -75,3 +75,33 @@ def test_pools_exact_sum_delay_sec_not_rounded_avg_delay_sec():
     old_buggy_result = round((100 * 7 + 101 * 3) / 10)
     assert old_buggy_result == 100
     assert out[0]["avg_delay_sec"] != old_buggy_result
+
+
+def test_null_sum_delay_sec_row_is_skipped_not_crashed_on():
+    """sum_delay_sec is nullable (migration 0028) -- any agg_route_daily row
+    analyze() hasn't rewritten since that migration can have samples set but
+    sum_delay_sec still None. A naive unconditional ``+=`` would raise
+    TypeError (int += NoneType); this helper must instead skip such a row
+    entirely (excluded from both the numerator and the denominator, not just
+    the numerator) so the surviving route-level entry is undistorted.
+    """
+    rows = [
+        ("44372", None, 50, None),  # not yet rewritten by analyze() -- must not crash
+        ("44372", 480, 50, 480 * 50),
+    ]
+    out = _aggregate_by_route(rows)
+    assert len(out) == 1
+    e = out[0]
+    # The None row's samples must NOT be folded in alongside the populated
+    # row's -- only the populated row contributes.
+    assert e["samples"] == 50
+    assert e["avg_delay_sec"] == 480
+    assert e["sum_delay_sec"] == 24000
+
+
+def test_all_rows_null_sum_delay_sec_yields_no_entry():
+    """A route with every service_type row still unbackfilled must vanish
+    from the output entirely, not appear with a misleading zeroed average."""
+    rows = [("44372", None, 50, None)]
+    out = _aggregate_by_route(rows)
+    assert out == []

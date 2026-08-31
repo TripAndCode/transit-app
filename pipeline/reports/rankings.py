@@ -380,7 +380,12 @@ async def compute_dow_ranking(
     sql = (
         # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
         f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
-        "       ROUND((SUM(sum_delay_sec)::numeric / NULLIF(SUM(samples), 0) / 60.0), 2) AS avg_min,\n"
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see pipeline/reports/overview.py's
+        # _route_weekly_history for the identical rationale. `samples` below
+        # stays the TRUE total (unfiltered) count.
+        "       ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2) AS avg_min,\n"
         "       SUM(samples)::int AS samples\n"
         "FROM agg_daily_trend\n"
         f"WHERE agency_id = $1 AND {where}\n"
@@ -449,15 +454,24 @@ async def compute_compare_ranking(
     where, params, n = _agg_filter(agg_ctx, next_param=2)
     wd = "EXTRACT(ISODOW FROM date::date) BETWEEN 1 AND 5"
     we = "EXTRACT(ISODOW FROM date::date) IN (6, 7)"
+    # sum_delay_sec is nullable (unlike samples); each side's numerator AND
+    # denominator (including the wd_n/we_n minimum-sample gate below) are
+    # additionally FILTERed to sum_delay_sec IS NOT NULL so a row with
+    # samples set but sum_delay_sec still NULL can't inflate wd_n/we_n past
+    # the >10 gate while contributing nothing to wd_avg/we_avg — same
+    # matched-population rationale as pipeline/reports/overview.py's
+    # _route_weekly_history.
+    wd_pop = f"{wd} AND sum_delay_sec IS NOT NULL"
+    we_pop = f"{we} AND sum_delay_sec IS NOT NULL"
     sql = (
         "WITH per_route AS (\n"
         "    SELECT route_code,\n"
-        f"           SUM(sum_delay_sec) FILTER (WHERE {wd})::numeric\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd}), 0) / 60.0 AS wd_avg,\n"
-        f"           SUM(samples) FILTER (WHERE {wd}) AS wd_n,\n"
-        f"           SUM(sum_delay_sec) FILTER (WHERE {we})::numeric\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {we}), 0) / 60.0 AS we_avg,\n"
-        f"           SUM(samples) FILTER (WHERE {we}) AS we_n\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {wd_pop})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd_pop}), 0) / 60.0 AS wd_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {wd_pop}) AS wd_n,\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {we_pop})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {we_pop}), 0) / 60.0 AS we_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {we_pop}) AS we_n\n"
         "    FROM agg_daily_trend\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "    GROUP BY route_code\n"
@@ -707,8 +721,15 @@ async def compute_trend_series(
         # Per-(bucket, route, service) display average, rounded once straight
         # from the exact raw-seconds sum (half-up, matching Postgres ROUND()).
         avg = float(_round2(sum_sec / n / 60.0)) if n and sum_sec is not None else None
-        by_date_samples[d] = by_date_samples.get(d, 0) + n
+        # sum_delay_sec is nullable (unlike samples); only add a group's n to
+        # by_date_samples alongside its sum_sec to by_date_weighted_sec — both
+        # dicts must describe the same row population, or the bucket-level
+        # avg_min computed from them below would be silently biased down by
+        # a group whose samples counted here but whose delay total didn't
+        # (matches pipeline/reports/overview.py's identical FILTER rationale
+        # applied at the SQL layer for other queries).
         if sum_sec is not None:
+            by_date_samples[d] = by_date_samples.get(d, 0) + n
             by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
         by_date.setdefault(d, []).append(
             {
@@ -721,7 +742,11 @@ async def compute_trend_series(
 
     daily = []
     for d in sorted(by_date.keys()):
-        n = by_date_samples[d]
+        # by_date always gets an entry per bucket (line above, unconditional);
+        # by_date_samples only gets one when at least one group's sum_delay_sec
+        # was populated (see the loop above) — a bucket where every group is
+        # still NULL has no by_date_samples entry at all, not just a zero one.
+        n = by_date_samples.get(d, 0)
         # Whole-bucket total pooled from every route/service group's exact
         # raw-seconds sum, dividing once at the end — NOT from re-weighting
         # each group's already-rounded display avg_min above.

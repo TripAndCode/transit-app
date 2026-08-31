@@ -86,10 +86,19 @@ def _aggregate_by_route(rows):
     also returned (exact, raw seconds) so build_digest's own further pooling across
     routes into an agency/network average can sum it directly instead of
     re-weighting this function's rounded per-route ``avg_delay_sec`` a second time.
+
+    ``sum_delay_sec`` is nullable (migration 0028) — a row can have ``samples``
+    set but ``sum_delay_sec`` still NULL (any ``agg_route_daily`` row analyze()
+    hasn't rewritten since that migration). Such a row is skipped entirely
+    (not just its numerator term, unlike SQL's SUM) so ``samples`` never counts
+    a row this function's own Python ``+=`` can't otherwise add — matching the
+    FILTER-both-sides pattern used everywhere else in this module.
     """
     acc: dict[str, dict] = {}
     order: list[str] = []
     for route_code, _avg_delay_sec, samples, sum_delay_sec in rows:
+        if sum_delay_sec is None:
+            continue
         e = acc.get(route_code)
         if e is None:
             e = {"route_code": route_code, "_delay_sum": 0, "samples": 0}
