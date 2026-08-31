@@ -57,16 +57,16 @@ def _seed(pg_conn, agency_id):
         for route, avg_sec in (("44372", 480), ("12", 120)):
             cur.execute(
                 "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-                "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-                "VALUES (%s, %s, %s, '平日', %s, %s, 10, 50, %s)",
-                (agency_id, DAY, route, avg_sec, avg_sec * 2, "2026-04-02T11:37:00+09:00"),
+                "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+                "VALUES (%s, %s, %s, '平日', %s, %s, 10, 50, %s, %s)",
+                (agency_id, DAY, route, avg_sec, avg_sec * 2, "2026-04-02T11:37:00+09:00", avg_sec * 50),
             )
         for route, avg_min, p90_min in (("44372", 3.0, 5.0), ("12", 2.0, 4.0)):
             cur.execute(
                 "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-                "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples) "
-                "VALUES (%s, %s, '平日', %s, %s, %s, 0, 90.0, 1.0, 500)",
-                (agency_id, route, avg_min, avg_min, p90_min),
+                "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples, sum_delay_sec) "
+                "VALUES (%s, %s, '平日', %s, %s, %s, 0, 90.0, 1.0, 500, %s)",
+                (agency_id, route, avg_min, avg_min, p90_min, round(avg_min * 60 * 500)),
             )
         cur.execute(
             "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, 3400, 12)",
@@ -114,21 +114,44 @@ def test_build_digest_excludes_deleted_agency(pg_conn, agency_id):
     assert agency_id in [s.agency_id for s in data.sections]
 
 
-def _insert_daily(cur, agency_id, route, service_type, avg_sec, samples):
+def _insert_daily(cur, agency_id, route, service_type, avg_sec, samples, sum_delay_sec=None):
+    """Seed one agg_route_daily row. ``sum_delay_sec`` defaults to the exact
+    ``avg_sec * samples`` reconstruction (matching what analyze() would emit
+    when ``avg_sec`` is itself exact); pass it explicitly to test rounding
+    divergence between the two."""
+    if sum_delay_sec is None:
+        sum_delay_sec = avg_sec * samples
     cur.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, 10, %s, %s)",
-        (agency_id, DAY, route, service_type, avg_sec, avg_sec * 2, samples, "2026-04-02T11:37:00+09:00"),
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES (%s, %s, %s, %s, %s, %s, 10, %s, %s, %s)",
+        (
+            agency_id,
+            DAY,
+            route,
+            service_type,
+            avg_sec,
+            avg_sec * 2,
+            samples,
+            "2026-04-02T11:37:00+09:00",
+            sum_delay_sec,
+        ),
     )
 
 
-def _insert_stats(cur, agency_id, route, service_type, avg_min, p90_min, samples=500):
+def _insert_stats(cur, agency_id, route, service_type, avg_min, p90_min, samples=500, sum_delay_sec=None):
+    """Seed one agg_route_stats row. ``sum_delay_sec`` defaults to the exact
+    ``avg_min * 60 * samples`` reconstruction (matching what analyze() would
+    emit when ``avg_min`` is itself exact) so _ROUTE_BASELINE_SQL's FILTERed
+    pooling has a real value to sum, not a NULL that would drop the route to
+    no_baseline; pass it explicitly to test rounding divergence."""
+    if sum_delay_sec is None:
+        sum_delay_sec = round(avg_min * 60 * samples)
     cur.execute(
         "INSERT INTO agg_route_stats (agency_id, route_code, service_type, "
-        "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples) "
-        "VALUES (%s, %s, %s, %s, %s, %s, 0, 90.0, 1.0, %s)",
-        (agency_id, route, service_type, avg_min, avg_min, p90_min, samples),
+        "avg_min, p50_min, p90_min, late_5min_plus, on_time_pct, late5_pct, samples, sum_delay_sec) "
+        "VALUES (%s, %s, %s, %s, %s, %s, 0, 90.0, 1.0, %s, %s)",
+        (agency_id, route, service_type, avg_min, avg_min, p90_min, samples, sum_delay_sec),
     )
 
 
@@ -283,11 +306,54 @@ def test_route_baseline_sql_p90_pooling_ignores_null_p90_rows(pg_conn, agency_id
         (route_code, base_avg_min, base_p90_min) = cur.fetchone()
 
     assert route_code == "R1"
-    assert base_avg_min == pytest.approx((2.0 * 3 + 4.0 * 500) / 503)
+    # base_avg_min comes back as decimal.Decimal (the SQL's ::numeric cast);
+    # pytest.approx can't subtract a Decimal from a float expected value, so
+    # cast to float first, matching this file's other base_avg_min assertion
+    # (test_route_baseline_sql_pools_exact_sum_delay_sec_not_rounded_avg_min).
+    assert float(base_avg_min) == pytest.approx((2.0 * 3 + 4.0 * 500) / 503)
     # Must equal the healthy group's own p90 exactly (the only contributor) --
     # NOT diluted to 10.0*500/503 ~= 9.94 by including the null-p90 row's
     # samples in the denominator.
     assert base_p90_min == pytest.approx(10.0)
+
+
+def test_route_baseline_sql_pools_exact_sum_delay_sec_not_rounded_avg_min(pg_conn, agency_id):
+    """_ROUTE_BASELINE_SQL's base_avg_min must pool each service_type's EXACT
+    sum_delay_sec, not re-weight each service_type's already-rounded avg_min.
+
+    Two service_types for the same route: 3 samples whose raw-seconds sum is
+    124 (analyze() would round that group's own avg_min to 0.69 min) and 7
+    samples whose raw-seconds sum is 700 (rounds to 1.67 min). Pooling the
+    exact sums gives (124+700)/10/60 = 1.37333... min; re-weighting the
+    rounded 0.69/1.67 instead (the pre-fix pattern) gives
+    (0.69*3 + 1.67*7)/10 = 1.376 min -- these round to a different whole
+    second (82 vs 83) once converted the way build_digest actually consumes
+    this figure, proving the two methods diverge."""
+    from pipeline.digest.build import _ROUTE_BASELINE_SQL
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES (%s, 'R1', '平日', 0.69, 3, 124)",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO agg_route_stats (agency_id, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES (%s, 'R1', '土日', 1.67, 7, 700)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    with pg_conn.cursor() as cur:
+        cur.execute(_ROUTE_BASELINE_SQL, {"aid": agency_id})
+        (route_code, base_avg_min, _base_p90_min) = cur.fetchone()
+
+    assert route_code == "R1"
+    exact_sec = round(float(base_avg_min) * 60)
+    buggy_sec = round((0.69 * 3 + 1.67 * 7) / 10 * 60)
+    assert exact_sec == 82
+    assert buggy_sec == 83
+    assert exact_sec != buggy_sec
 
 
 def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):

@@ -342,8 +342,13 @@ async def _headline_stats(
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
         sql = (
-            "SELECT CASE WHEN SUM(samples) > 0\n"
-            "            THEN ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2)\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides of
+            # avg_min's division to the same row population — see
+            # _route_weekly_history's identical rationale. The returned
+            # `samples` column below stays the TRUE total (unfiltered) count.
+            "SELECT CASE WHEN SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
+            "            THEN ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "                / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
             "       COALESCE(SUM(samples), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
@@ -378,12 +383,19 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min,\n"
+            # See _route_weekly_history's identical FILTER rationale: match
+            # avg_min's numerator/denominator to the same sum_delay_sec
+            # IS NOT NULL row population. The returned `samples` column below
+            # stays the TRUE total (unfiltered) sample count — a distinct,
+            # legitimate "how much data backs this route" figure independent
+            # of whether sum_delay_sec has been backfilled yet.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
             "       SUM(samples)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(avg_min * samples) IS NOT NULL"
+            "HAVING SUM(samples) > 0 AND SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -482,7 +494,15 @@ async def _route_weekly_history(
             where_clause = f" AND ({where})" if where else ""
             rows = await conn.fetch(
                 "SELECT route_code,\n"
-                "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+                # sum_delay_sec is nullable (unlike samples); a row can have
+                # samples set but sum_delay_sec still NULL (pre-backfill row,
+                # hand-seeded fixture, or any row analyze() hasn't rewritten
+                # since migration 0028) — FILTER both sides to the same row
+                # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+                # silently dropped, matching pipeline/digest/build.py's
+                # _ROUTE_BASELINE_SQL.
+                "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+                "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
                 "FROM agg_daily_trend\n"
                 f"WHERE agency_id=$1{where_clause}\n"
                 f"  AND route_code = ANY(${n}::text[])\n"
@@ -669,8 +689,10 @@ async def _top_delayed_routes(
     three stats and the routes list all describe the same snapshot.
 
     Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
-    each route's true weighted average (SUM(avg_min*samples)/SUM(samples)),
-    not _concentration()'s "total lateness contribution" sum — a route with
+    each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
+    dividing once at the end rather than re-weighting each day's already-
+    rounded avg_min — see pipeline/analyze.py's module docstring), not
+    _concentration()'s "total lateness contribution" sum — a route with
     few samples but a high average must outrank a route with more samples
     but a lower average, which _concentration()'s metric would get backwards.
     Slow path reads the shared grain (:func:`_fetch_grain`) for a non-default
@@ -681,11 +703,17 @@ async def _top_delayed_routes(
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT route_code,\n"
-            "       SUM(avg_min * samples)::float / NULLIF(SUM(samples), 0) AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0\n"
+            # Guard against a NULL pooled average reaching the unguarded
+            # round(float(...)) below.
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             # Ties broken by route_code, same as the slow path just below and
             # as _concentration()'s fast path.
             "ORDER BY avg_min DESC NULLS LAST, route_code",
@@ -755,7 +783,11 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     where_clause = (" AND " + " AND ".join(parts)) if parts else ""
     sql = (
         "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+        # the same row population — see _route_weekly_history's identical
+        # rationale.
+        "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
         "FROM agg_route_hour\n"
         f"WHERE agency_id=$1{where_clause}\n"
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
@@ -916,7 +948,11 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT date, service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date, service_type\n"
@@ -1058,7 +1094,15 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); a row can have
+            # samples set but sum_delay_sec still NULL (pre-backfill row,
+            # hand-seeded fixture, or any row analyze() hasn't rewritten
+            # since migration 0028) — FILTER both sides to the same row
+            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+            # silently dropped, matching pipeline/digest/build.py's
+            # _ROUTE_BASELINE_SQL.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY service_type",
@@ -1095,7 +1139,15 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT date AS day,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); a row can have
+            # samples set but sum_delay_sec still NULL (pre-backfill row,
+            # hand-seeded fixture, or any row analyze() hasn't rewritten
+            # since migration 0028) — FILTER both sides to the same row
+            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+            # silently dropped, matching pipeline/digest/build.py's
+            # _ROUTE_BASELINE_SQL.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date\n"

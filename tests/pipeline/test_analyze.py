@@ -247,6 +247,90 @@ def test_analyze_creates_agg_daily_trend(pg_conn, agency_id, ch_client):
     assert count > 0
 
 
+def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, agency_id, ch_client):
+    """analyze() must store the exact raw-seconds sum alongside avg_min, so a
+    multi-row pool over agg_daily_trend can divide once at the end instead of
+    re-weighting each row's own already-rounded avg_min.
+
+    Day 1: 3 observations at 41s/41s/42s -> sum=124s, avg=41.333s (rounds to
+    0.69 min). Day 2: 7 observations at 100s each -> sum=700s, avg=100s
+    (rounds to 1.67 min). The true combined mean is 824s / 10 / 60 = 1.3733
+    min, which rounds to 1.37 -- but re-weighting the two ALREADY-ROUNDED
+    per-day avg_min values instead (the pre-fix pattern) gives
+    (0.69*3 + 1.67*7) / 10 = 1.376, which rounds to 1.38: a different, wrong
+    answer that exists purely because of the intermediate rounding.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for day, delays in (("2026-04-01", [41, 41, 42]), ("2026-04-02", [100] * 7)):
+            for dep in delays:
+                cur.execute(
+                    "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                    "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                    "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        agency_id,
+                        f"sdw{i}.pb",
+                        f"{day}T09:00:00",
+                        f"trip_sdw_{i}",
+                        "平日",
+                        time(9, 0),
+                        "SDW1",
+                        1,
+                        dep,
+                    ),
+                )
+                i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, samples, sum_delay_sec FROM agg_daily_trend "
+            "WHERE agency_id = %s AND route_code = 'SDW1' ORDER BY date",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+        assert len(rows) == 2
+        (_d1, n1, s1), (_d2, n2, s2) = rows
+        # sum_delay_sec is the exact SUM(dep_delay) behind each row's avg_min --
+        # not itself rounded, unlike avg_min.
+        assert (n1, s1) == (3, 124)
+        assert (n2, s2) == (7, 700)
+
+        # Fixed pooling: divide the exact raw-seconds sums once, at the end.
+        cur.execute(
+            "SELECT ROUND((SUM(sum_delay_sec)::numeric / SUM(samples) / 60.0), 2) "
+            "FROM agg_daily_trend WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        fixed_avg = float(cur.fetchone()[0])
+
+        # The bug this migration fixes: re-weighting each row's own
+        # already-rounded avg_min instead of the raw sum.
+        cur.execute(
+            "SELECT ROUND((SUM(avg_min * samples) / SUM(samples))::numeric, 2) "
+            "FROM agg_daily_trend WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        buggy_avg = float(cur.fetchone()[0])
+
+        # From-scratch cross-check directly over the raw per-observation data
+        # (mirrors the slow/live path, which averages raw seconds with no
+        # intermediate rounding) -- the fixed figure must match this exactly.
+        cur.execute(
+            "SELECT ROUND((AVG(dep_delay) / 60.0)::numeric, 2) FROM updates "
+            "WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        raw_avg = float(cur.fetchone()[0])
+
+    assert fixed_avg == 1.37
+    assert buggy_avg == 1.38
+    assert fixed_avg != buggy_avg
+    assert fixed_avg == raw_avg
+
+
 def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
     # _seed_updates schedules every row at 11:37 → all land in hour 11.
     _seed_updates(pg_conn, agency_id)

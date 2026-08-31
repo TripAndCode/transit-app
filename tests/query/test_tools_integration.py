@@ -235,8 +235,8 @@ async def test_is_route_registered_fast_path_hits_agg_route_daily_not_clickhouse
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'FASTPATH', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'FASTPATH', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     result = await _is_route_registered("FASTPATH", aconn, aagency_id, ch=_ExplodingChClient())
@@ -343,8 +343,8 @@ async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
     # analyzed route) -- simulates analyze() being stuck there.
     await aconn.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES ($1, $2, 'OTHERROUTE', 'weekday', 30, 60, 1, 5, $3)",
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, $2, 'OTHERROUTE', 'weekday', 30, 60, 1, 5, $3, 150)",
         aagency_id,
         horizon_date,
         now,
@@ -469,8 +469,8 @@ async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     await aconn.execute(
@@ -510,17 +510,19 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     for d, avg in zip(days, avgs, strict=True):
         await aconn.execute(
-            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
-            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20, $4)",
             aagency_id,
             d.isoformat(),
             avg,
+            round(avg * 60 * 20),
         )
     ctx = RangeCtx(from_date=days[0], to_date=days[-1])
     result = await dispatch("trend_shift", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja")

@@ -26,7 +26,7 @@ TOP_MOVERS = 5
 _AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
 
 _DAY_ROUTES_SQL = """
-    SELECT route_code, avg_delay_sec, samples
+    SELECT route_code, samples, sum_delay_sec
     FROM agg_route_daily
     WHERE agency_id = %(aid)s AND date = %(day)s
 """
@@ -34,17 +34,29 @@ _DAY_ROUTES_SQL = """
 # Route-grain baseline: aggregate agg_route_stats ACROSS service_types per route,
 # weighted by the baseline's OWN samples. Keyed by route_code so a NULL-service
 # ('') daily row still finds the route's overall baseline.
+# base_avg_min pools each service_type's EXACT sum_delay_sec (raw seconds),
+# dividing once at the end, rather than re-weighting each service_type's
+# already-rounded avg_min — see pipeline/analyze.py's module docstring.
+# Its numerator/denominator are both FILTERed to sum_delay_sec IS NOT NULL rows,
+# the same defensive pattern base_p90_min already used below: analyze()-written
+# rows always populate sum_delay_sec alongside samples together, but a row
+# written any other way (a pre-migration-backfill historical row, a hand-seeded
+# test fixture, or any future non-analyze() writer) could have samples set
+# without it -- SUM() silently skips a null numerator term but NOT its row's
+# sample count in the denominator, which would otherwise bias base_avg_min down
+# whenever any contributing service_type is missing the column.
 # base_p90_min's numerator/denominator are both FILTERed to the same
 # p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin groups, so
 # a service_type's p90_min can itself be null (a degenerate PERCENT_RANK
 # result) while its samples are not -- SUM() silently skips a null numerator
 # term but NOT its row's sample count in the denominator, which would
 # otherwise bias base_p90_min down whenever any contributing service_type is
-# thin. base_avg_min needs no such filter since AVG() is never null for a
-# non-empty group.
+# thin. Percentiles don't compose exactly across buckets (unlike the mean), so
+# base_p90_min stays a sample-weighted approximation of the rounded p90_min.
 _ROUTE_BASELINE_SQL = """
     SELECT route_code,
-           SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
+           SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+               / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
            SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
                / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min
     FROM agg_route_stats
@@ -61,24 +73,40 @@ _FEED_HEALTH_SQL = """
 def _aggregate_by_route(rows):
     """Collapse per-(route, service_type) day rows to one weighted entry per route_code.
 
-    Returns list of dicts: {route_code, avg_delay_sec, samples}.
+    Returns list of dicts: {route_code, avg_delay_sec, samples, sum_delay_sec}.
     A digest is per-route; multiple service_types on one day would otherwise yield
     duplicate-route_code movers (e.g. a typed + NULL-service row for the same route).
     The baseline is NOT part of this helper — it is looked up per route_code from a
     route-grain aggregate of agg_route_stats in build_digest.
 
-    ``rows`` are tuples ``(route_code, avg_delay_sec, samples)`` from
-    ``_DAY_ROUTES_SQL``; avg_delay_sec is sample-weighted across service_types.
+    ``rows`` are tuples ``(route_code, samples, sum_delay_sec)`` from
+    ``_DAY_ROUTES_SQL``; pools each service_type's EXACT sum_delay_sec and divides
+    once at the end, rather than re-weighting each service_type's already-rounded
+    per-row average — see pipeline/analyze.py's module docstring. This function's
+    OWN ``avg_delay_sec`` output key is derived from the pooled sum, not read from
+    a row. ``sum_delay_sec`` is also returned (exact, raw seconds) so build_digest's
+    own further pooling across routes into an agency/network average can sum it
+    directly instead of re-weighting this function's rounded per-route
+    ``avg_delay_sec`` a second time.
+
+    ``sum_delay_sec`` is nullable (migration 0028) — a row can have ``samples``
+    set but ``sum_delay_sec`` still NULL (any ``agg_route_daily`` row analyze()
+    hasn't rewritten since that migration). Such a row is skipped entirely
+    (not just its numerator term, unlike SQL's SUM) so ``samples`` never counts
+    a row this function's own Python ``+=`` can't otherwise add — matching the
+    FILTER-both-sides pattern used everywhere else in this module.
     """
     acc: dict[str, dict] = {}
     order: list[str] = []
-    for route_code, avg_delay_sec, samples in rows:
+    for route_code, samples, sum_delay_sec in rows:
+        if sum_delay_sec is None:
+            continue
         e = acc.get(route_code)
         if e is None:
-            e = {"route_code": route_code, "_delay_w": 0.0, "samples": 0}
+            e = {"route_code": route_code, "_delay_sum": 0, "samples": 0}
             acc[route_code] = e
             order.append(route_code)
-        e["_delay_w"] += avg_delay_sec * samples
+        e["_delay_sum"] += sum_delay_sec
         e["samples"] += samples
 
     out: list[dict] = []
@@ -88,8 +116,9 @@ def _aggregate_by_route(rows):
         out.append(
             {
                 "route_code": rc,
-                "avg_delay_sec": round(e["_delay_w"] / samples) if samples else 0,
+                "avg_delay_sec": round(e["_delay_sum"] / samples) if samples else 0,
                 "samples": samples,
+                "sum_delay_sec": e["_delay_sum"],
             }
         )
     return out
@@ -169,17 +198,29 @@ def build_digest(conn, target_day: date) -> DigestData:
             # Route-grain baseline (keyed by route_code, so '' NULL-service rows
             # still match). Convert minutes -> seconds for classify_route.
             base_avg_min, base_p90_min = baselines.get(e["route_code"], (None, None))
-            base_avg_sec = round(base_avg_min * 60) if base_avg_min is not None else None
+            # Unrounded (but cast to float -- base_avg_min comes back as
+            # decimal.Decimal from the ::numeric SQL cast, which can't mix with
+            # base_p90_sec's plain float/int below): classify_route accepts a
+            # float baseline, and Mover's own display re-rounds to 1 decimal at
+            # render time (see below) — rounding to whole seconds here would
+            # only lose precision before this value gets weighted into base_w,
+            # the same rounded-then-reweight pattern this diff eliminates
+            # everywhere else.
+            base_avg_sec = float(base_avg_min) * 60 if base_avg_min is not None else None
             base_p90_sec = round(base_p90_min * 60) if base_p90_min is not None else None
             bucket, deviation_sec, low_conf = classify_route(avg_delay_sec, base_avg_sec, base_p90_sec, samples)
-            delay_w += avg_delay_sec * samples
+            # delay_w/matched_delay_w pool EXACT per-route raw-seconds sums across
+            # routes (same underlying population: this agency's trips today), so
+            # they sum e["sum_delay_sec"] directly rather than re-weighting the
+            # already-rounded e["avg_delay_sec"] by samples a second time.
+            delay_w += e["sum_delay_sec"]
             samples_sum += samples
             # Weight each route's route-grain baseline by that route's TODAY
             # samples so the headline delta stays apples-to-apples with today's avg.
             if base_avg_sec is not None:
                 base_w += base_avg_sec * samples
                 base_samples += samples
-                matched_delay_w += avg_delay_sec * samples
+                matched_delay_w += e["sum_delay_sec"]
             if bucket in ("anomaly", "watch"):
                 movers.append(
                     Mover(

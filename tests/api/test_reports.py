@@ -329,6 +329,30 @@ async def test_dow_ranking_ties_break_by_route_code(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_dow_ranking_pools_exact_sum_not_rounded_avg_min(reports_client, ch_client):
+    """compute_dow_ranking's fast path must pool each day's EXACT sum_delay_sec
+    across agg_daily_trend rows, not re-weight each day's own already-rounded
+    avg_min.
+
+    Two weekdays for the same route/service: day 1 (6 obs, raw-seconds sum
+    248 -> analyze() rounds that day's own avg_min to 0.69 min) and day 2 (14
+    obs, raw-seconds sum 1400 -> rounds to 1.67 min). Pooling the exact sums
+    gives (248+1400)/20/60 = 1.37333... -> rounds to 1.37; re-weighting the
+    rounded 0.69/1.67 instead (the pre-fix pattern) gives
+    (0.69*6 + 1.67*14)/20 = 1.376 -> rounds to 1.38 -- a measurably different
+    (and wrong) answer that exists purely from the intermediate rounding.
+    """
+    client, agency_id, pool = reports_client
+    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-04", [41, 41, 41, 41, 42, 42])
+    await _seed_route(pool, agency_id, "R_POOL", "平日", "2026-05-05", [100] * 14)
+    _run_analyze(agency_id, ch_client)
+    resp = await client.get(f"/api/{agency_id}/reports/dow_weekday?from=2026-05-01&to=2026-05-07")
+    rows = resp.json()["rows"]
+    row = next(r for r in rows if r[0] == "R_POOL")
+    assert float(row[3]) == 1.37  # avg_min column -- NOT the buggy re-weighted 1.38
+
+
+@pytest.mark.asyncio
 async def test_compare_ranking_ties_break_by_route_code(reports_client, ch_client):
     """Two routes tied on abs_delta (agg fast path) must sort by route_code,
     ascending, for a reproducible top-N cut."""
@@ -725,16 +749,17 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
     for route_code in ("R_TR_Z", "R_TR_A"):
         await aconn.execute(
             "INSERT INTO agg_daily_trend "
-            "(agency_id, date, route_code, service_type, avg_min, samples) "
-            "VALUES ($1, $2, $3, $4, $5, $6) "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7) "
             "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
-            "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+            "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
             aagency_id,
             day.isoformat(),
             route_code,
             "平日",
             5.0,
             10,
+            round(5.0 * 60 * 10),
         )
 
     ctx = RangeCtx(from_date=day, to_date=day)
@@ -742,6 +767,156 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
     offenders = out["days"][0]["top_offenders"]
     codes = [o["route_code"] for o in offenders if o["route_code"].startswith("R_TR_")]
     assert codes == ["R_TR_A", "R_TR_Z"]
+
+
+@pytest.mark.asyncio
+async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_min(aconn, aagency_id):
+    """A 'week' bucket pools MULTIPLE agg_daily_trend rows (one per day) for
+    the same route/service. This must divide the exact raw-seconds sums once
+    at the end, not re-weight each day's own already-rounded avg_min.
+
+    Two days in the same ISO week for the same route/service: day 1 (3
+    samples, raw-seconds sum 124 -> analyze() rounds that day's own avg_min
+    to 0.69 min) and day 2 (7 samples, raw-seconds sum 700 -> rounds to 1.67
+    min). Pooling the exact sums gives (124+700)/10/60 = 1.37333... ->
+    rounds to 1.37; re-weighting the rounded 0.69/1.67 instead (the pre-fix
+    pattern) gives (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
+    measurably different (and wrong) answer that exists purely from the
+    intermediate rounding.
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    # 2026-05-18 (Mon) and 2026-05-19 (Tue) fall in the same ISO week.
+    for day, avg_min, samples, sum_delay_sec in (
+        (date(2026, 5, 18), 0.69, 3, 124),
+        (date(2026, 5, 19), 1.67, 7, 700),
+    ):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R_WK', '平日', $3, $4, $5)",
+            aagency_id,
+            day.isoformat(),
+            avg_min,
+            samples,
+            sum_delay_sec,
+        )
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 19))
+    out = await compute_trend_series(aagency_id, ctx, aconn, granularity="week")
+    days = out["days"]
+    assert len(days) == 1
+    assert days[0]["avg_min"] == 1.37  # NOT the buggy re-weighted 1.38
+    offender = next(o for o in days[0]["top_offenders"] if o["route_code"] == "R_WK")
+    assert offender["avg_min"] == 1.37
+
+
+async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucket_avg(aconn, aagency_id):
+    """A bucket's Python-side pooling (``by_date_samples`` /
+    ``by_date_weighted_sec``) must exclude a (route, service) group whose
+    ``sum_delay_sec`` is still NULL (migration 0028's column is nullable —
+    any ``agg_daily_trend`` row analyze() hasn't rewritten since that
+    migration can be in this state) from BOTH the numerator and the
+    denominator, not just the numerator.
+
+    Same day, two routes each clearing the ``HAVING SUM(samples) > 5`` gate
+    on their own: R_NULL (6 samples, sum_delay_sec NULL) must contribute 0
+    to the bucket average; R_OK (6 samples, raw-seconds sum 360 -> exact
+    1.0 min) is the only group that should determine it. Pre-fix, R_NULL's
+    6 samples would still land in ``by_date_samples`` while contributing
+    nothing to ``by_date_weighted_sec``, giving (0+360)/12/60=0.5 instead of
+    the correct 360/6/60=1.0.
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    day = date(2026, 5, 20)
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        day.isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        6,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_OK', '平日', $3, $4, $5)",
+        aagency_id,
+        day.isoformat(),
+        1.0,
+        6,
+        360,
+    )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    out = await compute_trend_series(aagency_id, ctx, aconn)
+    days = out["days"]
+    assert len(days) == 1
+    assert days[0]["samples"] == 6  # R_NULL's samples excluded, not counted alongside R_OK's
+    assert days[0]["avg_min"] == 1.0  # NOT the buggy 0.5 from counting R_NULL's samples
+
+
+async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_date(aconn, aagency_id):
+    """A week/month bucket's own SQL-level pooling (SUM(sum_delay_sec) /
+    SUM(samples) per bucket/route/service, BEFORE the Python-side pooling
+    across route/service groups) must also FILTER both sides to the same
+    row population. This is a distinct guard from
+    ``test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucket_avg``
+    above: that test covers pooling ACROSS route/service groups within one
+    bucket; this one covers pooling ACROSS DATES within one route/service
+    group for a 'week'/'month' bucket, which happens one layer earlier, at
+    the SQL GROUP BY itself.
+
+    Same ISO week, same route/service, two dates: day 1 (6 samples,
+    sum_delay_sec NULL) must contribute 0 to this row's own avg_min; day 2
+    (6 samples, raw-seconds sum 360 -> exact 1.0 min) is the only date that
+    should determine it. Pre-fix, day 1's 6 samples would still land in the
+    SQL's own SUM(samples) while contributing nothing to SUM(sum_delay_sec),
+    giving (0+360)/12/60=0.5 instead of the correct 360/6/60=1.0 -- silently
+    reproducing the exact bug this whole item exists to eliminate, one
+    aggregation layer beneath where the Python-side fix already guards.
+    """
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    # 2026-05-18 (Mon) and 2026-05-19 (Tue) fall in the same ISO week.
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        date(2026, 5, 18).isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        6,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, $5)",
+        aagency_id,
+        date(2026, 5, 19).isoformat(),
+        1.0,
+        6,
+        360,
+    )
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 19))
+    out = await compute_trend_series(aagency_id, ctx, aconn, granularity="week")
+    days = out["days"]
+    assert len(days) == 1
+    offender = next(o for o in days[0]["top_offenders"] if o["route_code"] == "R_WKNULL")
+    assert offender["samples"] == 6  # the NULL date's samples excluded
+    assert offender["avg_min"] == 1.0  # NOT the buggy 0.5 from counting the NULL date's samples
 
 
 # ---------------------------------------------------------------------------

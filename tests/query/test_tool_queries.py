@@ -442,11 +442,13 @@ async def test_route_trend_shift_detects_regime_change(aconn, aagency_id):
     avgs = [1.0, 1.2, 5.0, 5.5]
     for d, avg in zip(days, avgs, strict=True):
         await aconn.execute(
-            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
-            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20, $4)",
             aagency_id,
             d.isoformat(),
             avg,
+            round(avg * 60 * 20),
         )
     ctx = RangeCtx(from_date=days[0], to_date=days[-1])
     result = await route_trend_shift(aagency_id, ctx, aconn, route="R1")
