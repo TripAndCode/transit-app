@@ -55,6 +55,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
+from pipeline.stats import annotate_on_time_pct_confidence
 
 TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
 
@@ -861,7 +862,10 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
         sort_order = "desc" if best_first else "asc"
         rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
-        cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
+        # Display-only annotation (pipeline/stats.py) — does not change
+        # compute_on_time's own contract.
+        rows = annotate_on_time_pct_confidence(rows)
+        cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
@@ -985,6 +989,9 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     rows = await compute_on_time(agency_id, ctx, conn, ch=ch, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
+    # Display-only annotation (pipeline/stats.py) — does not change
+    # compute_on_time's own contract.
+    rows = annotate_on_time_pct_confidence(rows)
     return ToolResult(
         kind="table",
         summary=_summary(
@@ -994,7 +1001,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
             count=len(rows),
         ),
         rows=[list(r) for r in rows],
-        columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples"],
+        columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"],
     )
 
 

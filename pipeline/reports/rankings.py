@@ -662,9 +662,20 @@ async def compute_trend_series(
 
     ``granularity`` controls the time bucket: ``'day'`` (default), ``'week'``,
     or ``'month'``. Returns
-    ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``
-    where ``date`` is the bucket start date (ISO string).
+    ``{ days: [{ date, avg_min, samples, avg_min_smoothed, top_offenders: [...] }] }``
+    where ``date`` is the bucket start date (ISO string). ``avg_min_smoothed``
+    is a trailing sample-weighted mean over the last (up to) ``_SMOOTH_WINDOW``
+    OBSERVED buckets ending at that one (position-based, not calendar-day-
+    anchored — a bucket with no service that day simply isn't in the window,
+    same "observed days only" convention as
+    ``pipeline.reports.forecast.summarize_agency_overview``'s ``recent_daily``)
+    — a low-traffic route/day's raw figure is visually noisy day to day, and
+    this sits ALONGSIDE it (not a replacement) so the UI can show both.
+    Only computed for ``granularity == 'day'``; a week/month bucket is
+    already smoothed by its own wider width, so ``avg_min_smoothed`` is
+    ``None`` there.
     """
+    _SMOOTH_WINDOW = 7
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
@@ -763,7 +774,7 @@ async def compute_trend_series(
         daily.append({"date": d, "avg_min": avg, "samples": n})
 
     days = []
-    for r in daily:
+    for i, r in enumerate(daily):
         # None (no data) sorts last; among real values, worst delay first.
         # Two-pass stable sort: pre-sort by route_code so ties on avg_min
         # break deterministically in ascending route_code order — `per_day`
@@ -773,10 +784,26 @@ async def compute_trend_series(
             sorted(by_date.get(r["date"], []), key=lambda x: x["route_code"]),
             key=lambda x: (x["avg_min"] is None, -(x["avg_min"] or 0)),
         )[:top_offenders]
+        # Trailing window over the last _SMOOTH_WINDOW OBSERVED buckets
+        # (position-based via `daily`'s sorted index), pooled from the same
+        # exact raw-seconds sums as the per-bucket avg_min above — dividing
+        # once at the end, not re-weighting already-rounded per-bucket means.
+        avg_min_smoothed = None
+        # trunc_unit (not the raw `granularity` arg) is the actual bucket
+        # width used above on BOTH the fast (`_TRUNC.get`) and live
+        # (`_CH_BUCKET_EXPR.get`) paths, including their identical
+        # unrecognized-value fallback to a per-day bucket.
+        if trunc_unit == "day":
+            window_dates = [daily[j]["date"] for j in range(max(0, i - _SMOOTH_WINDOW + 1), i + 1)]
+            window_samples = sum(by_date_samples.get(d, 0) for d in window_dates)
+            if window_samples:
+                window_sec = sum(by_date_weighted_sec.get(d, 0) for d in window_dates)
+                avg_min_smoothed = round((window_sec / window_samples) / 60, 2)
         days.append(
             {
                 "date": r["date"].isoformat(),
                 "avg_min": r["avg_min"],
+                "avg_min_smoothed": avg_min_smoothed,
                 "samples": r["samples"],
                 "top_offenders": offenders,
             }

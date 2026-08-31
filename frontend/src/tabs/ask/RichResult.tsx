@@ -19,6 +19,11 @@ export function RichResult({
     const cols = result.columns;
     const routeIdx = cols.findIndex((c) => c === "route_code");
     const serviceTypeIdx = cols.findIndex((c) => c === "service_type");
+    // The on-time tools' trailing `low_confidence` column is a caveat flag
+    // (95% Wilson interval too wide to trust the percentage — see
+    // pipeline/stats.py), not a plain value; render a short marker only
+    // when true rather than the raw "true"/"false".
+    const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
     return (
       <div>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
@@ -50,11 +55,15 @@ export function RichResult({
                         ? formatRoute(cell as string)
                         : j === serviceTypeIdx && cell != null
                           ? t(`common.service_value.${String(cell)}`, { defaultValue: String(cell) })
-                          : cell == null
-                            ? "—"
-                            : typeof cell === "number"
-                              ? cell.toLocaleString()
-                              : String(cell)}
+                          : j === lowConfIdx
+                            ? cell
+                              ? t("ask.low_confidence_mark")
+                              : ""
+                            : cell == null
+                              ? "—"
+                              : typeof cell === "number"
+                                ? cell.toLocaleString()
+                                : String(cell)}
                     </td>
                   ))}
                 </tr>

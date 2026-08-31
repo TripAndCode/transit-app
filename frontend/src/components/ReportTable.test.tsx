@@ -10,11 +10,11 @@ function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
 }
 
-function renderTable(rows: unknown[][]) {
+function renderTable(rows: unknown[][], reportType = "ranking") {
   return renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/analysis"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType="ranking" rows={rows} />} />
+        <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -43,5 +43,23 @@ describe("ReportTable route column", () => {
     ]);
     renderTable([["53011", "平日", 5.2, 3.1, 8.4, 120]]);
     expect(screen.getByText("Route 53011")).toBeInTheDocument();
+  });
+});
+
+describe("ReportTable on_time confidence column", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a caveat marker for a low-confidence percentage", () => {
+    mockRoutes([]);
+    renderTable([["39061", "平日", 80.0, 0.5, 25, true]], "on_time");
+    expect(screen.getByText("wide range")).toBeInTheDocument();
+  });
+
+  it("renders no caveat marker for a confident percentage", () => {
+    mockRoutes([]);
+    renderTable([["39061", "平日", 90.0, 0.5, 300, false]], "on_time");
+    expect(screen.queryByText("wide range")).not.toBeInTheDocument();
   });
 });

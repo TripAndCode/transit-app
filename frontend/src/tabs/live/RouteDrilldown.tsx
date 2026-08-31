@@ -102,6 +102,12 @@ export function RouteDrilldown({
                   count: (s.cohort_route_count ?? 1) - 1,
                   delta: Math.round((s.avg_delay_sec - s.cohort_avg_delay_sec) / 60),
                 })}
+                {s.cohort_low_confidence && (
+                  <>
+                    {" "}
+                    ({t("live.drill.stop_outlier_low_confidence")})
+                  </>
+                )}
               </small>
             )}
           </span>

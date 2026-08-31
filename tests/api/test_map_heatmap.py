@@ -69,6 +69,9 @@ async def test_heatmap_returns_p90_delay_min(hmap_client):
     assert props["p90_delay_min"] is not None
     # avg is (60+120+600)/3/60 = 4.0 min; p90 is >= avg
     assert props["p90_delay_min"] >= props["avg_delay_min"]
+    # Fixture has 3 total samples, well under LOW_CONFIDENCE_SAMPLES (30).
+    assert props["samples"] == 3
+    assert props["low_confidence"] is True
 
 
 @pytest.mark.asyncio
@@ -220,6 +223,10 @@ async def test_stop_profile_includes_cohort_fields(stop_profile_client):
     # S1: K31 avg=600s, cohort avg=(600+200+100)/3=300s; 600 > 300*1.5=450 → True
     assert s1["cohort_route_count"] == 3
     assert s1["cohort_avg_delay_sec"] == pytest.approx(300, abs=5)
+    # Fixture's 3 cohort rows are samples=1 each -> cohort_samples=3, well
+    # under COHORT_LOW_CONFIDENCE_SAMPLES (10).
+    assert s1["cohort_samples"] == 3
+    assert s1["cohort_low_confidence"] is True
 
 
 @pytest.mark.asyncio
@@ -349,3 +356,7 @@ async def test_stop_profile_cohort_avg_is_samples_weighted(weighted_cohort_clien
     # Samples-weighted: (200+25000)/(2+500) ≈ 50.2 -> 50. A naive per-row
     # average of the two ratios (100s and 50s) would instead give 75.
     assert s1["cohort_avg_delay_sec"] == 50
+    # 502 total cohort samples clears COHORT_LOW_CONFIDENCE_SAMPLES (10),
+    # unlike stop_profile_client's thinner (3-sample) cohort above.
+    assert s1["cohort_samples"] == 502
+    assert s1["cohort_low_confidence"] is False
