@@ -216,6 +216,14 @@ async def compute_on_time(
     Reads agg_route_daily_dist (exact). The on-time threshold is baked into
     ``on_time_count`` (<=60s) at analyze time, so a non-default ``threshold_sec``
     or a time_band filter falls back to the live scan (ClickHouse).
+
+    Returned percentages carry no confidence signal of their own -- a caller
+    displaying one of these percentages to a user should also call
+    :func:`pipeline.stats.annotate_on_time_pct_confidence` (see
+    api/routers/reports.py's ``on_time`` report and pipeline/query/tools.py's
+    ``on_time_rate`` tool for the existing pattern) rather than showing a
+    thin-sample percentage with the same visual weight as a well-supported
+    one.
     """
     if ctx.time_band != "all" or threshold_sec != 60:
         if ch is None:
