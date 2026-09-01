@@ -176,8 +176,13 @@ async def forecast_heatmap(
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
     """
     rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population so a pre-backfill NULL row can't inflate the
+        # denominator without contributing to the numerator (see
+        # pipeline/reports/rankings.py's identical rationale).
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
@@ -243,8 +248,11 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
         "WITH latest AS ("
         "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
         ") "
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see forecast_heatmap's identical rationale.
         "SELECT d.date, d.route_code, "
-        "  SUM(d.avg_delay_sec * d.samples) / NULLIF(SUM(d.samples), 0) / 60.0 AS avg_min "
+        "  (SUM(d.sum_delay_sec) FILTER (WHERE d.sum_delay_sec IS NOT NULL)::numeric "
+        "      / NULLIF(SUM(d.samples) FILTER (WHERE d.sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
         "FROM agg_route_daily d, latest "
         "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
         "GROUP BY d.date, d.route_code "
@@ -267,8 +275,11 @@ async def forecast_overview(
     (no dedicated aggregate — the table is small enough to pool on read).
     """
     grid_rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see forecast_heatmap's identical rationale.
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
@@ -278,7 +289,8 @@ async def forecast_overview(
     route_rows = await conn.fetch(
         "WITH ra AS ("
         "  SELECT route_code, "
-        "    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "    (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "        / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "    SUM(samples)::int AS samples "
         "  FROM agg_route_hour_dow "
         "  WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "

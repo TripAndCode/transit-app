@@ -174,13 +174,14 @@ async def peak_hour_breakdown(
         rows = await conn.fetch(
             """
             SELECT route_code, service_type,
-                   SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min,
+                   (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
                    SUM(samples) AS samples
             FROM agg_route_hour_dow
             WHERE agency_id = $1 AND hour = $2 AND samples >= 3
             GROUP BY route_code, service_type
             HAVING SUM(samples) >= 3
-            ORDER BY avg_min DESC
+            ORDER BY avg_min DESC NULLS LAST
             LIMIT 20
             """,
             agency_id,
@@ -197,6 +198,7 @@ async def peak_hour_breakdown(
                 samples=int(r["samples"]),
             )
             for r in rows
+            if r["avg_min"] is not None
         ],
     )
 

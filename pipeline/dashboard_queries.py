@@ -137,7 +137,9 @@ async def _heatmap_from_agg(
         rc_param = n2
         grid = await conn.fetch(
             "SELECT route_code, EXTRACT(DOW FROM date::date)::int AS bucket, "
-            "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_daily_trend "
+            "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+            "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
+            "FROM agg_daily_trend "
             f"WHERE agency_id = $1 AND {frag2} AND route_code = ANY(${rc_param}::text[]) "
             "GROUP BY route_code, bucket",
             agency_id,
@@ -172,7 +174,9 @@ async def _heatmap_from_agg(
         "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 10 AND 15 THEN 1 "
         "WHEN EXTRACT(HOUR FROM scheduled_time)::int BETWEEN 16 AND 20 THEN 2 "
         "ELSE 3 END AS bucket, "
-        "SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min FROM agg_route_hour "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
+        "FROM agg_route_hour "
         f"WHERE agency_id = $1 {routes_clause} AND route_code = ANY(${rc_param}::text[]) "
         "GROUP BY route_code, bucket",
         agency_id,
@@ -194,7 +198,9 @@ async def _anomalies_series_from_agg(
         routes_clause = f"AND route_code = ANY(${n}::text[])"
         params = [*params, list(ctx.routes)]
     rows = await conn.fetch(
-        "SELECT date AS d, SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min "
+        "SELECT date AS d, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
         f"FROM agg_daily_trend WHERE agency_id = $1 AND {frag} {routes_clause} "
         "GROUP BY date ORDER BY date",
         agency_id,
@@ -261,7 +267,8 @@ async def _movers_from_agg(
     sql = f"""
         WITH cur AS (
             SELECT route_code,
-                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min,
+                   (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
                    SUM(samples) AS n
             FROM agg_daily_trend
             WHERE agency_id = $1 AND {cur_frag} {routes_clause}
@@ -269,7 +276,8 @@ async def _movers_from_agg(
         ),
         prv AS (
             SELECT route_code,
-                   SUM(avg_min*samples)/NULLIF(SUM(samples),0) AS avg_min
+                   (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min
             FROM agg_daily_trend
             WHERE agency_id = $1 AND {prv_frag} {routes_clause}
             GROUP BY route_code

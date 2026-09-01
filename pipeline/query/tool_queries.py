@@ -215,20 +215,28 @@ async def route_hour_dow_pattern(
     limited to top_n.
     """
     rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see api/routers/reports.py's forecast_heatmap
+        # identical rationale.
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour "
         "HAVING SUM(samples) > 5 "
-        "ORDER BY avg_min DESC "
+        "ORDER BY avg_min DESC NULLS LAST "
         "LIMIT $3",
         agency_id,
         str(route),
         top_n,
     )
-    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]
+    return [
+        (r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"])
+        for r in rows
+        if r["avg_min"] is not None
+    ]
 
 
 async def schedule_realism_segments(
