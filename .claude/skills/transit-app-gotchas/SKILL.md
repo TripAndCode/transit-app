@@ -59,39 +59,30 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 ## VPS loop / sandboxed worker sessions
 - A dispatched VPS-loop worker's sandbox has NO `poetry install`/`npm
   install` permission and often no already-provisioned virtualenv/
-  `node_modules` package at all — confirmed live across items 8, 10, 16,
-  21, 23, 25, and 22 (twice) as of 2026-08-30, i.e. this exact class of
-  gap recurred **eight times** before being captured here, well past
-  CLAUDE.md's own "a mistake repeated twice is a missing guardrail" rule.
-  Symptoms: `poetry run pytest`/`ruff`/`mypy` report "Command not found",
-  a worktree's poetry virtualenv has zero installed packages (`poetry env
-  info` there reports `Path: NA`), and/or `frontend/node_modules` is
-  missing a newly-added dependency because `npm install` was never
-  actually run for that worktree. A dispatched worker cannot close this
-  itself — every workaround it can reach (hand-tracing logic against
-  source instead of running it, vendoring a stub package into
-  `node_modules`) was tried and explicitly rejected/insufficient.
+  `node_modules` package at all. Symptoms: `poetry run pytest`/`ruff`/`mypy`
+  report "Command not found", a worktree's poetry virtualenv has zero
+  installed packages (`poetry env info` there reports `Path: NA`), and/or
+  `frontend/node_modules` is missing a newly-added dependency because `npm
+  install` was never actually run for that worktree. A dispatched worker
+  cannot close this itself — every workaround it can reach (hand-tracing
+  logic against source instead of running it, vendoring a stub package into
+  `node_modules`) is insufficient.
 - **`node_modules` sharing is NOT guaranteed — verify before relying on
-  it.** A past session found one specific VPS worktree with
-  `frontend/node_modules` set up as a symlink back to the main checkout's
-  copy (confirmed live via `ls -la`) and generalized that into "worktrees
-  share `node_modules`." Re-verified 2026-08-30 and that generalization is
-  **false as a default**: git worktrees do NOT share gitignored/untracked
-  directories automatically, `frontend/node_modules` is a plain directory
-  (not a symlink) in the main checkout and in freshly-created worktrees,
-  and a third worktree had no `node_modules` at all. Check with `ls -la
-  frontend/node_modules` (or `python3 -c "import os;
+  it.** Git worktrees do NOT share gitignored/untracked directories
+  automatically: `frontend/node_modules` is normally a plain directory (not
+  a symlink) in both the main checkout and any freshly-created worktree, so
+  an `npm install` run in one worktree does not cover another. Check with
+  `ls -la frontend/node_modules` (or `python3 -c "import os;
   print(os.path.islink('frontend/node_modules'))"`) in the SPECIFIC
   worktree you're fixing before assuming an `npm install` elsewhere already
   covers it — if it's a plain directory, you must run `npm install`
   separately in that worktree's own `frontend/`. If a symlink happens to
-  exist, treat it as a possibly-deliberate, worktree-specific setup detail
-  someone put there, not a repo-wide guarantee to rely on going forward.
+  exist, treat it as a possibly-deliberate, worktree-specific setup detail,
+  not a repo-wide guarantee to rely on going forward.
 - **What actually works**: an interactive session (not a dispatched
   worker) usually has broader Bash permissions and CAN run `poetry
-  install`/`npm install` for real, closing the gap after the fact.
-  Pattern that worked live (2026-08-29/30, items 22/23): fetch the
-  worker's branch locally (or SSH into the VPS and use its own worktree
+  install`/`npm install` for real, closing the gap after the fact. Fetch
+  the worker's branch locally (or SSH into the VPS and use its own worktree
   directly), run `poetry run <ruff|mypy|pytest> <paths>` **from the main
   checkout's cwd** pointed at the worktree's file paths (poetry resolves
   its virtualenv by cwd identity, not by the file arguments — running
@@ -112,16 +103,15 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 - **Concurrency risk**: an interactive session fixing a worker's worktree
   can race with the autonomous loop's own next tick resuming the same
   branch (Step 3b's "has commits: resume and ship it yourself" path does
-  not know an interactive session is also live). Confirmed live
-  (2026-08-30, item 22): a coordinator tick and an interactive session
-  edited the exact same files in the exact same worktree within minutes of
-  each other; the coordinator detected the concurrent edit and correctly
-  backed off without committing (per its own "don't act on state you don't
-  clearly own" boundary) — but a `git add -A && git commit` from the other
-  side can still silently absorb the other actor's uncommitted edit into
-  its own commit. Diff the resulting commit against what you think you
-  wrote before trusting it; don't assume a clean commit only contains your
-  own changes.
+  not know an interactive session is also live). A coordinator tick and an
+  interactive session can edit the exact same files in the exact same
+  worktree within minutes of each other; the coordinator is designed to
+  detect a concurrent edit and back off without committing (per its own
+  "don't act on state you don't clearly own" boundary) — but a `git add -A
+  && git commit` from the other side can still silently absorb the other
+  actor's uncommitted edit into its own commit. Diff the resulting commit
+  against what you think you wrote before trusting it; don't assume a
+  clean commit only contains your own changes.
 
 ## Git
 - Default branch is `main`, not master. Diff and PR against `main`.
@@ -130,39 +120,37 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   closes (not retargets) the dependent PR.
 - `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
   worktree is visible (and droppable) from every other worktree and the main
-  checkout. Confirmed live (2026-08-28, item 8): a freshly-dispatched VPS-loop
-  worker found a prior tick's stash explicitly held for human review, reused
-  its content, then ran `git stash drop` on it without authorization — an
-  irreversible action (recovered only because `git gc` hadn't run yet; a
-  dangling stash commit is one `git gc --prune=now` away from gone for good).
-  Never run `git stash drop`/`clear`/`pop` against a stash you didn't create
-  in the current session/tick; `vps-loop-run.md`'s Step 4 worker prompt now
-  says this explicitly.
+  checkout. A freshly-dispatched VPS-loop worker finding a prior tick's
+  stash explicitly held for human review, reusing its content, then running
+  `git stash drop` on it without authorization can be irreversible: a
+  dropped stash is only reachable until `git gc --prune=now` runs, which
+  eventually will. Never run `git stash
+  drop`/`clear`/`pop` against a stash you didn't create in the current
+  session/tick; `vps-loop-run.md`'s Step 4 worker prompt says this
+  explicitly.
 - `[skip ci]` must be on EVERY commit you might push as a branch's tip,
   including intermediate fix-and-reverify commits mid-branch, not just the
   first/last one. A multi-commit push where only some commits carry the
   trailer can still trigger CI — GitHub's skip-ci check is evaluated
   once per push event against that push's *tip* commit message, not
-  retroactively for every individual commit in a multi-commit push. Here,
-  `84a984c` (missing the trailer) and `4ed7a7b` (also missing it) were pushed
-  together; since the tip (`4ed7a7b`) lacked `[skip ci]`, that one push
-  triggered CI (`on: push`/`pull_request` isn't gated on the convention —
-  `[skip ci]` only works because GitHub itself skips a run when it's present
-  in the *triggering push's tip* commit message). The run failed in ~4s with
-  "recent account payments have failed or your spending limit needs to be
-  increased" — a GitHub Actions billing problem on this account, unrelated to
-  the code, but real and worth knowing: a stray missing `[skip ci]` on
-  whatever ends up as a push's tip is the only thing standing between "CI is
-  dormant" and "CI actually runs and immediately fails for an unrelated
-  reason," which could look like a real regression if not checked.
+  retroactively for every individual commit in a multi-commit push: if a
+  push's tip commit lacks the trailer, that push triggers CI regardless of
+  whether every other commit in it correctly has one (`on: push`/
+  `pull_request` isn't gated on the convention — `[skip ci]` only works
+  because GitHub itself skips a run when it's present in the *triggering
+  push's tip* commit message). A stray missing `[skip ci]` on whatever
+  ends up as a push's tip is the only thing standing between "CI is
+  dormant" and "CI actually runs," which could look like a real regression
+  if not checked, or fail for an unrelated infrastructure reason (e.g. a
+  billing/quota issue) that has nothing to do with the code.
   The same gap shows up when resolving a conflict: running `git merge main`
   produces an auto-generated commit message
   ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`
   trailer — `git merge` never adds it automatically. That merge commit
-  became the branch's pushed tip, so it alone (re-)triggered the same
-  billing-failure CI run despite every real work commit on the branch
-  correctly carrying the trailer. Always add `[skip ci]` to a merge commit
-  too: either pass `git merge main -m "Merge main into vps-loop/item-N" -m
-  "[skip ci]"` directly (multiple `-m` flags create a blank-line-separated
-  body, avoiding a literal embedded newline in the shell string), or amend
-  the default merge message before pushing.
+  becomes the branch's pushed tip, so it alone (re-)triggers CI despite
+  every real work commit on the branch correctly carrying the trailer.
+  Always add `[skip ci]` to a merge commit too: either pass `git merge main
+  -m "Merge main into vps-loop/item-N" -m "[skip ci]"` directly (multiple
+  `-m` flags create a blank-line-separated body, avoiding a literal
+  embedded newline in the shell string), or amend the default merge
+  message before pushing.

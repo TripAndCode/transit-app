@@ -555,7 +555,11 @@ avoid confusion with this section's own "Step 6" heading.
       is deleted out from under it (see CLAUDE.md's stacked-PR bullet).
       Accumulating merged-but-undeleted remote `vps-loop/item-*` branches is
       accepted operational debt, not a bug to silently fix here — a human
-      can batch-delete ones with no open dependants when it's worth the time.
+      can batch-delete ones with no open dependants when it's worth the
+      time, or run `scripts/daily_git_hygiene.py` (dry run by default) or
+      `scripts/daily_git_hygiene.py --apply` — a separate, non-loop-tick
+      process (see its own docstring for the lock it takes to avoid racing
+      a live tick) that automates exactly this batch-delete.
 6.11. Append: `- <UTC timestamp>: item N merged as PR #<number>; both
       /review-branch passes clean, mergeable/clean confirmed, squash-merged and
       cleaned up.`
