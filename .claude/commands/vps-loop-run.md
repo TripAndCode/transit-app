@@ -53,13 +53,19 @@ described next (none of the three extend or restart the streak that
 triggered them, and none is ever itself one of the 3 entries counted
 toward it).
 
-**"3 in a row" means the last 3 times this specific tag was logged, not 3
-literally-adjacent Status-log entries.** An unrelated entry with no
-`Blocker-tag` (an idle-throttle line, an ordinary shipped item) sitting
-between two occurrences of the same tag does NOT break the count — the
-same root cause recurring with an occasional unrelated success interleaved
-is still the same recurring problem worth escalating, arguably more so
-than requiring zero interruption. Worked example (oldest → newest,
+**"3 in a row" means the last 3 tag-bearing Status-log entries share an
+identical tag, not 3 literally-adjacent Status-log entries.** An unrelated
+entry with NO `Blocker-tag` at all (an idle-throttle line, an ordinary
+shipped item) sitting between two occurrences of the same tag does NOT
+break the count or consume one of the 3 slots — the same root cause
+recurring with an occasional unrelated success interleaved is still the
+same recurring problem worth escalating, arguably more so than requiring
+zero interruption. A genuinely DIFFERENT blocker (its own, different
+`Blocker-tag`) occurring in between DOES break the count: it occupies one
+of the 3 most-recent tag-bearing slots with a non-matching tag, and is
+itself real evidence the situation changed, not something to silently
+look past — only no-tag interleaving is transparent to this count, not
+every interleaving. Worked example (oldest → newest,
 Blocker-tag lines omitted from this summary for brevity, each really has
 its own `**Blocker-tag:** db-write-blocked` line):
 ```
@@ -95,9 +101,12 @@ two steps:
    - Beyond Step 1, do NOT run the rest of the normal flow every tick —
      only attempt it once enough wall-clock time has passed since the most
      recent PAUSED-family entry's own UTC timestamp: roughly three times
-     this loop's own configured cron cadence (see CLAUDE.md ▸ Autonomous
-     VPS loop — don't restate a number here, same convention Step 3 uses
-     below). Compute this from each entry's own timestamp, not by counting
+     the actual interval the invoking cron job runs on, read directly from
+     the live crontab (`crontab -l`) rather than any hardcoded or
+     documented figure — this repo has more than one stale,
+     mutually-conflicting cadence number on record across different files,
+     so the crontab itself is the only source guaranteed current. Compute
+     this from each entry's own timestamp, not by counting
      ticks — a tick where not enough time has passed yet logs nothing at
      all (see below), so it's indistinguishable from any other silent tick
      except by timestamp math; a tick counter cannot be reliably
@@ -426,7 +435,9 @@ append `- <UTC timestamp>: item N blocked before verification — worker reporte
 <its blocker, summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`, plus a
 `**Blocker-tag:**` line per Step 0 naming the blocker's class (e.g.
 `sensitive-file-no-approver`, `db-write-blocked` — reuse an existing slug if this
-matches a cause already seen, don't invent a near-duplicate), no push, no PR, stop.
+matches a cause already seen, don't invent a near-duplicate; fall back to Step 0's
+generic `worker-blocked` bucket only if the report doesn't fit any more specific,
+already-established class yet), no push, no PR, stop.
 
 ## Step 5 — Verify
 
