@@ -122,8 +122,14 @@ two steps:
        tag** (progress is made — an item ships, a different item is
        picked, or the same item now proceeds past where it previously
        stopped — or the tick ends idle/clean with no matching
-       `Blocker-tag` at all): log `**RESUMED after N paused ticks — <tag>
-       cleared.**` FIRST, then let that attempt's own normal outcome
+       `Blocker-tag` at all): log `**RESUMED — <tag> cleared (paused since
+       <the original PAUSED entry's own UTC timestamp>).**` FIRST — not a
+       tick count: exactly like the cadence math above, most ticks during
+       a pause log nothing, so a literal count of paused ticks is not
+       reconstructable from the log either, and this template must not
+       ask for one. The original `PAUSED` entry's timestamp is already in
+       the log and needs no reconstruction. Then let that attempt's own
+       normal outcome
        logging (per whichever of Steps 2-6 it actually reached) proceed as
        its own separate, later entry — including a fresh `**Blocker-tag:**`
        line if the attempt itself stops on a new, different blocker.
