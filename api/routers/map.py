@@ -642,13 +642,16 @@ async def today_route_summary(
             -- base_avg_min would be biased toward zero whenever any
             -- contributing service_type hasn't been backfilled yet.
             -- base_p90_min's numerator/denominator are both FILTERed to the same
-            -- p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin
-            -- groups, so a service_type's p90_min can itself be null (every
-            -- contributing row's dep_delay was itself NULL) while its samples are
-            -- not -- SUM() silently
+            -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
+            -- produce a null p90_min alongside a non-null avg_min/samples for a
+            -- live group (dep_delay is filtered non-null upstream, and analyze()
+            -- wipes and rebuilds each agency's rows from scratch every run), but
+            -- this FILTER stays as defense-in-depth against a stale pre-rebuild
+            -- row or a non-analyze() writer (e.g. a test fixture) inserting one
+            -- directly -- SUM() silently
             -- skips a null numerator term but NOT its row's sample count in the
             -- denominator, which would otherwise bias base_p90_min down whenever
-            -- any contributing service_type is thin.
+            -- any contributing service_type's row is null this way.
             -- base_p90_min itself is a samples-weighted average of each
             -- service_type's already-computed p90_min, not a percentile
             -- recomputed over the pooled raw delay observations across
@@ -674,10 +677,12 @@ async def today_route_summary(
             -- (b or rb) via one shared condition, never coalesced
             -- independently per column -- b.avg_min IS NOT NULL is the
             -- correct "does b have a matching row" test (AVG() over a real
-            -- joined row is never null). agg_route_stats no longer gates out
-            -- thin (route, service_type) groups at insert time, so b.p90_min
-            -- can legitimately be null (every contributing row's dep_delay
-            -- was itself NULL) while b.avg_min is not; independently
+            -- joined row is never null). `analyze()`'s own SQL can no longer
+            -- produce a null b.p90_min alongside a non-null b.avg_min for a
+            -- live (route, service_type) group (dep_delay is filtered
+            -- non-null upstream, and analyze() wipes and rebuilds every row
+            -- each run), but a stale pre-rebuild row or a non-analyze()
+            -- writer could still leave one, so this guard stays; independently
             -- coalescing each column would then silently mix b's exact-match
             -- avg with rb's pooled-across-service_types p90 -- two different
             -- statistical populations reported as one baseline. Picking all

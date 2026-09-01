@@ -840,9 +840,12 @@ async def test_route_summary_null_service_uses_route_grain_baseline(map_app_ch, 
 
 @pytest.mark.asyncio
 async def test_route_summary_baseline_columns_stay_same_source(map_app_ch, ch_client):
-    """agg_route_stats no longer gates out thin (route, service_type) groups, so
-    a group's p90_min can itself be null (every contributing row's dep_delay
-    was itself NULL) while avg_min isn't. baseline_avg_min/baseline_p90_min/
+    """A group's p90_min can be null while avg_min isn't -- not something
+    `analyze()`'s own SQL can currently produce for a live group (dep_delay is
+    filtered non-null upstream, and analyze() wipes and rebuilds every row
+    each run), but a stale pre-rebuild row or, as here, a directly-seeded
+    fixture can still exercise this shape, and downstream readers must handle
+    it correctly regardless of cause. baseline_avg_min/baseline_p90_min/
     baseline_samples must all come from the SAME source (the exact (route,
     service_type) match, here) rather than independently falling back column-by-
     column to the route-grain pooled baseline -- even though the route DOES have
