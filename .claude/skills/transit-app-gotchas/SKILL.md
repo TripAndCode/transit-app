@@ -122,9 +122,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   worktree is visible (and droppable) from every other worktree and the main
   checkout. A freshly-dispatched VPS-loop worker finding a prior tick's
   stash explicitly held for human review, reusing its content, then running
-  `git stash drop` on it without authorization is an irreversible action
-  unless `git gc` hasn't run yet (a dangling stash commit is one `git gc
-  --prune=now` away from gone for good). Never run `git stash
+  `git stash drop` on it without authorization can be irreversible: a
+  dropped stash is only reachable until `git gc --prune=now` runs, which
+  eventually will. Never run `git stash
   drop`/`clear`/`pop` against a stash you didn't create in the current
   session/tick; `vps-loop-run.md`'s Step 4 worker prompt says this
   explicitly.
