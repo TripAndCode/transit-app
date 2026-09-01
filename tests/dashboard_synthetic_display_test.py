@@ -54,16 +54,15 @@ Why the Analysis ranking table's median/p90 columns are NOT checked here
 (also considered and rejected): `pipeline/reports/rankings.py`'s
 `compute_ranking` fast path reads `agg_route_daily_dist`'s per-day delay
 HISTOGRAM and interpolates p50/p90 from it (`percentile_from_hist`) — a
-different algorithm from `agg_route_stats`'s `PERCENT_RANK()`-window
-formula item 21 hand-verified (see that function's own docstring, and
-`synthetic_gtfs.uniform_delays`'s docstring on the NULL-on-fully-tied-data
-quirk specific to the `PERCENT_RANK` formula). The two are expected to
-disagree by design on a fully/mostly-tied distribution — asserting item 21's
-`p50_min`/`p90_min` against the ranking table's columns would be checking a
-real, intentional methodological difference, not a rendering bug. Only
-`avg_min` (plain `SUM(sum_delay_sec)/SUM(samples)`, identical math on both
-tables) and `samples` (an exact count, identical on both tables) are
-checked.
+different algorithm from `agg_route_stats`'s `PERCENTILE_DISC()`-based
+formula item 21 hand-verified (see that function's own docstring). An
+interpolating histogram estimate and an exact discrete percentile over the
+same underlying data are not guaranteed to agree bucket-for-bucket —
+asserting item 21's `p50_min`/`p90_min` against the ranking table's columns
+would be checking a real, intentional methodological difference, not a
+rendering bug. Only `avg_min` (plain `SUM(sum_delay_sec)/SUM(samples)`,
+identical math on both tables) and `samples` (an exact count, identical on
+both tables) are checked.
 
 Skips by default (needs `RUN_CH_INTEGRATION=1`, a built SPA, and a real
 Chromium — the same tier as `tests/i18n_coverage_test.py`, which this

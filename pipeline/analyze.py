@@ -241,24 +241,27 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # No minimum-sample HAVING here — see the module docstring's no-gate
         # policy.
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
-            ranked AS (
-                SELECT *, PERCENT_RANK() OVER (
-                    PARTITION BY route_code, service_type ORDER BY dep_delay
-                ) AS pct FROM deduped
-            )
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2)  AS avg_min,
-                ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
-                ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
+                -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always an
+                -- actual observed dep_delay value, matching pipeline/reports/
+                -- rankings.py's _ranking_live boundary-row-pick semantics. It
+                -- also handles ties and single-row groups correctly by
+                -- construction: it picks the smallest ordered value whose
+                -- cumulative distribution is >= the target fraction, so a
+                -- tied cluster or an n=1 partition always resolves to a real
+                -- value instead of skipping every row below the threshold.
+                ROUND(PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p50_min,
+                ROUND(PERCENTILE_DISC(0.9) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p90_min,
                 SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,
                 ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,
                 ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS late5_pct,
                 COUNT(*) AS samples,
                 SUM(dep_delay) AS sum_delay_sec
-            FROM ranked
+            FROM deduped
             GROUP BY route_code, service_type
             ORDER BY avg_min DESC
         """
@@ -284,21 +287,17 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
-            ranked AS (
-                SELECT *, PERCENT_RANK() OVER (
-                    PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay
-                ) AS pct FROM deduped
-            )
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type, scheduled_time,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
-                ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
+                -- PERCENTILE_DISC: see agg_route_stats's identical column above.
+                ROUND(PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p50_min,
+                ROUND(PERCENTILE_DISC(0.9) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p90_min,
                 COUNT(*) AS samples,
                 SUM(dep_delay) AS sum_delay_sec
-            FROM ranked
+            FROM deduped
             GROUP BY route_code, service_type, scheduled_time
             ORDER BY route_code, scheduled_time
         """
