@@ -10,6 +10,51 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Step 0 — Circuit breaker: back off after a repeated identical blocker
+
+Every Status log entry logged when a tick stops making zero forward progress
+because of a genuine blocker — Step 1's stash-and-stop, Step 3b's
+worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
+stop paths, Step 4b's worker-couldn't-complete, and Step 5/6's
+blocked-after-fix-iteration-cap stops — must end with its own line:
+`**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root cause's
+*class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
+`settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
+specific instance (not the item number, not the exact file path) — the same
+class of problem recurring on different items must reuse the identical slug,
+or this mechanism can never detect the pattern. This does NOT apply to a
+"skip item N, keep going" outcome that doesn't stop the whole tick (e.g. Step
+3b's closed-PR skip, or Step 3's ordinary "item still open, try another")
+— only to an outcome where the tick stops entirely with no other progress.
+
+At the very start of every tick, before Step 1: read the last 5 Status log
+entries. If the most recent 3 or more consecutive entries all carry the
+identical `Blocker-tag`, this tick is in **paused** mode:
+
+- The tick where the streak *first* reaches 3: log `**PAUSED after 3
+  consecutive ticks blocked on <tag>. Backing off to a reduced probe cadence
+  until this clears or a human resolves it.**` and stop — skip Steps 1
+  through 6 entirely this tick.
+- Every tick after that while still paused: do NOT re-run the full flow.
+  Instead, probe cheaply once every 3rd tick (roughly hourly at the current
+  20-minute cadence — tune to whatever the actual cadence is if it changes)
+  by running Step 1 alone. If Step 1 now comes back clean (the specific
+  blocking condition is gone), log `**RESUMED after N paused ticks — <tag>
+  cleared.**` and continue into Step 2 onward normally this same tick. If
+  Step 1 still finds the same blocker, log nothing this tick (avoid Status
+  log spam — the pause is already recorded) and skip straight to stopping
+  again.
+- If paused for a very long stretch (24+ hours), log one additional
+  low-frequency reminder line rather than staying completely silent
+  indefinitely — a human checking in after a day away should see "still
+  stuck" at a glance without having to scroll through a wall of
+  skipped-tick timestamps.
+
+This must not interfere with Step 3's own "nothing actionable this run"
+idle-throttling convention for an empty/fully-claimed backlog — that's a
+different, benign kind of "no progress" and must NOT accumulate toward this
+circuit breaker's streak count. Only genuine blocker/failure outcomes count.
+
 ## Step 1 — State check
 
 `git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
@@ -33,6 +78,10 @@ empty:
    output> — needs human review before next run. Files: <the exact output of the
    filtered `git status --porcelain` from above, one path per line>.` Include the file list verbatim — it's
    the only diagnostic a human gets without SSHing in to inspect the stash.
+   End the entry with a `**Blocker-tag:**` line per Step 0 — name the file
+   shape's class (e.g. `review-scratch-leftover` for a leftover review
+   scratch dir/file, or a new slug if the shape doesn't match one already
+   in use).
 4. Stop. No later step runs this tick.
 
 ## Step 2 — Sync main and clear proven-stale state
@@ -183,7 +232,8 @@ worktree, so it resolves against current `main`).
   - Dirty (the likeliest interrupted state is a worker killed mid-implementation,
     before its first commit — and `remove --force` exists precisely to override that
     refusal): do NOT remove it. `git -C <path> stash push -u -m "vps-loop item-<N>
-    leftover"`, log the stash ref, worktree path, and file list, and stop this tick.
+    leftover"`, log the stash ref, worktree path, file list, and a `**Blocker-tag:**`
+    line per Step 0 (e.g. `worktree-dirty-pre-commit`), and stop this tick.
     Boundaries say stash, don't discard — and Step 1's check never looks inside a
     worktree.
   - Clean: `git worktree unlock <path>` (ignore "not locked"), `git worktree remove
@@ -194,7 +244,8 @@ worktree, so it resolves against current `main`).
   on `main`, so `git diff main...HEAD` there is empty and would produce a vacuously
   clean review of unreviewed commits. Log `- <UTC timestamp>: item N has an
   un-reviewed leftover branch with commits but no worktree: <commit list>. Not resumed
-  — needs a human to attach a worktree or delete it.` and stop this tick.
+  — needs a human to attach a worktree or delete it.
+  **Blocker-tag:** branch-without-worktree` and stop this tick.
 - *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
   `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
   1. Run Step 5's full **Pass 1 then Pass 2** review sequence against this
@@ -218,7 +269,8 @@ worktree, so it resolves against current `main`).
      findings (finish Pass 2 if Pass 1 was the one fixed; if Pass 2 was the one
      fixed, that fix-and-reverify cycle *is* Pass 2 — no further pass needed) before
      doing item 2. Still not clean after that pass's cap → append residual findings
-     + worktree path to the Status log, no push, no PR, stop.
+     + worktree path to the Status log, plus a `**Blocker-tag:**` line per Step 0
+     (e.g. `review-major-unresolved`), no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 
@@ -255,8 +307,10 @@ spec. Record the worktree path and branch the call returns; later steps need the
 If the worker reports it did NOT produce a finished local commit (blocked, needs more
 context, denied a tool call it couldn't work around), do NOT proceed to Step 5:
 append `- <UTC timestamp>: item N blocked before verification — worker reported:
-<its blocker, summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`, no push, no
-PR, stop.
+<its blocker, summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`, plus a
+`**Blocker-tag:**` line per Step 0 naming the blocker's class (e.g.
+`sensitive-file-no-approver`, `db-write-blocked` — reuse an existing slug if this
+matches a cause already seen, don't invent a near-duplicate), no push, no PR, stop.
 
 ## Step 5 — Verify
 
@@ -282,7 +336,8 @@ Run them as a strict sequence, not a single branching decision:
      Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
      blocked — /review-branch still reports Major findings after 2 fix
      iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
-     <summary>.`, no push, no PR, stop.
+     <summary>.
+     **Blocker-tag:** review-major-unresolved`, no push, no PR, stop.
    - Once pass 1 is clean — whether immediately, or only after the
      fix-and-reverify cycle above — proceed to pass 2. Do not skip to Step 6
      here even though pass 1 is clean; the second pass is mandatory regardless.
@@ -295,7 +350,8 @@ Run them as a strict sequence, not a single branching decision:
      iterations for pass 2. Once clean, proceed to Step 6 — a Major caught and
      fixed on pass 2 still satisfies the two-pass bar; do not run a third full
      pass just to reach the count. Still Major after 2 fix iterations on pass 2:
-     same blocked-and-stop logging as pass 1, above.
+     same blocked-and-stop logging as pass 1, above (including the
+     `**Blocker-tag:** review-major-unresolved` line).
 
 (Doubling the mandatory full-pass count roughly doubles this step's reviewer-agent
 cost for every item, including trivial ones — accepted deliberately, since a
@@ -336,8 +392,8 @@ avoid confusion with this section's own "Step 6" heading.
      is still advancing or GitHub's mergeability check is still not settling
      after 2 tries, stop and log `- <UTC timestamp>: item N blocked before
      merge — main kept advancing / mergeability wouldn't settle after 2
-     re-sync attempts. PR #<number> left ready, not merged.` rather than
-     retrying indefinitely.
+     re-sync attempts. PR #<number> left ready, not merged.
+     **Blocker-tag:** merge-resync-unsettled` rather than retrying indefinitely.
 6.7. `gh pr ready <number>`. Step 5 already completed both required
      `/review-branch` passes clean, and 6.6 just confirmed `main` hasn't moved
      since — mark it ready rather than leaving it in draft.
