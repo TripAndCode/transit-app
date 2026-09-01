@@ -144,16 +144,19 @@ async def compute_ranking(
 async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str, limit: int) -> list[tuple]:
     """Live raw-scan ranking — fallback for time_band-filtered queries.
 
-    p50/p90 reproduce the Postgres version's `PERCENT_RANK() OVER (...)`
-    window + boundary-row pick (min-rank ties: the smallest value whose
-    fraction-strictly-below is >= q) via `rank()`/`count()` window
-    functions instead — NOT ClickHouse's `quantileExact`, which is a pure
-    positional pick (`sorted[floor(q*n)]`) that silently disagrees with
-    PERCENT_RANK whenever `dep_delay` has ties (common: exact-zero delays
-    and clamped/rounded values dominate this column). E.g. sorted
-    `[0]*95 + [600]*5`: PERCENT_RANK's p90 is 600s, quantileExact's is 0s.
-    Every group here has > 20 rows (the HAVING gate), so `avg` is never
-    NULL/NaN — no empty-input guard needed.
+    p50/p90 are computed via `rank()`/`count()` window functions reproducing
+    the OLD min-rank-tie `PERCENT_RANK()` formula the Postgres aggregate path
+    (`agg_route_stats`/`agg_route_hour`) used before it migrated to
+    `PERCENTILE_DISC` — NOT ClickHouse's `quantileExact`, which is a pure
+    positional pick (`sorted[floor(q*n)]`). This is a known, accepted
+    divergence: this ClickHouse fallback can now disagree with the Postgres
+    aggregate path on tied/clustered `dep_delay` data (common: exact-zero
+    delays and clamped/rounded values dominate this column), since the two
+    paths use different tie-handling rules. E.g. sorted `[0]*95 + [600]*5`:
+    this function's p90 is 600s, `PERCENTILE_DISC`'s (the current aggregate
+    path) is 0s, and `quantileExact`'s would also be 0s. Every group here has
+    > 20 rows (the HAVING gate), so `avg` is never NULL/NaN — no empty-input
+    guard needed.
     """
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
@@ -179,11 +182,13 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
     )
     # ClickHouse's round() is round-half-to-even; round in Python (half-up)
     # to match Postgres ROUND() and the agg fast path's _avg_min/_sec_to_min.
-    # p50/p90 can legitimately be None: PERCENT_RANK's min-rank tie handling
+    # p50/p90 can legitimately be None: this function's min-rank tie handling
     # gives every row in an all-tied (or heavily-tied) partition the SAME
     # rank, so `minIf(dep_delay, pct >= q)` matches zero rows once every
-    # row's pct sits below q — exactly what the pre-migration Postgres
-    # PERCENT_RANK query did too (MIN() of an empty CASE-filtered set).
+    # row's pct sits below q. The Postgres aggregate path no longer has this
+    # failure mode (`PERCENTILE_DISC` always resolves to a real value for a
+    # non-empty group) — this NULL case is specific to this ClickHouse
+    # fallback's still-old tie formula, per this function's own docstring.
     return [
         (
             route_code,

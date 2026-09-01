@@ -247,13 +247,16 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 route_code, service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2)  AS avg_min,
                 -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always an
-                -- actual observed dep_delay value, matching pipeline/reports/
-                -- rankings.py's _ranking_live boundary-row-pick semantics. It
-                -- also handles ties and single-row groups correctly by
-                -- construction: it picks the smallest ordered value whose
-                -- cumulative distribution is >= the target fraction, so a
-                -- tied cluster or an n=1 partition always resolves to a real
-                -- value instead of skipping every row below the threshold.
+                -- actual observed dep_delay value. It handles ties and
+                -- single-row groups correctly by construction: it picks the
+                -- smallest ordered value whose cumulative distribution is >=
+                -- the target fraction, so a tied cluster or an n=1 partition
+                -- always resolves to a real value instead of skipping every
+                -- row below the threshold. NOTE: this does NOT match
+                -- pipeline/reports/rankings.py's _ranking_live ClickHouse
+                -- fallback, which intentionally reproduces the old min-rank
+                -- tie formula this column used to use — see that function's
+                -- docstring for the known, accepted divergence on tied data.
                 ROUND(PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p50_min,
                 ROUND(PERCENTILE_DISC(0.9) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p90_min,
                 SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,

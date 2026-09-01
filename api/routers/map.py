@@ -643,8 +643,9 @@ async def today_route_summary(
             -- contributing service_type hasn't been backfilled yet.
             -- base_p90_min's numerator/denominator are both FILTERed to the same
             -- p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin
-            -- groups, so a service_type's p90_min can itself be null (a degenerate
-            -- PERCENT_RANK result) while its samples are not -- SUM() silently
+            -- groups, so a service_type's p90_min can itself be null (every
+            -- contributing row's dep_delay was itself NULL) while its samples are
+            -- not -- SUM() silently
             -- skips a null numerator term but NOT its row's sample count in the
             -- denominator, which would otherwise bias base_p90_min down whenever
             -- any contributing service_type is thin.
@@ -675,8 +676,8 @@ async def today_route_summary(
             -- correct "does b have a matching row" test (AVG() over a real
             -- joined row is never null). agg_route_stats no longer gates out
             -- thin (route, service_type) groups at insert time, so b.p90_min
-            -- can legitimately be null (a degenerate PERCENT_RANK result for
-            -- a thin or tied group) while b.avg_min is not; independently
+            -- can legitimately be null (every contributing row's dep_delay
+            -- was itself NULL) while b.avg_min is not; independently
             -- coalescing each column would then silently mix b's exact-match
             -- avg with rb's pooled-across-service_types p90 -- two different
             -- statistical populations reported as one baseline. Picking all
