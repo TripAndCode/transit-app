@@ -30,7 +30,7 @@ from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
-from api.triage import classify_route
+from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 
 _log = logging.getLogger(__name__)
 
@@ -873,16 +873,33 @@ async def route_trips(
 
 
 def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dict:
-    """Merge cohort stats for one stop into the stop dict."""
+    """Merge cohort stats for one stop into the stop dict.
+
+    ``cohort_low_confidence`` flags a thin total observation count behind
+    ``cohort_avg_delay_sec`` — independent of ``is_outlier``'s own
+    ``cohort_route_count >= 2`` gate, which only checks how many DISTINCT
+    routes contributed, not how many total observations they contributed
+    between them (two routes with 5 observations each still clears that
+    gate but is still a thin average).
+    """
     if stop_id is None or stop_id not in cohort:
-        return {"cohort_avg_delay_sec": None, "cohort_route_count": 0, "is_outlier": False}
+        return {
+            "cohort_avg_delay_sec": None,
+            "cohort_route_count": 0,
+            "cohort_samples": 0,
+            "cohort_low_confidence": False,
+            "is_outlier": False,
+        }
     c = cohort[stop_id]
     cohort_avg = c["cohort_avg_delay_sec"]
     route_count = c["cohort_route_count"]
+    cohort_samples = c["cohort_samples"] or 0
     is_outlier = cohort_avg is not None and route_count >= 2 and route_avg_sec > cohort_avg * 1.5
     return {
         "cohort_avg_delay_sec": cohort_avg,
         "cohort_route_count": route_count,
+        "cohort_samples": cohort_samples,
+        "cohort_low_confidence": cohort_avg is not None and cohort_samples < COHORT_LOW_CONFIDENCE_SAMPLES,
         "is_outlier": is_outlier,
     }
 
@@ -972,6 +989,7 @@ async def route_stop_profile(
             SELECT
                 stop_id,
                 COUNT(DISTINCT route_code) AS cohort_route_count,
+                SUM(samples)::int AS cohort_samples,
                 ROUND(
                     (SUM(delay_sum)::float / NULLIF(SUM(samples), 0))::numeric, 0
                 )::int AS cohort_avg_delay_sec
@@ -1009,7 +1027,14 @@ def _heatmap_features(rows) -> dict:
     Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
     stop_codes, route_codes, avg_delay_min, p90_delay_min, samples.  Those columns
     are mapped to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
-    platform_code, avg_delay_min, p90_delay_min, samples, route_codes).
+    platform_code, avg_delay_min, p90_delay_min, samples, route_codes,
+    low_confidence).
+
+    ``low_confidence`` reuses the same sample-count floor as the route-level
+    baselines (``LOW_CONFIDENCE_SAMPLES``) rather than the cohort-specific one:
+    a heatmap cell pools the FULL requested date range (not a fixed 30-day
+    window at one stop), so its typical sample density is closer to a route
+    baseline's than to a cohort comparison's.
     """
     features = [
         {
@@ -1024,6 +1049,7 @@ def _heatmap_features(rows) -> dict:
                 "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
+                "low_confidence": r["samples"] < LOW_CONFIDENCE_SAMPLES,
             },
         }
         for r in rows

@@ -55,6 +55,10 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+    // 95% Wilson interval too wide to trust the percentage (see
+    // pipeline/stats.py) — a caveat marker, not a plain value, so it's
+    // blank rather than "false" for the common (confident) case.
+    { index: 5, labelKey: "reports.col.confidence", align: "left", format: (v, t) => fmtConfidence(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
@@ -102,6 +106,10 @@ function fmtNum(v: unknown, _t: TFunction): string {
   const n = Number(v);
   if (!isFinite(n)) return "—";
   return n.toLocaleString();
+}
+
+function fmtConfidence(v: unknown, t: TFunction): string {
+  return v === true ? t("reports.confidence_low_mark") : "";
 }
 
 // Module-scope pure function rather than an in-render IIFE — see

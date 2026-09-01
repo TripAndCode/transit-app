@@ -389,7 +389,8 @@
       "few_to_many": "delay: low → high",
       "color_explainer": "Color: average delay band",
       "bubble_explainer": "Bubble: a group of stops (number = how many stops)",
-      "size_explainer": "Dot size: bigger = longer delay"
+      "size_explainer": "Dot size: bigger = longer delay",
+      "low_confidence_explainer": "Faint dot: few observations, treat with caution"
     },
     "popup": {
       "platform_label": "Platform",
@@ -530,8 +531,10 @@
       "stop_name": "Stop",
       "hour": "Hour",
       "next_stop_sequence": "Next Stop #",
-      "avg_added_min": "Added (min)"
+      "avg_added_min": "Added (min)",
+      "low_confidence": "Confidence"
     },
+    "low_confidence_mark": "wide range",
     "more_rows": "…and {{count}} more",
     "chips": {
       "more": "More"
@@ -794,6 +797,7 @@
       "stop_label_no_name": "Stop #{{seq}}",
       "stop_outlier_one": "{{delta}}min more than {{count}} other route's avg",
       "stop_outlier_other": "{{delta}}min more than {{count}} other routes' avg",
+      "stop_outlier_low_confidence": "few observations",
       "close": "Close",
       "empty": "No trip data for this route"
     },
@@ -835,8 +839,10 @@
       "weekday": "Weekday",
       "weekend": "Weekend/Holiday",
       "diff": "Diff",
-      "direction": "Direction"
+      "direction": "Direction",
+      "confidence": "Confidence"
     },
+    "confidence_low_mark": "wide range",
     "direction": {
       "weekend_higher": "Weekend > Weekday",
       "weekday_higher": "Weekday > Weekend"
@@ -883,6 +889,8 @@
       "empty": "No data in this range.",
       "svg_aria": "Daily average delay chart",
       "tooltip_metrics": "avg {{min}} min / {{count}} obs.",
+      "smoothed_tooltip": "7-day avg {{min}} min",
+      "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
       "offender": "Route {{code}} ({{min}} min)"
     }

@@ -185,6 +185,31 @@ async def test_on_time_and_worst_5min_exact_from_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_on_time_appends_pct_low_confidence_flag(reports_client, ch_client):
+    """The on_time report appends a trailing `low_confidence` bool (index 5)
+    per row — True when the on-time percentage's 95% Wilson interval is
+    wide enough to need a caveat, independent of compute_on_time's own
+    samples>20 inclusion gate (see pipeline/stats.py)."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-09"
+    # 25 samples at 80% on-time: comfortably clears the >20 inclusion gate
+    # but is still thin enough for a wide Wilson interval.
+    await _seed_route(pool, agency_id, "R_UNCERTAIN", "平日", day, [30] * 20 + [600] * 5)
+    # 300 samples at 90% on-time: a large-enough baseline that the interval
+    # narrows well under the 5pp cutoff.
+    await _seed_route(pool, agency_id, "R_CONFIDENT", "平日", day, [30] * 270 + [600] * 30)
+    _run_analyze(agency_id, ch_client)
+
+    rows = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
+    uncertain = next(x for x in rows if x[0] == "R_UNCERTAIN")
+    confident = next(x for x in rows if x[0] == "R_CONFIDENT")
+    assert float(uncertain[2]) == 80.0
+    assert uncertain[5] is True
+    assert float(confident[2]) == 90.0
+    assert confident[5] is False
+
+
+@pytest.mark.asyncio
 async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
     """NULL service_type routes must still rank (the '' sentinel maps back to
     None), matching the old live query which never filtered them."""
@@ -812,6 +837,55 @@ async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_
     assert days[0]["avg_min"] == 1.37  # NOT the buggy re-weighted 1.38
     offender = next(o for o in days[0]["top_offenders"] if o["route_code"] == "R_WK")
     assert offender["avg_min"] == 1.37
+
+
+@pytest.mark.asyncio
+async def test_compute_trend_series_avg_min_smoothed_is_trailing_pooled_mean(aconn, aagency_id):
+    """`avg_min_smoothed` sits alongside the raw per-day `avg_min` — a
+    trailing pooled mean over the last (up to 7) OBSERVED days, computed
+    from each day's exact raw-seconds sum (not by re-weighting the
+    already-rounded daily avg_min values)."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.rankings import compute_trend_series
+
+    days_seed = [
+        (date(2026, 5, 18), 1.0, 10, 600),
+        (date(2026, 5, 19), 2.0, 10, 1200),
+        (date(2026, 5, 20), 3.0, 10, 1800),
+    ]
+    for day, avg_min, samples, sum_delay_sec in days_seed:
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R_SMOOTH', '平日', $3, $4, $5)",
+            aagency_id,
+            day.isoformat(),
+            avg_min,
+            samples,
+            sum_delay_sec,
+        )
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 20))
+    out = await compute_trend_series(aagency_id, ctx, aconn)
+    days = out["days"]
+    assert len(days) == 3
+    # Day 1: window is just day 1 itself -> 600/10/60 = 1.0.
+    assert days[0]["avg_min"] == 1.0
+    assert days[0]["avg_min_smoothed"] == 1.0
+    # Day 2: pooled over days 1-2 -> (600+1200)/20/60 = 1.5.
+    assert days[1]["avg_min_smoothed"] == 1.5
+    # Day 3: pooled over all 3 days (fewer than the 7-day window) ->
+    # (600+1200+1800)/30/60 = 2.0 -- NOT a re-weighted mean of 1.0/2.0/3.0
+    # (which would also happen to be 2.0 here since samples are equal; the
+    # exact-sum pooling is what matters for unequal-samples days elsewhere).
+    assert days[2]["avg_min"] == 3.0
+    assert days[2]["avg_min_smoothed"] == 2.0
+
+    # Week/month buckets are already smoothed by their own width.
+    out_week = await compute_trend_series(aagency_id, ctx, aconn, granularity="week")
+    assert out_week["days"][0]["avg_min_smoothed"] is None
 
 
 async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucket_avg(aconn, aagency_id):

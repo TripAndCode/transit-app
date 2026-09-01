@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap, type MockLayer } from "../../test/mockMap";
-import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER } from "./useHeatmapLayer";
+import { useHeatmapLayer, SOURCE, LAYER, CLUSTER_LAYER, LOW_CONFIDENCE_OPACITY_FACTOR } from "./useHeatmapLayer";
 import type { HeatmapCollection } from "../../api/types";
 import type { SeverityKey } from "../../components/MapLegend";
 
@@ -93,8 +93,30 @@ describe("useHeatmapLayer (clustering)", () => {
     const radius = JSON.stringify(paint["circle-radius"]);
     expect(radius).toContain("avg_delay_min"); // size driven by delay
     expect(radius).not.toContain("samples"); // NOT by data volume
-    // solid fill (no focus) — opacity no longer encodes samples
-    expect(paint["circle-opacity"]).toBe(0.92);
+    // solid fill (no focus) at full confidence — opacity no longer encodes
+    // `samples` as a continuous volume signal; it only dims for the binary
+    // `low_confidence` flag (a thin-sample caveat, not proportional to n).
+    expect(paint["circle-opacity"]).toEqual([
+      "case",
+      ["boolean", ["get", "low_confidence"], false],
+      0.92 * LOW_CONFIDENCE_OPACITY_FACTOR,
+      0.92,
+    ]);
+  });
+
+  it("dims low-confidence stops instead of hiding or resizing them", () => {
+    const map = makeMockMap();
+    run(map);
+    const dotPaint = (map.getLayer(LAYER) as MockLayer).paint as Record<string, unknown>;
+    const casingPaint = (map.getLayer("delay-casing") as MockLayer).paint as Record<string, unknown>;
+    const opacityExpr = JSON.stringify(dotPaint["circle-opacity"]);
+    const strokeOpacityExpr = JSON.stringify(casingPaint["circle-stroke-opacity"]);
+    expect(opacityExpr).toContain("low_confidence");
+    expect(strokeOpacityExpr).toContain("low_confidence");
+    // Radius/color (the delay-severity signal) must stay untouched by
+    // confidence — only opacity dims.
+    expect(JSON.stringify(dotPaint["circle-radius"])).not.toContain("low_confidence");
+    expect(JSON.stringify(dotPaint["circle-color"])).not.toContain("low_confidence");
   });
 });
 

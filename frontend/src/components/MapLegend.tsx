@@ -196,7 +196,8 @@ export function MapLegend({
         <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
           {t("map.legend.color_explainer")}<br />
           {t("map.legend.bubble_explainer")}<br />
-          {t("map.legend.size_explainer")}
+          {t("map.legend.size_explainer")}<br />
+          {t("map.legend.low_confidence_explainer")}
         </div>
       </div>
       )}
