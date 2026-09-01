@@ -85,3 +85,14 @@ i18n key parity or `agg_*` column renames).
   noticeably slower than a typical dev machine. A timeout with no test
   failure is an infrastructure limitation, not evidence that tests failed;
   resolve it before weakening the gate.
+- A daily crontab entry (`15 3 * * *`, JST — the VPS's system timezone —
+  distinct from both the 20-minute `/vps-loop-run` cadence and the Oracle
+  collector VM's 9am-JST jobs on a different machine) runs
+  `python3 /root/transit-app/scripts/daily_git_hygiene.py --apply`,
+  appending to `/root/git-hygiene.log`. It closes the two gaps
+  `/vps-loop-run` only handles reactively: local worktree/branch cleanup
+  during long idle stretches or a stuck loop, and merged `vps-loop/item-*`
+  branches plus stale `-superseded-<sha>` backup branches piling up
+  unbounded on GitHub. Like `/root/claude-loop.sh`, the crontab wiring
+  itself is VPS-local infrastructure, not tracked in this repo — only the
+  script it invokes is.
