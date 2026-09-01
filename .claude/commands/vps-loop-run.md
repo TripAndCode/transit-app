@@ -10,6 +10,176 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Step 0 — Circuit breaker: back off after a repeated identical blocker
+
+Every Status log entry logged when a tick stops making zero forward progress
+because of a genuine blocker — Step 1's stash-and-stop, Step 2's
+tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3b's
+worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
+stop paths, Step 4b's
+worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+and Boundaries' generic tool-call-errored stop — must end with its own
+line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
+cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
+`settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
+specific instance (not the item number, not the exact file path) — the same
+class of problem recurring on different items must reuse the identical slug,
+or this mechanism can never detect the pattern. Two outcome-category slugs
+(`review-major-unresolved` for an unresolved review finding,
+`worker-blocked` for a Step 4b report) are generic buckets, not
+necessarily a real recurring root cause on their own — before reusing one of
+these because the last 2 entries also used it, sanity-check that the
+underlying cause is actually the same, not just the same outcome shape; if
+it's clearly a different underlying issue that happens to also end in an
+unresolved review or a blocked worker, use a more specific compound slug
+instead (e.g. `review-major-unresolved-null-handling`) so unrelated one-off
+failures don't spuriously trip the streak. This tagging requirement does NOT
+apply to a "skip item N, keep going" outcome that doesn't stop the whole
+tick (e.g. Step 3b's closed-PR skip — no `Blocker-tag` there, it's an item
+skip, not a tick stop; see Step 0 — or Step 3's ordinary "item still open,
+try another") — only to an outcome where the tick stops entirely with no
+other progress.
+
+One entry = the text from one leading `- <UTC timestamp>: ...` bullet up to
+(excluding) the next line that starts with `- <UTC timestamp>`, regardless
+of any `-`-prefixed lines embedded within that entry's own prose (e.g. a
+findings summary) — don't miscount those as separate entries. `**PAUSED
+...**`/`**Still paused ...**`/`**RESUMED ...**` bookkeeping lines
+(introduced below) are their own entries too, in the same `- <UTC
+timestamp>: **PAUSED ...**` bulleted form as everything else in this log —
+never a bare unbulleted line — but they are bookkeeping markers, not
+`Blocker-tag`-bearing occurrences; keep them out of the tag-streak count
+described next (none of the three extend or restart the streak that
+triggered them, and none is ever itself one of the 3 entries counted
+toward it).
+
+**"3 in a row" means the last 3 tag-bearing Status-log entries share an
+identical tag, not 3 literally-adjacent Status-log entries.** An unrelated
+entry with NO `Blocker-tag` at all (an idle-throttle line, an ordinary
+shipped item) sitting between two occurrences of the same tag does NOT
+break the count or consume one of the 3 slots — the same root cause
+recurring with an occasional unrelated success interleaved is still the
+same recurring problem worth escalating, arguably more so than requiring
+zero interruption. A genuinely DIFFERENT blocker (its own, different
+`Blocker-tag`) occurring in between DOES break the count: it occupies one
+of the 3 most-recent tag-bearing slots with a non-matching tag, and is
+itself real evidence the situation changed, not something to silently
+look past — only no-tag interleaving is transparent to this count, not
+every interleaving. Worked example (oldest → newest,
+Blocker-tag lines omitted from this summary for brevity, each really has
+its own `**Blocker-tag:** db-write-blocked` line):
+```
+10:00 item 21 blocked before verification — db write refused.
+10:20 item 22 blocked before verification — db write refused.
+10:40 item 23 shipped. PR #501 merged.
+11:00 item 24 blocked before verification — db write refused.
+```
+At the 11:20 tick, the last 3 `db-write-blocked` occurrences are 10:00,
+10:20, and 11:00 — the 10:40 shipped entry doesn't count and doesn't
+interrupt them. This is a real streak: log `**PAUSED after the last 3 ticks
+blocked on db-write-blocked. Backing off ...**`, exactly matching the
+template given below — note it says "the last 3 ticks," not "3 consecutive
+ticks," precisely to avoid implying strict Status-log adjacency.
+
+At the very start of every tick, before Step 1, determine pause state in
+two steps:
+
+1. **Am I currently paused?** Scan the Status log backward for the most
+   recent pause-related bookkeeping entry: a `**PAUSED ...**` line, a
+   `**Still paused ...**` confirming-probe line (introduced below), or a
+   `**RESUMED ...**` line — "PAUSED-family" below means either of the
+   first two. If none exists yet, or the most recent one is `RESUMED`, you
+   are NOT currently paused — skip to step 2. If the most recent one is
+   PAUSED-family, you ARE currently paused — do not re-derive this from
+   the raw tag streak each tick, this marker is authoritative:
+   - Still run Step 1 every tick as normal even while paused (it's cheap,
+     and it's this repo's only guard against an unrelated new problem like
+     a leaked credential file landing at the top level while paused for a
+     different reason — never skip it). If Step 1 itself finds new
+     unexpected state, handle that normally (stash-and-log per Step 1,
+     with its own `Blocker-tag`) regardless of the existing pause.
+   - Beyond Step 1, do NOT run the rest of the normal flow every tick —
+     only attempt it once enough wall-clock time has passed since the most
+     recent PAUSED-family entry's own UTC timestamp: roughly three times
+     the actual interval the invoking cron job runs on, read directly from
+     the live crontab (`crontab -l`) rather than any hardcoded or
+     documented figure — this repo has more than one stale,
+     mutually-conflicting cadence number on record across different files,
+     so the crontab itself is the only source guaranteed current. Compute
+     this from each entry's own timestamp, not by counting
+     ticks — a tick where not enough time has passed yet logs nothing at
+     all (see below), so it's indistinguishable from any other silent tick
+     except by timestamp math; a tick counter cannot be reliably
+     reconstructed from the log, but elapsed wall-clock time can. On a
+     tick where not enough time has passed yet, stop here with no new log
+     line at all, not even a repeat of the pause.
+     There is no separate "probe check" to invent per tag: a probe attempt
+     IS a normal, full, unrestricted run of Steps 2 onward, exactly as any
+     tick would otherwise do — the same logic that originally produced the
+     stop is what re-confirms or clears it, because it's the same code
+     path. Two outcomes:
+     - **The attempt reaches a genuinely different outcome than the paused
+       tag** (progress is made — an item ships, a different item is
+       picked, or the same item now proceeds past where it previously
+       stopped — or the tick ends idle/clean with no matching
+       `Blocker-tag` at all): log `**RESUMED — <tag> cleared (paused since
+       <the original PAUSED entry's own UTC timestamp>).**` FIRST — not a
+       tick count: exactly like the cadence math above, most ticks during
+       a pause log nothing, so a literal count of paused ticks is not
+       reconstructable from the log either, and this template must not
+       ask for one. The original `PAUSED` entry's timestamp is already in
+       the log and needs no reconstruction. Then let that attempt's own
+       normal outcome
+       logging (per whichever of Steps 2-6 it actually reached) proceed as
+       its own separate, later entry — including a fresh `**Blocker-tag:**`
+       line if the attempt itself stops on a new, different blocker.
+       Logging `RESUMED` first, not merely "in addition to" with
+       unspecified order, matters: it guarantees that if this new blocker
+       recurs later, its first occurrence here is never wrongly excluded
+       by step 2's own "do not scan past the most recent `RESUMED`" rule
+       below, since that boundary now sits chronologically before, not
+       after, this occurrence. This `RESUMED` entry is what step 1 above
+       will see on the next tick, correctly reporting "not currently
+       paused" from then on.
+     - **The attempt stops again with the identical `Blocker-tag`:** this
+       is a confirming probe, not a new occurrence to react to. Log
+       `**Still paused — probe found <tag> unchanged.**` as its own
+       timestamped entry — a PAUSED-family bookkeeping marker exactly like
+       the original `PAUSED` line, not a `Blocker-tag`-bearing occurrence
+       (see the definition above). This entry's timestamp is what step 1
+       measures elapsed time against for the *next* probe; skipping this
+       log line would make that elapsed-time calculation impossible from
+       the log alone. It also means a human checking in after a long pause
+       finds one line per probe cycle rather than a wall of total silence,
+       so no separate long-stretch reminder mechanism is needed.
+2. **Not currently paused — should I newly enter pause this tick?** Read
+   backward through the Status log, but do NOT scan past the boundary step
+   1 already found: stop at (do not look behind) the most recent
+   `RESUMED` marker, or the top of the log if none exists yet. (By
+   construction this is always the correct boundary here: if a
+   `PAUSED`/`Still paused` entry more recent than that existed with no
+   later `RESUMED`, step 1 above would have reported "currently paused"
+   and step 2 would never run at all this tick.) A `RESUMED` genuinely
+   resets this streak's window, so a tag-bearing entry from before it must
+   never count again, even if it's still among the numerically-nearest
+   entries. Within that bounded window, find the most
+   recent 3 entries that themselves carry a `Blocker-tag` (skipping over
+   Step 3's idle-throttle lines and ordinary item-shipped entries, which
+   don't carry one — an unrelated successful tick in between does not
+   reset or interrupt this count, per the worked example above). If those
+   3 share an identical tag, log `**PAUSED after the last 3 ticks blocked
+   on <tag>. Backing off to a reduced probe cadence until this clears or a
+   human resolves it.**` and stop — skip Steps 1 through 6 entirely this
+   tick. If fewer than 3 tag-bearing entries exist within the bounded
+   window (including zero, e.g. right after a fresh `RESUMED`), that is
+   not a streak — proceed to Step 1 as normal; this is an ordinary,
+   unrestricted tick.
+
+This must not interfere with Step 3's own "nothing actionable this run"
+idle-throttling convention for an empty/fully-claimed backlog — that's a
+different, benign kind of "no progress" and must NOT accumulate toward this
+circuit breaker's streak count. Only genuine blocker/failure outcomes count.
+
 ## Step 1 — State check
 
 `git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
@@ -33,6 +203,10 @@ empty:
    output> — needs human review before next run. Files: <the exact output of the
    filtered `git status --porcelain` from above, one path per line>.` Include the file list verbatim — it's
    the only diagnostic a human gets without SSHing in to inspect the stash.
+   End the entry with a `**Blocker-tag:**` line per Step 0 — name the file
+   shape's class (e.g. `review-scratch-leftover` for a leftover review
+   scratch dir/file, or a new slug if the shape doesn't match one already
+   in use).
 4. Stop. No later step runs this tick.
 
 ## Step 2 — Sync main and clear proven-stale state
@@ -43,8 +217,9 @@ empty:
    policy shared with `/cleanup-merged`: it removes only clean local worktrees/refs
    that are already recoverable from `main` or an exact merged-PR head. It retains
    open PRs, dirty/locked worktrees, unique commits, `production`, and remote branches.
-3. If either command errors, follow the Boundaries tool-error rule: log it and stop
-   this tick. Never replace a retained decision with manual force deletion.
+3. If either command errors, follow the Boundaries tool-error rule (including its
+   `**Blocker-tag:**` requirement per Step 0): log it and stop this tick. Never
+   replace a retained decision with manual force deletion.
 
 ## Step 2b — Detect unshipped work stranded behind an already-merged item
 
@@ -113,7 +288,10 @@ interchangeable, the same way Step 3b already forks on this.
      (#<original number>) doesn't cover all commits on vps-loop/item-<N>
      (branch only, no worktree); unshipped content found (<short
      description>). Not resumed — needs a human to attach a worktree or
-     delete the branch.` and do not act on it further this tick.
+     delete the branch.
+     **Blocker-tag:** branch-without-worktree` and do not act on it further
+     this tick — reusing Step 3b's exact tag for this same root cause, not
+     a fresh compound slug, since it's genuinely the identical stop reason.
    Only route the FIRST such match to Step 3b in a given tick — this step
    still respects the one-item-per-tick design the rest of this file assumes.
    If a second or later `vps-loop/item-<M>` entry also lands in this branch
@@ -165,7 +343,9 @@ Step 3 keeps `CLOSED` items eligible.
 closed --json number,state,headRefName`. A `CLOSED`, unmerged PR means a human declined
 these exact commits — do NOT resume and re-push them. Log
 `- <UTC timestamp>: item N has leftover commits from closed PR #<number>; not resumed —
-delete the branch or reopen the PR by hand.` and skip item N this tick.
+delete the branch or reopen the PR by hand.` and skip item N this tick. No
+`**Blocker-tag:**` line here — this is an item skip, not a tick stop (see Step 0);
+the tick itself may still continue on to a different item.
 
 Otherwise detect both shapes: `git worktree list`, and
 `git rev-parse --verify --quiet refs/heads/vps-loop/item-<N>` for a branch with no
@@ -183,7 +363,8 @@ worktree, so it resolves against current `main`).
   - Dirty (the likeliest interrupted state is a worker killed mid-implementation,
     before its first commit — and `remove --force` exists precisely to override that
     refusal): do NOT remove it. `git -C <path> stash push -u -m "vps-loop item-<N>
-    leftover"`, log the stash ref, worktree path, and file list, and stop this tick.
+    leftover"`, log the stash ref, worktree path, file list, and a `**Blocker-tag:**`
+    line per Step 0 (e.g. `worktree-dirty-pre-commit`), and stop this tick.
     Boundaries say stash, don't discard — and Step 1's check never looks inside a
     worktree.
   - Clean: `git worktree unlock <path>` (ignore "not locked"), `git worktree remove
@@ -194,7 +375,8 @@ worktree, so it resolves against current `main`).
   on `main`, so `git diff main...HEAD` there is empty and would produce a vacuously
   clean review of unreviewed commits. Log `- <UTC timestamp>: item N has an
   un-reviewed leftover branch with commits but no worktree: <commit list>. Not resumed
-  — needs a human to attach a worktree or delete it.` and stop this tick.
+  — needs a human to attach a worktree or delete it.
+  **Blocker-tag:** branch-without-worktree` and stop this tick.
 - *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
   `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
   1. Run Step 5's full **Pass 1 then Pass 2** review sequence against this
@@ -218,7 +400,8 @@ worktree, so it resolves against current `main`).
      findings (finish Pass 2 if Pass 1 was the one fixed; if Pass 2 was the one
      fixed, that fix-and-reverify cycle *is* Pass 2 — no further pass needed) before
      doing item 2. Still not clean after that pass's cap → append residual findings
-     + worktree path to the Status log, no push, no PR, stop.
+     + worktree path to the Status log, plus a `**Blocker-tag:**` line per Step 0
+     (e.g. `review-major-unresolved`), no push, no PR, stop.
 
 ## Step 4 — Dispatch the worker
 
@@ -255,8 +438,12 @@ spec. Record the worktree path and branch the call returns; later steps need the
 If the worker reports it did NOT produce a finished local commit (blocked, needs more
 context, denied a tool call it couldn't work around), do NOT proceed to Step 5:
 append `- <UTC timestamp>: item N blocked before verification — worker reported:
-<its blocker, summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`, no push, no
-PR, stop.
+<its blocker, summarized>. Worktree: <path>, branch: vps-loop/item-<N>.`, plus a
+`**Blocker-tag:**` line per Step 0 naming the blocker's class (e.g.
+`sensitive-file-no-approver`, `db-write-blocked` — reuse an existing slug if this
+matches a cause already seen, don't invent a near-duplicate; fall back to Step 0's
+generic `worker-blocked` bucket only if the report doesn't fit any more specific,
+already-established class yet), no push, no PR, stop.
 
 ## Step 5 — Verify
 
@@ -282,7 +469,8 @@ Run them as a strict sequence, not a single branching decision:
      Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
      blocked — /review-branch still reports Major findings after 2 fix
      iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
-     <summary>.`, no push, no PR, stop.
+     <summary>.
+     **Blocker-tag:** review-major-unresolved`, no push, no PR, stop.
    - Once pass 1 is clean — whether immediately, or only after the
      fix-and-reverify cycle above — proceed to pass 2. Do not skip to Step 6
      here even though pass 1 is clean; the second pass is mandatory regardless.
@@ -295,7 +483,8 @@ Run them as a strict sequence, not a single branching decision:
      iterations for pass 2. Once clean, proceed to Step 6 — a Major caught and
      fixed on pass 2 still satisfies the two-pass bar; do not run a third full
      pass just to reach the count. Still Major after 2 fix iterations on pass 2:
-     same blocked-and-stop logging as pass 1, above.
+     same blocked-and-stop logging as pass 1, above (including the
+     `**Blocker-tag:** review-major-unresolved` line).
 
 (Doubling the mandatory full-pass count roughly doubles this step's reviewer-agent
 cost for every item, including trivial ones — accepted deliberately, since a
@@ -336,8 +525,8 @@ avoid confusion with this section's own "Step 6" heading.
      is still advancing or GitHub's mergeability check is still not settling
      after 2 tries, stop and log `- <UTC timestamp>: item N blocked before
      merge — main kept advancing / mergeability wouldn't settle after 2
-     re-sync attempts. PR #<number> left ready, not merged.` rather than
-     retrying indefinitely.
+     re-sync attempts. PR #<number> left ready, not merged.
+     **Blocker-tag:** merge-resync-unsettled` rather than retrying indefinitely.
 6.7. `gh pr ready <number>`. Step 5 already completed both required
      `/review-branch` passes clean, and 6.6 just confirmed `main` hasn't moved
      since — mark it ready rather than leaving it in draft.
@@ -383,4 +572,9 @@ avoid confusion with this section's own "Step 6" heading.
   moved on, and never skip or shortcut the two-pass gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
-  (worktree path/branch if one was created) — don't guess or retry blindly.
+  (worktree path/branch if one was created) — don't guess or retry blindly. This is
+  a genuine tick-stopping blocker: end the entry with a `**Blocker-tag:**` line per
+  Step 0 (e.g. a denied `git`/Bash call gets a slug like
+  `git-stash-permission-denied` or `sensitive-file-no-approver` depending on what
+  was actually denied — reuse the existing slug if the same command shape was
+  already denied before, rather than inventing a near-duplicate).
