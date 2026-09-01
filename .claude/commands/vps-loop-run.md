@@ -13,37 +13,69 @@ skip ahead.
 ## Step 0 — Circuit breaker: back off after a repeated identical blocker
 
 Every Status log entry logged when a tick stops making zero forward progress
-because of a genuine blocker — Step 1's stash-and-stop, Step 3b's
-worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
-stop paths, Step 4b's worker-couldn't-complete, and Step 5/6's
-blocked-after-fix-iteration-cap stops — must end with its own line:
-`**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root cause's
-*class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
+because of a genuine blocker — Step 1's stash-and-stop, Step 2's
+tool-error stop, Step 3b's worktree-dirty/branch-without-worktree/
+still-Major-after-2-fix-iterations stop paths, Step 4b's
+worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+and Boundaries' generic tool-call-errored stop — must end with its own
+line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
+cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
 `settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
 specific instance (not the item number, not the exact file path) — the same
 class of problem recurring on different items must reuse the identical slug,
-or this mechanism can never detect the pattern. This does NOT apply to a
-"skip item N, keep going" outcome that doesn't stop the whole tick (e.g. Step
-3b's closed-PR skip, or Step 3's ordinary "item still open, try another")
-— only to an outcome where the tick stops entirely with no other progress.
+or this mechanism can never detect the pattern. Two outcome-category slugs
+(`review-major-unresolved` for an unresolved review finding,
+`worker-blocked` for a Step 4b report) are generic buckets, not
+necessarily a real recurring root cause on their own — before reusing one of
+these because the last 2 entries also used it, sanity-check that the
+underlying cause is actually the same, not just the same outcome shape; if
+it's clearly a different underlying issue that happens to also end in an
+unresolved review or a blocked worker, use a more specific compound slug
+instead (e.g. `review-major-unresolved-null-handling`) so unrelated one-off
+failures don't spuriously trip the streak. This tagging requirement does NOT
+apply to a "skip item N, keep going" outcome that doesn't stop the whole
+tick (e.g. Step 3b's closed-PR skip — no `Blocker-tag` there, it's an item
+skip, not a tick stop; see Step 0 — or Step 3's ordinary "item still open,
+try another") — only to an outcome where the tick stops entirely with no
+other progress.
+
+One entry = the text from one leading `- <UTC timestamp>: ...` bullet up to
+(excluding) the next line that starts with `- <UTC timestamp>`, regardless
+of any `-`-prefixed lines embedded within that entry's own prose (e.g. a
+findings summary) — don't miscount those as separate entries.
 
 At the very start of every tick, before Step 1: read the last 5 Status log
-entries. If the most recent 3 or more consecutive entries all carry the
-identical `Blocker-tag`, this tick is in **paused** mode:
+entries by that definition. If the most recent 3 or more consecutive entries
+all carry the identical `Blocker-tag`, this tick is in **paused** mode:
 
 - The tick where the streak *first* reaches 3: log `**PAUSED after 3
   consecutive ticks blocked on <tag>. Backing off to a reduced probe cadence
   until this clears or a human resolves it.**` and stop — skip Steps 1
   through 6 entirely this tick.
-- Every tick after that while still paused: do NOT re-run the full flow.
-  Instead, probe cheaply once every 3rd tick (roughly hourly at the current
-  20-minute cadence — tune to whatever the actual cadence is if it changes)
-  by running Step 1 alone. If Step 1 now comes back clean (the specific
-  blocking condition is gone), log `**RESUMED after N paused ticks — <tag>
-  cleared.**` and continue into Step 2 onward normally this same tick. If
-  Step 1 still finds the same blocker, log nothing this tick (avoid Status
-  log spam — the pause is already recorded) and skip straight to stopping
-  again.
+- Every tick after that while still paused: still run Step 1 every tick as
+  normal (it's cheap, and it's this repo's only guard against an unrelated
+  new problem like a leaked credential file landing at the top level while
+  paused for a different reason — never skip it). If Step 1 itself finds
+  new unexpected state, handle that normally (stash-and-log per Step 1,
+  with its own `Blocker-tag`) even while otherwise paused. Beyond Step 1,
+  do NOT run the rest of the normal flow every tick — only attempt it once
+  every 3rd tick (roughly hourly at the current 20-minute cadence — tune to
+  whatever the actual cadence is if it changes). There is no separate
+  "probe check" to invent per tag: a probe attempt IS a normal, full,
+  unrestricted run of Steps 2 onward, exactly as any tick would otherwise
+  do — the same logic that originally produced the stop is what re-confirms
+  or clears it, because it's the same code path. Two outcomes:
+  - The attempt reaches a genuinely different outcome than the paused tag
+    (progress is made — an item ships, a different item is picked, or the
+    same item now proceeds past where it previously stopped — or the tick
+    ends idle/clean with no matching `Blocker-tag` at all): log `**RESUMED
+    after N paused ticks — <tag> cleared.**` in addition to whatever that
+    attempt's own normal outcome logging is, and resume the normal
+    every-tick cadence starting next tick.
+  - The attempt stops again with the identical `Blocker-tag`: this is a
+    confirming probe, not a new occurrence to react to — log nothing extra
+    (the pause and this tag are already recorded; avoid Status log spam)
+    and stay paused for another 3-tick interval.
 - If paused for a very long stretch (24+ hours), log one additional
   low-frequency reminder line rather than staying completely silent
   indefinitely — a human checking in after a day away should see "still
@@ -92,8 +124,9 @@ empty:
    policy shared with `/cleanup-merged`: it removes only clean local worktrees/refs
    that are already recoverable from `main` or an exact merged-PR head. It retains
    open PRs, dirty/locked worktrees, unique commits, `production`, and remote branches.
-3. If either command errors, follow the Boundaries tool-error rule: log it and stop
-   this tick. Never replace a retained decision with manual force deletion.
+3. If either command errors, follow the Boundaries tool-error rule (including its
+   `**Blocker-tag:**` requirement per Step 0): log it and stop this tick. Never
+   replace a retained decision with manual force deletion.
 
 ## Step 2b — Detect unshipped work stranded behind an already-merged item
 
@@ -214,7 +247,9 @@ Step 3 keeps `CLOSED` items eligible.
 closed --json number,state,headRefName`. A `CLOSED`, unmerged PR means a human declined
 these exact commits — do NOT resume and re-push them. Log
 `- <UTC timestamp>: item N has leftover commits from closed PR #<number>; not resumed —
-delete the branch or reopen the PR by hand.` and skip item N this tick.
+delete the branch or reopen the PR by hand.` and skip item N this tick. No
+`**Blocker-tag:**` line here — this is an item skip, not a tick stop (see Step 0);
+the tick itself may still continue on to a different item.
 
 Otherwise detect both shapes: `git worktree list`, and
 `git rev-parse --verify --quiet refs/heads/vps-loop/item-<N>` for a branch with no
@@ -439,4 +474,9 @@ avoid confusion with this section's own "Step 6" heading.
   moved on, and never skip or shortcut the two-pass gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
-  (worktree path/branch if one was created) — don't guess or retry blindly.
+  (worktree path/branch if one was created) — don't guess or retry blindly. This is
+  a genuine tick-stopping blocker: end the entry with a `**Blocker-tag:**` line per
+  Step 0 (e.g. a denied `git`/Bash call gets a slug like
+  `git-stash-permission-denied` or `sensitive-file-no-approver` depending on what
+  was actually denied — reuse the existing slug if the same command shape was
+  already denied before, rather than inventing a near-duplicate).
