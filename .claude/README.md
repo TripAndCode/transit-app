@@ -86,13 +86,17 @@ i18n key parity or `agg_*` column renames).
   failure is an infrastructure limitation, not evidence that tests failed;
   resolve it before weakening the gate.
 - A daily crontab entry (`15 3 * * *`, JST — the VPS's system timezone —
-  distinct from both the 20-minute `/vps-loop-run` cadence and the Oracle
-  collector VM's 9am-JST jobs on a different machine) runs
+  distinct from `/vps-loop-run`'s own, much more frequent cron cadence — see
+  `crontab -l` for the current interval, not a hardcoded figure here — and
+  from the Oracle collector VM's 9am-JST jobs on a different machine) runs
   `python3 /root/transit-app/scripts/daily_git_hygiene.py --apply`,
-  appending to `/root/git-hygiene.log`. It closes the two gaps
-  `/vps-loop-run` only handles reactively: local worktree/branch cleanup
-  during long idle stretches or a stuck loop, and merged `vps-loop/item-*`
-  branches plus stale `-superseded-<sha>` backup branches piling up
-  unbounded on GitHub. Like `/root/claude-loop.sh`, the crontab wiring
-  itself is VPS-local infrastructure, not tracked in this repo — only the
+  appending to `/root/git-hygiene.log`. It closes gaps `/vps-loop-run` either
+  only handles reactively or never handles at all: local worktree/branch
+  cleanup (handled reactively as a tick side effect, but not during long
+  idle stretches or a stuck loop), merged `vps-loop/item-*` branches piling
+  up unbounded on GitHub (never deleted by the loop itself), and stale local
+  `-superseded-<sha>` backup branches (created by Step 2b, never pushed —
+  no automated prune path existed at all). Like `/root/claude-loop.sh`, the
+  crontab wiring itself is VPS-local infrastructure, not tracked in this
+  repo — only the
   script it invokes is.
