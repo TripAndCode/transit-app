@@ -97,15 +97,21 @@ two steps:
        timestamps. This reminder is not itself a new `PAUSED`/`RESUMED`
        marker and doesn't change the state determined above.
 2. **Not currently paused — should I newly enter pause this tick?** Read
-   backward through the Status log for the most recent 3 entries that
-   themselves carry a `Blocker-tag` (skipping over any entries that don't,
-   including old `PAUSED`/`RESUMED` bookkeeping from a prior, already-
-   resolved episode, Step 3's idle-throttle lines, and ordinary
-   item-shipped entries). If those 3 share an identical tag, log `**PAUSED
-   after 3 consecutive ticks blocked on <tag>. Backing off to a reduced
-   probe cadence until this clears or a human resolves it.**` and stop —
-   skip Steps 1 through 6 entirely this tick. Otherwise proceed to Step 1
-   as normal; this is an ordinary, unrestricted tick.
+   backward through the Status log, but do NOT scan past the boundary step
+   1 already found: stop at (do not look behind) the most recent
+   `PAUSED`/`RESUMED` marker, or the top of the log if none exists yet — a
+   `RESUMED` genuinely resets this streak's window, so a tag-bearing entry
+   from before it must never count again, even if it's still among the
+   numerically-nearest entries. Within that bounded window, find the most
+   recent 3 entries that themselves carry a `Blocker-tag` (skipping over
+   Step 3's idle-throttle lines and ordinary item-shipped entries, which
+   don't carry one). If those 3 share an identical tag, log `**PAUSED after
+   3 consecutive ticks blocked on <tag>. Backing off to a reduced probe
+   cadence until this clears or a human resolves it.**` and stop — skip
+   Steps 1 through 6 entirely this tick. If fewer than 3 tag-bearing
+   entries exist within the bounded window (including zero, e.g. right
+   after a fresh `RESUMED`), that is not a streak — proceed to Step 1 as
+   normal; this is an ordinary, unrestricted tick.
 
 This must not interfere with Step 3's own "nothing actionable this run"
 idle-throttling convention for an empty/fully-claimed backlog — that's a
