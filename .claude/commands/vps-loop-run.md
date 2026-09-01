@@ -49,7 +49,29 @@ as everything else in this log — never a bare unbulleted line — but they
 are bookkeeping markers, not `Blocker-tag`-bearing occurrences; keep them
 out of the tag-streak count described next (a `PAUSED` entry does not
 extend or restart the streak that triggered it, and is never itself one of
-the "3 consecutive" entries).
+the 3 entries counted toward it).
+
+**"3 in a row" means the last 3 times this specific tag was logged, not 3
+literally-adjacent Status-log entries.** An unrelated entry with no
+`Blocker-tag` (an idle-throttle line, an ordinary shipped item) sitting
+between two occurrences of the same tag does NOT break the count — the
+same root cause recurring with an occasional unrelated success interleaved
+is still the same recurring problem worth escalating, arguably more so
+than requiring zero interruption. Worked example (oldest → newest,
+Blocker-tag lines omitted from this summary for brevity, each really has
+its own `**Blocker-tag:** db-write-blocked` line):
+```
+10:00 item 21 blocked before verification — db write refused.
+10:20 item 22 blocked before verification — db write refused.
+10:40 item 23 shipped. PR #501 merged.
+11:00 item 24 blocked before verification — db write refused.
+```
+At the 11:20 tick, the last 3 `db-write-blocked` occurrences are 10:00,
+10:20, and 11:00 — the 10:40 shipped entry doesn't count and doesn't
+interrupt them. This is a real streak: log `**PAUSED after the last 3 ticks
+blocked on db-write-blocked. Backing off ...**`, exactly matching the
+template given below — note it says "the last 3 ticks," not "3 consecutive
+ticks," precisely to avoid implying strict Status-log adjacency.
 
 At the very start of every tick, before Step 1, determine pause state in
 two steps:
@@ -105,13 +127,15 @@ two steps:
    numerically-nearest entries. Within that bounded window, find the most
    recent 3 entries that themselves carry a `Blocker-tag` (skipping over
    Step 3's idle-throttle lines and ordinary item-shipped entries, which
-   don't carry one). If those 3 share an identical tag, log `**PAUSED after
-   3 consecutive ticks blocked on <tag>. Backing off to a reduced probe
-   cadence until this clears or a human resolves it.**` and stop — skip
-   Steps 1 through 6 entirely this tick. If fewer than 3 tag-bearing
-   entries exist within the bounded window (including zero, e.g. right
-   after a fresh `RESUMED`), that is not a streak — proceed to Step 1 as
-   normal; this is an ordinary, unrestricted tick.
+   don't carry one — an unrelated successful tick in between does not
+   reset or interrupt this count, per the worked example above). If those
+   3 share an identical tag, log `**PAUSED after the last 3 ticks blocked
+   on <tag>. Backing off to a reduced probe cadence until this clears or a
+   human resolves it.**` and stop — skip Steps 1 through 6 entirely this
+   tick. If fewer than 3 tag-bearing entries exist within the bounded
+   window (including zero, e.g. right after a fresh `RESUMED`), that is
+   not a streak — proceed to Step 1 as normal; this is an ordinary,
+   unrestricted tick.
 
 This must not interfere with Step 3's own "nothing actionable this run"
 idle-throttling convention for an empty/fully-claimed backlog — that's a
