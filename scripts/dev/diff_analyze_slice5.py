@@ -14,6 +14,16 @@ Usage (from repo root, with the :5544/:8124 throwaway instances up):
 
 Run once with --save against the pre-refactor code to capture the golden
 fixture, then again (no flag) against the refactored code to diff.
+
+NOTE: `tests/fixtures/baseline_outputs/analyze_slice5/golden.json` still
+reflects `agg_route_stats`/`agg_route_hour`'s old `PERCENT_RANK()`-based
+p50_min/p90_min formula. Since that formula was replaced with
+`PERCENTILE_DISC`, a `--save` run against current `main` will change
+`p90_min` for this harness's seeded rows (the median happens to land on the
+same value under both formulas for this particular seed, but the 90th
+percentile does not) -- expected, not a regression. This harness isn't
+wired into CI/`make check`, so nothing enforces re-running `--save` after a
+change like this; do so by hand next time this fixture is touched.
 """
 
 import json
