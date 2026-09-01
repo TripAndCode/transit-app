@@ -68,19 +68,20 @@ i18n key parity or `agg_*` column renames).
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
   `/root/claude-loop.sh` itself is VPS-local infrastructure, not tracked in this
   repo -- it runs the invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
-  (added 2026-08-29) so a dispatched Step-4 worker's background Agent task isn't
-  killed by the CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a
-  "you'll be notified when it finishes" expectation after that ceiling can never
-  be fulfilled, and the still-in-progress worker's uncommitted edits are lost
-  when the parent process exits. Confirmed live on item 16. A genuinely-hung
-  worker is still caught by `vps-heartbeat-watchdog.yml`, since a stuck run
-  never reaches the heartbeat line either.
+  so a dispatched Step-4 worker's background Agent task isn't killed by the
+  CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a "you'll be
+  notified when it finishes" expectation after that ceiling can never be
+  fulfilled, and the still-in-progress worker's uncommitted edits are lost
+  when the parent process exits. A genuinely-hung worker is still caught by
+  `vps-heartbeat-watchdog.yml`, since a stuck run never reaches the
+  heartbeat line either.
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
-  cron. The loop operates on one item per tick and, since 2026-08-28, may merge
-  its own PR once both review passes are clean and it's mergeable/clean.
-- The pre-push backend timeout is 420 seconds (raised from 240s on 2026-08-28 —
-  the full suite legitimately took ~281s, which the small VPS can run noticeably
-  slower than that). A timeout with no test failure is an infrastructure
-  limitation, not evidence that tests failed; resolve it before weakening the gate.
+  cron. The loop operates on one item per tick and may merge its own PR once
+  both review passes are clean and it's mergeable/clean.
+- The pre-push backend timeout is 420 seconds — the full suite's legitimate
+  wall-clock time leaves real headroom on a small VPS, which can run
+  noticeably slower than a typical dev machine. A timeout with no test
+  failure is an infrastructure limitation, not evidence that tests failed;
+  resolve it before weakening the gate.
