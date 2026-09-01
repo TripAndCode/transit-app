@@ -449,6 +449,44 @@ async def test_route_hour_dow_pattern_pools_exact_sum_delay_sec_not_reweighted_a
 
 
 @pytest.mark.asyncio
+async def test_route_hour_dow_pattern_skips_all_null_sum_delay_sec_group(aconn, aagency_id):
+    """A (dow, hour) group whose every contributing row has sum_delay_sec
+    NULL (migration 0028's column is nullable on every table) still passes
+    the unfiltered ``HAVING SUM(samples) > 5`` gate, so the FILTER-guarded
+    exact-sum SQL returns avg_min=NULL for that group. Pre-fix, passing that
+    NULL to ``_round2`` raised an unhandled decimal.InvalidOperation; the
+    group must instead be omitted, while a normal group still comes through.
+
+    Seeds 3 distinct all-NULL (dow, hour) groups -- matching the function's
+    default ``top_n=3`` -- so this also proves
+    ``ORDER BY avg_min DESC NULLS LAST``: without NULLS LAST, Postgres's
+    default NULLS FIRST for DESC would let these 3 NULL groups fill the
+    entire LIMIT and push the real group out entirely, which a single-NULL-
+    group seed can't distinguish from "correctly excluded" since both would
+    fit under the limit regardless of sort order."""
+    from pipeline.query.tool_queries import route_hour_dow_pattern
+
+    await aconn.executemany(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, 'R1', $2, $3, $4, 0.5, 3, NULL)",
+        [(aagency_id, "平日", dow, 11) for dow in (1, 2, 3)],
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, 'R1', '平日', 4, 12, 2.0, 10, 1200)",
+        aagency_id,
+    )
+    result = await route_hour_dow_pattern(aagency_id, aconn, route="R1")
+    dows_hours = [r[:2] for r in result]
+    assert (4, 12) in dows_hours
+    assert (1, 11) not in dows_hours
+    assert (2, 11) not in dows_hours
+    assert (3, 11) not in dows_hours
+
+
+@pytest.mark.asyncio
 async def test_route_hour_dow_pattern_returns_empty_for_unknown_route(aconn, aagency_id):
     from pipeline.query.tool_queries import route_hour_dow_pattern
 

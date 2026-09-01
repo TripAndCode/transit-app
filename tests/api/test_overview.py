@@ -1348,6 +1348,36 @@ async def test_peak_hour_breakdown_no_dow_pools_exact_sum_delay_sec_not_reweight
     assert q1["avg_min"] == pytest.approx(1.67, abs=1e-9)
 
 
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(client, aconn, aagency_id):
+    """A (route, service_type) group at this hour whose every contributing
+    row has sum_delay_sec NULL (migration 0028's column is nullable on every
+    table) still passes the unfiltered ``HAVING SUM(samples) >= 3`` gate, so
+    the FILTER-guarded exact-sum SQL returns avg_min=NULL for that group.
+    Pre-fix, rounding that NULL into a non-optional Pydantic field raised an
+    unhandled TypeError; the group must instead be omitted, while a normal
+    group at the same hour still comes through.
+
+    Seeds 20 distinct all-NULL groups -- one per LIMIT 20 slot -- so this
+    also proves ``ORDER BY avg_min DESC NULLS LAST``: without NULLS LAST,
+    Postgres's default NULLS FIRST for DESC would let these NULL groups fill
+    the entire LIMIT and push R_OK out entirely, which a single-NULL-group
+    seed can't distinguish from "correctly excluded" since both rows would
+    fit under the limit regardless of sort order."""
+    await aconn.executemany(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, '平日', 1, 20, 0.5, 5, NULL)",
+        [(aagency_id, f"R_NULL{i}") for i in range(20)],
+    )
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "R_OK", "平日", 1, 20, 4.0, 10)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 20})
+    assert r.status_code == 200
+    codes = [x["route_code"] for x in r.json()["routes"]]
+    assert "R_OK" in codes
+    assert not any(c.startswith("R_NULL") for c in codes)
+
+
 # ---------------------------------------------------------------------------
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #

@@ -197,13 +197,17 @@ def is_test_path(path: str) -> bool:
 # own basename marks it as a `check-*`/`check_*` gate (a repo-wide naming
 # convention, not just top-level scripts/ — e.g. frontend/scripts/check-
 # entry-chunk.mjs and its test), plus specific non-`check-`-named
-# deletion-safety scripts. `is_excluded`'s path-or-basename fnmatch already
-# does exactly the matching this needs, so it's reused rather than
-# duplicated here.
+# deletion-safety scripts and this review script itself (a diff that quietly
+# weakens this very list is exactly the class of change enforcement review
+# exists to catch), along with each of those scripts' own tests, since a
+# weakened test is just as dangerous as a weakened script. `is_excluded`'s
+# path-or-basename fnmatch already does exactly the matching this needs, so
+# it's reused rather than duplicated here.
 ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     ".claude/hooks/*",
     ".claude/settings.json",
     ".github/workflows/*",
+    ".pre-commit-config.yaml",
     "pyproject.toml",
     "frontend/eslint.config.js",
     "frontend/package.json",
@@ -211,6 +215,10 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     "check_*",
     "scripts/cleanup_git_state.py",
     "scripts/daily_git_hygiene.py",
+    "scripts/prepare_review.py",
+    "tests/unit/test_prepare_review.py",
+    "tests/unit/test_cleanup_git_state.py",
+    "tests/unit/test_daily_git_hygiene.py",
 )
 
 

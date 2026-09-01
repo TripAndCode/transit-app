@@ -42,33 +42,50 @@ async def movers_pool(apply_schema):
     await pool.close()
 
 
+def _exact_sum_delay_sec(avg_min, samples):
+    """Back-derive the exact raw-seconds sum an ``avg_min``/``samples`` pair
+    would have stored, so pooling via ``SUM(sum_delay_sec)/SUM(samples)``
+    reproduces the same figure these tests already assert on. A caller that
+    wants the exact-vs-reweighted formulas to provably diverge must pass an
+    explicit ``sum_delay_sec`` instead of relying on this default."""
+    return round(float(avg_min) * 60 * int(samples))
+
+
 async def _seed_trend(pool, agency_id, rows):
-    """rows: list of (date_iso, route_code, service_type, avg_min, samples)."""
+    """rows: (date_iso, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
+    expanded = []
+    for d, rc, st, av, n, *rest in rows:
+        sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
+        expanded.append((d, rc, st, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
-            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
-            "VALUES ($1,$2,$3,$4,$5,$6)",
-            [(agency_id, d, rc, st, av, n) for (d, rc, st, av, n) in rows],
+            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
+            "sum_delay_sec) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            [(agency_id, d, rc, st, av, n, sds) for (d, rc, st, av, n, sds) in expanded],
         )
         await c.executemany(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,$2,$3) "
             "ON CONFLICT DO NOTHING",
-            [(agency_id, rc, rc) for (_d, rc, _s, _a, _n) in rows],
+            [(agency_id, rc, rc) for (_d, rc, _s, _a, _n, _sds) in expanded],
         )
 
 
 async def _seed_route_hour(pool, agency_id, rows):
-    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples)."""
+    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples[, sum_delay_sec])."""
+    expanded = []
+    for rc, st, sch, av, n, *rest in rows:
+        sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
+        expanded.append((rc, st, sch, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "
-            "avg_min, p50_min, p90_min, samples) VALUES ($1,$2,$3,$4,$5,$5,$5,$6)",
-            [(agency_id, rc, st, sch, av, n) for (rc, st, sch, av, n) in rows],
+            "avg_min, p50_min, p90_min, samples, sum_delay_sec) VALUES ($1,$2,$3,$4,$5,$5,$5,$6,$7)",
+            [(agency_id, rc, st, sch, av, n, sds) for (rc, st, sch, av, n, sds) in expanded],
         )
         await c.executemany(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1,$2,$3) "
             "ON CONFLICT DO NOTHING",
-            [(agency_id, rc, rc) for (rc, *_rest) in rows],
+            [(agency_id, rc, rc) for (rc, *_rest) in expanded],
         )
 
 
@@ -235,3 +252,82 @@ async def test_delay_heatmap_cache_hit(movers_pool):
     # Non-empty result so the cache assertions aren't vacuous.
     assert result1.routes[0]["route_code"] == "R1"
     assert result1.cells[0][0] == 5.0
+
+
+async def test_heatmap_dow_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
+    """Both seeded Mondays share the same (wrong) avg_min=5.0, so the old
+    SUM(avg_min*samples)/SUM(samples) reweighting would also report 5.0 --
+    but sum_delay_sec backs true per-row averages of 6.0 and 2.0, so the
+    exact pooled mean must be 3.0, proving the grid reads sum_delay_sec."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-06", "R1", "平日", 5.0, 100, 36000),  # Monday, true avg 6.0
+            ("2026-04-13", "R1", "平日", 5.0, 300, 36000),  # Monday, true avg 2.0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    async with pool.acquire() as c:
+        res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="dow", top_routes=20)
+    assert res.cells[0][0] == 3.0
+
+
+async def test_heatmap_hour_band_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
+    """Same divergence proof as the DOW grid, for the hour-band grid served
+    from agg_route_hour: both rows share avg_min=5.0, but sum_delay_sec backs
+    true averages of 6.0 and 2.0, so the exact pool must be 3.0."""
+    pool, agency_id = movers_pool
+    await _seed_route_hour(
+        pool,
+        agency_id,
+        [
+            ("R1", "平日", time(6, 0), 5.0, 100, 36000),  # 朝, true avg 6.0
+            ("R1", "祝日", time(7, 0), 5.0, 300, 36000),  # 朝, true avg 2.0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30))
+    async with pool.acquire() as c:
+        res = await delay_heatmap(c, agency_id=agency_id, ctx=ctx, dimension="hour_band", top_routes=20)
+    assert res.cells[0][0] == 3.0
+
+
+async def test_anomalies_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
+    """Same-date, two-service-type divergence proof for the anomaly-timeline
+    series: both rows share avg_min=5.0, but sum_delay_sec backs true
+    averages of 6.0 and 2.0, so the exact network-wide pool must be 3.0."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-01", "R1", "平日", 5.0, 100, 36000),  # true avg 6.0
+            ("2026-04-01", "R1", "祝日", 5.0, 300, 36000),  # true avg 2.0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 1))
+    async with pool.acquire() as c:
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+    assert res.series[0]["avg_delay"] == 3.0
+
+
+async def test_movers_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
+    """Current-window divergence proof for movers: both current-window rows
+    share avg_min=5.0, but sum_delay_sec backs true averages of 6.0 and 2.0,
+    so the exact pooled current_avg must be 3.0, not the reweighted 5.0."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 5.0, 100, 36000),  # current window, true avg 6.0
+            ("2026-04-10", "R1", "祝日", 5.0, 300, 36000),  # current window, true avg 2.0
+            ("2026-04-03", "R1", "平日", 1.0, 100, 6000),  # prior window, exact avg 1.0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] == 3.0

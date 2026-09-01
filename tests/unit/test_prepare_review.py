@@ -171,6 +171,58 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
     assert manifest["enforcement"] is True
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".pre-commit-config.yaml",
+        "frontend/package.json",
+        "scripts/cleanup_git_state.py",
+        "scripts/daily_git_hygiene.py",
+        "scripts/prepare_review.py",
+        "tests/unit/test_prepare_review.py",
+        "tests/unit/test_cleanup_git_state.py",
+        "tests/unit/test_daily_git_hygiene.py",
+    ],
+)
+def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path: Path, path: str):
+    """Each exact-path ENFORCEMENT_PATTERNS entry must independently route a
+    diff touching only that file as enforcement -- a future refactor of the
+    tuple (a typo, or someone "cleaning up" what looks like a redundant
+    entry) would otherwise silently drop one with nothing failing. Covers
+    the review-tooling self-reference (scripts/prepare_review.py and its own
+    test) and the two deletion-safety scripts' tests, none of which the
+    `check-*`/`check_*` basename glob happens to catch."""
+
+    target = repository / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# placeholder\n", encoding="utf-8")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [path]
+    assert manifest["enforcement"] is True
+
+
+def test_ordinary_file_change_is_not_flagged_as_enforcement(repository: Path, tmp_path: Path):
+    """Negative control for `touches_enforcement`/`ENFORCEMENT_PATTERNS`: an
+    ordinary source file and an ordinary doc, neither matching any pattern,
+    must NOT route as enforcement -- guards against a future overly-broad
+    pattern (e.g. an accidental wildcard or a `check-*` typo widened too far)
+    silently making everything route as enforcement, which would defeat the
+    point of this flag by making it unconditionally true."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "app.py").write_text("value = 2\n", encoding="utf-8")
+    (repository / "notes.md").write_text("notes\n", encoding="utf-8")
+    git(repository, "add", "app.py", "notes.md")
+    git(repository, "commit", "-m", "ordinary change")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["app.py", "notes.md"]
+    assert manifest["enforcement"] is False
+
+
 def test_output_directory_inside_repository_is_rejected(repository: Path):
     """Review artifacts cannot recursively become part of a later review diff."""
 

@@ -67,14 +67,19 @@ function writeStored(agencyId: number, value: StoredFilter): void {
  * guaranteed-empty default), while restoring a remembered filter is a
  * convenience on top that must not silently reintroduce the empty-view
  * problem the anchor exists to prevent. Both hooks read the same
- * already-cached `agencies` data and the same `params` at the same render,
- * so this produces a deterministic precedence without either hook needing
- * to know about the other's internal state or effect timing.
+ * `agencies` query and the same `params`, so once `agencies` has resolved
+ * they produce a deterministic precedence without either hook needing to
+ * know about the other's internal state or effect timing -- but on a cold
+ * page load `agencies` can still be pending on this hook's first render (no
+ * router prefetch guarantees it's warm), and `computeAnchorRange` can't
+ * distinguish "not enough data to decide yet" from "no rewrite needed" by
+ * its return value alone, so this hook waits for `agencies` to resolve
+ * before acting at all rather than risk restoring ahead of the anchor.
  */
 export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();
   const [params, setParams] = useSearchParams();
-  const { data: agencies } = useAgencies();
+  const { data: agencies, isPending: agenciesPending } = useAgencies();
   // Tracks which agency we've already attempted a restore for, so an
   // explicit in-session reset (which clears every filter param) doesn't
   // immediately get overwritten by a re-restore of the old stored value.
@@ -82,6 +87,18 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
 
   useEffect(() => {
     if (isLoading || session || agencyId == null) return;
+    // computeAnchorRange returns null both when no anchor rewrite is needed
+    // AND when `agencies` hasn't loaded yet (it can't tell those apart from
+    // its own return value alone) -- on a cold page load (fresh tab/reload/
+    // deep link, no router prefetch of useAgencies) this hook's effect can
+    // still fire on that same first render, before useDefaultRangeAnchor has
+    // ever had real data to decide with. Restoring a stored filter in that
+    // window would permanently pre-empt the anchor once it decides afterward
+    // (a stored from/to already in the URL makes every later
+    // computeAnchorRange call return null for "range already present", not
+    // "no rewrite needed"). Wait for agencies to resolve before acting at
+    // all, so the anchor always gets first refusal.
+    if (agenciesPending) return;
     if (computeAnchorRange(agencyId, agencies, params)) return;
 
     const hasAnyFilterParam = Boolean(
@@ -181,5 +198,5 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'
     // return value on `location.search`, so this only re-runs when the URL's
     // query string actually changes, not on every unrelated render.
-  }, [agencyId, isLoading, session, params, setParams, agencies]);
+  }, [agencyId, isLoading, session, params, setParams, agencies, agenciesPending]);
 }

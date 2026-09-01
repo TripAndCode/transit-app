@@ -48,4 +48,40 @@ describe("useAnonymousFilterPersistence defers to computeAnchorRange", () => {
     );
     expect(screen.getByTestId("params")).toHaveTextContent("");
   });
+
+  it("withholds the restore while agencies is still pending, even before any anchor-relevant params exist", () => {
+    // Cold page load (fresh tab/reload/deep link): no router prefetch
+    // guarantees useAgencies() is already warm, so this hook's effect can
+    // fire on the very first render while `agencies` is still pending.
+    // computeAnchorRange can't distinguish that from "no anchor needed" by
+    // its return value alone, so this hook must wait for `agencies` to
+    // resolve before acting at all -- otherwise it could restore a stored
+    // from/to ahead of useDefaultRangeAnchor ever getting a chance to
+    // override it (a stored from/to already in the URL makes every later
+    // computeAnchorRange call return null for "range already present", not
+    // "no rewrite needed").
+    const agenciesSpy = vi.spyOn(hooks, "useAgencies");
+    agenciesSpy.mockReturnValue({ data: undefined, isPending: true } as never);
+    localStorage.setItem(
+      "transit.lastFilter.1",
+      JSON.stringify({ from: "2020-01-01", to: "2020-01-07" }),
+    );
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+        <Probe agencyId={1} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("params")).toHaveTextContent("");
+
+    agenciesSpy.mockReturnValue({
+      data: [agency({ latest_data_date: null })],
+      isPending: false,
+    } as never);
+    rerender(
+      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+        <Probe agencyId={1} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("params")).toHaveTextContent("from=2020-01-01&to=2020-01-07");
+  });
 });

@@ -181,7 +181,7 @@ async def peak_hour_breakdown(
             WHERE agency_id = $1 AND hour = $2 AND samples >= 3
             GROUP BY route_code, service_type
             HAVING SUM(samples) >= 3
-            ORDER BY avg_min DESC
+            ORDER BY avg_min DESC NULLS LAST
             LIMIT 20
             """,
             agency_id,
@@ -198,6 +198,7 @@ async def peak_hour_breakdown(
                 samples=int(r["samples"]),
             )
             for r in rows
+            if r["avg_min"] is not None
         ],
     )
 

@@ -226,13 +226,17 @@ async def route_hour_dow_pattern(
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour "
         "HAVING SUM(samples) > 5 "
-        "ORDER BY avg_min DESC "
+        "ORDER BY avg_min DESC NULLS LAST "
         "LIMIT $3",
         agency_id,
         str(route),
         top_n,
     )
-    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]
+    return [
+        (r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"])
+        for r in rows
+        if r["avg_min"] is not None
+    ]
 
 
 async def schedule_realism_segments(

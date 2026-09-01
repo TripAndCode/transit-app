@@ -70,11 +70,15 @@ describe("useAnonymousFilterPersistence", () => {
     useSessionMock.mockReturnValue({ data: null, isLoading: false });
     // The hook now also reads useAgencies (to defer to useDefaultRangeAnchor
     // via the shared computeAnchorRange — see anonymousFilterPersistence.ts's
-    // docstring); mock it as "not loaded" so computeAnchorRange is always a
-    // no-op here and these tests keep exercising restore/persist in
-    // isolation. The dedicated interaction coverage lives in
+    // docstring); mock it as resolved-but-empty (no agency data to anchor on)
+    // so computeAnchorRange is always a no-op here and these tests keep
+    // exercising restore/persist in isolation. Must be resolved (isPending:
+    // false), not pending — the hook now withholds all action while agencies
+    // is still pending (see the cold-load race test in
+    // _combinedHooksProbe.test.tsx), which would otherwise block every test
+    // in this file. The dedicated interaction coverage lives in
     // defaultRangeAnchor.test.tsx.
-    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   });
   afterEach(() => vi.restoreAllMocks());
 
