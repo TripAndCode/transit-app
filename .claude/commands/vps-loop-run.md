@@ -42,45 +42,70 @@ other progress.
 One entry = the text from one leading `- <UTC timestamp>: ...` bullet up to
 (excluding) the next line that starts with `- <UTC timestamp>`, regardless
 of any `-`-prefixed lines embedded within that entry's own prose (e.g. a
-findings summary) — don't miscount those as separate entries.
+findings summary) — don't miscount those as separate entries. `**PAUSED
+...**`/`**RESUMED ...**` bookkeeping lines (introduced below) are their own
+entries too, in the same `- <UTC timestamp>: **PAUSED ...**` bulleted form
+as everything else in this log — never a bare unbulleted line — but they
+are bookkeeping markers, not `Blocker-tag`-bearing occurrences; keep them
+out of the tag-streak count described next (a `PAUSED` entry does not
+extend or restart the streak that triggered it, and is never itself one of
+the "3 consecutive" entries).
 
-At the very start of every tick, before Step 1: read the last 5 Status log
-entries by that definition. If the most recent 3 or more consecutive entries
-all carry the identical `Blocker-tag`, this tick is in **paused** mode:
+At the very start of every tick, before Step 1, determine pause state in
+two steps:
 
-- The tick where the streak *first* reaches 3: log `**PAUSED after 3
-  consecutive ticks blocked on <tag>. Backing off to a reduced probe cadence
-  until this clears or a human resolves it.**` and stop — skip Steps 1
-  through 6 entirely this tick.
-- Every tick after that while still paused: still run Step 1 every tick as
-  normal (it's cheap, and it's this repo's only guard against an unrelated
-  new problem like a leaked credential file landing at the top level while
-  paused for a different reason — never skip it). If Step 1 itself finds
-  new unexpected state, handle that normally (stash-and-log per Step 1,
-  with its own `Blocker-tag`) even while otherwise paused. Beyond Step 1,
-  do NOT run the rest of the normal flow every tick — only attempt it once
-  every 3rd tick (roughly hourly at the current 20-minute cadence — tune to
-  whatever the actual cadence is if it changes). There is no separate
-  "probe check" to invent per tag: a probe attempt IS a normal, full,
-  unrestricted run of Steps 2 onward, exactly as any tick would otherwise
-  do — the same logic that originally produced the stop is what re-confirms
-  or clears it, because it's the same code path. Two outcomes:
-  - The attempt reaches a genuinely different outcome than the paused tag
-    (progress is made — an item ships, a different item is picked, or the
-    same item now proceeds past where it previously stopped — or the tick
-    ends idle/clean with no matching `Blocker-tag` at all): log `**RESUMED
-    after N paused ticks — <tag> cleared.**` in addition to whatever that
-    attempt's own normal outcome logging is, and resume the normal
-    every-tick cadence starting next tick.
-  - The attempt stops again with the identical `Blocker-tag`: this is a
-    confirming probe, not a new occurrence to react to — log nothing extra
-    (the pause and this tag are already recorded; avoid Status log spam)
-    and stay paused for another 3-tick interval.
-- If paused for a very long stretch (24+ hours), log one additional
-  low-frequency reminder line rather than staying completely silent
-  indefinitely — a human checking in after a day away should see "still
-  stuck" at a glance without having to scroll through a wall of
-  skipped-tick timestamps.
+1. **Am I currently paused?** Scan the Status log backward for the most
+   recent `PAUSED` or `RESUMED` bookkeeping entry. If none exists yet, or
+   the most recent one is a `RESUMED`, you are NOT currently paused — skip
+   to step 2. If the most recent one is a `PAUSED` with no later `RESUMED`,
+   you ARE currently paused — do not re-derive this from the raw tag
+   streak each tick, this marker is authoritative:
+   - Still run Step 1 every tick as normal even while paused (it's cheap,
+     and it's this repo's only guard against an unrelated new problem like
+     a leaked credential file landing at the top level while paused for a
+     different reason — never skip it). If Step 1 itself finds new
+     unexpected state, handle that normally (stash-and-log per Step 1,
+     with its own `Blocker-tag`) regardless of the existing pause.
+   - Beyond Step 1, do NOT run the rest of the normal flow every tick —
+     only attempt it once every 3rd tick since the `PAUSED` entry (roughly
+     hourly at the current 20-minute cadence — tune to whatever the actual
+     cadence is if it changes; on ticks that aren't a probe tick, stop
+     here with no new log line at all, not even a repeat of the pause).
+     There is no separate "probe check" to invent per tag: a probe attempt
+     IS a normal, full, unrestricted run of Steps 2 onward, exactly as any
+     tick would otherwise do — the same logic that originally produced the
+     stop is what re-confirms or clears it, because it's the same code
+     path. Two outcomes:
+     - The attempt reaches a genuinely different outcome than the paused
+       tag (progress is made — an item ships, a different item is picked,
+       or the same item now proceeds past where it previously stopped — or
+       the tick ends idle/clean with no matching `Blocker-tag` at all): log
+       `**RESUMED after N paused ticks — <tag> cleared.**` in addition to
+       whatever that attempt's own normal outcome logging is. This
+       `RESUMED` entry is what step 1 above will see on the next tick,
+       correctly reporting "not currently paused" from then on.
+     - The attempt stops again with the identical `Blocker-tag`: this is a
+       confirming probe, not a new occurrence to react to — log nothing
+       extra (no new `PAUSED` line; the existing one is still the most
+       recent bookkeeping entry and remains authoritative) and stay paused
+       for another 3-tick interval.
+     - If paused for a very long stretch (24+ hours since the `PAUSED`
+       entry with no `RESUMED` yet), log one additional low-frequency
+       reminder line rather than staying completely silent indefinitely —
+       a human checking in after a day away should see "still stuck" at a
+       glance without having to scroll through a wall of skipped-tick
+       timestamps. This reminder is not itself a new `PAUSED`/`RESUMED`
+       marker and doesn't change the state determined above.
+2. **Not currently paused — should I newly enter pause this tick?** Read
+   backward through the Status log for the most recent 3 entries that
+   themselves carry a `Blocker-tag` (skipping over any entries that don't,
+   including old `PAUSED`/`RESUMED` bookkeeping from a prior, already-
+   resolved episode, Step 3's idle-throttle lines, and ordinary
+   item-shipped entries). If those 3 share an identical tag, log `**PAUSED
+   after 3 consecutive ticks blocked on <tag>. Backing off to a reduced
+   probe cadence until this clears or a human resolves it.**` and stop —
+   skip Steps 1 through 6 entirely this tick. Otherwise proceed to Step 1
+   as normal; this is an ordinary, unrestricted tick.
 
 This must not interfere with Step 3's own "nothing actionable this run"
 idle-throttling convention for an empty/fully-claimed backlog — that's a
