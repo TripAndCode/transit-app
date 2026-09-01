@@ -14,8 +14,9 @@ skip ahead.
 
 Every Status log entry logged when a tick stops making zero forward progress
 because of a genuine blocker — Step 1's stash-and-stop, Step 2's
-tool-error stop, Step 3b's worktree-dirty/branch-without-worktree/
-still-Major-after-2-fix-iterations stop paths, Step 4b's
+tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3b's
+worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
+stop paths, Step 4b's
 worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
 and Boundaries' generic tool-call-errored stop — must end with its own
 line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
@@ -43,13 +44,14 @@ One entry = the text from one leading `- <UTC timestamp>: ...` bullet up to
 (excluding) the next line that starts with `- <UTC timestamp>`, regardless
 of any `-`-prefixed lines embedded within that entry's own prose (e.g. a
 findings summary) — don't miscount those as separate entries. `**PAUSED
-...**`/`**RESUMED ...**` bookkeeping lines (introduced below) are their own
-entries too, in the same `- <UTC timestamp>: **PAUSED ...**` bulleted form
-as everything else in this log — never a bare unbulleted line — but they
-are bookkeeping markers, not `Blocker-tag`-bearing occurrences; keep them
-out of the tag-streak count described next (a `PAUSED` entry does not
-extend or restart the streak that triggered it, and is never itself one of
-the 3 entries counted toward it).
+...**`/`**Still paused ...**`/`**RESUMED ...**` bookkeeping lines
+(introduced below) are their own entries too, in the same `- <UTC
+timestamp>: **PAUSED ...**` bulleted form as everything else in this log —
+never a bare unbulleted line — but they are bookkeeping markers, not
+`Blocker-tag`-bearing occurrences; keep them out of the tag-streak count
+described next (none of the three extend or restart the streak that
+triggered them, and none is ever itself one of the 3 entries counted
+toward it).
 
 **"3 in a row" means the last 3 times this specific tag was logged, not 3
 literally-adjacent Status-log entries.** An unrelated entry with no
@@ -77,11 +79,13 @@ At the very start of every tick, before Step 1, determine pause state in
 two steps:
 
 1. **Am I currently paused?** Scan the Status log backward for the most
-   recent `PAUSED` or `RESUMED` bookkeeping entry. If none exists yet, or
-   the most recent one is a `RESUMED`, you are NOT currently paused — skip
-   to step 2. If the most recent one is a `PAUSED` with no later `RESUMED`,
-   you ARE currently paused — do not re-derive this from the raw tag
-   streak each tick, this marker is authoritative:
+   recent pause-related bookkeeping entry: a `**PAUSED ...**` line, a
+   `**Still paused ...**` confirming-probe line (introduced below), or a
+   `**RESUMED ...**` line — "PAUSED-family" below means either of the
+   first two. If none exists yet, or the most recent one is `RESUMED`, you
+   are NOT currently paused — skip to step 2. If the most recent one is
+   PAUSED-family, you ARE currently paused — do not re-derive this from
+   the raw tag streak each tick, this marker is authoritative:
    - Still run Step 1 every tick as normal even while paused (it's cheap,
      and it's this repo's only guard against an unrelated new problem like
      a leaked credential file landing at the top level while paused for a
@@ -89,42 +93,61 @@ two steps:
      unexpected state, handle that normally (stash-and-log per Step 1,
      with its own `Blocker-tag`) regardless of the existing pause.
    - Beyond Step 1, do NOT run the rest of the normal flow every tick —
-     only attempt it once every 3rd tick since the `PAUSED` entry (roughly
-     hourly at the current 20-minute cadence — tune to whatever the actual
-     cadence is if it changes; on ticks that aren't a probe tick, stop
-     here with no new log line at all, not even a repeat of the pause).
+     only attempt it once enough wall-clock time has passed since the most
+     recent PAUSED-family entry's own UTC timestamp: roughly three times
+     this loop's own configured cron cadence (see CLAUDE.md ▸ Autonomous
+     VPS loop — don't restate a number here, same convention Step 3 uses
+     below). Compute this from each entry's own timestamp, not by counting
+     ticks — a tick where not enough time has passed yet logs nothing at
+     all (see below), so it's indistinguishable from any other silent tick
+     except by timestamp math; a tick counter cannot be reliably
+     reconstructed from the log, but elapsed wall-clock time can. On a
+     tick where not enough time has passed yet, stop here with no new log
+     line at all, not even a repeat of the pause.
      There is no separate "probe check" to invent per tag: a probe attempt
      IS a normal, full, unrestricted run of Steps 2 onward, exactly as any
      tick would otherwise do — the same logic that originally produced the
      stop is what re-confirms or clears it, because it's the same code
      path. Two outcomes:
-     - The attempt reaches a genuinely different outcome than the paused
-       tag (progress is made — an item ships, a different item is picked,
-       or the same item now proceeds past where it previously stopped — or
-       the tick ends idle/clean with no matching `Blocker-tag` at all): log
-       `**RESUMED after N paused ticks — <tag> cleared.**` in addition to
-       whatever that attempt's own normal outcome logging is. This
-       `RESUMED` entry is what step 1 above will see on the next tick,
-       correctly reporting "not currently paused" from then on.
-     - The attempt stops again with the identical `Blocker-tag`: this is a
-       confirming probe, not a new occurrence to react to — log nothing
-       extra (no new `PAUSED` line; the existing one is still the most
-       recent bookkeeping entry and remains authoritative) and stay paused
-       for another 3-tick interval.
-     - If paused for a very long stretch (24+ hours since the `PAUSED`
-       entry with no `RESUMED` yet), log one additional low-frequency
-       reminder line rather than staying completely silent indefinitely —
-       a human checking in after a day away should see "still stuck" at a
-       glance without having to scroll through a wall of skipped-tick
-       timestamps. This reminder is not itself a new `PAUSED`/`RESUMED`
-       marker and doesn't change the state determined above.
+     - **The attempt reaches a genuinely different outcome than the paused
+       tag** (progress is made — an item ships, a different item is
+       picked, or the same item now proceeds past where it previously
+       stopped — or the tick ends idle/clean with no matching
+       `Blocker-tag` at all): log `**RESUMED after N paused ticks — <tag>
+       cleared.**` FIRST, then let that attempt's own normal outcome
+       logging (per whichever of Steps 2-6 it actually reached) proceed as
+       its own separate, later entry — including a fresh `**Blocker-tag:**`
+       line if the attempt itself stops on a new, different blocker.
+       Logging `RESUMED` first, not merely "in addition to" with
+       unspecified order, matters: it guarantees that if this new blocker
+       recurs later, its first occurrence here is never wrongly excluded
+       by step 2's own "do not scan past the most recent `RESUMED`" rule
+       below, since that boundary now sits chronologically before, not
+       after, this occurrence. This `RESUMED` entry is what step 1 above
+       will see on the next tick, correctly reporting "not currently
+       paused" from then on.
+     - **The attempt stops again with the identical `Blocker-tag`:** this
+       is a confirming probe, not a new occurrence to react to. Log
+       `**Still paused — probe found <tag> unchanged.**` as its own
+       timestamped entry — a PAUSED-family bookkeeping marker exactly like
+       the original `PAUSED` line, not a `Blocker-tag`-bearing occurrence
+       (see the definition above). This entry's timestamp is what step 1
+       measures elapsed time against for the *next* probe; skipping this
+       log line would make that elapsed-time calculation impossible from
+       the log alone. It also means a human checking in after a long pause
+       finds one line per probe cycle rather than a wall of total silence,
+       so no separate long-stretch reminder mechanism is needed.
 2. **Not currently paused — should I newly enter pause this tick?** Read
    backward through the Status log, but do NOT scan past the boundary step
    1 already found: stop at (do not look behind) the most recent
-   `PAUSED`/`RESUMED` marker, or the top of the log if none exists yet — a
-   `RESUMED` genuinely resets this streak's window, so a tag-bearing entry
-   from before it must never count again, even if it's still among the
-   numerically-nearest entries. Within that bounded window, find the most
+   `RESUMED` marker, or the top of the log if none exists yet. (By
+   construction this is always the correct boundary here: if a
+   `PAUSED`/`Still paused` entry more recent than that existed with no
+   later `RESUMED`, step 1 above would have reported "currently paused"
+   and step 2 would never run at all this tick.) A `RESUMED` genuinely
+   resets this streak's window, so a tag-bearing entry from before it must
+   never count again, even if it's still among the numerically-nearest
+   entries. Within that bounded window, find the most
    recent 3 entries that themselves carry a `Blocker-tag` (skipping over
    Step 3's idle-throttle lines and ordinary item-shipped entries, which
    don't carry one — an unrelated successful tick in between does not
@@ -250,7 +273,10 @@ interchangeable, the same way Step 3b already forks on this.
      (#<original number>) doesn't cover all commits on vps-loop/item-<N>
      (branch only, no worktree); unshipped content found (<short
      description>). Not resumed — needs a human to attach a worktree or
-     delete the branch.` and do not act on it further this tick.
+     delete the branch.
+     **Blocker-tag:** branch-without-worktree` and do not act on it further
+     this tick — reusing Step 3b's exact tag for this same root cause, not
+     a fresh compound slug, since it's genuinely the identical stop reason.
    Only route the FIRST such match to Step 3b in a given tick — this step
    still respects the one-item-per-tick design the rest of this file assumes.
    If a second or later `vps-loop/item-<M>` entry also lands in this branch
