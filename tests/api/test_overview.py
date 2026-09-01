@@ -103,19 +103,30 @@ async def _seed_agg_route_hour(
     )
 
 
-async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples):
-    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day)."""
+async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, sum_delay_sec=None):
+    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day).
+
+    sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
+    pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (
+    _peak_hour_by_dow's fast path) agrees with the plain avg_min this helper's
+    callers assert on, unless a test explicitly passes a mismatched value to
+    prove the exact-vs-reweighted divergence -- mirrors _seed_agg_route_hour_dow's
+    identical pattern.
+    """
+    if sum_delay_sec is None:
+        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
     await aconn.execute(
-        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples) "
-        "VALUES ($1, ($2::text)::date, $3, $4, $5) "
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, ($2::text)::date, $3, $4, $5, $6) "
         "ON CONFLICT (agency_id, date, hour) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
         iso,
         int(hour),
         float(avg_min),
         int(samples),
+        int(sum_delay_sec),
     )
 
 
@@ -1071,6 +1082,31 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
     # Cross-bucket cells stay None.
     assert pk_wd["by_hour"][17] is None
     assert pk_we["by_hour"][8] is None
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
+    """_peak_hour_by_dow's fast path pools multiple agg_hour_daily days for the
+    same hour. Pooling must use SUM(sum_delay_sec)/SUM(samples) (exact), not
+    the old SUM(avg_min * samples)/SUM(samples) reweighting of an
+    already-rounded per-day average -- mirrors peak_hour_breakdown's identical
+    fix for agg_route_hour_dow (migration 0028's sum_delay_sec rollout,
+    extended to agg_hour_daily)."""
+    # Two weekday Tuesdays at hour 15, with non-round per-row avg_min values
+    # whose sum_delay_sec is seeded to the TRUE underlying sum rather than
+    # backed out from the rounded avg_min, so the two pooling formulas diverge.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 15, 1.61, 3, sum_delay_sec=290)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 26), 15, 2.0, 1000, sum_delay_sec=100000)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    assert pk_wd is not None
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert pk_wd["by_hour"][15] == pytest.approx(1.67, abs=0.01)
 
 
 @pytest.mark.asyncio

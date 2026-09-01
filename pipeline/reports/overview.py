@@ -835,7 +835,11 @@ async def _peak_hour_by_dow(
         dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
         sql = (
             "SELECT hour AS h,\n"
-            "       SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_hour_daily\n"
             "WHERE agency_id = $1 AND date >= ($2::text)::date AND date <= ($3::text)::date\n"
             f"  AND EXTRACT(ISODOW FROM date) {dow_pred}\n"
