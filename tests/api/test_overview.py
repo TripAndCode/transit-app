@@ -137,13 +137,22 @@ async def _seed_agg_route_stats(aconn, agency_id, route_code, service_type, avg_
     )
 
 
-async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples):
+async def _seed_agg_route_hour_dow(
+    aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec=None
+):
+    # sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
+    # pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (peak_hour_
+    # breakdown's dow=None path) agrees with the plain avg_min this helper's
+    # callers assert on, unless a test explicitly passes a mismatched value to
+    # prove the exact-vs-reweighted divergence.
+    if sum_delay_sec is None:
+        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     await aconn.execute(
         "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7) "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) "
         "ON CONFLICT (agency_id, route_code, service_type, dow, hour) DO UPDATE "
-        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples",
+        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples, sum_delay_sec=EXCLUDED.sum_delay_sec",
         agency_id,
         route_code,
         service_type,
@@ -151,6 +160,7 @@ async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, d
         hour,
         float(avg_min),
         int(samples),
+        int(sum_delay_sec),
     )
 
 
@@ -1317,6 +1327,55 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
     assert r.status_code == 200
     codes = [x["route_code"] for x in r.json()["routes"]]
     assert "Z1" in codes
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_pools_exact_sum_delay_sec_not_reweighted_avg(client, aconn, aagency_id):
+    """Without dow, peak_hour_breakdown pools multiple dow rows for the same
+    route/service/hour. Pooling must use SUM(sum_delay_sec)/SUM(samples)
+    (exact), not the old SUM(avg_min * samples)/SUM(samples) reweighting of
+    an already-rounded per-row average -- mirrors forecast_heatmap's
+    identical fix (migration 0028's sum_delay_sec rollout)."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 3, 15, 1.61, 3, sum_delay_sec=290)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 4, 15, 2.0, 1000, sum_delay_sec=100000)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 15})
+    assert r.status_code == 200
+    routes = {x["route_code"]: x for x in r.json()["routes"]}
+    q1 = routes["Q1"]
+    assert q1["samples"] == 1003
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert q1["avg_min"] == pytest.approx(1.67, abs=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(client, aconn, aagency_id):
+    """A (route, service_type) group at this hour whose every contributing
+    row has sum_delay_sec NULL (migration 0028's column is nullable on every
+    table) still passes the unfiltered ``HAVING SUM(samples) >= 3`` gate, so
+    the FILTER-guarded exact-sum SQL returns avg_min=NULL for that group.
+    Pre-fix, rounding that NULL into a non-optional Pydantic field raised an
+    unhandled TypeError; the group must instead be omitted, while a normal
+    group at the same hour still comes through.
+
+    Seeds 20 distinct all-NULL groups -- one per LIMIT 20 slot -- so this
+    also proves ``ORDER BY avg_min DESC NULLS LAST``: without NULLS LAST,
+    Postgres's default NULLS FIRST for DESC would let these NULL groups fill
+    the entire LIMIT and push R_OK out entirely, which a single-NULL-group
+    seed can't distinguish from "correctly excluded" since both rows would
+    fit under the limit regardless of sort order."""
+    await aconn.executemany(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, '平日', 1, 20, 0.5, 5, NULL)",
+        [(aagency_id, f"R_NULL{i}") for i in range(20)],
+    )
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "R_OK", "平日", 1, 20, 4.0, 10)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 20})
+    assert r.status_code == 200
+    codes = [x["route_code"] for x in r.json()["routes"]]
+    assert "R_OK" in codes
+    assert not any(c.startswith("R_NULL") for c in codes)
 
 
 # ---------------------------------------------------------------------------

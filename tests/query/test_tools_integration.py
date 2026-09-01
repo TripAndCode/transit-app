@@ -474,11 +474,12 @@ async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
         aagency_id,
     )
     await aconn.execute(
-        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
         "VALUES "
-        "  ($1, 'R1', '平日', 1, 8, 2.0, 20),"
-        "  ($1, 'R1', '平日', 5, 18, 6.5, 40),"
-        "  ($1, 'R1', '平日', 3, 9, 1.0, 3)",  # below the samples > 5 gate
+        "  ($1, 'R1', '平日', 1, 8, 2.0, 20, 2400),"
+        "  ($1, 'R1', '平日', 5, 18, 6.5, 40, 15600),"
+        "  ($1, 'R1', '平日', 3, 9, 1.0, 3, 180)",  # below the samples > 5 gate
         aagency_id,
     )
     result = await dispatch("time_pattern", {"route": "R1"}, _ctx(), aconn, aagency_id, locale="ja")

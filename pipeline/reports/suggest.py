@@ -79,12 +79,16 @@ def _pool_ranking_by_route(rows: list[tuple]) -> dict[str, dict]:
     service_type) pair (a route commonly has ~3 service-type variants on
     real data), but the rule chain reasons about routes. Pooling first makes
     that assumption true instead of threading service_type through every
-    comparison -- the same sample-weighted route-grain pooling
-    ``api/routers/map.py``'s ``today_route_summary`` already does for its
-    baseline (`rb` CTE: ``SUM(avg_min * samples) / NULLIF(SUM(samples), 0)``).
-    ``p90_min`` pools the same way -- percentiles don't strictly compose, but
-    this matches that existing precedent rather than inventing a stricter
-    merge for one call site.
+    comparison -- sample-weighting each row's own ``avg_min`` by its
+    ``samples`` is exact here because ``compute_ranking``'s per-row
+    ``avg_min`` is already an exact mean (backed by ``agg_route_daily_dist``'s
+    raw ``sum_delay_sec``), not a pre-rounded, already-aggregated figure:
+    pooling an already-exact per-row mean by its own sample count is itself
+    exact -- unlike a pooling step that re-weights a pre-rounded,
+    already-aggregated column (see the ``agg_*`` tables' ``sum_delay_sec``-
+    based exact pooling elsewhere in this codebase). ``p90_min`` pools the
+    same way -- percentiles don't strictly compose, but this matches that
+    same precedent rather than inventing a stricter merge for one call site.
     """
     sum_samples: dict[str, int] = {}
     sum_avg_weighted: dict[str, float] = {}

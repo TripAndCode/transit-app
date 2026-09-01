@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "./auth";
+import { computeAnchorRange } from "./defaultRangeAnchor";
+import { useAgencies } from "./hooks";
 import type { DowFilter, ServiceFilter, TimeBand } from "./rangeContext";
 
 type StoredFilter = {
@@ -58,10 +60,26 @@ function writeStored(agencyId: number, value: StoredFilter): void {
  * Logged-in users are intentionally unaffected (this hook no-ops once
  * `session` is present) — their filters already benefit from the explicit,
  * durable presets feature instead.
+ *
+ * Defers entirely to `useDefaultRangeAnchor` (via the shared, pure
+ * `computeAnchorRange`) whenever both would act on the same fresh visit: a
+ * verified-non-empty anchored window is a correctness floor (never show a
+ * guaranteed-empty default), while restoring a remembered filter is a
+ * convenience on top that must not silently reintroduce the empty-view
+ * problem the anchor exists to prevent. Both hooks read the same
+ * `agencies` query and the same `params`, so once `agencies` has resolved
+ * they produce a deterministic precedence without either hook needing to
+ * know about the other's internal state or effect timing -- but on a cold
+ * page load `agencies` can still be pending on this hook's first render (no
+ * router prefetch guarantees it's warm), and `computeAnchorRange` can't
+ * distinguish "not enough data to decide yet" from "no rewrite needed" by
+ * its return value alone, so this hook waits for `agencies` to resolve
+ * before acting at all rather than risk restoring ahead of the anchor.
  */
 export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();
   const [params, setParams] = useSearchParams();
+  const { data: agencies, isPending: agenciesPending } = useAgencies();
   // Tracks which agency we've already attempted a restore for, so an
   // explicit in-session reset (which clears every filter param) doesn't
   // immediately get overwritten by a re-restore of the old stored value.
@@ -69,6 +87,19 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
 
   useEffect(() => {
     if (isLoading || session || agencyId == null) return;
+    // computeAnchorRange returns null both when no anchor rewrite is needed
+    // AND when `agencies` hasn't loaded yet (it can't tell those apart from
+    // its own return value alone) -- on a cold page load (fresh tab/reload/
+    // deep link, no router prefetch of useAgencies) this hook's effect can
+    // still fire on that same first render, before useDefaultRangeAnchor has
+    // ever had real data to decide with. Restoring a stored filter in that
+    // window would permanently pre-empt the anchor once it decides afterward
+    // (a stored from/to already in the URL makes every later
+    // computeAnchorRange call return null for "range already present", not
+    // "no rewrite needed"). Wait for agencies to resolve before acting at
+    // all, so the anchor always gets first refusal.
+    if (agenciesPending) return;
+    if (computeAnchorRange(agencyId, agencies, params)) return;
 
     const hasAnyFilterParam = Boolean(
       SCALAR_FILTER_KEYS.some((key) => params.get(key)) || params.get("routes"),
@@ -128,10 +159,44 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
       const existing = readStored(agencyId);
       if (existing && Object.keys(existing).length > 0) return;
     }
+    // A field missing from the CURRENT params (e.g. dow/time_band/service/
+    // routes when this render's URL only carries the from/to
+    // useDefaultRangeAnchor just wrote, before this hook ever got a chance
+    // to restore them — see this hook's deferral to computeAnchorRange
+    // above) must not silently drop that field's last known stored value.
+    // The current params always win for whichever field they DO carry; this
+    // only fills in what's genuinely absent. `from`/`to` are deliberately
+    // excluded from this merge — reviving a stale stored date range here
+    // would reintroduce exactly the guaranteed-empty-view problem
+    // useDefaultRangeAnchor exists to prevent.
+    //
+    // Gated to `isFirstAttemptForAgency`, same as the ambiguity guard just
+    // above and for the identical reason: the anchor-handoff scenario this
+    // merge exists for can ONLY happen on an agency's first effect run this
+    // session (computeAnchorRange only ever fires before any filter
+    // interaction, so by construction this hook can defer to it — see line
+    // 85 above — at most once per agency, on that very first render).
+    // Beyond the first attempt, a field absent from `nextStored` reflects a
+    // real, later, in-session change (e.g. the user explicitly clearing just
+    // `dow` while `from`/`to`/`time_band` stay put) that must be allowed to
+    // stick, not be silently undone by resurrecting the old stored value.
+    if (isFirstAttemptForAgency) {
+      const existingForMerge = readStored(agencyId);
+      if (existingForMerge) {
+        for (const key of ["dow", "time_band", "service"] as const) {
+          if (nextStored[key] === undefined && existingForMerge[key] !== undefined) {
+            (nextStored as Record<string, string>)[key] = existingForMerge[key] as string;
+          }
+        }
+        if (nextStored.routes === undefined && existingForMerge.routes && existingForMerge.routes.length > 0) {
+          nextStored.routes = existingForMerge.routes;
+        }
+      }
+    }
     writeStored(agencyId, nextStored);
     // `params` (not a derived string key) is the dependency, matching
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'
     // return value on `location.search`, so this only re-runs when the URL's
     // query string actually changes, not on every unrelated render.
-  }, [agencyId, isLoading, session, params, setParams]);
+  }, [agencyId, isLoading, session, params, setParams, agencies, agenciesPending]);
 }

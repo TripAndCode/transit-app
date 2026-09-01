@@ -193,17 +193,39 @@ def is_test_path(path: str) -> bool:
     )
 
 
-def touches_enforcement(path: str) -> bool:
+# Quality-gate paths: hooks/CI wiring, lint/type config, and any file whose
+# own basename marks it as a `check-*`/`check_*` gate (a repo-wide naming
+# convention, not just top-level scripts/ — e.g. frontend/scripts/check-
+# entry-chunk.mjs and its test), plus specific non-`check-`-named
+# deletion-safety scripts and this review script itself (a diff that quietly
+# weakens this very list is exactly the class of change enforcement review
+# exists to catch), along with each of those scripts' own tests, since a
+# weakened test is just as dangerous as a weakened script. `is_excluded`'s
+# path-or-basename fnmatch already does exactly the matching this needs, so
+# it's reused rather than duplicated here.
+ENFORCEMENT_PATTERNS: tuple[str, ...] = (
+    ".claude/hooks/*",
+    ".claude/settings.json",
+    ".github/workflows/*",
+    ".pre-commit-config.yaml",
+    "pyproject.toml",
+    "frontend/eslint.config.js",
+    "frontend/package.json",
+    "check-*",
+    "check_*",
+    "scripts/cleanup_git_state.py",
+    "scripts/daily_git_hygiene.py",
+    "scripts/prepare_review.py",
+    "tests/unit/test_prepare_review.py",
+    "tests/unit/test_cleanup_git_state.py",
+    "tests/unit/test_daily_git_hygiene.py",
+)
+
+
+def touches_enforcement(path: str, patterns: tuple[str, ...] = ENFORCEMENT_PATTERNS) -> bool:
     """Return whether a path changes an automated quality gate."""
 
-    return (
-        path.startswith(".claude/hooks/")
-        or path == ".claude/settings.json"
-        or path == "frontend/eslint.config.js"
-        or path.startswith(".github/workflows/")
-        or path == "pyproject.toml"
-        or (path.startswith("scripts/check-") or path.startswith("scripts/check_"))
-    )
+    return is_excluded(path, patterns)
 
 
 def aggregate_changes(changes: list[Change]) -> dict[str, Change]:
