@@ -1642,19 +1642,22 @@ async def test_slow_path_movers_add_exactly_one_more_query(aconn, aagency_id, ch
 
 @pytest.mark.asyncio
 async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aagency_id, ch_client, ch_async_client):
-    """The grain must span 7 days BEFORE ctx.from_date.
+    """The grain must span days BEFORE ctx.from_date, even for a single-day ctx.
 
-    The baseline window is the 7 days immediately before the current one, and
-    the current window is clamped to start no earlier than ctx.from_date — so
-    the baseline can legitimately fall entirely outside ctx. A grain that only
-    covered ctx would silently report `baseline_avg_min: None`.
+    The baseline window is the SAME WIDTH as the current one, immediately
+    before it, and the current window is clamped to start no earlier than
+    ctx.from_date — so the baseline can legitimately fall entirely outside
+    ctx. A grain that only covered ctx would silently report
+    `baseline_avg_min: None`.
     """
-    # ctx is a single day; its baseline is 2026-05-11..2026-05-17, wholly before it.
+    # ctx is a single day (05-18) -> cur_ctx is also a single day, so its
+    # same-width baseline is the single day immediately before it, 05-17,
+    # wholly before ctx.
     await _seed_update(
         aconn, aagency_id, datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc), "R_BL", 600
     )
     await _seed_update(
-        aconn, aagency_id, datetime.combine(date(2026, 5, 14), time(12, 0), tzinfo=timezone.utc), "R_BL", 300, seq=2
+        aconn, aagency_id, datetime.combine(date(2026, 5, 17), time(12, 0), tzinfo=timezone.utc), "R_BL", 300, seq=2
     )
     from tests.conftest import mirror_updates_to_ch
 
@@ -1669,6 +1672,57 @@ async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aag
     assert out["headline"]["delta_min"] == pytest.approx(5.0, abs=0.01)
     # The pre-ctx baseline day must NOT leak into the ctx-windowed surfaces.
     assert out["sparkline_points"] == [10.0]
+
+
+@pytest.mark.asyncio
+async def test_narrow_ctx_baseline_matches_current_window_width(aconn, aagency_id, ch_client, ch_async_client):
+    """A ctx narrower than 7 days must get a same-width baseline, not an
+    always-7-day one.
+
+    ctx is a 3-day range (05-16..05-18) with data on every one of those days
+    plus its immediately-preceding 3-day window (05-13..05-15) *and* two
+    more days further back (05-09, 05-12) that only an unclamped 7-day
+    baseline would reach. Those two extra days are seeded with a sharply
+    different average (15.0 min) from the 05-13..05-15 tier (1.0 min) —
+    seeding them uniformly, or leaving them empty, would make the old
+    (buggy) 7-day-wide baseline and the fixed same-width baseline produce
+    the identical result, so this test would pass either way and catch
+    nothing. With the distinct third tier, the old formula's
+    baseline_avg_min would be pulled toward the 15.0-min days while the
+    fixed formula's stays at exactly 1.0, so only the fixed code satisfies
+    the assertion below.
+    """
+    for d, dep in [
+        (date(2026, 5, 9), 900),
+        (date(2026, 5, 12), 900),
+        (date(2026, 5, 13), 60),
+        (date(2026, 5, 14), 60),
+        (date(2026, 5, 15), 60),
+        (date(2026, 5, 16), 300),
+        (date(2026, 5, 17), 300),
+        (date(2026, 5, 18), 300),
+    ]:
+        await _seed_update(
+            aconn, aagency_id, datetime.combine(d, time(12, 0), tzinfo=timezone.utc), "R_NW", dep, seq=d.day
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 16), to_date=date(2026, 5, 18), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    h = out["headline"]
+    # cur_ctx == ctx (already <= 7 days wide, so no clamping): 3 days at 5.0 min.
+    assert h["window_from"] == "2026-05-16"
+    assert h["window_to"] == "2026-05-18"
+    assert h["avg_min"] == pytest.approx(5.0, abs=0.01)
+    # base_ctx must be the SAME 3-day width immediately before cur_ctx
+    # (05-13..05-15, avg 1.0 min) rather than an unclamped 7-day window
+    # reaching back to 05-09/05-12's 15.0-min tier.
+    assert h["baseline_avg_min"] == pytest.approx(1.0, abs=0.01)
+    assert h["delta_min"] == pytest.approx(4.0, abs=0.01)
 
 
 @pytest.mark.asyncio
