@@ -15,19 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres:
-        image: postgis/postgis:14-3.2
-        env:
-          POSTGRES_USER: transit
-          POSTGRES_PASSWORD: transit
-          POSTGRES_DB: transit
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
       clickhouse:
         image: clickhouse/clickhouse-server:26.3
@@ -79,28 +66,28 @@ jobs:
             /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
 
-      # Same pgvector-from-source build as ci.yml's test job — see that
-      # file's comment for the full rationale (postgis/postgis:14-3.2
-      # doesn't ship pgvector; apt's current package forces an
-      # ABI-mismatching postgresql-14 core upgrade).
-      - name: Build pgvector from source in Postgres service
+      # Built from the repository's own `db/Dockerfile`, the same way ci.yml's
+      # test job does it, so this workflow cannot drift onto a different
+      # PostGIS or pgvector version than the schema is developed against.
+      # `-h localhost` forces readiness onto TCP: the official image's first
+      # run starts a temporary socket-only server to bootstrap the data
+      # directory, so an unqualified `pg_isready` reports ready before the
+      # real, TCP-listening server has replaced it.
+      - name: Start Postgres from db/Dockerfile
         run: |
-          CID=$(docker ps -q --filter ancestor=postgis/postgis:14-3.2 | head -n1)
-          docker exec "$CID" sh -c '
-            set -e
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              build-essential git ca-certificates postgresql-server-dev-14 clang-11 llvm-11
-            git clone --depth 1 --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
-            cd /tmp/pgvector
-            make BITCODE_FILES= MODULE_big_BITCODE_FILES=
-            make BITCODE_FILES= MODULE_big_BITCODE_FILES= install
-            test -f /usr/share/postgresql/14/extension/vector.control
-            rm -rf /tmp/pgvector
-            apt-get purge -y build-essential clang-11 llvm-11 git
-            apt-get autoremove -y
-            rm -rf /var/lib/apt/lists/*
-          '
+          docker build -t transit-eval-db db/
+          docker run -d --name transit-eval-db \
+            -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
+            -e POSTGRES_DB=transit -p 5433:5432 transit-eval-db
+          for _ in $(seq 1 60); do
+            if docker exec transit-eval-db pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready" >&2
+          docker logs transit-eval-db >&2
+          exit 1
 
       - name: Apply Postgres schema
         run: poetry run python gtfs_pipeline.py migrate up

@@ -110,8 +110,13 @@ jobs:
           docker run -d --name transit-ci-db \
             -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
             -e POSTGRES_DB=transit -p 5433:5432 transit-ci-db
+          # `-h localhost` forces the check onto TCP. The official image's first
+          # run starts a temporary socket-only server to bootstrap the data
+          # directory, so an unqualified `pg_isready` reports ready before the
+          # real, TCP-listening server has replaced it — and the schema step
+          # that follows is then refused.
           for _ in $(seq 1 60); do
-            if docker exec transit-ci-db pg_isready -U transit -d transit >/dev/null 2>&1; then
+            if docker exec transit-ci-db pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
               echo "postgres ready"; exit 0
             fi
             sleep 2
