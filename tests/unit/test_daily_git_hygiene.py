@@ -315,6 +315,7 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
     holder = lock_path.open("a+")
     fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
@@ -334,6 +335,8 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
                 str(lock_path),
                 "--log-file",
                 str(log_path),
+                "--state-file",
+                str(state_path),
                 "--apply",
             ]
         )
@@ -343,6 +346,238 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
 
     assert exit_code == 0
     assert "SKIP" in log_path.read_text(encoding="utf-8")
+    # A lock-collision skip is not a completion -- must still retry later today.
+    assert not state_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Same-day completion marker: turns a lost lock race into an hourly retry
+# instead of a 24-hour one (see `already_succeeded_today`'s own docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_already_succeeded_today_false_when_state_file_missing(tmp_path: Path):
+    """No prior run recorded at all -- must not be mistaken for success."""
+
+    assert hygiene.already_succeeded_today(tmp_path / "missing") is False
+
+
+def test_mark_and_check_succeeded_today_round_trip(tmp_path: Path):
+    """Marking success today is what the same-day check then reports back."""
+
+    state_path = tmp_path / "last-success"
+    hygiene.mark_succeeded_today(state_path, tmp_path / "git-hygiene.log")
+    assert hygiene.already_succeeded_today(state_path) is True
+
+
+def test_already_succeeded_today_false_for_a_stale_prior_day(tmp_path: Path):
+    """A completion recorded on an earlier calendar day does not count for today."""
+
+    state_path = tmp_path / "last-success"
+    state_path.write_text("2000-01-01\n", encoding="utf-8")
+    assert hygiene.already_succeeded_today(state_path) is False
+
+
+def test_already_succeeded_today_fails_open_on_a_non_missing_os_error(tmp_path: Path):
+    """A permission/directory-shape OSError reading the state file must not crash the job.
+
+    Every stage this gates is already idempotent, so treating "can't tell" the same
+    as "not yet succeeded" costs at most one redundant hourly retry, not a false skip.
+    """
+
+    state_path = tmp_path / "last-success-is-a-directory"
+    state_path.mkdir()  # read_text() on a directory raises IsADirectoryError (an OSError)
+    assert hygiene.already_succeeded_today(state_path) is False
+
+
+def test_mark_succeeded_today_logs_instead_of_raising_on_write_failure(tmp_path: Path):
+    """A write failure must be logged, not raised -- this runs after cleanup already succeeded."""
+
+    state_path = tmp_path / "last-success-parent-is-a-file"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    blocking_file = state_path.parent / "blocking"
+    blocking_file.write_text("", encoding="utf-8")
+    unwritable_state_path = blocking_file / "last-success"  # parent.mkdir() fails: not a directory
+
+    log_path = tmp_path / "git-hygiene.log"
+    hygiene.mark_succeeded_today(unwritable_state_path, log_path)  # must not raise
+
+    assert "WARNING" in log_path.read_text(encoding="utf-8")
+
+
+def test_already_succeeded_today_and_mark_succeeded_today_use_the_given_day_not_the_live_clock(
+    tmp_path: Path,
+):
+    """An explicit `today=` must be used verbatim, so a run straddling a UTC midnight stays
+    self-consistent between its pre-check and its eventual marker (both pass the same
+    captured day, rather than each calling `today_utc()` fresh)."""
+
+    state_path = tmp_path / "last-success"
+    log_path = tmp_path / "git-hygiene.log"
+
+    hygiene.mark_succeeded_today(state_path, log_path, today="2026-01-01")
+
+    assert hygiene.already_succeeded_today(state_path, today="2026-01-01") is True
+    # A different (e.g. live "today") day must not match yesterday's explicit marker.
+    assert hygiene.already_succeeded_today(state_path, today="2026-01-02") is False
+
+
+def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An hourly re-trigger on a day this job already completed must not even try the lock."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+    hygiene.mark_succeeded_today(state_path, log_path)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("must not attempt the lock once today's run is already marked complete")
+
+    monkeypatch.setattr(hygiene, "try_acquire_lock", _boom)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 0
+
+
+def test_main_marks_today_succeeded_only_after_a_fully_clean_apply_run(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A stage error must not mark today done -- it should retry on the next hourly trigger."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    def _boom(*_args: object, **_kwargs: object) -> bool:
+        raise hygiene.HygieneError("simulated stage failure")
+
+    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", _boom)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 2
+    assert not state_path.exists()
+
+
+def test_main_does_not_mark_today_succeeded_on_a_dry_run(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A plain preview (no --apply, the documented default) must not poison the day's real cron run.
+
+    Every stage returns True/exit_code 0 on a dry run just as easily as on a genuinely
+    clean --apply run, since each returns before deleting anything -- without the
+    `args.apply` gate, an operator previewing the plan by hand would silently cancel
+    that day's scheduled --apply cleanup.
+    """
+
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert not state_path.exists()
+
+
+def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_to_clean(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A real --apply run that finds nothing to delete is still a fully-clean day."""
+
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 0
+    assert hygiene.already_succeeded_today(state_path) is True
+
+
+def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A stage that returns False (a swallowed per-item error) must not mark today done either."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", lambda *_args, **_kwargs: False)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 2
+    assert not state_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -568,8 +803,9 @@ def test_run_remote_branch_cleanup_continues_after_one_delete_error(
     monkeypatch.setattr(hygiene, "delete_remote_branch", _flaky_delete)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
     assert "vps-loop/item-15" in remaining  # the failed delete leaves it in place
     assert "vps-loop/item-16" not in remaining  # the other branch still gets swept
@@ -609,8 +845,9 @@ def test_run_remote_branch_cleanup_continues_after_one_tip_check_error(
     monkeypatch.setattr(hygiene, "remote_branch_head", _flaky_head_check)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
     assert "vps-loop/item-18" in remaining  # the failed tip check leaves it in place
     assert "vps-loop/item-19" not in remaining  # the other branch still gets checked and swept
@@ -639,8 +876,9 @@ def test_run_backup_branch_pruning_continues_after_one_delete_error(
     monkeypatch.setattr(hygiene, "delete_local_branch", _flaky_delete)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
+    all_clean = hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-1111111")
     assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-2222222") == ""
     log_contents = log_path.read_text(encoding="utf-8")

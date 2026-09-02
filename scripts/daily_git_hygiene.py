@@ -15,7 +15,12 @@ This closes three gaps `/vps-loop-run` only handles reactively:
 
 This script must never race a live `/vps-loop-run` tick: it acquires the
 same `/tmp/claude-loop.lock` lock file non-blockingly before touching
-anything and skips cleanly (not an error) if the loop is mid-tick.
+anything and skips cleanly (not an error) if the loop is mid-tick. A single
+fixed-time daily cron trigger has no retry if it loses that race, so the
+crontab should invoke this hourly; a same-day completion marker
+(`--state-file`, default `/root/.daily_git_hygiene_last_success`) keeps the
+actual cleanup itself running at most once per calendar day regardless of
+how often the trigger fires.
 
 Every deletion (local or remote) is appended to a dedicated hygiene log
 (default `/root/git-hygiene.log`) -- not `docs/refactor-log.md`, which is
@@ -58,6 +63,7 @@ CleanupError = cleanup_git_state.CleanupError
 
 DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
+DEFAULT_STATE_FILE = Path("/root/.daily_git_hygiene_last_success")
 DEFAULT_RETENTION_DAYS = 30
 
 # `vps-loop/item-<N>` (no suffix): the branch shape the loop pushes and opens
@@ -137,17 +143,82 @@ def log_line(log_file: Path, message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Same-day completion marker
+# ---------------------------------------------------------------------------
+
+
+def today_utc() -> str:
+    """Today's UTC date as `YYYY-MM-DD`, this job's unit of "already ran"."""
+
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def already_succeeded_today(state_file: Path, *, today: str | None = None) -> bool:
+    """True if `state_file` already records `today` (default: `today_utc()`) as completed.
+
+    A single fixed cron time (e.g. once daily) can keep losing the
+    `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
+    retry within that invocation (see that function's own docstring).
+    Pairing a same-day completion marker with a much more frequent cron
+    trigger (this job stays idempotent per day either way) turns that into
+    an hourly retry instead of a 24-hour one, without ever running the
+    real cleanup twice in one day.
+
+    Takes `today` explicitly (rather than each caller in `main` calling
+    `today_utc()` separately) so a run whose wall-clock execution straddles
+    a UTC midnight still compares and records the same calendar day it
+    started on, instead of the pre-check and the eventual marker disagreeing.
+
+    Any `OSError` other than a missing file (permission denied, the path
+    being a directory, ...) is treated the same as "not yet succeeded" --
+    every stage this gates is already idempotent, so failing open here
+    costs at most one redundant hourly attempt, not a false skip of real
+    cleanup.
+    """
+
+    try:
+        return state_file.read_text(encoding="utf-8").strip() == (today if today is not None else today_utc())
+    except OSError:
+        return False
+
+
+def mark_succeeded_today(state_file: Path, log_file: Path, *, today: str | None = None) -> None:
+    """Record `today` (default: `today_utc()`) as this job's last fully-clean run.
+
+    Failure to write is logged, not raised -- this runs only after the real
+    cleanup already completed, so losing the marker costs one redundant
+    hourly retry tomorrow (extra `gh`/`git` calls, not a correctness issue),
+    never a false "done" or a crash before the lock in `main`'s `finally`
+    block gets to release.
+    """
+
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(f"{today if today is not None else today_utc()}\n", encoding="utf-8")
+    except OSError as exc:
+        message = f"WARNING: could not write completion marker {state_file}: {exc}"
+        print(message, file=sys.stderr)
+        log_line(log_file, message)
+
+
+# ---------------------------------------------------------------------------
 # 1. Local branch/worktree cleanup -- delegates to cleanup_git_state.py
 # ---------------------------------------------------------------------------
 
 
-def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> None:
+def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> bool:
     """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes.
 
     Fetches `remote` first: `build_plan`'s `validate_base` requires local
     `refs/heads/{base}` to exactly match `refs/remotes/{remote}/{base}`, and
     this job is specifically meant to run during idle stretches where nothing
     else has refreshed that remote-tracking ref recently.
+
+    Unlike the other two stages, `cleanup_git_state.apply_plan` has no
+    per-item swallow-and-continue -- any problem raises `CleanupError`
+    immediately, which `main`'s own stage loop already catches. Always
+    returns True (or doesn't return at all) for that reason; the bool
+    return exists only so all three stages share one uniform contract.
     """
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
@@ -155,7 +226,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
     decisions = cleanup_git_state.build_plan(repo, base=base, remote=remote, protected=protected)
     cleanup_git_state.print_plan(decisions, applying=apply)
     if not apply:
-        return
+        return True
 
     # Capture apply_plan's own "DELETED ..." lines so the hygiene log records
     # exactly what it actually removed (post its own immediate re-check),
@@ -170,6 +241,8 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
         for line in output.splitlines():
             if line.startswith("DELETED "):
                 log_line(log_file, f"local cleanup: {line}")
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +355,15 @@ def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
     cleanup_git_state.run_git(repo, "push", remote, "--delete", "--", branch)
 
 
-def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> None:
-    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches."""
+def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> bool:
+    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches.
+
+    Returns False if any individual branch's tip-check or delete failed --
+    those are deliberately swallowed and logged per-branch (a transient
+    failure on one branch must not abort the rest), but the caller still
+    needs to know the stage wasn't fully clean, since that decides whether
+    today can be marked done (see `main`'s `mark_succeeded_today` gate).
+    """
 
     print(f"== Remote vps-loop/item-* branch cleanup ({remote}) ==")
     branches = list_remote_vps_loop_branches(repo, remote)
@@ -301,7 +381,9 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
     if delete_count and not apply:
         print(f"Dry run only. Re-run with --apply to delete the listed {remote} branches.")
     if not apply:
-        return
+        return True
+
+    all_clean = True
 
     # Re-fetch dependent-PR evidence once right before applying (not once per
     # branch) to catch a stacked PR opened during planning, without regressing
@@ -323,6 +405,7 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
             message = f"remote cleanup: ERROR checking {remote}/{decision.branch} tip: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         if current_head != decision.head:
             observed = current_head[:12] if current_head else "branch gone"
@@ -339,9 +422,12 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
             message = f"remote cleanup: ERROR deleting {remote}/{decision.branch}: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         print(f"DELETED {remote}/{decision.branch}")
         log_line(log_file, f"remote cleanup: DELETED {remote}/{decision.branch} — {decision.reason}")
+
+    return all_clean
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +489,14 @@ def delete_local_branch(repo: Path, branch: str) -> None:
     cleanup_git_state.run_git(repo, "branch", "-D", "--", branch)
 
 
-def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> None:
-    """Plan (and optionally apply) removal of superseded-backup branches past retention."""
+def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> bool:
+    """Plan (and optionally apply) removal of superseded-backup branches past retention.
+
+    Returns False if any individual branch's delete failed -- deliberately
+    swallowed and logged per-branch (see `run_remote_branch_cleanup`'s
+    docstring for why), but still surfaced so `main` doesn't mark today
+    done on a stage that wasn't actually fully clean.
+    """
 
     print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
     now_epoch = int(time.time())
@@ -419,8 +511,9 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
     if delete_count and not apply:
         print("Dry run only. Re-run with --apply to remove the listed backup branches.")
     if not apply:
-        return
+        return True
 
+    all_clean = True
     for decision in decisions:
         if decision.action != "delete":
             continue
@@ -435,9 +528,12 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
             message = f"backup pruning: ERROR deleting {decision.branch}: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         print(f"DELETED {decision.branch}")
         log_line(log_file, f"backup pruning: DELETED {decision.branch} — {decision.reason}")
+
+    return all_clean
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +553,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE, help="Lock shared with claude-loop.sh")
     parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_FILE, help="Deletion log (not refactor-log.md)")
     parser.add_argument(
+        "--state-file", type=Path, default=DEFAULT_STATE_FILE, help="Marks the last calendar day this job completed"
+    )
+    parser.add_argument(
         "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS, help="Backup-branch retention window in days"
     )
     args = parser.parse_args(argv)
 
     log_file: Path = args.log_file
+
+    # Captured once so a run whose execution straddles a UTC midnight still
+    # checks and (if it succeeds) records the same calendar day throughout,
+    # rather than the pre-check and the eventual marker each calling
+    # `today_utc()` fresh and disagreeing.
+    run_day = today_utc()
+
+    # Checked before the lock, and not logged: an hourly cron trigger hitting
+    # this on a day it already completed is the expected common case, not
+    # something worth a log line every time.
+    if already_succeeded_today(args.state_file, today=run_day):
+        print(f"Already completed today ({run_day}) per {args.state_file}; nothing to do")
+        return 0
+
     lock_handle = try_acquire_lock(args.lock_file)
     if lock_handle is None:
         message = f"SKIP: {args.lock_file} is held (a /vps-loop-run tick is likely mid-flight); not touching git state"
@@ -481,7 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         protected = {args.base, "production", *args.protect}
         exit_code = 0
 
-        stages: tuple[tuple[str, Callable[[], None]], ...] = (
+        stages: tuple[tuple[str, Callable[[], bool]], ...] = (
             (
                 "local cleanup",
                 lambda: run_local_cleanup(
@@ -501,11 +614,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for stage, runner in stages:
             try:
-                runner()
+                stage_clean = runner()
             except (CleanupError, HygieneError, OSError) as exc:
                 print(f"ERROR ({stage}): {exc}", file=sys.stderr)
                 log_line(log_file, f"ERROR: {stage} failed: {exc}")
                 exit_code = 2
+                continue
+            if not stage_clean:
+                # A per-item failure inside the stage (already logged there,
+                # e.g. one branch's delete or tip-check erroring) -- the
+                # stage itself didn't raise, but it wasn't fully clean either.
+                exit_code = 2
+
+        # Only a fully-clean --apply run marks today done. A dry run (the
+        # default, and the documented way to preview what a run would do)
+        # reaches exit_code == 0 just as easily as a real cleanup does, since
+        # every stage returns early before deleting anything -- marking it
+        # done would silently cancel the day's real --apply cron run the
+        # next time it fires. A stage error (raised or per-item) must also
+        # not mark today done, so it retries on the next hourly trigger
+        # instead of waiting a full day.
+        if args.apply and exit_code == 0:
+            mark_succeeded_today(args.state_file, log_file, today=run_day)
 
         return exit_code
     finally:
