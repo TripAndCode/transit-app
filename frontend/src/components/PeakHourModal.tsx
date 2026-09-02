@@ -134,9 +134,14 @@ export function PeakHourModal({
                 }}
               >
                 <div
+                  data-testid={`peak-hour-modal-bar-${r.route_code}`}
                   style={{
                     height: "100%",
-                    width: `${(r.avg_min / maxAvg) * 100}%`,
+                    // avg_min can be negative for early-running routes; clamp
+                    // to 0 (no bar) rather than emit an invalid negative CSS
+                    // width, matching PeakHourRibbon's bar_h clamp. The text
+                    // label still shows the true (possibly negative) value.
+                    width: `${Math.max((r.avg_min / maxAvg) * 100, 0)}%`,
                     background: "var(--accent)",
                     borderRadius: 4,
                   }}
