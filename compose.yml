@@ -1,8 +1,10 @@
 services:
   db:
     build:
-      context: .
-      dockerfile: db/Dockerfile
+      # Context is `db/`, matching every other caller (`docker build … db/`), so
+      # the Dockerfile's COPY resolves the same way everywhere and the context
+      # stays this directory rather than the whole repository.
+      context: db
     container_name: transit-pg
     environment:
       POSTGRES_USER: transit

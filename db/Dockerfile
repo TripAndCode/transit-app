@@ -1,9 +1,8 @@
 # Multi-architecture Postgres for local dev, the throwaway test database, and
 # any self-hosted deployment. The official `postgres` image publishes arm64
-# alongside amd64, so an Apple Silicon or arm64 Linux machine runs this
-# natively instead of under emulation — `postgis/postgis` ships amd64 only,
-# which forced a `platform: linux/amd64` pin and made every query pay a QEMU
-# translation tax.
+# alongside amd64, so an arm64 host runs this natively. `postgis/postgis`
+# publishes amd64 only, for every tag, and cannot: it needs an emulated
+# platform, which taxes every query.
 FROM postgres:14
 
 # PostGIS and pgvector come from PGDG, which the official image already
@@ -28,33 +27,10 @@ RUN apt-get update \
         postgresql-14-pgvector \
     && rm -rf /var/lib/apt/lists/*
 
-# Positive control for the layer above. Every extension the migrations create
-# must be present before this image is considered built: `postgis` and
-# `vector` come from the packages above, `pg_trgm` from the base image's
-# contrib modules. Without this an absent extension surfaces much later, as a
-# confusing failure partway through `migrate up`.
-#
-# Only the two apt-installed extensions carry a version floor, because only
-# they can move independently of this file; `pg_trgm` ships with the base
-# image at whatever version its Postgres provides, so presence is the whole
-# check there.
-#
-# This reads packaging metadata, so it proves an extension is installable, not
-# that it loads — a control file beside an unusable shared object would still
-# pass. Actually creating each extension needs a running server, which the
-# first `migrate up` against this image does; keep that a step away rather
-# than starting a throwaway server inside the build.
-RUN set -eu; \
-    ext=/usr/share/postgresql/14/extension; \
-    for control in postgis vector pg_trgm; do \
-        test -f "$ext/$control.control" || { echo "missing extension: $control" >&2; exit 1; }; \
-    done; \
-    version_of() { sed -n "s/^default_version *= *'\(.*\)'/\1/p" "$ext/$1.control"; }; \
-    require() { \
-        installed=$(version_of "$1"); \
-        echo "$1 $installed"; \
-        dpkg --compare-versions "$installed" ge "$2" \
-            || { echo "$1 $installed is below the required $2" >&2; exit 1; }; \
-    }; \
-    require postgis 3.2; \
-    require vector 0.8
+# Positive control for the layer above: the build fails here rather than
+# partway through `migrate up`. The check lives in its own script so it can be
+# tested — a version floor buried in a `RUN` one-liner can be turned into a
+# no-op by a later cleanup with nothing to catch it.
+COPY assert_extensions.sh /usr/local/bin/assert-extensions
+RUN /usr/local/bin/assert-extensions /usr/share/postgresql/14/extension \
+        postgis=3.2 vector=0.8 pg_trgm

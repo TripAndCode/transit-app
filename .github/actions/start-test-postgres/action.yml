@@ -7,14 +7,6 @@ inputs:
   container-name:
     description: Name for the container, so parallel jobs do not collide.
     required: true
-  port:
-    description: Host port to publish Postgres on.
-    required: false
-    default: "5433"
-  database:
-    description: Database to create and probe.
-    required: false
-    default: transit
 
 runs:
   using: composite
@@ -23,21 +15,37 @@ runs:
     # that block can only pull a published image, and none carries PostGIS and
     # pgvector together. Building it keeps every workflow, local dev, and the
     # throwaway test database on one definition, so a schema that migrates
-    # locally cannot fail in CI on a missing extension.
-    - shell: bash
+    # locally cannot fail here on a missing extension.
+    - name: Build the database image
+      shell: bash
       run: |
+        set -euo pipefail
         docker build -t "${{ inputs.container-name }}" db/
+
+    # The port and database are fixed here rather than parameterised: callers
+    # name them again in their own DATABASE_URL, and a second knob would let
+    # the two drift apart with nothing to catch it until a job failed to
+    # connect.
+    - name: Run the container
+      shell: bash
+      run: |
+        set -euo pipefail
         docker run -d --name "${{ inputs.container-name }}" \
           -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
-          -e POSTGRES_DB="${{ inputs.database }}" \
-          -p "${{ inputs.port }}:5432" "${{ inputs.container-name }}"
-        # `-h localhost` forces the check onto TCP. The official image's first
-        # run answers on the Unix socket from a temporary bootstrap server
-        # before the real, TCP-listening server replaces it, so an unqualified
-        # probe reports ready while the next step would still be refused.
+          -e POSTGRES_DB=transit \
+          -p 5433:5432 "${{ inputs.container-name }}"
+
+    # `-h localhost` forces the check onto TCP. The official image's first run
+    # answers on the Unix socket from a temporary bootstrap server before the
+    # real, TCP-listening server replaces it, so an unqualified probe reports
+    # ready while the next step would still be refused.
+    - name: Wait for TCP readiness
+      shell: bash
+      run: |
+        set -euo pipefail
         for _ in $(seq 1 60); do
           if docker exec "${{ inputs.container-name }}" \
-              pg_isready -h localhost -U transit -d "${{ inputs.database }}" >/dev/null 2>&1; then
+              pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
             echo "postgres ready"
             exit 0
           fi
