@@ -502,17 +502,23 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
 async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantics(
     reports_client, ch_client, ch_async_client
 ):
-    """Regression: ClickHouse's `quantileExact` is a pure positional pick
-    (`sorted[floor(q*n)]`) that silently disagrees with Postgres's
-    `PERCENT_RANK()` (min-rank ties) whenever `dep_delay` has ties — common,
-    since exact-zero delays and clamped/rounded values dominate this column.
+    """Regression: `_ranking_live` (this endpoint's `time_band`-filtered
+    ClickHouse fallback) intentionally still reproduces the OLD min-rank-tie
+    `PERCENT_RANK()` formula, via `rank()`/`count()` window functions — NOT
+    ClickHouse's `quantileExact`, which is a pure positional pick
+    (`sorted[floor(q*n)]`). This is a known, accepted divergence from the
+    Postgres aggregate path (`agg_route_stats`/`agg_route_hour`), which has
+    since migrated to `PERCENTILE_DISC` and would give a different answer on
+    the same tied data — see `_ranking_live`'s own docstring.
 
-    95 rows at 0s + 5 at 600s (n=100): PERCENT_RANK's min-rank tie handling
-    gives every 0s row rank=1 (pct=0) and every 600s row rank=96
-    (pct=95/99≈0.960). That's the only group clearing >=0.5 AND >=0.9, so
-    both p50 and p90 must read 10.0 (600s/60). quantileExact(0.5)/(0.9)
-    would instead pick position floor(0.5*100)=50 and floor(0.9*100)=90 —
-    both still inside the 95-row 0s run — giving 0.0 for both.
+    95 rows at 0s + 5 at 600s (n=100): the old min-rank tie handling this
+    function reproduces gives every 0s row rank=1 (pct=0) and every 600s row
+    rank=96 (pct=95/99≈0.960). That's the only group clearing >=0.5 AND
+    >=0.9, so both p50 and p90 must read 10.0 (600s/60). quantileExact(0.5)/
+    (0.9) would instead pick position floor(0.5*100)=50 and
+    floor(0.9*100)=90 — both still inside the 95-row 0s run — giving 0.0 for
+    both. (`PERCENTILE_DISC`, the current Postgres aggregate path, would also
+    give 0.0 here — the same divergence from this function's 10.0.)
     """
     from api.main import app
 
