@@ -61,7 +61,7 @@ exists when you wire the app.
 4. `db` service → **Settings → Build**:
    - Builder: **Dockerfile**
    - Dockerfile Path: `db/Dockerfile`
-5. `db` → **Variables** (these feed the `postgis/postgis` image):
+5. `db` → **Variables** (these feed the `postgres` image `db/Dockerfile` builds on):
    ```
    POSTGRES_USER=transit
    POSTGRES_PASSWORD=<openssl rand -hex 24>

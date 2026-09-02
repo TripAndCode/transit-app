@@ -1,13 +1,24 @@
-FROM postgis/postgis:14-3.2
+# Multi-architecture Postgres for local dev, the throwaway test database, and
+# any self-hosted deployment. The official `postgres` image publishes arm64
+# alongside amd64, so an Apple Silicon or arm64 Linux machine runs this
+# natively instead of under emulation — `postgis/postgis` ships amd64 only,
+# which forced a `platform: linux/amd64` pin and made every query pay a QEMU
+# translation tax.
+FROM postgres:14
 
-# Pinned for reproducible image builds — bump deliberately, not on rebuild.
-# 0.8.2-1.pgdg11+1 was pruned from the PGDG apt pool (only 0.8.3+ remain as
-# of 2026-07-27); bumped to the latest available. Safe here specifically
-# because this is a single fresh image build, not an apt install against an
-# already-running server — there's no existing compiled postgresql-14
-# binary for a newer pgvector's `Depends: postgresql-14` to upgrade past
-# and ABI-mismatch (the problem CI's docker-exec-into-a-live-container
-# approach has to work around by building pgvector from source instead).
+# PostGIS and pgvector come from PGDG, which the official image already
+# configures. Versions are pinned so an image rebuild is reproducible; bump
+# them deliberately. A pin that disappears from the apt pool is ordinary
+# maintenance, not a broken build — PGDG prunes superseded patch releases.
+#
+# Installing at image-build time is what keeps this safe: the server is not
+# running yet, so a package that wants to upgrade `postgresql-14` cannot
+# ABI-mismatch an already-compiled extension against a live backend. The same
+# apt install against a running container is the case that breaks.
+ARG POSTGIS_VERSION=3.6.4+dfsg-2.pgdg12+1
+ARG PGVECTOR_VERSION=0.8.6-1.pgdg12+1
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-14-pgvector=0.8.5-1.pgdg11+1 \
+    && apt-get install -y --no-install-recommends \
+        "postgresql-14-postgis-3=${POSTGIS_VERSION}" \
+        "postgresql-14-pgvector=${PGVECTOR_VERSION}" \
     && rm -rf /var/lib/apt/lists/*

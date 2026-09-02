@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: db/Dockerfile
-    platform: linux/amd64
     container_name: transit-pg
     environment:
       POSTGRES_USER: transit
