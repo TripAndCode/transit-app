@@ -366,7 +366,7 @@ def test_mark_and_check_succeeded_today_round_trip(tmp_path: Path):
     """Marking success today is what the same-day check then reports back."""
 
     state_path = tmp_path / "last-success"
-    hygiene.mark_succeeded_today(state_path)
+    hygiene.mark_succeeded_today(state_path, tmp_path / "git-hygiene.log")
     assert hygiene.already_succeeded_today(state_path) is True
 
 
@@ -378,6 +378,50 @@ def test_already_succeeded_today_false_for_a_stale_prior_day(tmp_path: Path):
     assert hygiene.already_succeeded_today(state_path) is False
 
 
+def test_already_succeeded_today_fails_open_on_a_non_missing_os_error(tmp_path: Path):
+    """A permission/directory-shape OSError reading the state file must not crash the job.
+
+    Every stage this gates is already idempotent, so treating "can't tell" the same
+    as "not yet succeeded" costs at most one redundant hourly retry, not a false skip.
+    """
+
+    state_path = tmp_path / "last-success-is-a-directory"
+    state_path.mkdir()  # read_text() on a directory raises IsADirectoryError (an OSError)
+    assert hygiene.already_succeeded_today(state_path) is False
+
+
+def test_mark_succeeded_today_logs_instead_of_raising_on_write_failure(tmp_path: Path):
+    """A write failure must be logged, not raised -- this runs after cleanup already succeeded."""
+
+    state_path = tmp_path / "last-success-parent-is-a-file"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    blocking_file = state_path.parent / "blocking"
+    blocking_file.write_text("", encoding="utf-8")
+    unwritable_state_path = blocking_file / "last-success"  # parent.mkdir() fails: not a directory
+
+    log_path = tmp_path / "git-hygiene.log"
+    hygiene.mark_succeeded_today(unwritable_state_path, log_path)  # must not raise
+
+    assert "WARNING" in log_path.read_text(encoding="utf-8")
+
+
+def test_already_succeeded_today_and_mark_succeeded_today_use_the_given_day_not_the_live_clock(
+    tmp_path: Path,
+):
+    """An explicit `today=` must be used verbatim, so a run straddling a UTC midnight stays
+    self-consistent between its pre-check and its eventual marker (both pass the same
+    captured day, rather than each calling `today_utc()` fresh)."""
+
+    state_path = tmp_path / "last-success"
+    log_path = tmp_path / "git-hygiene.log"
+
+    hygiene.mark_succeeded_today(state_path, log_path, today="2026-01-01")
+
+    assert hygiene.already_succeeded_today(state_path, today="2026-01-01") is True
+    # A different (e.g. live "today") day must not match yesterday's explicit marker.
+    assert hygiene.already_succeeded_today(state_path, today="2026-01-02") is False
+
+
 def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -386,7 +430,7 @@ def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
-    hygiene.mark_succeeded_today(state_path)
+    hygiene.mark_succeeded_today(state_path, log_path)
 
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("must not attempt the lock once today's run is already marked complete")

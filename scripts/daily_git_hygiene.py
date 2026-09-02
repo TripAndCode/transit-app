@@ -128,37 +128,6 @@ def release_lock(handle: IO[str]) -> None:
     handle.close()
 
 
-def today_utc() -> str:
-    """Today's UTC date as `YYYY-MM-DD`, this job's unit of "already ran"."""
-
-    return time.strftime("%Y-%m-%d", time.gmtime())
-
-
-def already_succeeded_today(state_file: Path) -> bool:
-    """True if `state_file` already records today's UTC date as a completed run.
-
-    A single fixed cron time (e.g. once daily) can keep losing the
-    `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
-    retry within that invocation (see that function's own docstring).
-    Pairing a same-day completion marker with a much more frequent cron
-    trigger (this job stays idempotent per day either way) turns that into
-    an hourly retry instead of a 24-hour one, without ever running the
-    real cleanup twice in one day.
-    """
-
-    try:
-        return state_file.read_text(encoding="utf-8").strip() == today_utc()
-    except FileNotFoundError:
-        return False
-
-
-def mark_succeeded_today(state_file: Path) -> None:
-    """Record today's UTC date as this job's last fully-clean run."""
-
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(f"{today_utc()}\n", encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -171,6 +140,65 @@ def log_line(log_file: Path, message: str) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     with log_file.open("a", encoding="utf-8") as handle:
         handle.write(f"{timestamp} {message}\n")
+
+
+# ---------------------------------------------------------------------------
+# Same-day completion marker
+# ---------------------------------------------------------------------------
+
+
+def today_utc() -> str:
+    """Today's UTC date as `YYYY-MM-DD`, this job's unit of "already ran"."""
+
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def already_succeeded_today(state_file: Path, *, today: str | None = None) -> bool:
+    """True if `state_file` already records `today` (default: `today_utc()`) as completed.
+
+    A single fixed cron time (e.g. once daily) can keep losing the
+    `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
+    retry within that invocation (see that function's own docstring).
+    Pairing a same-day completion marker with a much more frequent cron
+    trigger (this job stays idempotent per day either way) turns that into
+    an hourly retry instead of a 24-hour one, without ever running the
+    real cleanup twice in one day.
+
+    Takes `today` explicitly (rather than each caller in `main` calling
+    `today_utc()` separately) so a run whose wall-clock execution straddles
+    a UTC midnight still compares and records the same calendar day it
+    started on, instead of the pre-check and the eventual marker disagreeing.
+
+    Any `OSError` other than a missing file (permission denied, the path
+    being a directory, ...) is treated the same as "not yet succeeded" --
+    every stage this gates is already idempotent, so failing open here
+    costs at most one redundant hourly attempt, not a false skip of real
+    cleanup.
+    """
+
+    try:
+        return state_file.read_text(encoding="utf-8").strip() == (today if today is not None else today_utc())
+    except OSError:
+        return False
+
+
+def mark_succeeded_today(state_file: Path, log_file: Path, *, today: str | None = None) -> None:
+    """Record `today` (default: `today_utc()`) as this job's last fully-clean run.
+
+    Failure to write is logged, not raised -- this runs only after the real
+    cleanup already completed, so losing the marker costs one redundant
+    hourly retry tomorrow (extra `gh`/`git` calls, not a correctness issue),
+    never a false "done" or a crash before the lock in `main`'s `finally`
+    block gets to release.
+    """
+
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(f"{today if today is not None else today_utc()}\n", encoding="utf-8")
+    except OSError as exc:
+        message = f"WARNING: could not write completion marker {state_file}: {exc}"
+        print(message, file=sys.stderr)
+        log_line(log_file, message)
 
 
 # ---------------------------------------------------------------------------
@@ -534,11 +562,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     log_file: Path = args.log_file
 
+    # Captured once so a run whose execution straddles a UTC midnight still
+    # checks and (if it succeeds) records the same calendar day throughout,
+    # rather than the pre-check and the eventual marker each calling
+    # `today_utc()` fresh and disagreeing.
+    run_day = today_utc()
+
     # Checked before the lock, and not logged: an hourly cron trigger hitting
     # this on a day it already completed is the expected common case, not
     # something worth a log line every time.
-    if already_succeeded_today(args.state_file):
-        print(f"Already completed today ({today_utc()}) per {args.state_file}; nothing to do")
+    if already_succeeded_today(args.state_file, today=run_day):
+        print(f"Already completed today ({run_day}) per {args.state_file}; nothing to do")
         return 0
 
     lock_handle = try_acquire_lock(args.lock_file)
@@ -601,7 +635,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # not mark today done, so it retries on the next hourly trigger
         # instead of waiting a full day.
         if args.apply and exit_code == 0:
-            mark_succeeded_today(args.state_file)
+            mark_succeeded_today(args.state_file, log_file, today=run_day)
 
         return exit_code
     finally:
