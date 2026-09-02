@@ -14,7 +14,8 @@ skip ahead.
 
 Every Status log entry logged when a tick stops making zero forward progress
 because of a genuine blocker — Step 1's stash-and-stop, Step 2's
-tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3b's
+tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3's
+OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
 worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
@@ -316,9 +317,66 @@ Walk items top to bottom:
   and assert `headRefName` equals the branch exactly before acting. Use `--head`, NOT
   `--search "head:…"`: the search qualifier matches by prefix/token, so
   `head:vps-loop/item-1` can also return `item-10`'s PR and skip item 1 forever with no
-  log line. Any `OPEN` or `MERGED` entry → skip item N (done or in progress). A
-  `CLOSED` (rejected, unmerged) entry does NOT block a fresh attempt — but see Step 3b
-  before resuming any leftover commits.
+  log line. `MERGED` → skip item N (done). A `CLOSED` (rejected, unmerged) entry does
+  NOT block a fresh attempt — but see Step 3b before resuming any leftover commits.
+  `OPEN` (including draft) → before skipping, check whether it can instead be
+  *finished*: this PR's own branch — not `main`'s checkout — holds the durable
+  record Steps 4/6 write; the entry doesn't land on `main` until merge. Read it
+  with `git show origin/vps-loop/item-<N>:docs/refactor-log.md` (works even
+  with no local worktree). Require an explicit closing statement that **both**
+  passes completed (e.g. "both required `/review-branch` passes are now
+  clean" / "Pass 2 ... complete" language) — an interim milestone like "Pass 1
+  is now clean" is NOT enough and must NOT be read as satisfying this; real
+  entries commonly log Pass 1 clean well before Pass 2 even starts, and
+  mistaking that for completion would ready/merge a PR whose mandatory second
+  pass never ran. Treat any ambiguity as "not yet clean" (fall through to the
+  skip-as-in-progress behavior below) — same conservative bias as Step 2b's
+  own "treat this judgment as possibly wrong" caveat.
+  If the entry clearly shows both passes complete: this PR was shipped (Steps
+  6.1–6.4) by a tick that ended before reaching 6.5–6.11, and nothing in this
+  file otherwise routes a later tick back to finish readying/merging it — it
+  would sit open indefinitely, since Step 3's ordinary `OPEN` handling never
+  revisits it. Before trusting the closing statement, confirm no commit has
+  landed on the branch since it was written: find the most recent commit
+  touching the file with `git log -1 --format=%H origin/vps-loop/item-<N> --
+  docs/refactor-log.md` (this may resolve to 6.4's own placeholder-replacement
+  commit rather than the exact commit that wrote the closing statement — that
+  only makes the next check stricter, never wrong, since it can't land earlier
+  than the real closing-statement commit), then check `git log --oneline
+  <that-SHA>..origin/vps-loop/item-<N>` is empty. A non-empty result — e.g. an
+  interrupted `main`-resync merge from a prior 6.6 attempt, or any other later
+  commit — means commits exist that the closing statement never covered;
+  treat this exactly like an ambiguous entry and fall through to the
+  skip-as-in-progress behavior, do NOT resume at 6.5. Only once that log is
+  empty does the closing statement still describe the branch's actual current
+  tip. Next, confirm the worktree Steps 6.1–6.4 used still exists (`git
+  worktree list`) — mirroring Step 2b/3b's own "worktree exists vs. branch
+  only" fork: if it's gone, this is not safely resumable from here; log `-
+  <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows both
+  passes clean, but its worktree no longer exists — needs a human to reattach
+  one before Step 6 can be resumed.
+  **Blocker-tag:** branch-without-worktree` and stop this tick — a tick stop,
+  not an ordinary item skip, for the same reason Step 3b's own "branch only,
+  no worktree" case stops rather than continuing to a different item: moving
+  on would leave this recurring root cause invisible to Step 0's circuit
+  breaker. If the worktree exists: first check whether the entry still reads
+  `(PR #pending)` instead of a real number — meaning the tick died between
+  6.3 and 6.4 — and if so, run 6.4 now (replace the placeholder, commit,
+  push) before continuing; do not squash-merge that placeholder into `main`
+  verbatim. Then skip the rest of Step 3/3b and resume directly at **Step
+  6.5** for this PR, first reconstructing
+  `MAIN_SHA_AT_REVIEW` (6.1's value, which is never persisted and so isn't
+  available to a fresh tick) as `git -C <worktree-path> merge-base origin/main
+  vps-loop/item-<N>` — the `main` this branch tip was last reconciled against.
+  This reconstruction is only safe because the check above already proved the
+  branch tip hasn't moved since the reviewed state; without it, merge-base
+  could silently resolve to a `main` SHA more recent than what Step 5 actually
+  reviewed, masking a real "main advanced" case. 6.5 itself still re-verifies
+  identity, and 6.6 still re-derives whether `main` has advanced since that
+  reconstructed baseline, exactly as it would for a same-tick completion. If
+  the refactor-log entry does NOT show both passes clean (review genuinely
+  still in progress, mid fix-iteration, or never started), the original
+  behavior applies: skip item N this tick as in-progress, same as before.
 - If the item text has `Depends on: item <M>`, run the same exact-head query for M with
   `--state merged`. Empty → skip N this tick (dependency unmet) and keep walking;
   don't stall the run on it.
