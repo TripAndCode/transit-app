@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
-import fnmatch
 import importlib.util
 import io
 import json
@@ -689,9 +688,19 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
                 f"worktree {worktree.path} has no resolvable venv and no `.git` file to age-check "
                 "(expected a linked worktree); refusing to prune any orphaned venv this run"
             )
+        # Deliberately `except FileNotFoundError`, not the broader `OSError`: a
+        # *persistent* stat failure (permission denied, a stale network mount,
+        # an I/O error -- e.g. exactly the portable-device/network-share case
+        # `git worktree lock` exists for) is not "vanished" and must not be
+        # treated the same as it. Left uncaught here, it propagates out of this
+        # function entirely and is still fail-closed -- `main()`'s own stage
+        # loop already catches `OSError` generically -- just with a less
+        # specific message than the HygieneError raises elsewhere in this
+        # function. Swallowing it here instead would be a false "not in use",
+        # breaking this function's own stated guarantee.
         try:
             age_hours = (now_epoch - creation_stamp.stat().st_mtime) / 3600
-        except OSError:
+        except FileNotFoundError:
             continue  # vanished between the is_file() check and here -- same as the already-gone case above
         if age_hours < min_age_hours:
             continue
@@ -733,15 +742,9 @@ def run_orphaned_venv_pruning(
 
     print(f"== Orphaned poetry venv pruning ({venv_root}) ==")
 
-    # Resolved and validated FIRST, before the venv_root.is_dir() check below --
-    # not after it. The most likely real misconfiguration this self-check exists
-    # to catch (--venv-root left at the wrong platform's default) is exactly a
-    # root that doesn't exist at all; checking is_dir() first would let that
-    # exact case take the early "nothing to do" return and silently skip
-    # validation entirely, defeating the whole point of a *self-validating*
-    # control. Resolved exactly once here (not inside compute_in_use_poetry_venvs,
-    # and not called a second time below) so a transient poetry hiccup on the
-    # later re-check can never masquerade as "--venv-root is misconfigured".
+    # Resolved exactly once here (not inside compute_in_use_poetry_venvs, and not
+    # called a second time below) so a transient poetry hiccup on the later
+    # re-check can never masquerade as "--venv-root is misconfigured".
     main_venv = poetry_env_path(repo)
     if main_venv is None:
         raise HygieneError(
@@ -749,29 +752,29 @@ def run_orphaned_venv_pruning(
             "working?); refusing to prune -- this is a poetry/environment problem, not necessarily "
             "a --venv-root misconfiguration"
         )
+
+    # `venv_root.glob(...)` on a nonexistent directory simply yields nothing (no
+    # error), so this one enumeration doubles as the "does --venv-root even
+    # exist" check -- there's no separate is_dir() special case to keep in sync.
+    now_epoch = time.time()
+    candidates = sorted(path for path in venv_root.glob(POETRY_VENV_GLOB) if path.is_dir() and not path.is_symlink())
+
     # Self-validating positive control: if `--venv-root` is misconfigured (wrong
     # platform default, including simply not existing) or `POETRY_VENV_GLOB` no
     # longer matches (a renamed project), this stage would otherwise "succeed" by
     # finding zero candidates forever, silently enforcing nothing -- the one
-    # thing it exists to prevent a repeat of. The main checkout's own venv must
-    # be a DIRECT child of `venv_root` (not merely some ancestor of it, which
-    # `Path.parents` alone would too loosely accept) whose name the glob
-    # actually matches.
-    if main_venv.parent != venv_root.resolve() or not fnmatch.fnmatch(main_venv.name, POETRY_VENV_GLOB):
+    # thing it exists to prevent a repeat of. Checking against the SAME
+    # `candidates` list the rest of this function actually acts on (rather than
+    # a separate parent-path/glob string comparison) means this control can
+    # never pass while the real enumeration it's meant to certify comes back
+    # empty or wrong.
+    if not any(candidate.resolve() == main_venv for candidate in candidates):
         raise HygieneError(
-            f"--venv-root {venv_root} is not the direct parent of this checkout's own poetry venv "
-            f"({main_venv}); refusing to prune what may be the wrong directory entirely"
+            f"--venv-root {venv_root} does not enumerate this checkout's own poetry venv "
+            f"({main_venv}) via {POETRY_VENV_GLOB!r}; refusing to prune what may be the wrong directory entirely"
         )
-    if not venv_root.is_dir():
-        # Unreachable in practice now that the check above requires venv_root to
-        # be main_venv's own parent (which must exist for main_venv to resolve) --
-        # kept as a defensive, no-op fallback rather than assumed impossible.
-        print(f"{venv_root} does not exist, nothing to do")
-        return True
 
     in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
-    now_epoch = time.time()
-    candidates = sorted(path for path in venv_root.glob(POETRY_VENV_GLOB) if path.is_dir() and not path.is_symlink())
     decisions: list[VenvDecision] = []
     for candidate in candidates:
         resolved = candidate.resolve()

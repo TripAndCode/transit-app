@@ -501,13 +501,17 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
 
-    # The venv-pruning stage's own self-check now resolves and validates
-    # main_venv BEFORE checking whether --venv-root exists (see that function's
-    # own docstring for why), so a nonexistent --venv-root is no longer enough
-    # on its own to make this stage a no-op -- poetry_env_path must also be
-    # stubbed to agree with whatever --venv-root this test pins.
-    venv_root = tmp_path / "does-not-exist-virtualenvs"
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    # The venv-pruning stage's own self-check requires the main checkout's own
+    # venv to be a real, enumerable candidate under --venv-root, so this test
+    # gives it a real (but otherwise irrelevant to this test's own assertions)
+    # venv directory to find, pinned like every other dependency here (lock/
+    # log/state) rather than left at DEFAULT_POETRY_VENV_ROOT: that real,
+    # absolute host path may exist and be populated on the exact machine this
+    # script targets, which would make this test's outcome depend on the
+    # machine running it.
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
@@ -523,10 +527,6 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
             str(log_path),
             "--state-file",
             str(state_path),
-            # Pinned like every other dependency in this test (lock/log/state) rather
-            # than left at DEFAULT_POETRY_VENV_ROOT: that real, absolute host path may
-            # exist and be populated on the exact machine this script targets, which
-            # would make this test's outcome depend on the machine running it.
             "--venv-root",
             str(venv_root),
         ]
@@ -544,8 +544,9 @@ def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_t
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
 
-    venv_root = tmp_path / "does-not-exist-virtualenvs"
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
@@ -1193,7 +1194,7 @@ def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_re
     real_venv = _make_fake_venv(tmp_path / "real-location", "transit-delay-app-main-py3.12", age_hours=1)
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: real_venv)
 
-    with pytest.raises(hygiene.HygieneError, match="not the direct parent"):
+    with pytest.raises(hygiene.HygieneError, match="does not enumerate"):
         hygiene.run_orphaned_venv_pruning(
             repository,
             venv_root=tmp_path / "does-not-exist-virtualenvs",  # e.g. the wrong platform's default
@@ -1280,6 +1281,7 @@ def test_run_orphaned_venv_pruning_dry_run_deletes_nothing(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     orphaned = _make_fake_venv(venv_root, "transit-delay-app-orphan-py3.12", age_hours=100)
     monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo, _main_venv, **_kwargs: set())
 
@@ -1301,6 +1303,7 @@ def test_run_orphaned_venv_pruning_ignores_non_matching_venv_names(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     unrelated = _make_fake_venv(venv_root, "some-other-project-abc123-py3.12", age_hours=1000)
     monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo, _main_venv, **_kwargs: set())
 
@@ -1322,6 +1325,7 @@ def test_run_orphaned_venv_pruning_deletes_old_orphans_keeps_in_use_and_young(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     in_use_venv = _make_fake_venv(venv_root, "transit-delay-app-inuse-py3.12", age_hours=1000)
     young_orphan = _make_fake_venv(venv_root, "transit-delay-app-young-py3.12", age_hours=1)
     old_orphan = _make_fake_venv(venv_root, "transit-delay-app-old-py3.12", age_hours=100)
@@ -1351,6 +1355,7 @@ def test_run_orphaned_venv_pruning_refuses_a_plan_larger_than_the_cap(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     orphans = [_make_fake_venv(venv_root, f"transit-delay-app-orphan-{i}-py3.12", age_hours=100) for i in range(3)]
     monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo, _main_venv, **_kwargs: set())
 
@@ -1374,6 +1379,7 @@ def test_run_orphaned_venv_pruning_dry_run_over_cap_does_not_refuse_for_real(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     orphans = [_make_fake_venv(venv_root, f"transit-delay-app-orphan-{i}-py3.12", age_hours=100) for i in range(3)]
     monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo, _main_venv, **_kwargs: set())
 
@@ -1398,6 +1404,7 @@ def test_run_orphaned_venv_pruning_never_deletes_a_symlinked_candidate(
     venv_root = tmp_path / "virtualenvs"
     venv_root.mkdir()
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     real_target = _make_fake_venv(tmp_path / "elsewhere", "transit-delay-app-real-py3.12", age_hours=100)
     symlinked = venv_root / "transit-delay-app-symlink-py3.12"
     symlinked.symlink_to(real_target, target_is_directory=True)
@@ -1422,13 +1429,14 @@ def test_run_orphaned_venv_pruning_skips_the_recheck_when_nothing_is_deletable(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
-    _make_fake_venv(venv_root, "transit-delay-app-inuse-py3.12", age_hours=1000)
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
+    in_use_venv = _make_fake_venv(venv_root, "transit-delay-app-inuse-py3.12", age_hours=1000)
 
     calls = {"n": 0}
 
     def _fake_in_use(_repo: Path, _main_venv: Path, **_kwargs: object) -> set[Path]:
         calls["n"] += 1
-        return {next(venv_root.glob("transit-delay-app-*")).resolve()}
+        return {in_use_venv.resolve()}
 
     monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", _fake_in_use)
 
@@ -1449,6 +1457,7 @@ def test_run_orphaned_venv_pruning_rechecks_before_apply(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     candidate = _make_fake_venv(venv_root, "transit-delay-app-newly-adopted-py3.12", age_hours=100)
 
     calls = {"n": 0}
@@ -1479,6 +1488,7 @@ def test_run_orphaned_venv_pruning_continues_after_one_delete_error(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+    (venv_root / "transit-delay-app-main-py3.12").mkdir(parents=True, exist_ok=True)
     flaky = _make_fake_venv(venv_root, "transit-delay-app-flaky-py3.12", age_hours=100)
     fine = _make_fake_venv(venv_root, "transit-delay-app-fine-py3.12", age_hours=100)
 
