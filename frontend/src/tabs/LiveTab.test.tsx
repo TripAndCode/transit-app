@@ -100,4 +100,22 @@ describe("LiveTab", () => {
     );
     expect(queryByText(/live\.row\.low_confidence_baseline/)).not.toBeInTheDocument();
   });
+
+  it("renders a single '-' sign (never '+-') for a route that runs early on average", () => {
+    // A route with a negative baseline_avg_sec/avg_delay_sec genuinely runs early
+    // on average; the baseline/today comparison label must not double up the sign.
+    const testRoute = route({ baseline_avg_sec: -90, avg_delay_sec: -120 });
+    const mockT = ((key: string, opts?: Record<string, unknown>) =>
+      opts ? `${key}:${JSON.stringify(opts)}` : key
+    ) as never;
+    const { getByText, queryByText } = render(
+      <RouteRow route={testRoute} formatRoute={(rc: string) => rc} onOpen={() => {}} t={mockT} />
+    );
+    expect(
+      getByText(
+        'live.row.baseline_today:{"baseline":"common.unit_min_signed:{\\"sign\\":\\"-\\",\\"value\\":1}","today":"common.unit_min_signed:{\\"sign\\":\\"-\\",\\"value\\":2}"}',
+      ),
+    ).toBeInTheDocument();
+    expect(queryByText(/\+-/)).not.toBeInTheDocument();
+  });
 });
