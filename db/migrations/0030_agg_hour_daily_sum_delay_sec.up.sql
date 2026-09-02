@@ -1,0 +1,24 @@
+-- agg_hour_daily was excluded from migration 0028's sum_delay_sec rollout even
+-- though it has the exact same defect: its avg_min is a pre-rounded (2 dp
+-- minutes) per-bucket mean, and pipeline/reports/overview.py's
+-- `_peak_hour_by_dow` fast path re-pools MULTIPLE buckets of it with
+-- SUM(avg_min * samples) / SUM(samples) — a sample-weighted mean of
+-- ALREADY-ROUNDED per-bucket values, not the true pooled mean over the
+-- underlying raw observations (see migration 0028's comment and
+-- pipeline/analyze.py's module docstring for the general rationale). That
+-- same function's ClickHouse/live-grain fallback branch already pools raw
+-- sum_delay directly, so the fast and slow paths could disagree on the same
+-- date range depending on which branch a request hit.
+--
+-- sum_delay_sec is the exact SUM(dep_delay) in seconds behind agg_hour_daily's
+-- avg_min, mirroring the six tables migration 0028 already fixed. A
+-- downstream reader pools SUM(sum_delay_sec) / SUM(samples) once, at the end,
+-- instead of re-weighting the already-rounded avg_min.
+--
+-- Nullable, not backfilled — same rollout rationale as migration 0028:
+-- analyze() unconditionally DELETEs + re-INSERTs every agg_hour_daily row for
+-- an agency, so any value computed here at migration time would carry the
+-- same rounding error and be discarded by the very next `make analyze-all`
+-- (which must run after this migration regardless). Every reader of
+-- sum_delay_sec must treat it as nullable until that rebuild completes.
+ALTER TABLE agg_hour_daily ADD COLUMN IF NOT EXISTS sum_delay_sec BIGINT;
