@@ -241,31 +241,47 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # No minimum-sample HAVING here — see the module docstring's no-gate
         # policy.
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
+            grouped AS (
+                SELECT
+                    route_code, service_type,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always
+                    -- an actual observed dep_delay value. It handles ties and
+                    -- single-row groups correctly by construction: it picks the
+                    -- smallest ordered value whose cumulative distribution is
+                    -- >= the target fraction, so a tied cluster or an n=1
+                    -- partition always resolves to a real value instead of
+                    -- skipping every row below the threshold. NOTE: this does
+                    -- NOT match pipeline/reports/rankings.py's _ranking_live
+                    -- ClickHouse fallback, which intentionally reproduces the
+                    -- old min-rank tie formula this column used to use — see
+                    -- that function's docstring for the known, accepted
+                    -- divergence on tied data. Computing both fractions from
+                    -- one ARRAY[...] call (rather than two separate
+                    -- PERCENTILE_DISC calls) keeps this to a single per-group
+                    -- sort of dep_delay.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END) AS late_5min_plus,
+                    SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
+                    SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type
+            )
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2)  AS avg_min,
-                -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always an
-                -- actual observed dep_delay value. It handles ties and
-                -- single-row groups correctly by construction: it picks the
-                -- smallest ordered value whose cumulative distribution is >=
-                -- the target fraction, so a tied cluster or an n=1 partition
-                -- always resolves to a real value instead of skipping every
-                -- row below the threshold. NOTE: this does NOT match
-                -- pipeline/reports/rankings.py's _ranking_live ClickHouse
-                -- fallback, which intentionally reproduces the old min-rank
-                -- tie formula this column used to use — see that function's
-                -- docstring for the known, accepted divergence on tied data.
-                ROUND(PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p50_min,
-                ROUND(PERCENTILE_DISC(0.9) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p90_min,
-                SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,
-                ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,
-                ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS late5_pct,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
-            FROM deduped
-            GROUP BY route_code, service_type
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                late_5min_plus,
+                ROUND(on_time_pct_raw, 1) AS on_time_pct,
+                ROUND(late5_pct_raw, 1) AS late5_pct,
+                samples,
+                sum_delay_sec
+            FROM grouped
             ORDER BY avg_min DESC
         """
         _build_and_insert(
@@ -290,18 +306,27 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
+            grouped AS (
+                SELECT
+                    route_code, service_type, scheduled_time,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC: see agg_route_stats's identical column above.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type, scheduled_time
+            )
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type, scheduled_time,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                -- PERCENTILE_DISC: see agg_route_stats's identical column above.
-                ROUND(PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p50_min,
-                ROUND(PERCENTILE_DISC(0.9) WITHIN GROUP (ORDER BY dep_delay)/60.0::numeric, 2) AS p90_min,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
-            FROM deduped
-            GROUP BY route_code, service_type, scheduled_time
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                samples,
+                sum_delay_sec
+            FROM grouped
             ORDER BY route_code, scheduled_time
         """
         _build_and_insert(
