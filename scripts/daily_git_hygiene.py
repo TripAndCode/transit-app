@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Plan or apply daily git hygiene: local, remote, and backup-branch cleanup.
+"""Plan or apply daily git hygiene: local, remote, backup-branch, and venv cleanup.
 
-This closes three gaps `/vps-loop-run` only handles reactively:
+This closes four gaps `/vps-loop-run` only handles reactively (or not at all):
 
 1. Local branch/worktree cleanup (`scripts/cleanup_git_state.py`) currently
    only runs as a side effect of a loop tick, so it never runs during a long
@@ -12,6 +12,11 @@ This closes three gaps `/vps-loop-run` only handles reactively:
 3. `vps-loop/item-<N>-superseded-<sha>` backup branches (created by the
    loop's Step 2b before a judgment-based delete) have no automated prune
    path at all.
+4. Poetry names a project's virtualenv by hashing its absolute path, so a
+   worktree this script's own stage 1 (or the loop's own Step 2/2b) deletes
+   leaves its now-orphaned venv behind at several GB apiece with no automated
+   prune path -- poetry itself never revisits a path once it stops existing.
+   A handful of these is enough to fill a small VPS's root disk.
 
 This script must never race a live `/vps-loop-run` tick: it acquires the
 same `/tmp/claude-loop.lock` lock file non-blockingly before touching
@@ -40,6 +45,8 @@ import importlib.util
 import io
 import json
 import re
+import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -65,6 +72,14 @@ DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
 DEFAULT_STATE_FILE = Path("/root/.daily_git_hygiene_last_success")
 DEFAULT_RETENTION_DAYS = 30
+DEFAULT_POETRY_VENV_ROOT = Path("/root/.cache/pypoetry/virtualenvs")
+DEFAULT_MIN_VENV_AGE_HOURS = 24
+DEFAULT_MAX_VENV_DELETES_PER_RUN = 20
+POETRY_ENV_INFO_TIMEOUT_SECONDS = 10
+# Poetry's own venv-naming scheme for this project ("<name>-<hash>-py<major.minor>");
+# matches only this repo's own venvs, never an unrelated project sharing the same
+# shared virtualenvs.path (e.g. a poetry-managed CLI tool used across other work).
+POETRY_VENV_GLOB = "transit-delay-app-*"
 
 # `vps-loop/item-<N>` (no suffix): the branch shape the loop pushes and opens
 # PRs from. `vps-loop/item-<N>-superseded-<sha>`: Step 2b's own local-only
@@ -95,6 +110,15 @@ class BackupBranchDecision:
     action: Literal["keep", "delete"]
     reason: str
     commit_epoch: int
+
+
+@dataclass(frozen=True)
+class VenvDecision:
+    """A keep/delete decision for one poetry virtualenv directory."""
+
+    path: Path
+    action: Literal["keep", "delete"]
+    reason: str
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +242,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
     per-item swallow-and-continue -- any problem raises `CleanupError`
     immediately, which `main`'s own stage loop already catches. Always
     returns True (or doesn't return at all) for that reason; the bool
-    return exists only so all three stages share one uniform contract.
+    return exists only so all four stages share one uniform contract.
     """
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
@@ -537,6 +561,282 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
 
 
 # ---------------------------------------------------------------------------
+# 4. Orphaned poetry venv pruning
+# ---------------------------------------------------------------------------
+
+
+def poetry_env_path(location: Path) -> Path | None:
+    """Return the poetry virtualenv path active at `location`, or None if
+    poetry can't resolve one there.
+
+    `None` covers two outcomes `poetry env info --path` cannot distinguish
+    from each other by exit code or output alone (confirmed live: both
+    produce exit 1 with empty stdout AND empty stderr) -- "no venv created
+    for this location yet" (benign) and "poetry itself failed for an
+    unrelated, possibly transient reason" (not benign, if a real venv
+    exists there and is in use). Callers that need to tell these apart
+    must do so themselves; this function only ever reports "resolved" or
+    "not resolved."
+
+    A hard timeout guards against `poetry env info` hanging (config-file
+    lock contention, a keyring/dbus stall in a headless environment) --
+    this runs under `/tmp/claude-loop.lock`, and a hang here must not hold
+    that lock indefinitely and block a live `/vps-loop-run` tick.
+    """
+
+    try:
+        result = subprocess.run(
+            ("poetry", "env", "info", "--path"),
+            cwd=location,
+            capture_output=True,
+            text=True,
+            timeout=POETRY_ENV_INFO_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    path = result.stdout.strip()
+    return Path(path).resolve() if path else None
+
+
+def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:
+    """Every currently in-use poetry venv path: `main_venv` plus every worktree's own.
+
+    `main_venv` is resolved and validated exactly once by the caller
+    (`run_orphaned_venv_pruning`), not re-derived here: a second, separate
+    `poetry env info --path` spawn for the same `repo` could transiently
+    fail even when the first one just succeeded, which would otherwise
+    raise a confusing "`--venv-root` is misconfigured" error for what is
+    really an unrelated, one-off `poetry` hiccup.
+
+    A worktree gets two, narrower grace conditions before the same
+    fail-closed treatment applies:
+    - `git worktree list`'s own `prunable` flag means the administrative
+      entry outlived the actual directory (removed out-of-band, or pending
+      its own `git worktree prune`) -- unambiguously "nothing runs out of
+      here," not one of the two cases above, so it's skipped rather than
+      raised on. A `locked` worktree whose directory is merely absent is
+      NOT treated the same way: git itself refuses to mark a locked
+      worktree `prunable` even when its directory is gone (confirmed
+      live), since locking is meant to protect it from exactly this kind
+      of cleanup -- so an absent-but-locked worktree still falls through
+      to the fail-closed path below, rather than being silently skipped.
+    - A worktree younger than `min_age_hours` (mirroring the same grace
+      period `run_orphaned_venv_pruning` already applies to venv ages) may
+      simply not have run any poetry/backend command yet -- e.g. a
+      freshly-dispatched, frontend-only worker. Treating every such
+      worktree as a fail-closed abort would leave this stage (and this
+      job's once-daily completion marker, since a failing stage prevents
+      `mark_succeeded_today`) permanently unable to complete for as long as
+      any such worktree exists, which is an ordinary, common state, not a
+      rare edge case. Age is read from the linked worktree's `.git` FILE
+      (not the worktree's own top-level directory): `git worktree add`
+      writes that file at creation and (confirmed live) leaves it alone
+      across ordinary operations (status/fetch/commit/switch/rebase/`gc`/
+      lock/unlock), unlike a directory's own mtime, which resets on any
+      root-level create/delete inside it (a `.mypy_cache/`, an untracked
+      `NEXT_TASK.md`, a branch switch that adds/removes a root file) --
+      all routine activity for an actively-used worktree, which would
+      otherwise make a genuinely old, in-use worktree look "young" and
+      skip the very check meant to protect it. `git worktree move` and a
+      pointer-rewriting `git worktree repair` DO reset this stamp -- the
+      former is self-protecting (the path itself changes, so poetry's own
+      hash changes too, and the old path's venv is now a genuine orphan),
+      but a `repair` after the *main* checkout moved, while every worktree
+      path stays put, resets every worktree's stamp without their venvs
+      actually changing -- a known, narrow residual, not something this
+      code detects.
+    Past that grace period, an unresolvable worktree is treated exactly
+    like the main checkout: the whole computation raises, since a real,
+    in-use venv could be the one poetry transiently failed to resolve. The
+    cost of raising is a delayed prune (retried next hourly trigger), never
+    a false "not in use." A linked worktree's `.git` is always a file
+    (never a directory -- only the main checkout's own `.git` is one), so
+    an unexpected shape there also raises rather than silently guessing.
+
+    Assumes `repo` is the only clone of this project on the host, and that
+    no worktree path is ever reused after removal within one venv's
+    `min_age_hours` window: an unrelated second clone, or a fresh worktree
+    recreated at a path poetry previously hashed for a since-removed one,
+    would both be indistinguishable from this function's own inputs alone.
+    Neither is something this code detects or corrects for -- both are
+    deployment/usage assumptions, not gaps checked here.
+    """
+
+    resolved_repo = repo.resolve()
+    worktrees = cleanup_git_state.parse_worktrees(
+        cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
+    )
+    now_epoch = time.time()
+    in_use = {main_venv}
+    for worktree in worktrees:
+        resolved_worktree = worktree.path.resolve()
+        if resolved_worktree == resolved_repo:
+            continue  # main_venv (the caller's, not re-derived here) already covers this one
+        if worktree.prunable or (not worktree.locked and not worktree.path.exists()):
+            continue
+        venv = poetry_env_path(worktree.path)
+        if venv is not None:
+            in_use.add(venv)
+            continue
+        creation_stamp = worktree.path / ".git"
+        if not creation_stamp.is_file():
+            # Not the linked-worktree shape at all (or already gone) -- no
+            # creation-stable timestamp to trust, so no grace period.
+            raise HygieneError(
+                f"worktree {worktree.path} has no resolvable venv and no `.git` file to age-check "
+                "(expected a linked worktree); refusing to prune any orphaned venv this run"
+            )
+        # Deliberately `except FileNotFoundError`, not the broader `OSError`: a
+        # *persistent* stat failure (permission denied, a stale network mount,
+        # an I/O error -- e.g. exactly the portable-device/network-share case
+        # `git worktree lock` exists for) is not "vanished" and must not be
+        # treated the same as it. Left uncaught here, it propagates out of this
+        # function entirely and is still fail-closed -- `main()`'s own stage
+        # loop already catches `OSError` generically -- just with a less
+        # specific message than the HygieneError raises elsewhere in this
+        # function. Swallowing it here instead would be a false "not in use",
+        # breaking this function's own stated guarantee.
+        try:
+            age_hours = (now_epoch - creation_stamp.stat().st_mtime) / 3600
+        except FileNotFoundError:
+            continue  # vanished between the is_file() check and here -- same as the already-gone case above
+        if age_hours < min_age_hours:
+            continue
+        raise HygieneError(
+            f"could not resolve poetry venv for worktree {worktree.path} "
+            f"({age_hours:.1f}h old, past the {min_age_hours}h grace period); "
+            "refusing to prune any orphaned venv this run"
+        )
+    return in_use
+
+
+def run_orphaned_venv_pruning(
+    repo: Path,
+    *,
+    venv_root: Path,
+    min_age_hours: float,
+    max_deletes_per_run: int,
+    apply: bool,
+    log_file: Path,
+) -> bool:
+    """Plan (and optionally apply) removal of this project's poetry venvs whose
+    worktree no longer exists.
+
+    `min_age_hours` is a second, independent safety margin on top of the
+    in-use correlation above: a venv younger than this is never deleted even
+    if it doesn't match any currently-known worktree, in case a worktree was
+    created (and its venv installed) after this tick's own `git worktree
+    list` snapshot but before this stage reached the apply loop.
+
+    `max_deletes_per_run` is a circuit breaker, not a normal-operation limit:
+    steady-state hourly pruning should only ever find zero or one orphan.
+    A plan exceeding this is treated as a signal something is systemically
+    wrong (e.g. a burst of merges, or the in-use correlation itself
+    misbehaving) and refuses to delete anything until a human looks,
+    rather than silently deleting a large, irreversible batch. Checked (and
+    printed) in dry-run mode too, so a preview never shows a plan that the
+    real `--apply` run would then simply refuse.
+    """
+
+    print(f"== Orphaned poetry venv pruning ({venv_root}) ==")
+
+    # Resolved exactly once here (not inside compute_in_use_poetry_venvs, and not
+    # called a second time below) so a transient poetry hiccup on the later
+    # re-check can never masquerade as "--venv-root is misconfigured".
+    main_venv = poetry_env_path(repo)
+    if main_venv is None:
+        raise HygieneError(
+            f"could not resolve this checkout's own poetry venv at {repo} (is `poetry` on PATH and "
+            "working?); refusing to prune -- this is a poetry/environment problem, not necessarily "
+            "a --venv-root misconfiguration"
+        )
+
+    # `venv_root.glob(...)` on a nonexistent directory simply yields nothing (no
+    # error), so this one enumeration doubles as the "does --venv-root even
+    # exist" check -- there's no separate is_dir() special case to keep in sync.
+    now_epoch = time.time()
+    candidates = sorted(path for path in venv_root.glob(POETRY_VENV_GLOB) if path.is_dir() and not path.is_symlink())
+
+    # Self-validating positive control: if `--venv-root` is misconfigured (wrong
+    # platform default, including simply not existing) or `POETRY_VENV_GLOB` no
+    # longer matches (a renamed project), this stage would otherwise "succeed" by
+    # finding zero candidates forever, silently enforcing nothing -- the one
+    # thing it exists to prevent a repeat of. Checking against the SAME
+    # `candidates` list the rest of this function actually acts on (rather than
+    # a separate parent-path/glob string comparison) means this control can
+    # never pass while the real enumeration it's meant to certify comes back
+    # empty or wrong.
+    if not any(candidate.resolve() == main_venv for candidate in candidates):
+        raise HygieneError(
+            f"--venv-root {venv_root} does not enumerate this checkout's own poetry venv "
+            f"({main_venv}) via {POETRY_VENV_GLOB!r}; refusing to prune what may be the wrong directory entirely"
+        )
+
+    in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
+    decisions: list[VenvDecision] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        age_hours = (now_epoch - candidate.stat().st_mtime) / 3600
+        if resolved in in_use:
+            decisions.append(VenvDecision(candidate, "keep", "in use by the main checkout or a current worktree"))
+        elif age_hours < min_age_hours:
+            decisions.append(
+                VenvDecision(candidate, "keep", f"only {age_hours:.1f}h old, within {min_age_hours}h safety margin")
+            )
+        else:
+            decisions.append(VenvDecision(candidate, "delete", f"no matching worktree, {age_hours:.1f}h old"))
+    for decision in decisions:
+        print(f"{decision.action.upper():6} {decision.path} — {decision.reason}")
+    delete_count = sum(decision.action == "delete" for decision in decisions)
+    print(f"Summary: {delete_count} deletable, {len(decisions) - delete_count} retained")
+    if delete_count == 0:
+        return True
+    if delete_count > max_deletes_per_run:
+        message = (
+            f"venv pruning: {'would refuse' if not apply else 'REFUSING'} to delete {delete_count} venvs in one run "
+            f"(exceeds --max-venv-deletes-per-run={max_deletes_per_run}); needs a human to review the plan above"
+        )
+        print(message, file=sys.stderr)
+        if apply:
+            log_line(log_file, message)
+            return False
+        return True
+    if not apply:
+        print("Dry run only. Re-run with --apply to remove the listed orphaned venvs.")
+        return True
+
+    all_clean = True
+    # Re-fetch the in-use set once right before applying (not once per venv) --
+    # mirrors run_remote_branch_cleanup's fresh_dependents re-check -- to catch a
+    # worktree that started using one of these paths during planning. Only worth
+    # the extra `poetry` spawns per worktree when there's actually something to
+    # delete (delete_count == 0 already returned above).
+    fresh_in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
+    for decision in decisions:
+        if decision.action != "delete":
+            continue
+        if decision.path.resolve() in fresh_in_use:
+            message = f"venv pruning: SKIPPED {decision.path} — now in use, appeared since planning"
+            print(message)
+            log_line(log_file, message)
+            continue
+        try:
+            shutil.rmtree(decision.path)
+        except OSError as exc:
+            message = f"venv pruning: ERROR deleting {decision.path}: {exc}"
+            print(message, file=sys.stderr)
+            log_line(log_file, message)
+            all_clean = False
+            continue
+        print(f"DELETED {decision.path}")
+        log_line(log_file, f"venv pruning: DELETED {decision.path}")
+
+    return all_clean
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -557,6 +857,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS, help="Backup-branch retention window in days"
+    )
+    parser.add_argument(
+        "--venv-root", type=Path, default=DEFAULT_POETRY_VENV_ROOT, help="Poetry's virtualenvs.path to prune within"
+    )
+    parser.add_argument(
+        "--min-venv-age-hours",
+        type=float,
+        default=DEFAULT_MIN_VENV_AGE_HOURS,
+        help="Never prune a venv younger than this, even if no worktree currently matches it",
+    )
+    parser.add_argument(
+        "--max-venv-deletes-per-run",
+        type=int,
+        default=DEFAULT_MAX_VENV_DELETES_PER_RUN,
+        help="Refuse (rather than delete) an orphaned-venv plan larger than this in one run",
     )
     args = parser.parse_args(argv)
 
@@ -609,6 +924,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "backup branch pruning",
                 lambda: run_backup_branch_pruning(
                     repo, retention_days=args.retention_days, apply=args.apply, log_file=log_file
+                ),
+            ),
+            (
+                "orphaned venv pruning",
+                lambda: run_orphaned_venv_pruning(
+                    repo,
+                    venv_root=args.venv_root,
+                    min_age_hours=args.min_venv_age_hours,
+                    max_deletes_per_run=args.max_venv_deletes_per_run,
+                    apply=args.apply,
+                    log_file=log_file,
                 ),
             ),
         )
