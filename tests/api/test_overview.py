@@ -595,6 +595,69 @@ async def test_movers_suppresses_delta_pct_below_prv_avg_floor(aconn, aagency_id
 
 
 @pytest.mark.asyncio
+async def test_movers_includes_route_with_zero_baseline_avg(aconn, aagency_id):
+    """A route whose PRIOR window average is exactly 0.0 (all on-time,
+    still >= MIN_SAMPLES) must still be ranked on ``delta_min`` — it is
+    excluded only from the *percentage* comparison (``delta_pct`` stays
+    None via the existing near-zero-baseline floor), never from the
+    ranking itself. Dropping the whole route here would hide the single
+    most dramatic possible "worsened" case: baseline perfectly on-time,
+    current window running a real delay.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv = cur - timedelta(days=7)
+    # (route, prior_avg_sec, current_avg_sec)
+    routes = [
+        ("R_ZERO", 0, 300),  # prior avg exactly 0.0 min -> current avg 5 min
+        ("R_NORM", 120, 180),  # normal-magnitude route stays in the list too
+    ]
+    SAMPLES_PER_SIDE = 10
+    for code, prior_dep, cur_dep in routes:
+        for i in range(SAMPLES_PER_SIDE):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"zb_prv_{code}_{i}",
+                prv + timedelta(minutes=i),
+                code,
+                i + 1,
+                prior_dep,
+            )
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"zb_cur_{code}_{i}",
+                cur + timedelta(minutes=i),
+                code,
+                i + 1,
+                cur_dep,
+            )
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 17), code, "平日", prior_dep / 60.0, SAMPLES_PER_SIDE)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), code, "平日", cur_dep / 60.0, SAMPLES_PER_SIDE)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+
+    assert "R_ZERO" in worse_by_code
+    zero = worse_by_code["R_ZERO"]
+    assert zero["delta_min"] == pytest.approx(5.0, abs=0.01)
+    assert zero["delta_pct"] is None
+
+    norm = worse_by_code["R_NORM"]
+    assert norm["delta_min"] == pytest.approx(1.0, abs=0.01)
+    assert norm["delta_pct"] == pytest.approx(50.0, abs=0.5)
+
+
+@pytest.mark.asyncio
 async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     """A route worsening for 3 of the past 4 weeks reports streak=3
     and 4 ascending sparkline points (oldest-first).
