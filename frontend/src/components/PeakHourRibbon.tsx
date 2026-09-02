@@ -62,6 +62,12 @@ function PeakHourChart({
   const denom = peak_hour.peak_avg_min || 1;
   const usableH = H - PAD_TOP - PAD_BOTTOM;
   const toY = (v: number) => H - PAD_BOTTOM - (v / denom) * usableH;
+  // `denom` can itself be negative when every hour runs early, which can
+  // push toY(v) far outside the plot area for hours more extreme than the
+  // peak — clamp to the visible band everywhere a pixel y is derived from
+  // toY, so a bar or the hover indicator can never render above/below the
+  // chart regardless of how extreme the value/denom ratio gets.
+  const clampY = (y: number) => Math.min(Math.max(y, PAD_TOP), H - PAD_BOTTOM);
 
   const peakIdx = peak_hour.peak_hour;
   const peakV = hourValues[peakIdx] ?? peak_hour.peak_avg_min;
@@ -104,7 +110,7 @@ function PeakHourChart({
       return;
     }
     const barX = PAD_LEFT + idx * CELL_W + CELL_W / 2;
-    const barY = toY(v);
+    const barY = clampY(toY(v));
     setHover({
       visible: true,
       svgX: barX,
@@ -155,12 +161,7 @@ function PeakHourChart({
         {hourValues.map((v, h) => {
           if (v == null) return null;
           const x = PAD_LEFT + h * CELL_W + 1;
-          // `denom` (peak_avg_min) can itself be negative when every hour
-          // runs early, which can push toY(v) far outside the plot area for
-          // hours more extreme than the peak — clamp y to the visible band
-          // so a bar can never render above/below the chart regardless of
-          // how extreme the value/denom ratio gets.
-          const y = Math.min(Math.max(toY(v), PAD_TOP), H - PAD_BOTTOM);
+          const y = clampY(toY(v));
           const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
           const isPeak = h === peakIdx;
           const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";

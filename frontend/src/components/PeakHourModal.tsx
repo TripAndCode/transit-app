@@ -157,7 +157,10 @@ export function PeakHourModal({
                   fontSize: 13,
                 }}
               >
-                {t("peakHourModal.avgMin", { value: r.avg_min.toFixed(1) })}
+                {t("peakHourModal.avgMin", {
+                  sign: r.avg_min < 0 ? "-" : "+",
+                  value: Math.abs(r.avg_min).toFixed(1),
+                })}
               </span>
             </div>
           ))}

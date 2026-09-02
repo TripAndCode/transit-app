@@ -60,8 +60,12 @@ describe("PeakHourModal", () => {
     render(<PeakHourModal data={mixed} loading={false} onClose={() => {}} />);
     const bar = screen.getByTestId("peak-hour-modal-bar-K37-平日");
     expect(bar.style.width).toBe("0%");
-    // The label still shows the true negative value.
-    expect(screen.getByText(/-3\.2/)).toBeInTheDocument();
+    // The label still shows a single, correctly-signed negative value (not
+    // a double sign like "+-3.2min") — exact match, since an unanchored
+    // substring match can't distinguish the two.
+    expect(screen.getByText("-3.2min")).toBeInTheDocument();
+    // The positive route's sign is still explicit, not omitted.
+    expect(screen.getByText("+6.5min")).toBeInTheDocument();
   });
 
   it("does not render a NaN width when every route has avg_min of exactly 0", () => {

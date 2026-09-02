@@ -208,7 +208,7 @@
     "title_dow": "{{dow}}曜 {{hour}}時台 — 遅延路線",
     "title_all": "毎日 {{hour}}時台 — 遅延路線",
     "noData": "この時間帯に十分なデータがありません",
-    "avgMin": "+{{value}}分",
+    "avgMin": "{{sign}}{{value}}分",
     "routeCount_one": "{{count}}路線",
     "routeCount_other": "{{count}}路線"
   },
