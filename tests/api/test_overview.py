@@ -1213,6 +1213,31 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_service_split_daily_rounds_same_precision_as_service_split(aconn, aagency_id):
+    """service_split_daily's per-day avg must round to the same 2dp
+    precision as its sibling service_split for identical underlying data —
+    both read the same agg_daily_trend sum_delay_sec/samples pair, so a
+    single-date window makes the two report the exact same number.
+
+    100 delay-seconds over 3 samples is the canonical repro: 100/3/60 =
+    0.5555...5556 min, an infinite-precision value that must round to
+    0.56 rather than leak through unrounded (e.g. 0.5555555555555556).
+    """
+    d = date(2026, 5, 18)
+    avg_min = 100.0 / 3 / 60
+    await _seed_agg_daily(aconn, aagency_id, d, "R_SSD2", "平日", avg_min, 3)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    by_date = {row["date"]: row for row in out["service_split_daily"]}
+    daily_avg = by_date[d.isoformat()]["weekday"]
+    assert daily_avg == pytest.approx(0.56, abs=1e-9)
+    assert daily_avg == out["service_split"]["平日"]
+
+
+@pytest.mark.asyncio
 async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     """Pool-gather path and sequential path return identical payloads.
 

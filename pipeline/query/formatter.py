@@ -13,6 +13,7 @@ Strings live in :data:`_LOCALES` keyed on ``(template, locale)`` so a new
 language only needs to add a column rather than rewriting handler code.
 """
 
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from pipeline.query.labels import dow_label
@@ -85,11 +86,21 @@ def _t(template: str, locale: str, **vars: Any) -> str:
 def _r(x, d: int = 1) -> str:
     """Round a numeric DB value to *d* decimal places and return as a string.
 
+    Uses ``Decimal(...).quantize(..., ROUND_HALF_UP)`` — the same convention
+    ``pipeline.reports.rankings``'s ``_round1``/``_round2`` use to match
+    Postgres's ``ROUND()`` (half away from zero) — rather than plain Python
+    ``round()`` (round-half-to-even). The row values rendered here (e.g.
+    ``avg_min``) already arrive rounded to 2dp by that same convention;
+    re-rounding them to *d* places with a different rounding rule could
+    land on a different digit than the value shown elsewhere (e.g. the Ask
+    tab's raw table cell) for the exact same underlying number.
+
     Returns '—' for None/NULL values.
     """
     if x is None:
         return "—"
-    return f"{round(float(x), d):.{d}f}"
+    quant = Decimal("0." + "0" * (d - 1) + "1") if d > 0 else Decimal("1")
+    return f"{Decimal(str(x)).quantize(quant, rounding=ROUND_HALF_UP):.{d}f}"
 
 
 def _service_prefix(intent: dict, locale: str) -> str:

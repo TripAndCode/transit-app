@@ -752,7 +752,7 @@ async def _top_delayed_routes(
             {
                 "route_code": r["route_code"],
                 "route_short_name": names.get(r["route_code"]),
-                "avg_min": round(float(r["avg_min"]), 2),
+                "avg_min": float(_round2(r["avg_min"])),
             }
             for r in top_n
         ],
@@ -932,7 +932,7 @@ def _peak_from_hour_rows(rows) -> dict | None:
             continue
         h = int(r["h"])
         if 0 <= h < 24:
-            by_hour[h] = round(float(r["avg_min"]), 2)
+            by_hour[h] = float(_round2(r["avg_min"]))
     valid = [h for h in range(24) if by_hour[h] is not None]
     if not valid:
         return None
@@ -989,7 +989,9 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         d_raw = r["date"]
         d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
         st = r["service_type"]
-        avg = float(r["avg"]) if r["avg"] is not None else None
+        # 2dp, half-up — matches the sibling _service_split's rounding so the
+        # two report the same precision for the same underlying metric.
+        avg = float(_round2(r["avg"])) if r["avg"] is not None else None
         by_date.setdefault(d, {})[st] = avg
     out: list[dict] = []
     for d in sorted(by_date):
@@ -1133,7 +1135,7 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
             for service_type, (n, total) in sorted(((k, v) for k, v in by_service.items() if k), key=lambda kv: kv[0])
         ]
     return {
-        r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"] and r["avg_min"] is not None
+        r["service_type"]: float(_round2(r["avg_min"])) for r in rows if r["service_type"] and r["avg_min"] is not None
     }
 
 
@@ -1174,7 +1176,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         rows = [
             {"day": d, "avg_min": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0])
         ]
-    pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
+    pts = [float(_round2(r["avg_min"])) for r in rows if r["avg_min"] is not None]
     return pts
 
 
