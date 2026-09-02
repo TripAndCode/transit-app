@@ -319,37 +319,55 @@ Walk items top to bottom:
   log line. `MERGED` → skip item N (done). A `CLOSED` (rejected, unmerged) entry does
   NOT block a fresh attempt — but see Step 3b before resuming any leftover commits.
   `OPEN` (including draft) → before skipping, check whether it can instead be
-  *finished*: read `docs/refactor-log.md`'s entry for item N (the durable record
-  Steps 4/6 write). Require an explicit closing statement that **both** passes
-  completed (e.g. "both required `/review-branch` passes are now clean" / "Pass 2
-  ... complete" language) — an interim milestone like "Pass 1 is now clean" is NOT
-  enough and must NOT be read as satisfying this; real entries commonly log Pass 1
-  clean well before Pass 2 even starts, and mistaking that for completion would
-  ready/merge a PR whose mandatory second pass never ran. Treat any ambiguity as
-  "not yet clean" (fall through to the skip-as-in-progress behavior below) — same
-  conservative bias as Step 2b's own "treat this judgment as possibly wrong" caveat.
+  *finished*: this PR's own branch — not `main`'s checkout — holds the durable
+  record Steps 4/6 write; the entry doesn't land on `main` until merge. Read it
+  with `git show origin/vps-loop/item-<N>:docs/refactor-log.md` (works even
+  with no local worktree). Require an explicit closing statement that **both**
+  passes completed (e.g. "both required `/review-branch` passes are now
+  clean" / "Pass 2 ... complete" language) — an interim milestone like "Pass 1
+  is now clean" is NOT enough and must NOT be read as satisfying this; real
+  entries commonly log Pass 1 clean well before Pass 2 even starts, and
+  mistaking that for completion would ready/merge a PR whose mandatory second
+  pass never ran. Treat any ambiguity as "not yet clean" (fall through to the
+  skip-as-in-progress behavior below) — same conservative bias as Step 2b's
+  own "treat this judgment as possibly wrong" caveat.
   If the entry clearly shows both passes complete: this PR was shipped (Steps
-  6.1–6.4) by a tick that ended before reaching 6.5–6.11 — confirmed live
-  2026-09-02, item 46/PR #295: nothing in this file gave a later tick any way back
-  to finish readying/merging it, so it sat open indefinitely purely because it
-  wasn't finished within one tick. Before resuming, confirm the worktree Steps
-  6.1–6.4 used still exists (`git worktree list`) — mirroring Step 2b/3b's own
-  "worktree exists vs. branch only" fork: if it's gone, this is not safely
-  resumable from here; log `- <UTC timestamp>: item N's PR #<number> is OPEN and
-  refactor-log shows both passes clean, but its worktree no longer exists —
-  needs a human to reattach one before Step 6 can be resumed.` and skip item N
-  this tick, same as the "branch only, no worktree" cases elsewhere in this file.
-  If the worktree exists: skip the rest of Step 3/3b and resume directly at
-  **Step 6.5** for this PR, first reconstructing `MAIN_SHA_AT_REVIEW` (6.1's
-  value, which is never persisted and so isn't available to a fresh tick) as
-  `git -C <worktree-path> merge-base origin/main vps-loop/item-<N>` — the `main`
-  this branch tip was last reconciled against — rather than skipping past 6.1
-  entirely; 6.5 itself still re-verifies identity, and 6.6 still re-derives
-  whether `main` has advanced since that reconstructed baseline, exactly as it
-  would for a same-tick completion. If the refactor-log entry does NOT show both
-  passes clean (review genuinely still in progress, mid fix-iteration, or never
-  started), the original behavior applies: skip item N this tick as in-progress,
-  same as before.
+  6.1–6.4) by a tick that ended before reaching 6.5–6.11, and nothing in this
+  file otherwise routes a later tick back to finish readying/merging it — it
+  would sit open indefinitely, since Step 3's ordinary `OPEN` handling never
+  revisits it. Before trusting the closing statement, confirm no commit has
+  landed on the branch since it was written: find that commit with `git log -1
+  --format=%H origin/vps-loop/item-<N> -- docs/refactor-log.md`, then check
+  `git log --oneline <that-SHA>..origin/vps-loop/item-<N>` is empty. A
+  non-empty result — e.g. an interrupted `main`-resync merge from a prior 6.6
+  attempt, or any other later commit — means commits exist that the closing
+  statement never covered; treat this exactly like an ambiguous entry and fall
+  through to the skip-as-in-progress behavior, do NOT resume at 6.5. Only once
+  that log is empty does the closing statement still describe the branch's
+  actual current tip. Next, confirm the worktree Steps 6.1–6.4 used still
+  exists (`git worktree list`) — mirroring Step 2b/3b's own "worktree exists
+  vs. branch only" fork: if it's gone, this is not safely resumable from here;
+  log `- <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows
+  both passes clean, but its worktree no longer exists — needs a human to
+  reattach one before Step 6 can be resumed.
+  **Blocker-tag:** branch-without-worktree` and stop this tick — a tick stop,
+  not an ordinary item skip, for the same reason Step 3b's own "branch only,
+  no worktree" case stops rather than continuing to a different item: moving
+  on would leave this recurring root cause invisible to Step 0's circuit
+  breaker. If the worktree exists: skip the rest of Step 3/3b and resume
+  directly at **Step 6.5** for this PR, first reconstructing
+  `MAIN_SHA_AT_REVIEW` (6.1's value, which is never persisted and so isn't
+  available to a fresh tick) as `git -C <worktree-path> merge-base origin/main
+  vps-loop/item-<N>` — the `main` this branch tip was last reconciled against.
+  This reconstruction is only safe because the check above already proved the
+  branch tip hasn't moved since the reviewed state; without it, merge-base
+  could silently resolve to a `main` SHA more recent than what Step 5 actually
+  reviewed, masking a real "main advanced" case. 6.5 itself still re-verifies
+  identity, and 6.6 still re-derives whether `main` has advanced since that
+  reconstructed baseline, exactly as it would for a same-tick completion. If
+  the refactor-log entry does NOT show both passes clean (review genuinely
+  still in progress, mid fix-iteration, or never started), the original
+  behavior applies: skip item N this tick as in-progress, same as before.
 - If the item text has `Depends on: item <M>`, run the same exact-head query for M with
   `--state merged`. Empty → skip N this tick (dependency unmet) and keep walking;
   don't stall the run on it.
