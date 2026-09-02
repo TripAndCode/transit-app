@@ -16,6 +16,21 @@ rationale behind this shape over a scored-blend or no-ranking rotation.
 compute_suggestion() returns None when the agency has no analyzed data at
 all, or when all remaining candidates at a rule level are excluded via the
 exclude set.
+
+Every rule pools compute_ranking's / compute_on_time's per-(route_code,
+service_type) rows into one row per route_code (see
+:func:`_pool_ranking_by_route` / :func:`_pool_on_time_by_route`) by
+sample-weighting each row's OWN avg_min/p90_min/on_time_pct -- all three are
+already rounded display figures (2dp / 2dp / 1dp respectively), not the
+exact means the raw agg_route_daily_dist sums would give, so this pooling
+step is itself only an approximation of the true pooled mean (compounding
+whatever rounding compute_ranking/compute_on_time already did). Recovering
+exactness here would mean compute_ranking/compute_on_time exposing their
+raw sum_delay_sec/samples pair alongside the rounded tuple they already
+return to the API/CSV/formatter layers -- out of scope for this module,
+which only consumes their public return shape. See :func:`_anomaly_today`
+for the one place this imprecision can flip a hard classification decision
+rather than just reordering candidates.
 """
 
 from __future__ import annotations
@@ -79,16 +94,30 @@ def _pool_ranking_by_route(rows: list[tuple]) -> dict[str, dict]:
     service_type) pair (a route commonly has ~3 service-type variants on
     real data), but the rule chain reasons about routes. Pooling first makes
     that assumption true instead of threading service_type through every
-    comparison -- sample-weighting each row's own ``avg_min`` by its
-    ``samples`` is exact here because ``compute_ranking``'s per-row
-    ``avg_min`` is already an exact mean (backed by ``agg_route_daily_dist``'s
-    raw ``sum_delay_sec``), not a pre-rounded, already-aggregated figure:
-    pooling an already-exact per-row mean by its own sample count is itself
-    exact -- unlike a pooling step that re-weights a pre-rounded,
-    already-aggregated column (see the ``agg_*`` tables' ``sum_delay_sec``-
-    based exact pooling elsewhere in this codebase). ``p90_min`` pools the
-    same way -- percentiles don't strictly compose, but this matches that
-    same precedent rather than inventing a stricter merge for one call site.
+    comparison.
+
+    NOT exact: this sample-weights each row's own ``avg_min`` by its
+    ``samples``, but ``compute_ranking``'s per-row ``avg_min`` is already
+    ROUNDED to 2dp (``pipeline.reports.rankings._avg_min``'s
+    ``Decimal(...).quantize(..., ROUND_HALF_UP)``), not the exact mean
+    ``agg_route_daily_dist``'s raw ``sum_delay_sec`` would give -- weighting
+    an already-rounded per-row mean by its own sample count does not recover
+    the true pooled mean (each row can be off by up to half the rounding
+    unit before weighting, e.g. two rows of `sum_delay_sec=1000, samples=21`
+    and `sum_delay_sec=50, samples=21`: true combined mean is
+    ``1050/42/60 ≈ 0.4167`` min, but pooling the rounded per-row means
+    ``0.79`` and ``0.04`` gives ``(0.79*21 + 0.04*21)/42 = 0.415`` min).
+    Recovering exactness would require ``compute_ranking`` to also expose
+    the raw ``sum_delay_sec``/``samples`` pair behind its rounded tuple --
+    that tuple shape is also the API/CSV/formatter/LLM-tool contract (see
+    ``pipeline.query.formatter``/``pipeline.query.tools``), so widening it
+    is out of scope for this module. ``p90_min`` pools the same
+    (already-rounded, re-weighted) way; percentiles don't strictly compose
+    across route/service groups regardless, so that part was never exact to
+    begin with. This imprecision only reorders candidates for
+    ``_trend_shift_this_week``/``_on_time_fallback``; see
+    :func:`_anomaly_today` for where it can instead flip a hard
+    classification.
     """
     sum_samples: dict[str, int] = {}
     sum_avg_weighted: dict[str, float] = {}
@@ -114,8 +143,13 @@ def _pool_ranking_by_route(rows: list[tuple]) -> dict[str, dict]:
 
 def _pool_on_time_by_route(rows: list[tuple]) -> dict[str, dict]:
     """Pool compute_on_time's per-(route_code, service_type) rows into one
-    row per route_code, sample-weighted -- same convention as
-    :func:`_pool_ranking_by_route`."""
+    row per route_code, sample-weighted -- same convention (and same
+    not-exact caveat: ``on_time_pct`` is already rounded to 1dp by
+    ``compute_on_time`` before this re-weights it by ``samples``) as
+    :func:`_pool_ranking_by_route`. Lower severity than that function's
+    ``avg_min``/``p90_min`` case: this value only feeds
+    :func:`_on_time_fallback`'s ranking order, never a hard threshold
+    comparison."""
     sum_samples: dict[str, int] = {}
     sum_pct_weighted: dict[str, float] = {}
     for route_code, _service, on_time_pct, _avg_min, samples in rows:
@@ -163,6 +197,20 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
     service types first (see :func:`_pool_ranking_by_route`) so the
     comparison -- and the route+number the reason text names -- matches what
     an unfiltered report would show for that route.
+
+    This is the one call site where :func:`_pool_ranking_by_route`'s
+    known imprecision (see its docstring) can change an OUTCOME rather than
+    just reorder candidates: ``avg_delay_sec``/``baseline_avg_sec``/
+    ``baseline_p90_sec`` below round the already-imprecise pooled minutes to
+    whole seconds a THIRD time before ``classify_route``'s strict
+    ``avg_delay_sec > baseline_p90_sec`` comparison, so a route sitting
+    within about a second of that boundary could in principle flip between
+    "anomaly" and "watch" depending on how its service-type rows happened to
+    split. This is accepted as a pre-existing, narrow-window edge case (not
+    fixed here): a dedicated fix would need ``compute_ranking`` to expose
+    exact raw sums to this module (see the docstring above), which is a
+    change to a shared, widely-consumed return contract and so a separate
+    piece of work from tightening this rule's own pooling.
     """
     today_rows = await compute_ranking(agency_id, today_ctx, conn, ch=ch, sort_order="desc", limit=RANKING_FETCH_LIMIT)
     if not today_rows:

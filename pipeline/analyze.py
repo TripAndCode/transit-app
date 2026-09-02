@@ -529,11 +529,14 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost). UNTYPED dedup
-        # (all observations, no service filter) since that panel aggregates
+        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost) and
+        # the reports/trend hourly heatmap (same grain). UNTYPED dedup (all
+        # observations, no service filter) since both readers aggregate
         # hour-of-day across every route; a service/route filter falls back to
-        # the live path on read. (The reports/trend hourly heatmap is the same
-        # grain and a natural future consumer, but is not wired here yet.)
+        # the live path on read. `sum_delay_sec` lets a caller that pools
+        # MULTIPLE rows of this table (e.g. the trend heatmap's
+        # dow×band grid) divide an exact raw-seconds total once, at the end,
+        # instead of re-weighting this row's own already-rounded `avg_min`.
         # `EXTRACT(HOUR FROM scheduled_time)` is always 0-23, same invariant as
         # the agg_route_hour_dow comment above (see pipeline/strategies/_time.py).
         sql = """
