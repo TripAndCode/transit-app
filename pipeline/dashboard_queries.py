@@ -34,7 +34,7 @@ class DelayHeatmap:
 
 @dataclass(frozen=True)
 class AnomalyTimeline:
-    series: list[dict[str, Any]]  # [{date, avg_delay}]
+    series: list[dict[str, Any]]  # [{date, avg_delay}]; avg_delay is None where that date has no observed data
     mean: float
     std: float
     anomalies: list[dict[str, Any]]  # [{date, delta_sigma}]
@@ -206,7 +206,12 @@ async def _anomalies_series_from_agg(
         agency_id,
         *params,
     )
-    return [{"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else 0.0} for r in rows]
+    # A date whose rows are all still NULL sum_delay_sec (nullable since
+    # migration 0028) is genuinely unknown, not a zero-delay day — keep it
+    # in the series as `avg_delay: None` (for display as "no data") rather
+    # than fabricating a 0.0 that would silently bias anomaly_timeline's
+    # mean/std/z-score population below.
+    return [{"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else None} for r in rows]
 
 
 @perf.timed("dashboard.anomalies")
@@ -227,14 +232,22 @@ async def anomaly_timeline(
     column).
     """
     series = await _anomalies_series_from_agg(conn, agency_id, ctx)
-    if len(series) < 2:
+    # NULL-avg_delay days (genuinely no observed data, see
+    # _anomalies_series_from_agg above) are excluded from the mean/std/
+    # z-score population entirely — folding them in as 0.0 would bias the
+    # network mean down, inflate std, and could flag a merely-missing day
+    # as a false anomaly purely because it renders as an implausible "0
+    # min" day next to normal ones.
+    vals = [s["avg_delay"] for s in series if s["avg_delay"] is not None]
+    if len(vals) < 2:
         return AnomalyTimeline(series=series, mean=0.0, std=0.0, anomalies=[])
-    vals = [s["avg_delay"] for s in series]
     mean = statistics.fmean(vals)
     std = statistics.pstdev(vals) if len(vals) > 1 else 0.0
     anomalies = []
     if std > 0:
         for s in series:
+            if s["avg_delay"] is None:
+                continue
             ds = (s["avg_delay"] - mean) / std
             if abs(ds) >= sigma:
                 anomalies.append({"date": s["date"], "delta_sigma": round(ds, 2)})
@@ -323,8 +336,15 @@ async def movers(
         rc = r["route_code"]
         cur_v = float(r["current_avg"]) if r["current_avg"] is not None else None
         prv_v = float(r["previous_avg"]) if r["previous_avg"] is not None else None
-        delta = float(r["delta"]) if r["delta"] is not None else 0.0
-        pct = (delta / prv_v * 100.0) if prv_v else None
+        # `delta` is NULL exactly when `current_avg` itself is NULL (the SQL's
+        # COALESCE(prv.avg_min, 0) only ever substitutes a 0 on the PREVIOUS
+        # side, not the current one) — i.e. the current window has no
+        # observed data. Propagate that as None ("no data") rather than
+        # coercing to 0.0, which would misread as "no change" and could
+        # surface for an agency with fewer routes than `top`, past where
+        # ORDER BY ... DESC NULLS LAST pushes genuinely-NULL rows.
+        delta = float(r["delta"]) if r["delta"] is not None else None
+        pct = (delta / prv_v * 100.0) if (delta is not None and prv_v) else None
         out_rows.append(
             {
                 "route_code": rc,

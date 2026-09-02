@@ -16,6 +16,7 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import dow_label
+from pipeline.query.tools import _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "ja"): "データがありません。期間や路線フィルタを見直してください。",
@@ -254,8 +255,21 @@ def format_result(query_type: str, rows, intent: dict, locale: str = "ja") -> st
 
 
 def format_trend_text(days: list, from_date, to_date, locale: str = "ja") -> str:
-    """Locale-aware rendering for the Reports trend endpoint's text body."""
+    """Locale-aware rendering for the Reports trend endpoint's text body.
+
+    ``days`` entries can have ``avg_min=None, samples=0`` for a bucket with
+    no observed data (nullable since migration 0028 — see
+    ``pipeline.reports.rankings.compute_trend_series``). Those buckets are
+    excluded from both the mean and the rendered "observed days" count via
+    :func:`pipeline.query.tools._weighted_avg_min`'s own NULL-skipping,
+    sample-weighted pooling — the same approach the Ask tab's ``time_series``
+    tool uses on this same ``compute_trend_series`` output, so the two
+    surfaces report the same headline number for identical underlying data.
+    """
     if not days:
         return _t("trend_empty", locale)
-    avg = sum(d["avg_min"] or 0 for d in days) / len(days)
-    return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=len(days))
+    avg = _weighted_avg_min(days)
+    if avg is None:
+        return _t("trend_empty", locale)
+    observed_days = sum(1 for d in days if d.get("avg_min") is not None)
+    return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=observed_days)
