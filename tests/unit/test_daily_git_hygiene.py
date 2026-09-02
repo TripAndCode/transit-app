@@ -1,10 +1,11 @@
-"""Tests for the daily git hygiene job (local, remote, and backup-branch cleanup)."""
+"""Tests for the daily git hygiene job (local, remote, backup-branch, and venv cleanup)."""
 
 from __future__ import annotations
 
 import fcntl
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -884,3 +885,195 @@ def test_run_backup_branch_pruning_continues_after_one_delete_error(
     log_contents = log_path.read_text(encoding="utf-8")
     assert "ERROR deleting vps-loop/item-6-superseded-1111111" in log_contents
     assert "DELETED vps-loop/item-6-superseded-2222222" in log_contents
+
+
+# ---------------------------------------------------------------------------
+# 4. Orphaned poetry venv pruning
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_venv(root: Path, name: str, *, age_hours: float) -> Path:
+    """Create a directory standing in for a poetry venv, with a specific mtime."""
+
+    venv = root / name
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    stamp = time.time() - age_hours * 3600
+    os.utime(venv, (stamp, stamp))
+    return venv
+
+
+def test_poetry_env_path_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch):
+    """A location with no resolvable poetry venv (not a poetry project, no venv yet) is not an error."""
+
+    monkeypatch.setattr(
+        cleanup, "run_command", lambda *_a, **_k: subprocess.CompletedProcess((), returncode=1, stdout="", stderr="")
+    )
+    assert hygiene.poetry_env_path(Path("/unused")) is None
+
+
+def test_poetry_env_path_returns_resolved_path_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A successful `poetry env info --path` is parsed and resolved."""
+
+    venv = tmp_path / "some-venv"
+    venv.mkdir()
+    monkeypatch.setattr(
+        cleanup,
+        "run_command",
+        lambda *_a, **_k: subprocess.CompletedProcess((), returncode=0, stdout=f"{venv}\n", stderr=""),
+    )
+    assert hygiene.poetry_env_path(Path("/unused")) == venv.resolve()
+
+
+def test_compute_in_use_poetry_venvs_raises_when_main_repo_venv_unresolvable(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Refuses to compute an in-use set at all if the main checkout's own venv can't be found --
+    an empty/partial in-use set would make every real venv look orphaned."""
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
+    with pytest.raises(hygiene.HygieneError, match="main checkout"):
+        hygiene.compute_in_use_poetry_venvs(repository)
+
+
+def test_compute_in_use_poetry_venvs_includes_main_and_every_worktree(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The in-use set covers the main repo plus each worktree, by whatever venv path
+    `poetry_env_path` reports for that location -- worktrees with no resolvable venv
+    yet are simply absent from the set, not an error."""
+
+    worktree_path = tmp_path / "extra-worktree"
+    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+
+    main_venv = tmp_path / "venv-main"
+    worktree_venv = tmp_path / "venv-item-99"
+
+    def _fake_env_path(location: Path) -> Path | None:
+        if location.resolve() == repository.resolve():
+            return main_venv
+        if location.resolve() == worktree_path.resolve():
+            return worktree_venv
+        return None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    in_use = hygiene.compute_in_use_poetry_venvs(repository)
+
+    assert in_use == {main_venv, worktree_venv}
+
+
+def test_run_orphaned_venv_pruning_is_a_noop_when_venv_root_missing(tmp_path: Path):
+    """No venv root at all (e.g. poetry never ran here) is not an error."""
+
+    assert hygiene.run_orphaned_venv_pruning(
+        tmp_path, venv_root=tmp_path / "does-not-exist", min_age_hours=24, apply=True, log_file=tmp_path / "log"
+    ) is True
+
+
+def test_run_orphaned_venv_pruning_dry_run_deletes_nothing(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Without --apply, planning must not delete any venv nor write the log."""
+
+    venv_root = tmp_path / "virtualenvs"
+    orphaned = _make_fake_venv(venv_root, "transit-delay-app-orphan-py3.12", age_hours=100)
+    monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo: set())
+
+    log_path = tmp_path / "git-hygiene.log"
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, apply=False, log_file=log_path
+    )
+
+    assert all_clean is True
+    assert orphaned.is_dir()
+    assert not log_path.exists()
+
+
+def test_run_orphaned_venv_pruning_deletes_old_orphans_keeps_in_use_and_young(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Only a venv that is BOTH unmatched by any current worktree AND older than the
+    safety margin gets deleted; an in-use one and a too-young orphan are both kept."""
+
+    venv_root = tmp_path / "virtualenvs"
+    in_use_venv = _make_fake_venv(venv_root, "transit-delay-app-inuse-py3.12", age_hours=1000)
+    young_orphan = _make_fake_venv(venv_root, "transit-delay-app-young-py3.12", age_hours=1)
+    old_orphan = _make_fake_venv(venv_root, "transit-delay-app-old-py3.12", age_hours=100)
+
+    monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo: {in_use_venv.resolve()})
+
+    log_path = tmp_path / "git-hygiene.log"
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, apply=True, log_file=log_path
+    )
+
+    assert all_clean is True
+    assert in_use_venv.is_dir()
+    assert young_orphan.is_dir()
+    assert not old_orphan.exists()
+    assert "DELETED" in log_path.read_text(encoding="utf-8")
+    assert "transit-delay-app-old-py3.12" in log_path.read_text(encoding="utf-8")
+
+
+def test_run_orphaned_venv_pruning_rechecks_before_apply(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A venv that became in-use between planning and apply must not be deleted --
+    mirrors run_remote_branch_cleanup's fresh_dependents re-check."""
+
+    venv_root = tmp_path / "virtualenvs"
+    candidate = _make_fake_venv(venv_root, "transit-delay-app-newly-adopted-py3.12", age_hours=100)
+
+    calls = {"n": 0}
+
+    def _fake_in_use(_repo: Path) -> set[Path]:
+        calls["n"] += 1
+        # Planning (1st call) sees it as orphaned; the apply-time re-check (2nd call)
+        # sees it as now in use, as if a new worktree had just adopted this exact venv.
+        return set() if calls["n"] == 1 else {candidate.resolve()}
+
+    monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", _fake_in_use)
+
+    log_path = tmp_path / "git-hygiene.log"
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, apply=True, log_file=log_path
+    )
+
+    assert all_clean is True
+    assert candidate.is_dir()
+    assert "SKIPPED" in log_path.read_text(encoding="utf-8")
+    assert calls["n"] == 2
+
+
+def test_run_orphaned_venv_pruning_continues_after_one_delete_error(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A delete failure on one orphaned venv must not stop the rest of the stage."""
+
+    venv_root = tmp_path / "virtualenvs"
+    flaky = _make_fake_venv(venv_root, "transit-delay-app-flaky-py3.12", age_hours=100)
+    fine = _make_fake_venv(venv_root, "transit-delay-app-fine-py3.12", age_hours=100)
+
+    monkeypatch.setattr(hygiene, "compute_in_use_poetry_venvs", lambda _repo: set())
+
+    real_rmtree = shutil.rmtree
+
+    def _flaky_rmtree(path: object, *args: object, **kwargs: object) -> None:
+        if Path(str(path)).name == "transit-delay-app-flaky-py3.12":
+            raise OSError("simulated transient error")
+        real_rmtree(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(hygiene.shutil, "rmtree", _flaky_rmtree)
+
+    log_path = tmp_path / "git-hygiene.log"
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        repository, venv_root=venv_root, min_age_hours=24, apply=True, log_file=log_path
+    )
+
+    assert all_clean is False  # the swallowed per-venv error must still surface to the caller
+    assert flaky.is_dir()
+    assert not fine.exists()
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert "ERROR deleting" in log_contents
+    assert "DELETED" in log_contents
