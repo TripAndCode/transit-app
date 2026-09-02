@@ -506,6 +506,32 @@ async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_movers_delta_min_rounds_half_up_not_half_to_even(aconn, aagency_id):
+    """``_movers``'s delta_min must use the same ROUND_HALF_UP convention as
+    every other avg_min-class figure in this module, not Python's plain
+    round() (round-half-to-even).
+
+    prior avg = 1.0 min, current avg = 3.155 min -> delta_min_raw = 2.155,
+    an exact tie at the 2dp boundary the same way 2.15 is an exact tie at
+    1dp for pipeline.query.formatter._r (see test_formatter.py's identical
+    repro). ROUND_HALF_UP gives 2.16; plain round() lands fractionally
+    below the tie (2.155 is not exactly representable as a binary float)
+    and would give 2.15 instead.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc).date()
+    prv = cur - timedelta(days=7)
+    await _seed_agg_daily(aconn, aagency_id, prv, "R_BOUND", "平日", 1.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, cur, "R_BOUND", "平日", 3.155, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+    assert worse_by_code["R_BOUND"]["delta_min"] == 2.16
+
+
+@pytest.mark.asyncio
 async def test_movers_suppresses_delta_pct_below_prv_avg_floor(aconn, aagency_id):
     """A near-zero previous-window average must not produce a triple-digit
     delta_pct off a trivial absolute change — delta_pct is suppressed to
@@ -1210,6 +1236,31 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
     assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
     assert by_date["2026-05-20"]["weekday"] is None
     assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_service_split_daily_rounds_same_precision_as_service_split(aconn, aagency_id):
+    """service_split_daily's per-day avg must round to the same 2dp
+    precision as its sibling service_split for identical underlying data —
+    both read the same agg_daily_trend sum_delay_sec/samples pair, so a
+    single-date window makes the two report the exact same number.
+
+    100 delay-seconds over 3 samples is the canonical repro: 100/3/60 =
+    0.5555...5556 min, an infinite-precision value that must round to
+    0.56 rather than leak through unrounded (e.g. 0.5555555555555556).
+    """
+    d = date(2026, 5, 18)
+    avg_min = 100.0 / 3 / 60
+    await _seed_agg_daily(aconn, aagency_id, d, "R_SSD2", "平日", avg_min, 3)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    by_date = {row["date"]: row for row in out["service_split_daily"]}
+    daily_avg = by_date[d.isoformat()]["weekday"]
+    assert daily_avg == pytest.approx(0.56, abs=1e-9)
+    assert daily_avg == out["service_split"]["平日"]
 
 
 @pytest.mark.asyncio

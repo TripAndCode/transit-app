@@ -12,8 +12,31 @@ tests/unit/test_trend_weighted_avg.py).
 
 from datetime import date
 
-from pipeline.query.formatter import format_result, format_trend_text
+from pipeline.query.formatter import _r, format_result, format_trend_text
 from pipeline.reports.rankings import _weighted_avg_min
+
+
+def test_r_rounds_half_up_not_half_to_even():
+    """`_r` must match this codebase's ROUND_HALF_UP convention (Postgres's
+    ROUND), not Python's round-half-to-even. 2.15 rounded to 1dp is the
+    canonical divergence point: half-to-even gives '2.1' (2.15 is not exactly
+    representable as a binary float and lands fractionally below the half,
+    but even where it would land exactly on it, banker's rounding would still
+    pick the even digit), half-up gives '2.2'."""
+    assert _r(2.15) == "2.2"
+    assert _r(2.25) == "2.3"
+    assert _r(None) == "—"
+
+
+def test_fmt_ranking_rounds_avg_min_half_up():
+    """An avg_min of 2.15 (e.g. 129 delay-seconds over 1 sample) must render
+    as '2.2' in Reports text, matching the Ask tab's ROUND_HALF_UP convention
+    for the exact same underlying number — not '2.1' (Python round-half-to-
+    even) and not the unrounded '2.15'."""
+    rows = [("49022", "平日", 2.15, 2.15, 2.15, 1)]
+    result = format_result("ranking", rows, {"limit": 15})
+    assert "平均2.2分" in result
+    assert "平均2.1分" not in result
 
 
 def test_fmt_ranking_basic():
