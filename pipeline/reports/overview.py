@@ -56,6 +56,7 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
+from pipeline.reports.rankings import _round1
 
 _log = logging.getLogger(__name__)
 
@@ -722,7 +723,7 @@ async def _top_delayed_routes(
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
             # Guard against a NULL pooled average reaching the unguarded
-            # round(float(...)) below.
+            # _round2(...) below.
             "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             # Ties broken by route_code, same as the slow path just below and
             # as _concentration()'s fast path.
@@ -752,7 +753,7 @@ async def _top_delayed_routes(
             {
                 "route_code": r["route_code"],
                 "route_short_name": names.get(r["route_code"]),
-                "avg_min": round(float(r["avg_min"]), 2),
+                "avg_min": float(_round2(r["avg_min"])),
             }
             for r in top_n
         ],
@@ -835,7 +836,11 @@ async def _peak_hour_by_dow(
         dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
         sql = (
             "SELECT hour AS h,\n"
-            "       SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_hour_daily\n"
             "WHERE agency_id = $1 AND date >= ($2::text)::date AND date <= ($3::text)::date\n"
             f"  AND EXTRACT(ISODOW FROM date) {dow_pred}\n"
@@ -928,7 +933,7 @@ def _peak_from_hour_rows(rows) -> dict | None:
             continue
         h = int(r["h"])
         if 0 <= h < 24:
-            by_hour[h] = round(float(r["avg_min"]), 2)
+            by_hour[h] = float(_round2(r["avg_min"]))
     valid = [h for h in range(24) if by_hour[h] is not None]
     if not valid:
         return None
@@ -985,7 +990,9 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         d_raw = r["date"]
         d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
         st = r["service_type"]
-        avg = float(r["avg"]) if r["avg"] is not None else None
+        # 2dp, half-up — matches the sibling _service_split's rounding so the
+        # two report the same precision for the same underlying metric.
+        avg = float(_round2(r["avg"])) if r["avg"] is not None else None
         by_date.setdefault(d, {})[st] = avg
     out: list[dict] = []
     for d in sorted(by_date):
@@ -1043,7 +1050,7 @@ async def _movers(
             continue
         d_min = cur_avg - prv_avg
         d_pct = round((d_min / prv_avg) * 100.0, 1) if abs(prv_avg) >= MIN_PRV_AVG_FOR_PCT_MIN else None
-        deltas.append((code, round(d_min, 2), d_pct, d_min))
+        deltas.append((code, float(_round2(d_min)), d_pct, d_min))
     # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
     # they're distinct — which is what makes the ranking reproducible: the order
     # `common` happens to be iterated in cannot influence the result. It used to:
@@ -1080,8 +1087,8 @@ async def _movers(
             "delta_pct": dp,
             # Absolute averages for both windows so the UI can show
             # "last week X min → this week Y min" instead of a bare Δ%.
-            "current_avg_min": round(cur[code][0], 1),
-            "previous_avg_min": round(prv[code][0], 1),
+            "current_avg_min": float(_round1(cur[code][0])),
+            "previous_avg_min": float(_round1(prv[code][0])),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
             "sparkline_points": pts,
         }
@@ -1129,7 +1136,7 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
             for service_type, (n, total) in sorted(((k, v) for k, v in by_service.items() if k), key=lambda kv: kv[0])
         ]
     return {
-        r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"] and r["avg_min"] is not None
+        r["service_type"]: float(_round2(r["avg_min"])) for r in rows if r["service_type"] and r["avg_min"] is not None
     }
 
 
@@ -1170,7 +1177,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         rows = [
             {"day": d, "avg_min": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0])
         ]
-    pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
+    pts = [float(_round2(r["avg_min"])) for r in rows if r["avg_min"] is not None]
     return pts
 
 
@@ -1262,7 +1269,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
@@ -1336,7 +1343,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 

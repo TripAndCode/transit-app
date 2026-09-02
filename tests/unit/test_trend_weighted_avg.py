@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.query.tools import _weighted_avg_min
+from pipeline.reports.rankings import _weighted_avg_min
 
 
 def test_weights_by_samples_not_mean_of_means():

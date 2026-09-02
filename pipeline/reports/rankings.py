@@ -35,9 +35,29 @@ def _sec_to_min(sec: float | None) -> Decimal | None:
 
 
 def _round1(x: float) -> Decimal:
-    """Round an already-in-percent float to 1 dp, half-up — matches Postgres
-    ``ROUND(x::numeric, 1)``. Same rationale as :func:`_round2`."""
+    """Round a float to 1 dp, half-up — matches Postgres ``ROUND(x::numeric, 1)``.
+    Same rationale as :func:`_round2`."""
     return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
+def _weighted_avg_min(days: list[dict]) -> float | None:
+    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+
+    Each `days` entry is already a per-bucket sample-weighted mean with a
+    `samples` weight, so a plain mean-of-means would overweight thin days (one
+    sparse outlier day could dominate the headline). Null-`avg_min` days are
+    skipped (not counted as 0). Returns None when there are no measured samples.
+    """
+    num = 0.0
+    den = 0
+    for d in days:
+        v = d.get("avg_min")
+        if v is None:
+            continue
+        s = d.get("samples") or 0
+        num += v * s
+        den += s
+    return num / den if den else None
 
 
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
@@ -601,10 +621,24 @@ async def compute_hourly_heatmap(
 ) -> list[dict]:
     """Hour-of-day × date cells for the granular trend view.
 
-    Returns ``[ { date, hour, avg_min, samples } ]`` filtered by the same
-    ctx the rest of the trend uses. Hour is extracted from
+    Returns ``[ { date, hour, avg_min, samples, sum_delay_sec } ]`` filtered
+    by the same ctx the rest of the trend uses. Hour is extracted from
     ``scheduled_time`` (a TIME column post migration 0011); cells with too
     few samples (<3) are dropped to keep the rendering signal-strong.
+
+    ``sum_delay_sec`` is each cell's exact raw-seconds delay total — on the
+    fast path, nullable until the next ``make analyze-all`` rewrites the row
+    (migration 0030 added the column without a backfill, same rationale as
+    migration 0028). A caller that only reads one cell at a time (e.g.
+    rendering the raw per-hour heatmap) has no use for it and can ignore it;
+    a caller that pools MULTIPLE cells together (e.g.
+    ``pipeline.reports.forecast.hourly_cells_to_dow_band``, which pools
+    across dates into a dow×band grid) needs it to compute the true pooled
+    mean instead of re-weighting this function's own already-rounded
+    ``avg_min`` (each cell's ``avg_min`` here is itself a single rounding —
+    fine standalone, but re-weighting several already-rounded cells is a
+    second, compounding rounding — see migration 0030's own rationale for
+    the general defect class).
     """
     # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
     # a direct read. It has no service/route/hour-band dimension, so any of those
@@ -613,7 +647,7 @@ async def compute_hourly_heatmap(
     if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (
-            "SELECT date, hour, avg_min, samples\n"
+            "SELECT date, hour, avg_min, samples, sum_delay_sec\n"
             "FROM agg_hour_daily\n"
             f"WHERE agency_id = $1 AND {where} AND samples >= 3\n"
             "ORDER BY date, hour"
@@ -638,6 +672,7 @@ async def compute_hourly_heatmap(
             f"WITH {cte_sql}\n"
             f"SELECT date, {hour_expr} AS hour,\n"
             "       avg(dep_delay) / 60.0 AS avg_min,\n"
+            "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
@@ -649,13 +684,16 @@ async def compute_hourly_heatmap(
         rows = _ch_rows(result)
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     # Idempotent on the fast path, whose agg_hour_daily.avg_min is already
-    # stored rounded to 2 dp.
+    # stored rounded to 2 dp. sum_delay_sec is passed through unrounded (it's
+    # already an exact integer on both paths) — see this function's own
+    # docstring for why a pooling caller needs it.
     return [
         {
             "date": r["date"].isoformat(),
             "hour": int(r["hour"]),
             "avg_min": float(_round2(r["avg_min"])) if r["avg_min"] is not None else None,
             "samples": r["samples"],
+            "sum_delay_sec": int(r["sum_delay_sec"]) if r["sum_delay_sec"] is not None else None,
         }
         for r in rows
     ]

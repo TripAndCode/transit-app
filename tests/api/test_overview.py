@@ -103,19 +103,30 @@ async def _seed_agg_route_hour(
     )
 
 
-async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples):
-    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day)."""
+async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, sum_delay_sec=None):
+    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day).
+
+    sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
+    pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (
+    _peak_hour_by_dow's fast path) agrees with the plain avg_min this helper's
+    callers assert on, unless a test explicitly passes a mismatched value to
+    prove the exact-vs-reweighted divergence -- mirrors _seed_agg_route_hour_dow's
+    identical pattern.
+    """
+    if sum_delay_sec is None:
+        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
     await aconn.execute(
-        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples) "
-        "VALUES ($1, ($2::text)::date, $3, $4, $5) "
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, ($2::text)::date, $3, $4, $5, $6) "
         "ON CONFLICT (agency_id, date, hour) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
         iso,
         int(hour),
         float(avg_min),
         int(samples),
+        int(sum_delay_sec),
     )
 
 
@@ -492,6 +503,32 @@ async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
     # All four improved routes are surfaced, sorted by signed delta_min
     # ascending (most negative first).
     assert better_codes == ["R_E", "R_F", "R_G", "R_H"]
+
+
+@pytest.mark.asyncio
+async def test_movers_delta_min_rounds_half_up_not_half_to_even(aconn, aagency_id):
+    """``_movers``'s delta_min must use the same ROUND_HALF_UP convention as
+    every other avg_min-class figure in this module, not Python's plain
+    round() (round-half-to-even).
+
+    prior avg = 1.0 min, current avg = 3.155 min -> delta_min_raw = 2.155,
+    an exact tie at the 2dp boundary the same way 2.15 is an exact tie at
+    1dp for pipeline.query.formatter._r (see test_formatter.py's identical
+    repro). ROUND_HALF_UP gives 2.16; plain round() lands fractionally
+    below the tie (2.155 is not exactly representable as a binary float)
+    and would give 2.15 instead.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc).date()
+    prv = cur - timedelta(days=7)
+    await _seed_agg_daily(aconn, aagency_id, prv, "R_BOUND", "平日", 1.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, cur, "R_BOUND", "平日", 3.155, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+    assert worse_by_code["R_BOUND"]["delta_min"] == 2.16
 
 
 @pytest.mark.asyncio
@@ -1074,6 +1111,31 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
+    """_peak_hour_by_dow's fast path pools multiple agg_hour_daily days for the
+    same hour. Pooling must use SUM(sum_delay_sec)/SUM(samples) (exact), not
+    the old SUM(avg_min * samples)/SUM(samples) reweighting of an
+    already-rounded per-day average -- mirrors peak_hour_breakdown's identical
+    fix for agg_route_hour_dow (migration 0028's sum_delay_sec rollout,
+    extended to agg_hour_daily)."""
+    # Two weekday Tuesdays at hour 15, with non-round per-row avg_min values
+    # whose sum_delay_sec is seeded to the TRUE underlying sum rather than
+    # backed out from the rounded avg_min, so the two pooling formulas diverge.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 15, 1.61, 3, sum_delay_sec=290)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 26), 15, 2.0, 1000, sum_delay_sec=100000)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    assert pk_wd is not None
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert pk_wd["by_hour"][15] == pytest.approx(1.67, abs=0.01)
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
     """The agg fast path weights each day's hourly avg by its sample count, not
     a plain mean — two weekday Tuesdays at hour 8 with unequal weights."""
@@ -1174,6 +1236,31 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
     assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
     assert by_date["2026-05-20"]["weekday"] is None
     assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_service_split_daily_rounds_same_precision_as_service_split(aconn, aagency_id):
+    """service_split_daily's per-day avg must round to the same 2dp
+    precision as its sibling service_split for identical underlying data —
+    both read the same agg_daily_trend sum_delay_sec/samples pair, so a
+    single-date window makes the two report the exact same number.
+
+    100 delay-seconds over 3 samples is the canonical repro: 100/3/60 =
+    0.5555...5556 min, an infinite-precision value that must round to
+    0.56 rather than leak through unrounded (e.g. 0.5555555555555556).
+    """
+    d = date(2026, 5, 18)
+    avg_min = 100.0 / 3 / 60
+    await _seed_agg_daily(aconn, aagency_id, d, "R_SSD2", "平日", avg_min, 3)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    by_date = {row["date"]: row for row in out["service_split_daily"]}
+    daily_avg = by_date[d.isoformat()]["weekday"]
+    assert daily_avg == pytest.approx(0.56, abs=1e-9)
+    assert daily_avg == out["service_split"]["平日"]
 
 
 @pytest.mark.asyncio

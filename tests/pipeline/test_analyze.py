@@ -399,6 +399,56 @@ def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
     assert well_formed
 
 
+def test_analyze_hour_daily_sum_delay_sec_is_exact_raw_sum(pg_conn, agency_id, ch_client):
+    """agg_hour_daily must carry the exact SUM(dep_delay) alongside its
+    rounded avg_min, mirroring the six tables migration 0028 already covers
+    (see pipeline/analyze.py's module docstring) -- a downstream reader
+    pooling multiple agg_hour_daily rows (pipeline/reports/overview.py's
+    _peak_hour_by_dow fast path) divides SUM(sum_delay_sec) / SUM(samples)
+    once, rather than re-weighting the already-rounded avg_min.
+
+    3 observations at +601s and 3 at +599s: the rounded avg_min is exactly
+    10.0 either way, but the raw seconds sum (3600) is what a correct
+    downstream pool must reproduce -- an implementation that instead backs
+    sum_delay_sec out of the rounded avg_min*60*samples would also land on
+    3600 here, so this asserts the exact raw total directly rather than
+    relying on a coincidental match.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for dep in [601, 601, 601, 599, 599, 599]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"hd{i}.pb",
+                    "2026-04-01T09:00:00",
+                    f"trip_hd_{i}",
+                    "平日",
+                    time(9, 0),
+                    "HD1",
+                    1,
+                    dep,
+                ),
+            )
+            i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples, avg_min, sum_delay_sec FROM agg_hour_daily "
+            "WHERE agency_id = %s AND date = '2026-04-01' AND hour = 9",
+            (agency_id,),
+        )
+        samples, avg_min, sum_delay_sec = cur.fetchone()
+    assert samples == 6
+    assert float(avg_min) == 10.0
+    assert sum_delay_sec == 3600
+
+
 def test_analyze_buckets_dates_in_jst(pg_conn, agency_id, ch_client):
     """`captured_at::date` must bucket on the JST civil day the API reads under,
     not UTC. A 23:30 UTC observation is 08:30 the NEXT day in JST, so it must

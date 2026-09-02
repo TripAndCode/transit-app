@@ -29,16 +29,16 @@ rather than silently vanishing below some insert-time threshold that varies
 table to table.
 
 agg_route_stats / agg_route_hour / agg_route_dow / agg_route_hour_dow /
-agg_daily_trend / agg_route_daily each carry a `sum_delay_sec` column
-alongside their pre-rounded `avg_min` (or, for agg_route_daily,
-`avg_delay_sec`) — the exact SUM(dep_delay) in seconds behind that mean. A
-reader pooling MULTIPLE rows of one of these tables must divide
-SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than re-weighting
-the already-rounded avg_min/avg_delay_sec (SUM(avg_min * samples) /
-SUM(samples)) — the latter pools a mean of ROUNDED per-row values, which is
-not the same as the true pooled mean over the underlying raw observations.
-agg_route_daily_dist already followed this pattern from the start (see its
-own `sum_delay_sec`); these six tables now match it.
+agg_daily_trend / agg_route_daily / agg_hour_daily each carry a
+`sum_delay_sec` column alongside their pre-rounded `avg_min` (or, for
+agg_route_daily, `avg_delay_sec`) — the exact SUM(dep_delay) in seconds
+behind that mean. A reader pooling MULTIPLE rows of one of these tables must
+divide SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than
+re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
+samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
+values, which is not the same as the true pooled mean over the underlying
+raw observations. agg_route_daily_dist already followed this pattern from
+the start (see its own `sum_delay_sec`); these seven tables now match it.
 
 agg_daily_trend additionally carries `sum_late_sec`, the exact
 SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
@@ -529,11 +529,14 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost). UNTYPED dedup
-        # (all observations, no service filter) since that panel aggregates
+        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost) and
+        # the reports/trend hourly heatmap (same grain). UNTYPED dedup (all
+        # observations, no service filter) since both readers aggregate
         # hour-of-day across every route; a service/route filter falls back to
-        # the live path on read. (The reports/trend hourly heatmap is the same
-        # grain and a natural future consumer, but is not wired here yet.)
+        # the live path on read. `sum_delay_sec` lets a caller that pools
+        # MULTIPLE rows of this table (e.g. the trend heatmap's
+        # dow×band grid) divide an exact raw-seconds total once, at the end,
+        # instead of re-weighting this row's own already-rounded `avg_min`.
         # `EXTRACT(HOUR FROM scheduled_time)` is always 0-23, same invariant as
         # the agg_route_hour_dow comment above (see pipeline/strategies/_time.py).
         sql = """
@@ -543,7 +546,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 date,
                 EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             WHERE scheduled_time IS NOT NULL
             GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
@@ -552,7 +556,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_hour_daily",
-            ["agency_id", "date", "hour", "avg_min", "samples"],
+            ["agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )

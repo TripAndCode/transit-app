@@ -16,6 +16,7 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import dow_label
+from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "ja"): "データがありません。期間や路線フィルタを見直してください。",
@@ -81,14 +82,22 @@ def _t(template: str, locale: str, **vars: Any) -> str:
         return tpl
 
 
-def _r(x, d: int = 1) -> str:
-    """Round a numeric DB value to *d* decimal places and return as a string.
+def _r(x) -> str:
+    """Round a numeric DB value to 1 decimal place and return as a string.
+
+    Delegates to ``pipeline.reports.rankings``'s ``_round1``, which matches
+    Postgres's ``ROUND()`` (half away from zero) rather than plain Python
+    ``round()`` (round-half-to-even). The row values rendered here (e.g.
+    ``avg_min``) already arrive rounded to 2dp by that same convention;
+    re-rounding them with a different rounding rule could land on a
+    different digit than the value shown elsewhere (e.g. the Ask tab's raw
+    table cell) for the exact same underlying number.
 
     Returns '—' for None/NULL values.
     """
     if x is None:
         return "—"
-    return f"{round(float(x), d):.{d}f}"
+    return f"{_round1(x):.1f}"
 
 
 def _service_prefix(intent: dict, locale: str) -> str:
@@ -139,7 +148,7 @@ def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
             rank=i,
             route=r[0],
             service=r[1],
-            pct=_r(r[2], 1),
+            pct=_r(r[2]),
             avg=_r(r[3]),
             samples=r[4],
         )
@@ -254,8 +263,21 @@ def format_result(query_type: str, rows, intent: dict, locale: str = "ja") -> st
 
 
 def format_trend_text(days: list, from_date, to_date, locale: str = "ja") -> str:
-    """Locale-aware rendering for the Reports trend endpoint's text body."""
-    if not days:
+    """Locale-aware rendering for the Reports trend endpoint's text body.
+
+    ``days`` entries can have ``avg_min=None, samples=0`` for a bucket with
+    no observed data (nullable since migration 0028 — see
+    ``pipeline.reports.rankings.compute_trend_series``). Those buckets are
+    excluded from both the mean and the rendered "observed days" count via
+    :func:`pipeline.reports.rankings._weighted_avg_min`'s own NULL-skipping,
+    sample-weighted pooling — the same approach the Ask tab's ``time_series``
+    tool uses on this same ``compute_trend_series`` output, so the two
+    surfaces report the same headline number for identical underlying data.
+    An empty ``days`` list hits the same ``avg is None`` branch below as an
+    all-NULL one — ``_weighted_avg_min([])`` returns ``None`` too.
+    """
+    avg = _weighted_avg_min(days)
+    if avg is None:
         return _t("trend_empty", locale)
-    avg = sum(d["avg_min"] or 0 for d in days) / len(days)
-    return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=len(days))
+    observed_days = sum(1 for d in days if d.get("avg_min") is not None)
+    return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=observed_days)

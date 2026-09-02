@@ -409,6 +409,11 @@ async def test_reports_trend_reads_agg(reports_client, ch_client):
     # hourly heatmap cells present (scheduled_time 10:00 → hour 10, ≥3 samples)
     hourly = rows[0]["hourly"]
     assert any(c["hour"] == 10 for c in hourly)
+    # sum_delay_sec is the exact raw-seconds total behind that cell's
+    # avg_min (agg_hour_daily's own column, populated by analyze()) — 12
+    # observations at 180s each, on 2026-05-19.
+    cell_19 = next(c for c in hourly if c["date"] == "2026-05-19" and c["hour"] == 10)
+    assert cell_19["sum_delay_sec"] == 2160
     # dow_band: pooled from the same hourly cells, no routes/disclaimer keys
     dow_band = rows[0]["dow_band"]
     assert set(dow_band.keys()) == {"grid", "worst"}
@@ -604,6 +609,10 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
     hourly = rows[0]["hourly"]
     assert any(c["hour"] == 6 and c["samples"] == 6 for c in hourly)
     assert not any(c["hour"] == 20 for c in hourly)  # outside the morning band
+    # The ClickHouse live-fallback branch also reports the exact raw-seconds
+    # total (6 observations at 180s each) alongside the rounded avg_min.
+    cell_6 = next(c for c in hourly if c["hour"] == 6)
+    assert cell_6["sum_delay_sec"] == 1080
 
 
 @pytest.mark.asyncio
