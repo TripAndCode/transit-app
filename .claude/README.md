@@ -6,7 +6,12 @@ trigger explicitly).
 
 ## Commands (`.claude/commands/*.md`)
 
-Invoke as `/name` from a Claude Code session.
+Invoke as `/name` from a Claude Code session. Two lifecycles: work on **your own**
+branch/PR, or review **a PR you did not author** — including one `/vps-loop-run`
+opened on a `vps-loop/item-*` branch. Pick the command by whose code it touches and
+what stage you are at.
+
+### Your own work
 
 | Command | Does | Reads/writes |
 |---|---|---|
@@ -19,9 +24,28 @@ Invoke as `/name` from a Claude Code session.
 Typical flow: `/review-branch` → `/pr-github` (post findings) → reviewer replies
 → `/address-my-pr-comments` (triage + fix + reply) → merge → `/cleanup-merged`.
 
-`scripts/prepare_review.py` is the deterministic front end for `/review-branch`. It
-produces the private diff and JSON routing manifest, so commands should consume its
-output rather than reimplementing path exclusions, line counts, or test-share math.
+### A PR you did not author
+
+| Command | Does | Reads/writes |
+|---|---|---|
+| `/review-pr` | Fetches the PR head into `.worktrees/review-<branch>`, builds the diff and manifest with `scripts/prepare_review.py`, then applies `/review-branch`'s exact routing. Deduplicates against threads already on the PR and reports in the terminal. | Read-only on code. Posts nothing, writes no report file, unless asked. |
+| `/follow-up-pr-review` | Judges the threads **you** opened once the author replied or pushed (`settled` reported only; `discuss` gets a drafted reply behind a per-item gate), and scans `old_head..new_head` since your last look for regressions, staleness, and refactor opportunities. Never resolves a thread. | Read-only on code; posts replies and new threads only after per-item approval. |
+
+Typical flow: `/review-pr <n>` → discuss findings (optionally `/pr-github` to post
+them) → author replies or pushes → `/follow-up-pr-review <n>`.
+
+`/follow-up-pr-review`'s delta scan takes its baseline from the `/review-pr` worktree's
+current head, so removing that worktree removes the baseline; the next run then skips
+the scan instead of re-reviewing the whole PR. `.worktrees/` is gitignored.
+
+The split by whose PR it is matters because only your own branch can be fixed in place:
+`/address-my-pr-comments` may apply code changes, `/follow-up-pr-review` may not.
+Neither ever resolves a thread — that is always a manual step in the GitHub UI.
+
+`scripts/prepare_review.py` is the deterministic front end for `/review-branch`,
+`/review-pr`, and `/follow-up-pr-review`'s delta scan. It produces the private diff
+and JSON routing manifest, so commands should consume its output rather than
+reimplementing path exclusions, line counts, or test-share math.
 `scripts/cleanup_git_state.py` is the deletion authority for `/cleanup-merged` and the
 VPS loop; it defaults to dry-run and rechecks mutable state before applying a plan.
 
@@ -36,13 +60,15 @@ describes, never as the rule itself.
 |---|---|---|
 | `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
 
-Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`,
-`practices`, `security`, `alternatives`, plus `enforcement` (conditional —
-lint/CI/hook diffs only) — this list is a convenience snapshot
-and can drift; check the agent file for the current list and exact scope of
+Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`, `practices`,
+`comments`, `security`, `alternatives`, plus `enforcement` (conditional — lint/CI/hook
+diffs only) — this list is a convenience snapshot and can drift; check the agent file
+for the current list and exact scope of
 each (e.g. `security` covers hardcoded creds, CSRF/SSRF, PII/PDPA-APPI,
 session-cookie flags; `consistency` covers cross-file contract drift like
-i18n key parity or `agg_*` column renames).
+i18n key parity or `agg_*` column renames; `comments` narrows to the stale-candidate
+list from `$HOME/.claude/scripts/comment_lint.py`, personal tooling outside this repo,
+and enforces `CLAUDE.md`'s durable-content rule).
 
 ## Guardrails baked into these files
 
@@ -59,8 +85,11 @@ i18n key parity or `agg_*` column renames).
   ready, and squash-merge PRs once both required `/review-branch` passes are
   clean and the PR reports mergeable/clean — but it never pushes directly to
   `main` (only via a reviewed, merged PR) and never force-pushes.
-- `/address-my-pr-comments` never calls the GraphQL `resolveReviewThread`
-  mutation — resolving is the reviewer's call.
+- Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
+  `resolveReviewThread` mutation — resolving is always a manual step in the GitHub UI.
+- Reviewers dispatched for one diff read a single worktree concurrently, so the agent
+  file forbids `git checkout`/`switch`/`reset` inside it and requires
+  `git show <rev>:<path>` for other revisions.
 
 ## VPS operations
 

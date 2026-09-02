@@ -35,13 +35,16 @@ otherwise:
 - **Trivial:** human-facing Markdown outside `.claude/**` and root `CLAUDE.md`, with
   no executable instructions. Review directly; no subagent.
 - **Process-doc:** only `.claude/**` and/or root `CLAUDE.md`. Dispatch one
-  `branch-reviewer` for `logic+consistency+practices+security`. If `enforcement` is
-  true, add one standalone `enforcement` call.
+  `branch-reviewer` for `logic+consistency+practices+comments+security`. If
+  `enforcement` is true, add one standalone `enforcement` call.
 - **Standard:** dispatch exactly two `branch-reviewer` calls:
   1. `bugs+logic+consistency+security`
-  2. `perf+practices+alternatives`
+  2. `perf+practices+comments+alternatives`
   Add one standalone `enforcement` call only when the manifest flag is true and the
   diff actually changes a quality gate.
+
+A process-doc diff is Markdown, which `comment_lint.py` does not read, so `comments`
+runs there on its empty-list fallback. The agent file owns what that fallback is.
 
 **High-risk overlay:** auth/session/admin authorization, credential or PII handling,
 user-supplied URLs, schema/data migrations, destructive data paths, or security
@@ -53,8 +56,13 @@ dimensions, worktree path, and this exact line:
 
 `Deliberately excluded, do NOT re-derive: <manifest paths>. This is not truncation.`
 
+A dispatch whose assigned dimensions include `comments` additionally receives the
+manifest's `merge_base`, which that dimension needs to build its stale-candidate list.
+No other dimension takes a base ref.
+
 Do not paste diff text into prompts. Reviewers never receive one another's output.
-While they run, do not switch, reset, or otherwise move the reviewed worktree.
+While they run, do not switch, reset, or otherwise move the reviewed worktree; the
+agent file forbids reviewers from moving it for the same reason.
 
 ## 3. Synthesize and iterate only when needed
 
