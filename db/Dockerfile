@@ -29,19 +29,32 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Positive control for the layer above. Every extension the migrations create
-# must be installable before this image is considered built: `postgis` and
+# must be present before this image is considered built: `postgis` and
 # `vector` come from the packages above, `pg_trgm` from the base image's
 # contrib modules. Without this an absent extension surfaces much later, as a
 # confusing failure partway through `migrate up`.
+#
+# Only the two apt-installed extensions carry a version floor, because only
+# they can move independently of this file; `pg_trgm` ships with the base
+# image at whatever version its Postgres provides, so presence is the whole
+# check there.
+#
+# This reads packaging metadata, so it proves an extension is installable, not
+# that it loads — a control file beside an unusable shared object would still
+# pass. Actually creating each extension needs a running server, which the
+# first `migrate up` against this image does; keep that a step away rather
+# than starting a throwaway server inside the build.
 RUN set -eu; \
     ext=/usr/share/postgresql/14/extension; \
     for control in postgis vector pg_trgm; do \
         test -f "$ext/$control.control" || { echo "missing extension: $control" >&2; exit 1; }; \
     done; \
-    postgis_version=$(sed -n "s/^default_version *= *'\(.*\)'/\1/p" "$ext/postgis.control"); \
-    vector_version=$(sed -n "s/^default_version *= *'\(.*\)'/\1/p" "$ext/vector.control"); \
-    echo "postgis $postgis_version, vector $vector_version"; \
-    printf '%s\n3.2\n' "$postgis_version" | sort -C -V \
-        && { echo "postgis $postgis_version is older than the required 3.2" >&2; exit 1; } || true; \
-    printf '%s\n0.8\n' "$vector_version" | sort -C -V \
-        && { echo "vector $vector_version is older than the required 0.8" >&2; exit 1; } || true
+    version_of() { sed -n "s/^default_version *= *'\(.*\)'/\1/p" "$ext/$1.control"; }; \
+    require() { \
+        installed=$(version_of "$1"); \
+        echo "$1 $installed"; \
+        dpkg --compare-versions "$installed" ge "$2" \
+            || { echo "$1 $installed is below the required $2" >&2; exit 1; }; \
+    }; \
+    require postgis 3.2; \
+    require vector 0.8

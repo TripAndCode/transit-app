@@ -99,31 +99,10 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
 
-      # Built from the repository's own `db/Dockerfile` rather than declared as
-      # a `services:` entry, because that block can only pull a published image
-      # and none carries PostGIS and pgvector together. Building it here keeps
-      # CI, local dev, and the throwaway test database on one definition, so a
-      # schema that migrates locally cannot fail here on a missing extension.
       - name: Start Postgres from db/Dockerfile
-        run: |
-          docker build -t transit-ci-db db/
-          docker run -d --name transit-ci-db \
-            -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
-            -e POSTGRES_DB=transit -p 5433:5432 transit-ci-db
-          # `-h localhost` forces the check onto TCP. The official image's first
-          # run starts a temporary socket-only server to bootstrap the data
-          # directory, so an unqualified `pg_isready` reports ready before the
-          # real, TCP-listening server has replaced it — and the schema step
-          # that follows is then refused.
-          for _ in $(seq 1 60); do
-            if docker exec transit-ci-db pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
-              echo "postgres ready"; exit 0
-            fi
-            sleep 2
-          done
-          echo "postgres did not become ready" >&2
-          docker logs transit-ci-db >&2
-          exit 1
+        uses: ./.github/actions/start-test-postgres
+        with:
+          container-name: transit-ci-db
 
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up

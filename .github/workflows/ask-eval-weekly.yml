@@ -66,28 +66,10 @@ jobs:
             /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
 
-      # Built from the repository's own `db/Dockerfile`, the same way ci.yml's
-      # test job does it, so this workflow cannot drift onto a different
-      # PostGIS or pgvector version than the schema is developed against.
-      # `-h localhost` forces readiness onto TCP: the official image's first
-      # run starts a temporary socket-only server to bootstrap the data
-      # directory, so an unqualified `pg_isready` reports ready before the
-      # real, TCP-listening server has replaced it.
       - name: Start Postgres from db/Dockerfile
-        run: |
-          docker build -t transit-eval-db db/
-          docker run -d --name transit-eval-db \
-            -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
-            -e POSTGRES_DB=transit -p 5433:5432 transit-eval-db
-          for _ in $(seq 1 60); do
-            if docker exec transit-eval-db pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
-              echo "postgres ready"; exit 0
-            fi
-            sleep 2
-          done
-          echo "postgres did not become ready" >&2
-          docker logs transit-eval-db >&2
-          exit 1
+        uses: ./.github/actions/start-test-postgres
+        with:
+          container-name: transit-eval-db
 
       - name: Apply Postgres schema
         run: poetry run python gtfs_pipeline.py migrate up
