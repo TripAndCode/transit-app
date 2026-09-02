@@ -90,24 +90,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Poetry
-        run: pip install poetry==1.8.5
-
-      - name: Install dependencies
-        run: poetry install
-
       # This runner's root filesystem is small and shared with a lot of
       # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
-      # etc.) — reclaim it before anything else runs. Verified locally
-      # (2026-07-27): apt-installing any currently-available pgvector
-      # package for PG 14/pgdg11 (0.8.2, the one version that avoided
-      # forcing a postgresql-14 core upgrade, has since been pruned from
-      # the PGDG pool — only 0.8.3+ remain, and all of them still pull in a
-      # postgresql-14 upgrade as an ordinary `Depends:`, not merely the
+      # etc.) — reclaim it before anything else runs, including `poetry
+      # install` itself: the ML embedder dependency alone is large enough
+      # that installing it before this cleanup can exhaust the disk before
+      # the pgvector build (the other big consumer, see below) ever starts.
+      # Verified locally (2026-07-27): apt-installing any currently-available
+      # pgvector package for PG 14/pgdg11 (0.8.2, the one version that
+      # avoided forcing a postgresql-14 core upgrade, has since been pruned
+      # from the PGDG pool — only 0.8.3+ remain, and all of them still pull
+      # in a postgresql-14 upgrade as an ordinary `Depends:`, not merely the
       # `Breaks: postgresql-14-jit-llvm` line the apt error reports; with
       # apt-mark hold in place, apt refuses outright rather than silently
       # upgrading) still upgrades postgresql-14 to a build the live-running
@@ -127,6 +120,16 @@ jobs:
             /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Install dependencies
+        run: poetry install
 
       # postgis/postgis:14-3.2 doesn't ship pgvector; the schema's
       # `CREATE EXTENSION vector` then errors with UndefinedFile. Build

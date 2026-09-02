@@ -187,12 +187,12 @@ export function useAdminOps() {
 
 // ── Architecture docs (developer/internal page, item 25) ────────────────
 
-export type ArchitectureDocSummary = {
+type ArchitectureDocSummary = {
   slug: string;
   title: string;
 };
 
-export type ArchitectureDoc = ArchitectureDocSummary & {
+type ArchitectureDoc = ArchitectureDocSummary & {
   content: string;
 };
 
