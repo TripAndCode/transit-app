@@ -5,15 +5,15 @@ ranking / on_time / worst_5min / compare_ranking / dow_ranking.
 
 Label-helper coverage (dow_label / time_label) lives in
 tests/unit/test_labels.py. format_trend_text's NULL-day handling is covered
-below, cross-checked against pipeline.query.tools._weighted_avg_min (whose
-own NULL-skipping behavior is pinned separately in
+below, cross-checked against pipeline.reports.rankings._weighted_avg_min
+(whose own NULL-skipping behavior is pinned separately in
 tests/unit/test_trend_weighted_avg.py).
 """
 
 from datetime import date
 
 from pipeline.query.formatter import format_result, format_trend_text
-from pipeline.query.tools import _weighted_avg_min
+from pipeline.reports.rankings import _weighted_avg_min
 
 
 def test_fmt_ranking_basic():
