@@ -27,11 +27,11 @@ from tests.fixtures.synthetic_gtfs import (
 def _assert_numeric(actual, expected, pattern_name: str, label: str, places: int = 2) -> None:
     """Compare a possibly-NULL numeric aggregate column against its expected value.
 
-    Some patterns (a fully uniform delay distribution, or a NULL-delay
-    pattern whose surviving subset is itself uniform) legitimately produce a
-    NULL percentile under this codebase's rank-based `PERCENT_RANK` formula
-    (see `synthetic_gtfs.uniform_delays`'s docstring) — `expected=None`
-    asserts that NULL rather than crashing on `float(None)`.
+    `expected=None` asserts an actual NULL rather than crashing on
+    `float(None)` — kept for generality even though none of this module's
+    current patterns produce one: `agg_route_stats`/`agg_route_hour`'s
+    `PERCENTILE_DISC()`-based p50/p90 always resolve to an observed value for
+    any non-empty group (see `synthetic_gtfs.uniform_delays`'s docstring).
     """
     if expected is None:
         assert actual is None, f"{pattern_name}.{label}: expected NULL, got {actual!r}"

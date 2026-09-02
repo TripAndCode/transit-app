@@ -192,18 +192,16 @@ def uniform_delays() -> SyntheticPattern:
     departure delay. The mean, on-time rate, and every count-style column
     below are trivial arithmetic on a single repeated value.
 
-    p50_min/p90_min are the one non-obvious value here: `agg_route_stats`'s
-    percentile columns are built from Postgres's `PERCENT_RANK()` (see
-    `pipeline/analyze.py`), which is `(rank - 1) / (row_count - 1)`. When
-    EVERY row in the partition is tied at the same value, `RANK()` gives
-    every row the same rank (1), so `PERCENT_RANK` is 0 for all of them —
-    `WHERE pct >= 0.5`/`>= 0.9` then matches zero rows, and `MIN()` over an
-    all-NULL `CASE` is NULL. A fully uniform distribution therefore
-    genuinely yields a NULL p50/p90 under this codebase's rank-based
-    formula (not 0.5, the tied value) — asserted as `None` below rather
-    than avoided, since that NULL is itself the correct, hand-verified
-    answer and a future switch to an interpolating percentile function
-    would change it.
+    p50_min/p90_min are still worth calling out even though they're trivial
+    here: `agg_route_stats`'s percentile columns are built from Postgres's
+    `PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY dep_delay)` (see
+    `pipeline/analyze.py`), which picks the smallest observed value whose
+    cumulative distribution is >= the target fraction. When EVERY row in the
+    partition is tied at the same value, that value's cumulative distribution
+    is 1.0 for both fractions, so p50/p90 both resolve to the tied value
+    (0.5 min here) rather than NULL — unlike this codebase's prior hand-rolled
+    `PERCENT_RANK()`-based formula, which gave every tied row the same rank
+    and so matched zero rows for a fully-tied partition.
     """
     n = 25
     delay_sec = 30
@@ -229,14 +227,14 @@ def uniform_delays() -> SyntheticPattern:
     expected = {
         "agg_route_stats": {
             "avg_min": 0.5,
-            "p50_min": None,  # see docstring: fully-tied partition -> NULL, not 0.5
-            "p90_min": None,
+            "p50_min": 0.5,  # see docstring: fully-tied partition -> the tied value
+            "p90_min": 0.5,
             "late_5min_plus": 0,
             "on_time_pct": 100.0,
             "late5_pct": 0.0,
             "samples": n,
         },
-        "agg_route_hour": {"avg_min": 0.5, "p50_min": None, "p90_min": None, "samples": n},
+        "agg_route_hour": {"avg_min": 0.5, "p50_min": 0.5, "p90_min": 0.5, "samples": n},
         "agg_route_dow": {"avg_min": 0.5, "samples": n},
         "agg_route_hour_dow": {"avg_min": 0.5, "samples": n},
         "agg_daily_trend": {"avg_min": 0.5, "samples": n},
@@ -278,10 +276,12 @@ def outlier_spike() -> SyntheticPattern:
     24 trips at a 30s delay, plus 1 trip spiking to 600s (10 min — well
     under ``MAX_PLAUSIBLE_DELAY_SEC`` (7200s), so it is a real outlier, not a
     clamped/excluded implausible spike). With 24 of 25 values tied at the
-    minimum, Postgres's ``PERCENT_RANK()`` puts every tied row at rank 0 and
-    the single maximum at rank 1.0 — so BOTH p50 and p90 land exactly on the
-    outlier (10.0 min), which is deliberate and doubles as a percentile
-    mechanics regression check, not just a mean/outlier check.
+    minimum, the 30s value's cumulative distribution is 24/25 = 0.96, which
+    already clears both the 0.5 and 0.9 fractions — so Postgres's
+    ``PERCENTILE_DISC()`` puts BOTH p50 and p90 at the tied minimum (0.5 min),
+    the true statistical median/90th-percentile of a spike-dominated sample,
+    not the outlier itself. This doubles as a percentile mechanics regression
+    check, not just a mean/outlier check.
     """
     n = 25
     normal_delay_sec = 30
@@ -313,14 +313,14 @@ def outlier_spike() -> SyntheticPattern:
     expected = {
         "agg_route_stats": {
             "avg_min": 0.88,  # round(52.8 / 60, 2)
-            "p50_min": 10.0,  # spike-dominated percentile, see docstring
-            "p90_min": 10.0,
+            "p50_min": 0.5,  # tied-minimum dominates the distribution, see docstring
+            "p90_min": 0.5,
             "late_5min_plus": 1,  # only the 600s spike exceeds 300s
             "on_time_pct": 96.0,  # 24/25 <= 60s
             "late5_pct": 4.0,  # 1/25 > 300s
             "samples": n,
         },
-        "agg_route_hour": {"avg_min": 0.88, "p50_min": 10.0, "p90_min": 10.0, "samples": n},
+        "agg_route_hour": {"avg_min": 0.88, "p50_min": 0.5, "p90_min": 0.5, "samples": n},
         "agg_route_dow": {"avg_min": 0.88, "samples": n},
         "agg_route_hour_dow": {"avg_min": 0.88, "samples": n},
         "agg_daily_trend": {"avg_min": 0.88, "samples": n},
@@ -374,10 +374,10 @@ def null_delays() -> SyntheticPattern:
     already covers the case where EVERY observation for a key is NULL.
 
     The 22 valid observations are also all tied at the same 60s delay, so
-    `agg_route_stats`/`agg_route_hour`'s p50_min/p90_min are NULL for the
-    same rank-tie reason documented on `uniform_delays` above — not because
-    of the NULL rows, but because the surviving (non-NULL) subset is itself
-    uniform.
+    `agg_route_stats`/`agg_route_hour`'s p50_min/p90_min resolve to that tied
+    value (1.0 min) for the same reason documented on `uniform_delays`
+    above — not because of the NULL rows, but because the surviving
+    (non-NULL) subset is itself uniform.
     """
     n_valid = 22
     n_null = 3
@@ -407,14 +407,14 @@ def null_delays() -> SyntheticPattern:
     expected = {
         "agg_route_stats": {
             "avg_min": 1.0,
-            "p50_min": None,  # see docstring: the valid subset is itself fully tied -> NULL
-            "p90_min": None,
+            "p50_min": 1.0,  # see docstring: the valid subset is itself fully tied
+            "p90_min": 1.0,
             "late_5min_plus": 0,
             "on_time_pct": 100.0,
             "late5_pct": 0.0,
             "samples": n_valid,
         },
-        "agg_route_hour": {"avg_min": 1.0, "p50_min": None, "p90_min": None, "samples": n_valid},
+        "agg_route_hour": {"avg_min": 1.0, "p50_min": 1.0, "p90_min": 1.0, "samples": n_valid},
         "agg_route_dow": {"avg_min": 1.0, "samples": n_valid},
         "agg_route_hour_dow": {"avg_min": 1.0, "samples": n_valid},
         "agg_daily_trend": {"avg_min": 1.0, "samples": n_valid},

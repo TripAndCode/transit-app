@@ -286,9 +286,10 @@ def test_null_service_route_gets_route_grain_baseline(pg_conn, agency_id):
 
 def test_route_baseline_sql_p90_pooling_ignores_null_p90_rows(pg_conn, agency_id):
     """_ROUTE_BASELINE_SQL's base_p90_min must not be diluted by a
-    contributing service_type whose own p90_min is null (a degenerate
-    PERCENT_RANK result for a thin/tied group -- agg_route_stats no longer
-    gates those out at insert time). SUM(p90_min * samples) silently skips a
+    contributing service_type whose own p90_min is null -- not something
+    `analyze()`'s own SQL can currently produce for a live group, but a stale
+    pre-rebuild row or, as here, a directly-seeded fixture can still exercise
+    this shape. SUM(p90_min * samples) silently skips a
     null numerator term, but the denominator must be FILTERed the same way,
     or that row's samples still count against a p90 it contributed nothing
     to -- biasing the pooled figure down."""

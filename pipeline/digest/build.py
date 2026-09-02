@@ -46,13 +46,17 @@ _DAY_ROUTES_SQL = """
 # sample count in the denominator, which would otherwise bias base_avg_min down
 # whenever any contributing service_type is missing the column.
 # base_p90_min's numerator/denominator are both FILTERed to the same
-# p90_min IS NOT NULL rows: agg_route_stats no longer gates out thin groups, so
-# a service_type's p90_min can itself be null (a degenerate PERCENT_RANK
-# result) while its samples are not -- SUM() silently skips a null numerator
-# term but NOT its row's sample count in the denominator, which would
-# otherwise bias base_p90_min down whenever any contributing service_type is
-# thin. Percentiles don't compose exactly across buckets (unlike the mean), so
-# base_p90_min stays a sample-weighted approximation of the rounded p90_min.
+# p90_min IS NOT NULL rows, the same defensive pattern as base_avg_min above:
+# `analyze()`'s own SQL can no longer produce a null p90_min alongside
+# non-null samples for a live group (dep_delay is filtered non-null
+# upstream, and analyze() wipes and rebuilds every row each run), but a
+# pre-migration-backfill historical row, a hand-seeded test fixture, or any
+# future non-analyze() writer could still leave one -- SUM() would then
+# silently skip a null numerator term but NOT its row's sample count in the
+# denominator, which would otherwise bias base_p90_min down whenever any
+# contributing service_type's row is null this way. Percentiles don't
+# compose exactly across buckets (unlike the mean), so base_p90_min stays a
+# sample-weighted approximation of the rounded p90_min.
 _ROUTE_BASELINE_SQL = """
     SELECT route_code,
            SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
