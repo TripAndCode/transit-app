@@ -1,21 +1,26 @@
 """Expected-delay heatmap: summarize agg_route_hour_dow into a day×hour grid.
 
 Pure (no DB) so the grid-fill, low-confidence, and disclaimer logic are
-unit-testable. The endpoint (api/routers/reports.py) does the SQL — pooling
-agg_route_hour_dow across service types per (dow, hour) — and passes the
-per-cell rows here.
+unit-testable. Two call paths feed `summarize_agency_overview`'s `grid_rows`:
+the endpoint (api/routers/reports.py) doing its own SQL — pooling
+agg_route_hour_dow across service types per (dow, hour), with each row's
+`avg_min` already the exact SUM(sum_delay_sec) / SUM(samples) — and
+`hourly_cells_to_dow_band`, which instead re-pools `compute_hourly_heatmap`'s
+per-(date, hour) cells (see that function's own docstring on why its
+`avg_min` is only a single, already-rounded per-cell mean, not a range-wide
+exact one).
 
 This is a seasonal-naive baseline ("expected delay"), NOT a prediction — see
-DELAY_ANALYSIS.md. Only the sample-weighted mean is reported. The endpoint SQL
-pools each contributing bucket's exact raw-seconds sum once, at the end
-(SUM(sum_delay_sec) / SUM(samples)), so the `avg_min` this module receives is
-already the exact pooled mean, not a re-weighting of an already-rounded
-per-bucket average — further Python-side pooling of these already-exact
-per-bucket means (see `_pooled` below) stays exact for the same reason: a
-weighted mean of EXACT per-bucket averages equals the true pooled mean, unlike
-a weighted mean of rounded ones. Percentiles are not reported (a weighted mean
-of per-bucket percentiles is not the pooled percentile, and percentiles cannot
-be recovered from per-bucket percentiles).
+DELAY_ANALYSIS.md. Only the sample-weighted mean is reported. `_pooled` (and
+the grid-building loop in `summarize_agency_overview`) prefer each row's
+exact `sum_delay_sec` when present, and only fall back to re-weighting
+`avg_min * samples` when it is absent — exact for the direct-SQL caller
+(whose `avg_min` is already an exact pooled mean, so `avg_min * samples`
+equals `sum_delay_sec` exactly) but an approximation for
+`hourly_cells_to_dow_band`'s caller until `compute_hourly_heatmap` is able to
+supply `sum_delay_sec` (nullable pre-rebuild — see its docstring). Percentiles
+are not reported (a weighted mean of per-bucket percentiles is not the pooled
+percentile, and percentiles cannot be recovered from per-bucket percentiles).
 """
 
 from collections.abc import Iterable, Mapping
@@ -100,29 +105,44 @@ def band_of(hour: int) -> str:
 
 
 def _pooled(pairs: list[tuple[float, int]]) -> tuple[float | None, int]:
-    """(avg_min, samples) pairs -> exact pooled (mean, total_samples)."""
+    """(total_min, samples) pairs -> exact pooled (mean, total_samples).
+
+    Each pair's first element is that bucket's TOTAL minutes contributed
+    (``sum_delay_sec / 60`` when the caller had the exact raw-seconds sum,
+    else ``avg_min * samples`` as a fallback — see the call sites below for
+    when each applies), NOT a per-bucket average to be weighted here. Summing
+    those totals and dividing once by the grand total sample count is always
+    the true pooled mean; it never re-weights an already-rounded figure.
+    """
     n = sum(s for _, s in pairs)
     if not n:
         return None, 0
-    return sum(v * s for v, s in pairs) / n, n
+    return sum(v for v, _ in pairs) / n, n
 
 
 def hourly_cells_to_dow_band(
     hourly: list[dict[str, Any]],
     locale: str = "ja",
 ) -> dict[str, Any]:
-    """Range-filtered {date,hour,avg_min,samples} rows (as returned by
-    compute_hourly_heatmap) -> a 7x5 dow x band grid + worst window, via
-    summarize_agency_overview. No route ranking (route_rows is always
-    empty here) and no disclaimer (summarize_agency_overview's disclaimer
-    text is forecast-specific "seasonal-naive historical average" framing —
-    wrong for a range-filtered historical card)."""
+    """Range-filtered {date,hour,avg_min,samples,sum_delay_sec} rows (as
+    returned by compute_hourly_heatmap) -> a 7x5 dow x band grid + worst
+    window, via summarize_agency_overview. No route ranking (route_rows is
+    always empty here) and no disclaimer (summarize_agency_overview's
+    disclaimer text is forecast-specific "seasonal-naive historical average"
+    framing — wrong for a range-filtered historical card).
+
+    Passes each cell's ``sum_delay_sec`` through (may be ``None`` — see
+    compute_hourly_heatmap's docstring) so summarize_agency_overview's grid
+    pooling can use the exact raw-seconds sum instead of re-weighting this
+    function's already-rounded per-cell ``avg_min``.
+    """
     grid_rows = [
         {
             "dow": date.fromisoformat(r["date"]).isoweekday(),
             "hour": r["hour"],
             "avg_min": r["avg_min"],
             "samples": r["samples"],
+            "sum_delay_sec": r.get("sum_delay_sec"),
         }
         for r in hourly
     ]
@@ -139,17 +159,31 @@ def summarize_agency_overview(
 ) -> dict[str, Any]:
     """Agency-wide 7×band grid + worst-window + delay-ranked routes. Pure.
 
-    `grid_rows`: per-(dow,hour) pooled mappings ``{dow,hour,avg_min,samples}``.
+    `grid_rows`: per-(dow,hour) pooled mappings ``{dow,hour,avg_min,samples}``,
+    with an optional ``sum_delay_sec`` (exact raw-seconds total for that row;
+    absent or ``None`` when the caller doesn't have it).
     `route_rows`: per-route mappings ``{route_code, route_name, avg_min, samples}``.
     `recent_daily_rows`: per-(date,route_code) mappings ``{date, route_code, avg_min}``
     — attached per route as `recent_daily`, sorted oldest first. Missing calendar
     days (no agg_route_daily row, e.g. no service that day) are simply omitted
     rather than null-padded, so `recent_daily`'s point spacing reflects "days
-    observed," not a calendar-uniform week. `grid_rows`/`route_rows` carry in
-    each bucket's exact pooled mean (the endpoint SQL divides an exact
-    raw-seconds sum once, at the end: SUM(sum_delay_sec) / SUM(samples)), so
-    the further Python-side sample-weighted pooling done here stays exact — a
-    weighted mean of EXACT per-bucket averages equals the true pooled mean.
+    observed," not a calendar-uniform week.
+
+    The grid pooling below prefers each row's exact ``sum_delay_sec`` when
+    present, dividing once at the end — the true pooled mean regardless of
+    how many already-rounded per-row averages went into it. It falls back to
+    ``avg_min * samples`` only when ``sum_delay_sec`` is absent/None: exact
+    for the endpoint's own direct-SQL caller (whose `avg_min` is already
+    ``SUM(sum_delay_sec) / SUM(samples)``, so `avg_min * samples` reconstructs
+    the same exact total), but an approximation for
+    ``hourly_cells_to_dow_band``'s caller before its `sum_delay_sec` is
+    populated by a rebuild (see compute_hourly_heatmap's docstring) — that
+    path re-weights an already-rounded per-cell average and so is NOT exact
+    the way the direct-SQL path is, a real but small (sub-cell-rounding-scale)
+    divergence from the true pooled mean.
+    ``route_rows`` gets no such treatment: each is already one row per route
+    (no further Python-side pooling happens over it here), so its ``avg_min``
+    is used as-is regardless of source.
     The worst window excludes low-confidence buckets so a small-sample fluke
     can never headline. No percentile (cannot pool per-bucket percentiles).
     """
@@ -158,8 +192,19 @@ def summarize_agency_overview(
     for r in grid_rows:
         if r["avg_min"] is None or not r["samples"]:
             continue
+        samples = int(r["samples"])
+        # Plain ``r["sum_delay_sec"]`` would KeyError for the direct-SQL
+        # caller's asyncpg Records, which never select that column (their
+        # avg_min is already exact — see this function's docstring) —
+        # unlike a dict, a Record has no reliable `.get`/`in` to probe for
+        # an absent key first.
+        try:
+            sum_delay_sec = r["sum_delay_sec"]
+        except (KeyError, IndexError):
+            sum_delay_sec = None
+        total_min = (sum_delay_sec / 60.0) if sum_delay_sec is not None else float(r["avg_min"]) * samples
         key = (int(r["dow"]), band_of(int(r["hour"])))
-        buckets.setdefault(key, []).append((float(r["avg_min"]), int(r["samples"])))
+        buckets.setdefault(key, []).append((total_min, samples))
 
     grid: list[dict[str, Any]] = []
     worst: dict[str, Any] | None = None
