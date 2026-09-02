@@ -35,8 +35,8 @@ def _sec_to_min(sec: float | None) -> Decimal | None:
 
 
 def _round1(x: float) -> Decimal:
-    """Round an already-in-percent float to 1 dp, half-up — matches Postgres
-    ``ROUND(x::numeric, 1)``. Same rationale as :func:`_round2`."""
+    """Round a float to 1 dp, half-up — matches Postgres ``ROUND(x::numeric, 1)``.
+    Same rationale as :func:`_round2`."""
     return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
