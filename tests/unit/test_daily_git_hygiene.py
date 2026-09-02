@@ -501,6 +501,14 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
 
+    # The venv-pruning stage's own self-check now resolves and validates
+    # main_venv BEFORE checking whether --venv-root exists (see that function's
+    # own docstring for why), so a nonexistent --venv-root is no longer enough
+    # on its own to make this stage a no-op -- poetry_env_path must also be
+    # stubbed to agree with whatever --venv-root this test pins.
+    venv_root = tmp_path / "does-not-exist-virtualenvs"
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
+
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
@@ -520,7 +528,7 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
             # exist and be populated on the exact machine this script targets, which
             # would make this test's outcome depend on the machine running it.
             "--venv-root",
-            str(tmp_path / "does-not-exist-virtualenvs"),
+            str(venv_root),
         ]
     )
 
@@ -535,6 +543,9 @@ def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_t
 
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    venv_root = tmp_path / "does-not-exist-virtualenvs"
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
@@ -551,7 +562,7 @@ def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_t
             "--state-file",
             str(state_path),
             "--venv-root",
-            str(tmp_path / "does-not-exist-virtualenvs"),
+            str(venv_root),
             "--apply",
         ]
     )
@@ -567,12 +578,14 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
     through direct calls to run_orphaned_venv_pruning -- pinning --venv-root to a nonexistent
     directory in the other main() tests (for hermeticity) means every one of them takes the
     stage's very first no-op early-return, so none of them would notice if it were ever
-    dropped from main()'s own `stages` tuple entirely."""
+    dropped from main()'s own `stages` tuple entirely. The main checkout's own venv is given
+    an OLD mtime here specifically -- a fresh one would be protected by the age margin alone,
+    never actually exercising the in-use correlation this stage depends on to keep it safe."""
 
     venv_root = tmp_path / "virtualenvs"
-    main_venv = venv_root / "transit-delay-app-main-py3.12"
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
     monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=100)
     monkeypatch.setattr(
         hygiene,
         "poetry_env_path",
@@ -580,7 +593,6 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
     )
 
     orphan = _make_fake_venv(venv_root, "transit-delay-app-orphan-py3.12", age_hours=100)
-    main_venv.mkdir()  # satisfies the --venv-root-contains-main_venv self-check
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
@@ -606,6 +618,7 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
 
     assert exit_code == 0
     assert not orphan.exists()
+    assert main_venv.is_dir()  # protected by the in-use correlation, not merely by age
 
 
 def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
@@ -1094,6 +1107,29 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
     assert worktree_path.resolve() not in queried
 
 
+def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_directory_is_absent(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A locked worktree whose directory is gone must NOT be silently skipped like a prunable
+    one: git itself refuses to mark a locked worktree prunable even when its directory is
+    missing (locking exists specifically to protect it from this class of cleanup, confirmed
+    live), so this falls through to the fail-closed path instead of being treated as
+    unambiguously "nothing runs out of here"."""
+
+    worktree_path = tmp_path / "extra-worktree"
+    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "lock", str(worktree_path))
+    shutil.rmtree(worktree_path)  # remove the directory directly while still locked
+    listing = git(repository, "worktree", "list", "--porcelain")
+    assert "locked" in listing
+    assert "prunable" not in listing
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
+
+    with pytest.raises(hygiene.HygieneError):
+        hygiene.compute_in_use_poetry_venvs(repository, tmp_path / "venv-main", min_age_hours=0)
+
+
 def test_compute_in_use_poetry_venvs_includes_main_and_every_worktree(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1124,20 +1160,48 @@ def test_compute_in_use_poetry_venvs_includes_main_and_every_worktree(
     assert repository.resolve() not in queried
 
 
-def test_run_orphaned_venv_pruning_is_a_noop_when_venv_root_missing(tmp_path: Path):
-    """No venv root at all (e.g. poetry never ran here) is not an error."""
+def test_run_orphaned_venv_pruning_raises_when_the_checkouts_own_venv_is_unresolvable(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """If poetry can't resolve this checkout's own venv at all (not on PATH, a poetry config
+    problem), that's reported as a poetry/environment issue -- distinct from a --venv-root
+    misconfiguration -- rather than silently treated as "nothing to do" (this stage's own
+    original bug: --venv-root simply not existing took an early no-op return before this
+    self-check ever ran, letting the exact misconfiguration it exists to catch through)."""
 
-    assert (
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: None)
+
+    with pytest.raises(hygiene.HygieneError, match="could not resolve"):
         hygiene.run_orphaned_venv_pruning(
-            tmp_path,
+            repository,
             venv_root=tmp_path / "does-not-exist",
             min_age_hours=24,
             max_deletes_per_run=10,
             apply=True,
             log_file=tmp_path / "log",
         )
-        is True
-    )
+
+
+def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_real_venv_exists_elsewhere(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A --venv-root that simply doesn't exist (e.g. left at the wrong platform's default) must
+    not take a silent no-op return before the self-check runs -- this is precisely the
+    misconfiguration the self-check exists to catch, and it must be caught even though the
+    directory itself is absent, not merely wrong-but-present."""
+
+    real_venv = _make_fake_venv(tmp_path / "real-location", "transit-delay-app-main-py3.12", age_hours=1)
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: real_venv)
+
+    with pytest.raises(hygiene.HygieneError, match="not the direct parent"):
+        hygiene.run_orphaned_venv_pruning(
+            repository,
+            venv_root=tmp_path / "does-not-exist-virtualenvs",  # e.g. the wrong platform's default
+            min_age_hours=24,
+            max_deletes_per_run=10,
+            apply=True,
+            log_file=tmp_path / "log",
+        )
 
 
 def test_run_orphaned_venv_pruning_refuses_a_venv_root_containing_none_of_the_in_use_venvs(

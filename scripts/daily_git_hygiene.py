@@ -613,11 +613,16 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
 
     A worktree gets two, narrower grace conditions before the same
     fail-closed treatment applies:
-    - `git worktree list`'s own `prunable` flag, or the path simply not
-      existing on disk, means the administrative entry outlived the actual
-      directory (removed out-of-band, or pending its own `git worktree
-      prune`) -- unambiguously "nothing runs out of here," not one of the
-      two cases above, so it's skipped rather than raised on.
+    - `git worktree list`'s own `prunable` flag means the administrative
+      entry outlived the actual directory (removed out-of-band, or pending
+      its own `git worktree prune`) -- unambiguously "nothing runs out of
+      here," not one of the two cases above, so it's skipped rather than
+      raised on. A `locked` worktree whose directory is merely absent is
+      NOT treated the same way: git itself refuses to mark a locked
+      worktree `prunable` even when its directory is gone (confirmed
+      live), since locking is meant to protect it from exactly this kind
+      of cleanup -- so an absent-but-locked worktree still falls through
+      to the fail-closed path below, rather than being silently skipped.
     - A worktree younger than `min_age_hours` (mirroring the same grace
       period `run_orphaned_venv_pruning` already applies to venv ages) may
       simply not have run any poetry/backend command yet -- e.g. a
@@ -669,8 +674,8 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     for worktree in worktrees:
         resolved_worktree = worktree.path.resolve()
         if resolved_worktree == resolved_repo:
-            continue  # already queried above; avoid a redundant poetry spawn
-        if worktree.prunable or not worktree.path.exists():
+            continue  # main_venv (the caller's, not re-derived here) already covers this one
+        if worktree.prunable or (not worktree.locked and not worktree.path.exists()):
             continue
         venv = poetry_env_path(worktree.path)
         if venv is not None:
@@ -727,31 +732,42 @@ def run_orphaned_venv_pruning(
     """
 
     print(f"== Orphaned poetry venv pruning ({venv_root}) ==")
-    if not venv_root.is_dir():
-        print(f"{venv_root} does not exist, nothing to do")
-        return True
 
-    # Resolved and validated exactly once (not inside compute_in_use_poetry_venvs,
+    # Resolved and validated FIRST, before the venv_root.is_dir() check below --
+    # not after it. The most likely real misconfiguration this self-check exists
+    # to catch (--venv-root left at the wrong platform's default) is exactly a
+    # root that doesn't exist at all; checking is_dir() first would let that
+    # exact case take the early "nothing to do" return and silently skip
+    # validation entirely, defeating the whole point of a *self-validating*
+    # control. Resolved exactly once here (not inside compute_in_use_poetry_venvs,
     # and not called a second time below) so a transient poetry hiccup on the
-    # re-check can never masquerade as "--venv-root is misconfigured".
-    #
-    # Self-validating positive control: if `--venv-root` is misconfigured (wrong
-    # platform default) or `POETRY_VENV_GLOB` no longer matches (a renamed
-    # project), this stage would otherwise "succeed" by finding zero candidates
-    # forever, silently enforcing nothing -- the one thing it exists to prevent
-    # a repeat of. The main checkout's own venv must be a DIRECT child of
-    # `venv_root` (not merely some ancestor of it, which `Path.parents` alone
-    # would too loosely accept) whose name the glob actually matches.
+    # later re-check can never masquerade as "--venv-root is misconfigured".
     main_venv = poetry_env_path(repo)
-    if (
-        main_venv is None
-        or main_venv.parent != venv_root.resolve()
-        or not fnmatch.fnmatch(main_venv.name, POETRY_VENV_GLOB)
-    ):
+    if main_venv is None:
         raise HygieneError(
-            f"--venv-root {venv_root} does not contain this checkout's own poetry venv "
+            f"could not resolve this checkout's own poetry venv at {repo} (is `poetry` on PATH and "
+            "working?); refusing to prune -- this is a poetry/environment problem, not necessarily "
+            "a --venv-root misconfiguration"
+        )
+    # Self-validating positive control: if `--venv-root` is misconfigured (wrong
+    # platform default, including simply not existing) or `POETRY_VENV_GLOB` no
+    # longer matches (a renamed project), this stage would otherwise "succeed" by
+    # finding zero candidates forever, silently enforcing nothing -- the one
+    # thing it exists to prevent a repeat of. The main checkout's own venv must
+    # be a DIRECT child of `venv_root` (not merely some ancestor of it, which
+    # `Path.parents` alone would too loosely accept) whose name the glob
+    # actually matches.
+    if main_venv.parent != venv_root.resolve() or not fnmatch.fnmatch(main_venv.name, POETRY_VENV_GLOB):
+        raise HygieneError(
+            f"--venv-root {venv_root} is not the direct parent of this checkout's own poetry venv "
             f"({main_venv}); refusing to prune what may be the wrong directory entirely"
         )
+    if not venv_root.is_dir():
+        # Unreachable in practice now that the check above requires venv_root to
+        # be main_venv's own parent (which must exist for main_venv to resolve) --
+        # kept as a defensive, no-op fallback rather than assumed impossible.
+        print(f"{venv_root} does not exist, nothing to do")
+        return True
 
     in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
     now_epoch = time.time()
