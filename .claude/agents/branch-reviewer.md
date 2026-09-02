@@ -31,15 +31,17 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   `comments` dimension's job, not this one.
 - **comments** — comment prose that no longer matches the code beside it. Narrow the
   search first by running
-  `python3 "$HOME/.claude/scripts/comment_lint.py" --root <worktree> --stale-candidates <merge-base>`
+  `python3 <linter> --root <worktree> --stale-candidates <merge-base>`
   and judging only the comments it lists; each of those sits beside a changed line
-  while staying unchanged itself. That script is personal tooling under `$HOME` and is
-  not part of this repository — never report it as missing and never search the
-  worktree for it. Two cases fall back to reading the comments and prose adjacent to
-  the prepared diff's changed lines: the script failing to run, which you say so
-  about, and the script succeeding with an empty candidate list. It reads Python and
-  TypeScript sources only, so a diff touching neither — Markdown-only process-doc
-  diffs among them — produces nothing to list, and an empty list is not coverage.
+  while staying unchanged itself. The caller supplies `<linter>` as an absolute path to
+  `scripts/comment_lint.py` — take it from the prompt rather than resolving it inside
+  the worktree, since a reviewed branch may carry its own edited copy. Two cases fall
+  back to reading the comments and prose adjacent to the prepared diff's changed
+  lines: the script succeeding with an empty candidate list, and the script failing to
+  run, which is a real defect in repository tooling and belongs in your obstacles
+  note. It reads Python and TypeScript sources only, so a diff touching neither —
+  Markdown-only process-doc diffs among them — produces nothing to list, and an empty
+  list is not coverage.
   Judge only what a machine cannot: does each comment still describe what the code
   now does? Apply the repository's durable-content
   rule — a comment must not cite a PR number, an issue, a past bug, or a date as the

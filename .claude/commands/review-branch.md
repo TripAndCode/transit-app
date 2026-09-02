@@ -57,8 +57,11 @@ dimensions, worktree path, and this exact line:
 `Deliberately excluded, do NOT re-derive: <manifest paths>. This is not truncation.`
 
 A dispatch whose assigned dimensions include `comments` additionally receives the
-manifest's `merge_base`, which that dimension needs to build its stale-candidate list.
-No other dimension takes a base ref.
+manifest's `merge_base` and the absolute path to `scripts/comment_lint.py` **in the
+invoking checkout**, both of which that dimension needs to build its stale-candidate
+list. Pass the invoking checkout's copy rather than letting the reviewer resolve the
+path inside the worktree, for the same reason `prepare_review.py` is run from there: a
+reviewed branch may carry its own edited copy. No other dimension takes either value.
 
 Do not paste diff text into prompts. Reviewers never receive one another's output.
 While they run, do not switch, reset, or otherwise move the reviewed worktree; the

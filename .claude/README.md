@@ -48,6 +48,12 @@ and JSON routing manifest, so commands should consume its output rather than
 reimplementing path exclusions, line counts, or test-share math.
 `scripts/cleanup_git_state.py` is the deletion authority for `/cleanup-merged` and the
 VPS loop; it defaults to dry-run and rechecks mutable state before applying a plan.
+`scripts/comment_lint.py` narrows the `comments` dimension to comments left unchanged
+beside changed code, and its gate mode rejects banners, over-long blocks, pointers at
+other comments, and line-number references. It reads Python and TypeScript only, so it
+has nothing to say about a Markdown-only diff. All three are versioned here on purpose:
+a review rule that lives in one machine's home directory is not a review rule the VPS
+loop or a second checkout can apply.
 
 Each command file states its own token-frugality rules inline, in the phase they apply
 to. This README is a map, not a rule store: no command loads it, so nothing here is
@@ -67,8 +73,7 @@ for the current list and exact scope of
 each (e.g. `security` covers hardcoded creds, CSRF/SSRF, PII/PDPA-APPI,
 session-cookie flags; `consistency` covers cross-file contract drift like
 i18n key parity or `agg_*` column renames; `comments` narrows to the stale-candidate
-list from `$HOME/.claude/scripts/comment_lint.py`, personal tooling outside this repo,
-and enforces `CLAUDE.md`'s durable-content rule).
+list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content rule).
 
 ## Guardrails baked into these files
 

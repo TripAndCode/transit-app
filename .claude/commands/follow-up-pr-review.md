@@ -87,11 +87,11 @@ scoped to this delta only:
 - **Staleness** — comments, docstrings, tests, locale entries, or docs that the new
   commits leave contradicting the code, including anything the same commits
   refactored away. Narrow this half first by running
-  `python3 "$HOME/.claude/scripts/comment_lint.py" --root <worktree> --stale-candidates <merge_base>`
-  and judging only what it lists. That script is personal tooling under `$HOME`, not
-  part of the repository. If it fails or returns an empty list — it reads Python and
-  TypeScript sources only — fall back to the comments and prose beside the delta's
-  changed lines.
+  `python3 <invoking-checkout>/scripts/comment_lint.py --root <worktree> --stale-candidates <merge_base>`
+  and judging only what it lists — the invoking checkout's copy, never the reviewed
+  branch's, for the same reason `prepare_review.py` is run from there. If it fails or
+  returns an empty list — it reads Python and TypeScript sources only — fall back to
+  the comments and prose beside the delta's changed lines.
 - **Refactor opportunities** — duplication or unnecessary ceremony the new commits
   introduce or leave behind, with a concrete simpler alternative.
 
