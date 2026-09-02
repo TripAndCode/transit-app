@@ -104,12 +104,14 @@ i18n key parity or `agg_*` column renames).
   no automated prune path existed at all), and orphaned poetry virtualenvs:
   poetry names a project's venv by hashing its absolute path, so a worktree
   this script's own first stage (or the loop's own Step 2/2b) deletes
-  leaves its now-unreachable venv behind at ~5-6GB apiece with no automated
+  leaves its now-unreachable venv behind at several GB apiece with no automated
   prune path of its own — poetry itself never revisits a path once it stops
   existing. This requires `poetry` to be reachable from the cron shell's
   `PATH` (see the non-interactive-shell note above — the same `/usr/local/bin`
   reachability requirement applies here as for any other binary this job
-  shells out to). Like `/root/claude-loop.sh`, the
+  shells out to), and it assumes `/root/transit-app` is the only clone of
+  this project on the host — an independent second clone's own venv isn't
+  detectable as in-use and would eventually be pruned. Like `/root/claude-loop.sh`, the
   crontab wiring itself is VPS-local infrastructure, not tracked in this
   repo — only the
   script it invokes is.
