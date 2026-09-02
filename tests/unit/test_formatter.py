@@ -23,8 +23,8 @@ def test_r_rounds_half_up_not_half_to_even():
     representable as a binary float and lands fractionally below the half,
     but even where it would land exactly on it, banker's rounding would still
     pick the even digit), half-up gives '2.2'."""
-    assert _r(2.15, 1) == "2.2"
-    assert _r(2.25, 1) == "2.3"
+    assert _r(2.15) == "2.2"
+    assert _r(2.25) == "2.3"
     assert _r(None) == "—"
 
 

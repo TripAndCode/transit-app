@@ -56,6 +56,7 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
+from pipeline.reports.rankings import _round1
 
 _log = logging.getLogger(__name__)
 
@@ -722,7 +723,7 @@ async def _top_delayed_routes(
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
             # Guard against a NULL pooled average reaching the unguarded
-            # round(float(...)) below.
+            # _round2(...) below.
             "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             # Ties broken by route_code, same as the slow path just below and
             # as _concentration()'s fast path.
@@ -1049,7 +1050,7 @@ async def _movers(
             continue
         d_min = cur_avg - prv_avg
         d_pct = round((d_min / prv_avg) * 100.0, 1) if abs(prv_avg) >= MIN_PRV_AVG_FOR_PCT_MIN else None
-        deltas.append((code, round(d_min, 2), d_pct, d_min))
+        deltas.append((code, float(_round2(d_min)), d_pct, d_min))
     # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
     # they're distinct — which is what makes the ranking reproducible: the order
     # `common` happens to be iterated in cannot influence the result. It used to:
@@ -1086,8 +1087,8 @@ async def _movers(
             "delta_pct": dp,
             # Absolute averages for both windows so the UI can show
             # "last week X min → this week Y min" instead of a bare Δ%.
-            "current_avg_min": round(cur[code][0], 1),
-            "previous_avg_min": round(prv[code][0], 1),
+            "current_avg_min": float(_round1(cur[code][0])),
+            "previous_avg_min": float(_round1(prv[code][0])),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
             "sparkline_points": pts,
         }
@@ -1268,7 +1269,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
@@ -1342,7 +1343,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 

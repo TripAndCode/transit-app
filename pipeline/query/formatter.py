@@ -13,11 +13,10 @@ Strings live in :data:`_LOCALES` keyed on ``(template, locale)`` so a new
 language only needs to add a column rather than rewriting handler code.
 """
 
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from pipeline.query.labels import dow_label
-from pipeline.reports.rankings import _weighted_avg_min
+from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
     ("no_data", "ja"): "データがありません。期間や路線フィルタを見直してください。",
@@ -83,24 +82,22 @@ def _t(template: str, locale: str, **vars: Any) -> str:
         return tpl
 
 
-def _r(x, d: int = 1) -> str:
-    """Round a numeric DB value to *d* decimal places and return as a string.
+def _r(x) -> str:
+    """Round a numeric DB value to 1 decimal place and return as a string.
 
-    Uses ``Decimal(...).quantize(..., ROUND_HALF_UP)`` — the same convention
-    ``pipeline.reports.rankings``'s ``_round1``/``_round2`` use to match
-    Postgres's ``ROUND()`` (half away from zero) — rather than plain Python
+    Delegates to ``pipeline.reports.rankings``'s ``_round1``, which matches
+    Postgres's ``ROUND()`` (half away from zero) rather than plain Python
     ``round()`` (round-half-to-even). The row values rendered here (e.g.
     ``avg_min``) already arrive rounded to 2dp by that same convention;
-    re-rounding them to *d* places with a different rounding rule could
-    land on a different digit than the value shown elsewhere (e.g. the Ask
-    tab's raw table cell) for the exact same underlying number.
+    re-rounding them with a different rounding rule could land on a
+    different digit than the value shown elsewhere (e.g. the Ask tab's raw
+    table cell) for the exact same underlying number.
 
     Returns '—' for None/NULL values.
     """
     if x is None:
         return "—"
-    quant = Decimal("0." + "0" * (d - 1) + "1") if d > 0 else Decimal("1")
-    return f"{Decimal(str(x)).quantize(quant, rounding=ROUND_HALF_UP):.{d}f}"
+    return f"{_round1(x):.1f}"
 
 
 def _service_prefix(intent: dict, locale: str) -> str:
@@ -151,7 +148,7 @@ def _fmt_on_time(rows: list, intent: dict, locale: str) -> str:
             rank=i,
             route=r[0],
             service=r[1],
-            pct=_r(r[2], 1),
+            pct=_r(r[2]),
             avg=_r(r[3]),
             samples=r[4],
         )

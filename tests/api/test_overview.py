@@ -506,6 +506,32 @@ async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_movers_delta_min_rounds_half_up_not_half_to_even(aconn, aagency_id):
+    """``_movers``'s delta_min must use the same ROUND_HALF_UP convention as
+    every other avg_min-class figure in this module, not Python's plain
+    round() (round-half-to-even).
+
+    prior avg = 1.0 min, current avg = 3.155 min -> delta_min_raw = 2.155,
+    an exact tie at the 2dp boundary the same way 2.15 is an exact tie at
+    1dp for pipeline.query.formatter._r (see test_formatter.py's identical
+    repro). ROUND_HALF_UP gives 2.16; plain round() lands fractionally
+    below the tie (2.155 is not exactly representable as a binary float)
+    and would give 2.15 instead.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc).date()
+    prv = cur - timedelta(days=7)
+    await _seed_agg_daily(aconn, aagency_id, prv, "R_BOUND", "平日", 1.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, cur, "R_BOUND", "平日", 3.155, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+    assert worse_by_code["R_BOUND"]["delta_min"] == 2.16
+
+
+@pytest.mark.asyncio
 async def test_movers_suppresses_delta_pct_below_prv_avg_floor(aconn, aagency_id):
     """A near-zero previous-window average must not produce a triple-digit
     delta_pct off a trivial absolute change — delta_pct is suppressed to
