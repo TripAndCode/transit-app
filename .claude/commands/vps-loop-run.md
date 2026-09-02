@@ -14,7 +14,8 @@ skip ahead.
 
 Every Status log entry logged when a tick stops making zero forward progress
 because of a genuine blocker — Step 1's stash-and-stop, Step 2's
-tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3b's
+tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3's
+OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
 worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
@@ -336,26 +337,34 @@ Walk items top to bottom:
   file otherwise routes a later tick back to finish readying/merging it — it
   would sit open indefinitely, since Step 3's ordinary `OPEN` handling never
   revisits it. Before trusting the closing statement, confirm no commit has
-  landed on the branch since it was written: find that commit with `git log -1
-  --format=%H origin/vps-loop/item-<N> -- docs/refactor-log.md`, then check
-  `git log --oneline <that-SHA>..origin/vps-loop/item-<N>` is empty. A
-  non-empty result — e.g. an interrupted `main`-resync merge from a prior 6.6
-  attempt, or any other later commit — means commits exist that the closing
-  statement never covered; treat this exactly like an ambiguous entry and fall
-  through to the skip-as-in-progress behavior, do NOT resume at 6.5. Only once
-  that log is empty does the closing statement still describe the branch's
-  actual current tip. Next, confirm the worktree Steps 6.1–6.4 used still
-  exists (`git worktree list`) — mirroring Step 2b/3b's own "worktree exists
-  vs. branch only" fork: if it's gone, this is not safely resumable from here;
-  log `- <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows
-  both passes clean, but its worktree no longer exists — needs a human to
-  reattach one before Step 6 can be resumed.
+  landed on the branch since it was written: find the most recent commit
+  touching the file with `git log -1 --format=%H origin/vps-loop/item-<N> --
+  docs/refactor-log.md` (this may resolve to 6.4's own placeholder-replacement
+  commit rather than the exact commit that wrote the closing statement — that
+  only makes the next check stricter, never wrong, since it can't land earlier
+  than the real closing-statement commit), then check `git log --oneline
+  <that-SHA>..origin/vps-loop/item-<N>` is empty. A non-empty result — e.g. an
+  interrupted `main`-resync merge from a prior 6.6 attempt, or any other later
+  commit — means commits exist that the closing statement never covered;
+  treat this exactly like an ambiguous entry and fall through to the
+  skip-as-in-progress behavior, do NOT resume at 6.5. Only once that log is
+  empty does the closing statement still describe the branch's actual current
+  tip. Next, confirm the worktree Steps 6.1–6.4 used still exists (`git
+  worktree list`) — mirroring Step 2b/3b's own "worktree exists vs. branch
+  only" fork: if it's gone, this is not safely resumable from here; log `-
+  <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows both
+  passes clean, but its worktree no longer exists — needs a human to reattach
+  one before Step 6 can be resumed.
   **Blocker-tag:** branch-without-worktree` and stop this tick — a tick stop,
   not an ordinary item skip, for the same reason Step 3b's own "branch only,
   no worktree" case stops rather than continuing to a different item: moving
   on would leave this recurring root cause invisible to Step 0's circuit
-  breaker. If the worktree exists: skip the rest of Step 3/3b and resume
-  directly at **Step 6.5** for this PR, first reconstructing
+  breaker. If the worktree exists: first check whether the entry still reads
+  `(PR #pending)` instead of a real number — meaning the tick died between
+  6.3 and 6.4 — and if so, run 6.4 now (replace the placeholder, commit,
+  push) before continuing; do not squash-merge that placeholder into `main`
+  verbatim. Then skip the rest of Step 3/3b and resume directly at **Step
+  6.5** for this PR, first reconstructing
   `MAIN_SHA_AT_REVIEW` (6.1's value, which is never persisted and so isn't
   available to a fresh tick) as `git -C <worktree-path> merge-base origin/main
   vps-loop/item-<N>` — the `main` this branch tip was last reconciled against.
