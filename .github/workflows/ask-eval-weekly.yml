@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-
       clickhouse:
         image: clickhouse/clickhouse-server:26.3
         env:
