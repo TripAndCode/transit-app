@@ -139,12 +139,11 @@ def already_succeeded_today(state_file: Path) -> bool:
 
     A single fixed cron time (e.g. once daily) can keep losing the
     `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
-    retry within that invocation (see that function's own docstring) --
-    confirmed live, two calendar days running. Pairing a same-day
-    completion marker with a much more frequent cron trigger (this job
-    stays idempotent per day either way) turns that into an hourly retry
-    instead of a 24-hour one, without ever running the real cleanup twice
-    in one day.
+    retry within that invocation (see that function's own docstring).
+    Pairing a same-day completion marker with a much more frequent cron
+    trigger (this job stays idempotent per day either way) turns that into
+    an hourly retry instead of a 24-hour one, without ever running the
+    real cleanup twice in one day.
     """
 
     try:
@@ -179,13 +178,19 @@ def log_line(log_file: Path, message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> None:
+def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str], apply: bool, log_file: Path) -> bool:
     """Plan (and optionally apply) `cleanup_git_state`'s local cleanup, logging deletes.
 
     Fetches `remote` first: `build_plan`'s `validate_base` requires local
     `refs/heads/{base}` to exactly match `refs/remotes/{remote}/{base}`, and
     this job is specifically meant to run during idle stretches where nothing
     else has refreshed that remote-tracking ref recently.
+
+    Unlike the other two stages, `cleanup_git_state.apply_plan` has no
+    per-item swallow-and-continue -- any problem raises `CleanupError`
+    immediately, which `main`'s own stage loop already catches. Always
+    returns True (or doesn't return at all) for that reason; the bool
+    return exists only so all three stages share one uniform contract.
     """
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
@@ -193,7 +198,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
     decisions = cleanup_git_state.build_plan(repo, base=base, remote=remote, protected=protected)
     cleanup_git_state.print_plan(decisions, applying=apply)
     if not apply:
-        return
+        return True
 
     # Capture apply_plan's own "DELETED ..." lines so the hygiene log records
     # exactly what it actually removed (post its own immediate re-check),
@@ -208,6 +213,8 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
         for line in output.splitlines():
             if line.startswith("DELETED "):
                 log_line(log_file, f"local cleanup: {line}")
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +327,15 @@ def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
     cleanup_git_state.run_git(repo, "push", remote, "--delete", "--", branch)
 
 
-def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> None:
-    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches."""
+def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> bool:
+    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches.
+
+    Returns False if any individual branch's tip-check or delete failed --
+    those are deliberately swallowed and logged per-branch (a transient
+    failure on one branch must not abort the rest), but the caller still
+    needs to know the stage wasn't fully clean, since that decides whether
+    today can be marked done (see `main`'s `mark_succeeded_today` gate).
+    """
 
     print(f"== Remote vps-loop/item-* branch cleanup ({remote}) ==")
     branches = list_remote_vps_loop_branches(repo, remote)
@@ -339,7 +353,9 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
     if delete_count and not apply:
         print(f"Dry run only. Re-run with --apply to delete the listed {remote} branches.")
     if not apply:
-        return
+        return True
+
+    all_clean = True
 
     # Re-fetch dependent-PR evidence once right before applying (not once per
     # branch) to catch a stacked PR opened during planning, without regressing
@@ -361,6 +377,7 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
             message = f"remote cleanup: ERROR checking {remote}/{decision.branch} tip: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         if current_head != decision.head:
             observed = current_head[:12] if current_head else "branch gone"
@@ -377,9 +394,12 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
             message = f"remote cleanup: ERROR deleting {remote}/{decision.branch}: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         print(f"DELETED {remote}/{decision.branch}")
         log_line(log_file, f"remote cleanup: DELETED {remote}/{decision.branch} — {decision.reason}")
+
+    return all_clean
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +461,14 @@ def delete_local_branch(repo: Path, branch: str) -> None:
     cleanup_git_state.run_git(repo, "branch", "-D", "--", branch)
 
 
-def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> None:
-    """Plan (and optionally apply) removal of superseded-backup branches past retention."""
+def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> bool:
+    """Plan (and optionally apply) removal of superseded-backup branches past retention.
+
+    Returns False if any individual branch's delete failed -- deliberately
+    swallowed and logged per-branch (see `run_remote_branch_cleanup`'s
+    docstring for why), but still surfaced so `main` doesn't mark today
+    done on a stage that wasn't actually fully clean.
+    """
 
     print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
     now_epoch = int(time.time())
@@ -457,8 +483,9 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
     if delete_count and not apply:
         print("Dry run only. Re-run with --apply to remove the listed backup branches.")
     if not apply:
-        return
+        return True
 
+    all_clean = True
     for decision in decisions:
         if decision.action != "delete":
             continue
@@ -473,9 +500,12 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
             message = f"backup pruning: ERROR deleting {decision.branch}: {exc}"
             print(message, file=sys.stderr)
             log_line(log_file, message)
+            all_clean = False
             continue
         print(f"DELETED {decision.branch}")
         log_line(log_file, f"backup pruning: DELETED {decision.branch} — {decision.reason}")
+
+    return all_clean
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +560,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         protected = {args.base, "production", *args.protect}
         exit_code = 0
 
-        stages: tuple[tuple[str, Callable[[], None]], ...] = (
+        stages: tuple[tuple[str, Callable[[], bool]], ...] = (
             (
                 "local cleanup",
                 lambda: run_local_cleanup(
@@ -550,15 +580,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for stage, runner in stages:
             try:
-                runner()
+                stage_clean = runner()
             except (CleanupError, HygieneError, OSError) as exc:
                 print(f"ERROR ({stage}): {exc}", file=sys.stderr)
                 log_line(log_file, f"ERROR: {stage} failed: {exc}")
                 exit_code = 2
+                continue
+            if not stage_clean:
+                # A per-item failure inside the stage (already logged there,
+                # e.g. one branch's delete or tip-check erroring) -- the
+                # stage itself didn't raise, but it wasn't fully clean either.
+                exit_code = 2
 
-        # Only a fully-clean run marks today done -- a stage error should
-        # still retry on the next hourly trigger today, not wait a full day.
-        if exit_code == 0:
+        # Only a fully-clean --apply run marks today done. A dry run (the
+        # default, and the documented way to preview what a run would do)
+        # reaches exit_code == 0 just as easily as a real cleanup does, since
+        # every stage returns early before deleting anything -- marking it
+        # done would silently cancel the day's real --apply cron run the
+        # next time it fires. A stage error (raised or per-item) must also
+        # not mark today done, so it retries on the next hourly trigger
+        # instead of waiting a full day.
+        if args.apply and exit_code == 0:
             mark_succeeded_today(args.state_file)
 
         return exit_code

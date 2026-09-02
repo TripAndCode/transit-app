@@ -410,7 +410,7 @@ def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
     assert exit_code == 0
 
 
-def test_main_marks_today_succeeded_only_after_a_fully_clean_run(
+def test_main_marks_today_succeeded_only_after_a_fully_clean_apply_run(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A stage error must not mark today done -- it should retry on the next hourly trigger."""
@@ -419,7 +419,7 @@ def test_main_marks_today_succeeded_only_after_a_fully_clean_run(
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
-    def _boom(*_args: object, **_kwargs: object) -> None:
+    def _boom(*_args: object, **_kwargs: object) -> bool:
         raise hygiene.HygieneError("simulated stage failure")
 
     monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", _boom)
@@ -434,6 +434,101 @@ def test_main_marks_today_succeeded_only_after_a_fully_clean_run(
             str(log_path),
             "--state-file",
             str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 2
+    assert not state_path.exists()
+
+
+def test_main_does_not_mark_today_succeeded_on_a_dry_run(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A plain preview (no --apply, the documented default) must not poison the day's real cron run.
+
+    Every stage returns True/exit_code 0 on a dry run just as easily as on a genuinely
+    clean --apply run, since each returns before deleting anything -- without the
+    `args.apply` gate, an operator previewing the plan by hand would silently cancel
+    that day's scheduled --apply cleanup.
+    """
+
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert not state_path.exists()
+
+
+def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_to_clean(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A real --apply run that finds nothing to delete is still a fully-clean day."""
+
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
+    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 0
+    assert hygiene.already_succeeded_today(state_path) is True
+
+
+def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A stage that returns False (a swallowed per-item error) must not mark today done either."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", lambda *_args, **_kwargs: False)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
         ]
     )
 
@@ -664,8 +759,9 @@ def test_run_remote_branch_cleanup_continues_after_one_delete_error(
     monkeypatch.setattr(hygiene, "delete_remote_branch", _flaky_delete)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
     assert "vps-loop/item-15" in remaining  # the failed delete leaves it in place
     assert "vps-loop/item-16" not in remaining  # the other branch still gets swept
@@ -705,8 +801,9 @@ def test_run_remote_branch_cleanup_continues_after_one_tip_check_error(
     monkeypatch.setattr(hygiene, "remote_branch_head", _flaky_head_check)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
+    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
     assert "vps-loop/item-18" in remaining  # the failed tip check leaves it in place
     assert "vps-loop/item-19" not in remaining  # the other branch still gets checked and swept
@@ -735,8 +832,9 @@ def test_run_backup_branch_pruning_continues_after_one_delete_error(
     monkeypatch.setattr(hygiene, "delete_local_branch", _flaky_delete)
 
     log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
+    all_clean = hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
 
+    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
     assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-1111111")
     assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-2222222") == ""
     log_contents = log_path.read_text(encoding="utf-8")
