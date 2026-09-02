@@ -316,9 +316,20 @@ Walk items top to bottom:
   and assert `headRefName` equals the branch exactly before acting. Use `--head`, NOT
   `--search "head:…"`: the search qualifier matches by prefix/token, so
   `head:vps-loop/item-1` can also return `item-10`'s PR and skip item 1 forever with no
-  log line. Any `OPEN` or `MERGED` entry → skip item N (done or in progress). A
-  `CLOSED` (rejected, unmerged) entry does NOT block a fresh attempt — but see Step 3b
-  before resuming any leftover commits.
+  log line. `MERGED` → skip item N (done). A `CLOSED` (rejected, unmerged) entry does
+  NOT block a fresh attempt — but see Step 3b before resuming any leftover commits.
+  `OPEN` (including draft) → before skipping, check whether it can instead be
+  *finished*: read `docs/refactor-log.md`'s entry for item N (the durable record
+  Steps 4/6 write). If it already documents both required `/review-branch` passes
+  clean, this PR was shipped (Steps 6.1–6.4) by a tick that ended before reaching
+  6.5–6.11 — confirmed live 2026-09-02, item 46/PR #295: nothing in this file gave a
+  later tick any way back to finish readying/merging it, so it sat open indefinitely
+  purely because it wasn't finished within one tick. In that case, skip the rest of
+  Step 3/3b and resume directly at **Step 6.5** for this PR (re-verify identity there
+  as normal — the refactor-log entry only proves review happened, not that nothing
+  has changed since). If the refactor-log entry does NOT yet show both passes clean
+  (review genuinely still in progress, mid fix-iteration, or never started), the
+  original behavior applies: skip item N this tick as in-progress, same as before.
 - If the item text has `Depends on: item <M>`, run the same exact-head query for M with
   `--state merged`. Empty → skip N this tick (dependency unmet) and keep walking;
   don't stall the run on it.
