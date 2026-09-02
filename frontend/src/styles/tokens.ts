@@ -76,6 +76,16 @@ export const DELAY_RAMP = {
 
 type DelayBand = "ok" | "mild" | "moderate" | "severe";
 
+// The band-boundary minute values `delayBand()` applies below. Exported so any
+// UI that displays the cutoffs as text (e.g. a heatmap legend) can read them
+// straight from here instead of re-typing the numbers — a retuned threshold
+// then can't silently desync a label from the classifier that decides the color.
+export const DELAY_THRESHOLDS = {
+  mild: 1.5,
+  moderate: 3,
+  severe: 5,
+} as const;
+
 // Early arrival (<=0) and on-time treated as `ok` (green); positive minutes ramp up.
 // GTFS-RT dep_delay is signed: negative = early, positive = late.
 // Single source of truth for the delay/severity cutoffs — delayColor() and
@@ -83,9 +93,9 @@ type DelayBand = "ok" | "mild" | "moderate" | "severe";
 // through this, so a future retune can't silently desync one from the other.
 export function delayBand(minutes: number): DelayBand {
   if (minutes <= 0) return "ok";
-  if (minutes < 1.5) return "ok";
-  if (minutes < 3) return "mild";
-  if (minutes < 5) return "moderate";
+  if (minutes < DELAY_THRESHOLDS.mild) return "ok";
+  if (minutes < DELAY_THRESHOLDS.moderate) return "mild";
+  if (minutes < DELAY_THRESHOLDS.severe) return "moderate";
   return "severe";
 }
 
@@ -98,7 +108,7 @@ export function delayColor(minutes: number): string {
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use
  *  this (not `delayColor()`) for any MapLibre paint property. */
 export function delayColorResolved(minutes: number): string {
-  if (minutes < 5) return delayColor(minutes);
+  if (minutes < DELAY_THRESHOLDS.severe) return delayColor(minutes);
   return severeColorResolved();
 }
 
@@ -115,11 +125,11 @@ export function severityStepColors(): readonly [
 ] {
   return [
     DELAY_RAMP.ok,
-    1.5,
+    DELAY_THRESHOLDS.mild,
     DELAY_RAMP.mild,
-    3,
+    DELAY_THRESHOLDS.moderate,
     DELAY_RAMP.moderate,
-    5,
+    DELAY_THRESHOLDS.severe,
     severeColorResolved(),
   ];
 }
