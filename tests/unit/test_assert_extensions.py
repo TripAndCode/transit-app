@@ -2,13 +2,15 @@
 
 The gate runs inside the image build, where `dpkg` supplies version
 comparison. These tests stub `dpkg` on PATH so the script's own control flow
-is pinned everywhere the suite runs: an inverted comparison, a dropped
-`exit 1`, or a lost `set -eu` would otherwise turn the gate into a no-op with
-nothing to catch it.
+is pinned everywhere the suite runs. What they pin, specifically: an inverted
+comparison, a dropped `exit 1` on any failure branch, and a Dockerfile that
+stops running the gate or lets it fail without failing the build.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -64,8 +66,6 @@ def write_control(ext: Path, name: str, version: str) -> None:
 def run(ext: Path, stub_path: Path, *specs: str) -> subprocess.CompletedProcess[str]:
     """Invoke the gate the way the Dockerfile does."""
 
-    import os
-
     env = {**os.environ, "PATH": f"{stub_path}:{os.environ['PATH']}"}
     return subprocess.run(
         ["sh", str(SCRIPT), str(ext), *specs],
@@ -120,9 +120,32 @@ def test_rejects_being_called_without_specs(extension_dir, stub_path):
     assert "usage:" in result.stderr
 
 
-def test_the_dockerfile_uses_this_script_with_the_schema_s_floors():
-    """The gate is only real if the image actually runs it."""
+def test_the_dockerfile_runs_the_gate_and_lets_it_fail_the_build():
+    """The gate is only real if the image runs it and heeds its exit status.
+
+    Matched as a whole line, so a trailing `|| true` — which would keep every
+    substring below present while making the build succeed regardless — fails
+    this test rather than passing it.
+    """
 
     dockerfile = (ROOT / "db" / "Dockerfile").read_text()
     assert "COPY assert_extensions.sh /usr/local/bin/assert-extensions" in dockerfile
-    assert "postgis=3.2 vector=0.8 pg_trgm" in dockerfile
+
+    logical_lines = re.sub(r"\\\n\s*", " ", dockerfile)
+    invocation = re.compile(
+        r"^RUN\s+/usr/local/bin/assert-extensions"
+        r"\s+/usr/share/postgresql/14/extension"
+        r"\s+postgis=3\.2\s+vector=0\.8\s+pg_trgm\s*$",
+        re.MULTILINE,
+    )
+    assert invocation.search(logical_lines), (
+        "the Dockerfile must run the gate as its own command, with nothing appended that could swallow a non-zero exit"
+    )
+
+
+def test_rejects_a_spec_with_an_empty_minimum(extension_dir, stub_path):
+    """`name=` must not degrade into a presence-only check that always passes."""
+
+    result = run(extension_dir, stub_path, "postgis=")
+    assert result.returncode == 2
+    assert "no minimum version given for postgis" in result.stderr

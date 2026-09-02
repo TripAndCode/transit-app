@@ -37,6 +37,13 @@ for spec in "$@"; do
         continue
     fi
 
+    # `name=` with nothing after it would compare against an empty string,
+    # which every version satisfies — a gate that silently checks nothing.
+    if [ -z "$minimum" ]; then
+        echo "no minimum version given for $name" >&2
+        exit 2
+    fi
+
     installed=$(sed -n "s/^default_version *= *'\(.*\)'/\1/p" "$control")
     if [ -z "$installed" ]; then
         echo "cannot read a version for $name from $control" >&2
