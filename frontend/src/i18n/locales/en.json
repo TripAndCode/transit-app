@@ -208,7 +208,7 @@
     "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
     "title_all": "All days {{hour}}:00 — delayed routes",
     "noData": "Not enough data for this time slot",
-    "avgMin": "+{{value}}min",
+    "avgMin": "{{sign}}{{value}}min",
     "routeCount_one": "{{count}} route",
     "routeCount_other": "{{count}} routes"
   },
