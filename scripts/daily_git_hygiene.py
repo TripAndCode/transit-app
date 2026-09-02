@@ -15,7 +15,12 @@ This closes three gaps `/vps-loop-run` only handles reactively:
 
 This script must never race a live `/vps-loop-run` tick: it acquires the
 same `/tmp/claude-loop.lock` lock file non-blockingly before touching
-anything and skips cleanly (not an error) if the loop is mid-tick.
+anything and skips cleanly (not an error) if the loop is mid-tick. A single
+fixed-time daily cron trigger has no retry if it loses that race, so the
+crontab should invoke this hourly; a same-day completion marker
+(`--state-file`, default `/root/.daily_git_hygiene_last_success`) keeps the
+actual cleanup itself running at most once per calendar day regardless of
+how often the trigger fires.
 
 Every deletion (local or remote) is appended to a dedicated hygiene log
 (default `/root/git-hygiene.log`) -- not `docs/refactor-log.md`, which is
@@ -58,6 +63,7 @@ CleanupError = cleanup_git_state.CleanupError
 
 DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
+DEFAULT_STATE_FILE = Path("/root/.daily_git_hygiene_last_success")
 DEFAULT_RETENTION_DAYS = 30
 
 # `vps-loop/item-<N>` (no suffix): the branch shape the loop pushes and opens
@@ -120,6 +126,38 @@ def release_lock(handle: IO[str]) -> None:
 
     fcntl.flock(handle, fcntl.LOCK_UN)
     handle.close()
+
+
+def today_utc() -> str:
+    """Today's UTC date as `YYYY-MM-DD`, this job's unit of "already ran"."""
+
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def already_succeeded_today(state_file: Path) -> bool:
+    """True if `state_file` already records today's UTC date as a completed run.
+
+    A single fixed cron time (e.g. once daily) can keep losing the
+    `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
+    retry within that invocation (see that function's own docstring) --
+    confirmed live, two calendar days running. Pairing a same-day
+    completion marker with a much more frequent cron trigger (this job
+    stays idempotent per day either way) turns that into an hourly retry
+    instead of a 24-hour one, without ever running the real cleanup twice
+    in one day.
+    """
+
+    try:
+        return state_file.read_text(encoding="utf-8").strip() == today_utc()
+    except FileNotFoundError:
+        return False
+
+
+def mark_succeeded_today(state_file: Path) -> None:
+    """Record today's UTC date as this job's last fully-clean run."""
+
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(f"{today_utc()}\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +495,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE, help="Lock shared with claude-loop.sh")
     parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_FILE, help="Deletion log (not refactor-log.md)")
     parser.add_argument(
+        "--state-file", type=Path, default=DEFAULT_STATE_FILE, help="Marks the last calendar day this job completed"
+    )
+    parser.add_argument(
         "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS, help="Backup-branch retention window in days"
     )
     args = parser.parse_args(argv)
 
     log_file: Path = args.log_file
+
+    # Checked before the lock, and not logged: an hourly cron trigger hitting
+    # this on a day it already completed is the expected common case, not
+    # something worth a log line every time.
+    if already_succeeded_today(args.state_file):
+        print(f"Already completed today ({today_utc()}) per {args.state_file}; nothing to do")
+        return 0
+
     lock_handle = try_acquire_lock(args.lock_file)
     if lock_handle is None:
         message = f"SKIP: {args.lock_file} is held (a /vps-loop-run tick is likely mid-flight); not touching git state"
@@ -506,6 +555,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"ERROR ({stage}): {exc}", file=sys.stderr)
                 log_line(log_file, f"ERROR: {stage} failed: {exc}")
                 exit_code = 2
+
+        # Only a fully-clean run marks today done -- a stage error should
+        # still retry on the next hourly trigger today, not wait a full day.
+        if exit_code == 0:
+            mark_succeeded_today(args.state_file)
 
         return exit_code
     finally:

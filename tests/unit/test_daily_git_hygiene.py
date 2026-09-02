@@ -315,6 +315,7 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
 
     lock_path = tmp_path / "claude-loop.lock"
     log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
     holder = lock_path.open("a+")
     fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
@@ -334,6 +335,8 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
                 str(lock_path),
                 "--log-file",
                 str(log_path),
+                "--state-file",
+                str(state_path),
                 "--apply",
             ]
         )
@@ -343,6 +346,99 @@ def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: p
 
     assert exit_code == 0
     assert "SKIP" in log_path.read_text(encoding="utf-8")
+    # A lock-collision skip is not a completion -- must still retry later today.
+    assert not state_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Same-day completion marker: turns a lost lock race into an hourly retry
+# instead of a 24-hour one (see `already_succeeded_today`'s own docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_already_succeeded_today_false_when_state_file_missing(tmp_path: Path):
+    """No prior run recorded at all -- must not be mistaken for success."""
+
+    assert hygiene.already_succeeded_today(tmp_path / "missing") is False
+
+
+def test_mark_and_check_succeeded_today_round_trip(tmp_path: Path):
+    """Marking success today is what the same-day check then reports back."""
+
+    state_path = tmp_path / "last-success"
+    hygiene.mark_succeeded_today(state_path)
+    assert hygiene.already_succeeded_today(state_path) is True
+
+
+def test_already_succeeded_today_false_for_a_stale_prior_day(tmp_path: Path):
+    """A completion recorded on an earlier calendar day does not count for today."""
+
+    state_path = tmp_path / "last-success"
+    state_path.write_text("2000-01-01\n", encoding="utf-8")
+    assert hygiene.already_succeeded_today(state_path) is False
+
+
+def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An hourly re-trigger on a day this job already completed must not even try the lock."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+    hygiene.mark_succeeded_today(state_path)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("must not attempt the lock once today's run is already marked complete")
+
+    monkeypatch.setattr(hygiene, "try_acquire_lock", _boom)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 0
+
+
+def test_main_marks_today_succeeded_only_after_a_fully_clean_run(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A stage error must not mark today done -- it should retry on the next hourly trigger."""
+
+    lock_path = tmp_path / "claude-loop.lock"
+    log_path = tmp_path / "git-hygiene.log"
+    state_path = tmp_path / "last-success"
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise hygiene.HygieneError("simulated stage failure")
+
+    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", _boom)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(lock_path),
+            "--log-file",
+            str(log_path),
+            "--state-file",
+            str(state_path),
+        ]
+    )
+
+    assert exit_code == 2
+    assert not state_path.exists()
 
 
 # ---------------------------------------------------------------------------
