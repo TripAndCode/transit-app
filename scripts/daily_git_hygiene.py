@@ -74,8 +74,8 @@ DEFAULT_STATE_FILE = Path("/root/.daily_git_hygiene_last_success")
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_POETRY_VENV_ROOT = Path("/root/.cache/pypoetry/virtualenvs")
 DEFAULT_MIN_VENV_AGE_HOURS = 24
-DEFAULT_MAX_VENV_DELETES_PER_RUN = 10
-POETRY_ENV_INFO_TIMEOUT_SECONDS = 30
+DEFAULT_MAX_VENV_DELETES_PER_RUN = 20
+POETRY_ENV_INFO_TIMEOUT_SECONDS = 10
 # Poetry's own venv-naming scheme for this project ("<name>-<hash>-py<major.minor>");
 # matches only this repo's own venvs, never an unrelated project sharing the same
 # shared virtualenvs.path (e.g. a poetry-managed CLI tool used across other work).
@@ -600,38 +600,69 @@ def poetry_env_path(location: Path) -> Path | None:
     return Path(path).resolve() if path else None
 
 
-def compute_in_use_poetry_venvs(repo: Path) -> set[Path]:
+def compute_in_use_poetry_venvs(repo: Path, *, min_age_hours: float) -> set[Path]:
     """Every currently in-use poetry venv path: the main repo plus every worktree.
 
-    Raises `HygieneError` if ANY location's venv can't be resolved -- not
-    just the main repo's. `poetry_env_path` cannot tell "no venv yet" apart
-    from "poetry failed for an unrelated reason" (see its own docstring),
-    and every worktree of this repo always has a checked-in `pyproject.toml`,
-    so a resolution failure there is never "not a poetry project" -- it is
-    always one of those two ambiguous cases. Since a real, in-use worktree
-    venv could be the one poetry transiently failed to resolve, failing
-    the whole computation closed (rather than silently treating that
-    worktree as having no venv, and so nothing to protect) is the only
-    way to guarantee an in-use venv is never misclassified as orphaned.
-    The cost is a delayed prune (retried next hourly trigger), never a
-    false "not in use."
+    The main checkout's own venv must always resolve -- it's never "new,"
+    so any failure there raises `HygieneError` unconditionally, refusing to
+    prune anything this run: `poetry_env_path` cannot tell "no venv yet"
+    apart from "poetry failed for an unrelated reason" (see its own
+    docstring), so a real, in-use main-checkout venv could be the one that
+    failed to resolve, and there is no safe way to guess which.
+
+    A worktree gets two, narrower grace conditions before the same
+    fail-closed treatment applies:
+    - `git worktree list`'s own `prunable` flag, or the path simply not
+      existing on disk, means the administrative entry outlived the actual
+      directory (removed out-of-band, or pending its own `git worktree
+      prune`) -- unambiguously "nothing runs out of here," not one of the
+      two cases above, so it's skipped rather than raised on.
+    - A worktree younger than `min_age_hours` (mirroring the same grace
+      period `run_orphaned_venv_pruning` already applies to venv ages) may
+      simply not have run any poetry/backend command yet -- e.g. a
+      freshly-dispatched, frontend-only worker. Treating every such
+      worktree as a fail-closed abort would leave this stage (and this
+      job's once-daily completion marker, since a failing stage prevents
+      `mark_succeeded_today`) permanently unable to complete for as long as
+      any such worktree exists, which is an ordinary, common state, not a
+      rare edge case.
+    Past that grace period, an unresolvable worktree is treated exactly
+    like the main checkout: the whole computation raises, since a real,
+    in-use venv could be the one poetry transiently failed to resolve. The
+    cost of raising is a delayed prune (retried next hourly trigger), never
+    a false "not in use."
     """
 
+    main_venv = poetry_env_path(repo)
+    if main_venv is None:
+        raise HygieneError(f"could not resolve the main checkout's own poetry venv at {repo}; refusing to prune")
+    resolved_repo = repo.resolve()
     worktrees = cleanup_git_state.parse_worktrees(
         cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
     )
-    # `git worktree list` already includes the main checkout itself, but
-    # de-duplicate explicitly (by resolved path) rather than depend on that,
-    # so the main repo's venv is queried exactly once either way.
-    locations = {repo.resolve()} | {worktree.path.resolve() for worktree in worktrees}
-    in_use = set()
-    for location in sorted(locations):
-        venv = poetry_env_path(location)
-        if venv is None:
-            raise HygieneError(
-                f"could not resolve poetry venv for {location}; refusing to prune any orphaned venv this run"
-            )
-        in_use.add(venv)
+    now_epoch = time.time()
+    in_use = {main_venv}
+    for worktree in worktrees:
+        resolved_worktree = worktree.path.resolve()
+        if resolved_worktree == resolved_repo:
+            continue  # already queried above; avoid a redundant poetry spawn
+        if worktree.prunable or not worktree.path.exists():
+            continue
+        venv = poetry_env_path(worktree.path)
+        if venv is not None:
+            in_use.add(venv)
+            continue
+        try:
+            age_hours = (now_epoch - worktree.path.stat().st_mtime) / 3600
+        except OSError:
+            continue  # vanished between the exists() check and here -- same as the already-gone case above
+        if age_hours < min_age_hours:
+            continue
+        raise HygieneError(
+            f"could not resolve poetry venv for worktree {worktree.path} "
+            f"({age_hours:.1f}h old, past the {min_age_hours}h grace period); "
+            "refusing to prune any orphaned venv this run"
+        )
     return in_use
 
 
@@ -666,7 +697,7 @@ def run_orphaned_venv_pruning(
         print(f"{venv_root} does not exist, nothing to do")
         return True
 
-    in_use = compute_in_use_poetry_venvs(repo)
+    in_use = compute_in_use_poetry_venvs(repo, min_age_hours=min_age_hours)
     now_epoch = time.time()
     candidates = sorted(path for path in venv_root.glob(POETRY_VENV_GLOB) if path.is_dir())
     decisions: list[VenvDecision] = []
@@ -705,7 +736,7 @@ def run_orphaned_venv_pruning(
     # worktree that started using one of these paths during planning. Only worth
     # the extra `poetry` spawns per worktree when there's actually something to
     # delete (delete_count == 0 already returned above).
-    fresh_in_use = compute_in_use_poetry_venvs(repo)
+    fresh_in_use = compute_in_use_poetry_venvs(repo, min_age_hours=min_age_hours)
     for decision in decisions:
         if decision.action != "delete":
             continue
