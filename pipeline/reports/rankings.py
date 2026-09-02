@@ -40,6 +40,26 @@ def _round1(x: float) -> Decimal:
     return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
+def _weighted_avg_min(days: list[dict]) -> float | None:
+    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+
+    Each `days` entry is already a per-bucket sample-weighted mean with a
+    `samples` weight, so a plain mean-of-means would overweight thin days (one
+    sparse outlier day could dominate the headline). Null-`avg_min` days are
+    skipped (not counted as 0). Returns None when there are no measured samples.
+    """
+    num = 0.0
+    den = 0
+    for d in days:
+        v = d.get("avg_min")
+        if v is None:
+            continue
+        s = d.get("samples") or 0
+        num += v * s
+        den += s
+    return num / den if den else None
+
+
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
     """Range-scan agg_route_daily_dist, summing the exact per-route scalars.
 

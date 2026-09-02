@@ -331,3 +331,57 @@ async def test_movers_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
         res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
     by = {r["route_code"]: r for r in res.rows}
     assert by["R1"]["current_avg"] == 3.0
+
+
+async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
+    """A date whose only row has samples but a NULL sum_delay_sec (not yet
+    re-analyzed since migration 0028) must render avg_delay=None for that
+    date, and must be excluded from the mean/std/z-score population --
+    previously it was coerced to 0.0, which biased the network mean down
+    and could flag the missing day as a false anomaly.
+    """
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-01", "R1", "平日", 3.0, 100, 18000),  # real: avg 3.0
+            ("2026-04-02", "R1", "平日", 3.0, 100, 18000),  # real: avg 3.0
+            ("2026-04-03", "R1", "平日", 3.0, 100, 18000),  # real: avg 3.0
+            ("2026-04-04", "R1", "平日", 0.0, 100, None),  # NULL sum_delay_sec -> unknown, not 0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 4))
+    async with pool.acquire() as c:
+        res = await anomaly_timeline(c, agency_id=agency_id, ctx=ctx, days=30, sigma=1.5)
+    by_date = {s["date"]: s["avg_delay"] for s in res.series}
+    assert by_date["2026-04-04"] is None
+    # With the NULL day correctly excluded, all 3 real days are identical
+    # (avg 3.0 each), so std is exactly 0 and there are no anomalies at all
+    # -- not even the NULL day, which the old 0.0-coercion would have
+    # flagged as a >1.5-sigma outlier next to three 3.0-min days.
+    assert res.std == 0.0
+    assert res.mean == 3.0
+    assert res.anomalies == []
+
+
+async def test_movers_current_window_null_reports_none_not_zero(movers_pool):
+    """A route whose CURRENT window has samples but a NULL sum_delay_sec
+    must report delta=None ("no data"), not 0.0 ("no change") -- distinct
+    from the separate, already-correct prv_v == 0 case."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100, None),  # current window: NULL sum_delay_sec
+            ("2026-04-03", "R1", "平日", 3.0, 100, 18000),  # prior window: real avg 3.0
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] is None
+    assert by["R1"]["delta"] is None
+    assert by["R1"]["delta_pct"] is None
