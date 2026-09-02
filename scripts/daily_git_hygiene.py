@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import fnmatch
 import importlib.util
 import io
 import json
@@ -600,15 +601,15 @@ def poetry_env_path(location: Path) -> Path | None:
     return Path(path).resolve() if path else None
 
 
-def compute_in_use_poetry_venvs(repo: Path, *, min_age_hours: float) -> set[Path]:
-    """Every currently in-use poetry venv path: the main repo plus every worktree.
+def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:
+    """Every currently in-use poetry venv path: `main_venv` plus every worktree's own.
 
-    The main checkout's own venv must always resolve -- it's never "new,"
-    so any failure there raises `HygieneError` unconditionally, refusing to
-    prune anything this run: `poetry_env_path` cannot tell "no venv yet"
-    apart from "poetry failed for an unrelated reason" (see its own
-    docstring), so a real, in-use main-checkout venv could be the one that
-    failed to resolve, and there is no safe way to guess which.
+    `main_venv` is resolved and validated exactly once by the caller
+    (`run_orphaned_venv_pruning`), not re-derived here: a second, separate
+    `poetry env info --path` spawn for the same `repo` could transiently
+    fail even when the first one just succeeded, which would otherwise
+    raise a confusing "`--venv-root` is misconfigured" error for what is
+    really an unrelated, one-off `poetry` hiccup.
 
     A worktree gets two, narrower grace conditions before the same
     fail-closed treatment applies:
@@ -627,16 +628,21 @@ def compute_in_use_poetry_venvs(repo: Path, *, min_age_hours: float) -> set[Path
       any such worktree exists, which is an ordinary, common state, not a
       rare edge case. Age is read from the linked worktree's `.git` FILE
       (not the worktree's own top-level directory): `git worktree add`
-      writes that file once and never touches it again, whereas a
-      directory's own mtime resets on any root-level create/delete inside
-      it (a `.mypy_cache/`, an untracked `NEXT_TASK.md`, a branch switch
-      that adds/removes a root file) -- all routine activity for an
-      actively-used worktree, which would otherwise make a genuinely old,
-      in-use worktree look "young" and skip the very check meant to
-      protect it. The grace period's entire safety argument depends on
-      "a venv belonging to a worktree created less than `min_age_hours`
-      ago is itself younger than that" -- only a creation-stable stamp
-      keeps that true.
+      writes that file at creation and (confirmed live) leaves it alone
+      across ordinary operations (status/fetch/commit/switch/rebase/`gc`/
+      lock/unlock), unlike a directory's own mtime, which resets on any
+      root-level create/delete inside it (a `.mypy_cache/`, an untracked
+      `NEXT_TASK.md`, a branch switch that adds/removes a root file) --
+      all routine activity for an actively-used worktree, which would
+      otherwise make a genuinely old, in-use worktree look "young" and
+      skip the very check meant to protect it. `git worktree move` and a
+      pointer-rewriting `git worktree repair` DO reset this stamp -- the
+      former is self-protecting (the path itself changes, so poetry's own
+      hash changes too, and the old path's venv is now a genuine orphan),
+      but a `repair` after the *main* checkout moved, while every worktree
+      path stays put, resets every worktree's stamp without their venvs
+      actually changing -- a known, narrow residual, not something this
+      code detects.
     Past that grace period, an unresolvable worktree is treated exactly
     like the main checkout: the whole computation raises, since a real,
     in-use venv could be the one poetry transiently failed to resolve. The
@@ -645,20 +651,15 @@ def compute_in_use_poetry_venvs(repo: Path, *, min_age_hours: float) -> set[Path
     (never a directory -- only the main checkout's own `.git` is one), so
     an unexpected shape there also raises rather than silently guessing.
 
-    Assumes `repo` is the only clone of this project on the host: an
-    unrelated, independent second clone (not a worktree of `repo`) has its
-    own, different path hash, so `run_orphaned_venv_pruning`'s glob-based
-    enumeration (scoped to this project's name across the whole shared
-    `--venv-root`, not to this one clone) would see that clone's actively-used
-    venv as unmatched here and, once past `min_age_hours`, delete it. Not
-    detectable from this function alone -- poetry's path hash can't be
-    inverted back into "which clone" -- so this is a deployment assumption
-    (one persistent clone per host), not something this code checks.
+    Assumes `repo` is the only clone of this project on the host, and that
+    no worktree path is ever reused after removal within one venv's
+    `min_age_hours` window: an unrelated second clone, or a fresh worktree
+    recreated at a path poetry previously hashed for a since-removed one,
+    would both be indistinguishable from this function's own inputs alone.
+    Neither is something this code detects or corrects for -- both are
+    deployment/usage assumptions, not gaps checked here.
     """
 
-    main_venv = poetry_env_path(repo)
-    if main_venv is None:
-        raise HygieneError(f"could not resolve the main checkout's own poetry venv at {repo}; refusing to prune")
     resolved_repo = repo.resolve()
     worktrees = cleanup_git_state.parse_worktrees(
         cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
@@ -730,18 +731,29 @@ def run_orphaned_venv_pruning(
         print(f"{venv_root} does not exist, nothing to do")
         return True
 
-    in_use = compute_in_use_poetry_venvs(repo, min_age_hours=min_age_hours)
+    # Resolved and validated exactly once (not inside compute_in_use_poetry_venvs,
+    # and not called a second time below) so a transient poetry hiccup on the
+    # re-check can never masquerade as "--venv-root is misconfigured".
+    #
     # Self-validating positive control: if `--venv-root` is misconfigured (wrong
-    # platform default, a renamed project's glob matching nothing) this stage
-    # would otherwise "succeed" by finding zero candidates forever, silently
-    # enforcing nothing -- the one thing it exists to prevent a repeat of. The
-    # main checkout's own venv (just resolved above) must live under `venv_root`.
+    # platform default) or `POETRY_VENV_GLOB` no longer matches (a renamed
+    # project), this stage would otherwise "succeed" by finding zero candidates
+    # forever, silently enforcing nothing -- the one thing it exists to prevent
+    # a repeat of. The main checkout's own venv must be a DIRECT child of
+    # `venv_root` (not merely some ancestor of it, which `Path.parents` alone
+    # would too loosely accept) whose name the glob actually matches.
     main_venv = poetry_env_path(repo)
-    if main_venv is None or venv_root.resolve() not in main_venv.parents:
+    if (
+        main_venv is None
+        or main_venv.parent != venv_root.resolve()
+        or not fnmatch.fnmatch(main_venv.name, POETRY_VENV_GLOB)
+    ):
         raise HygieneError(
             f"--venv-root {venv_root} does not contain this checkout's own poetry venv "
             f"({main_venv}); refusing to prune what may be the wrong directory entirely"
         )
+
+    in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
     now_epoch = time.time()
     candidates = sorted(path for path in venv_root.glob(POETRY_VENV_GLOB) if path.is_dir() and not path.is_symlink())
     decisions: list[VenvDecision] = []
@@ -782,7 +794,7 @@ def run_orphaned_venv_pruning(
     # worktree that started using one of these paths during planning. Only worth
     # the extra `poetry` spawns per worktree when there's actually something to
     # delete (delete_count == 0 already returned above).
-    fresh_in_use = compute_in_use_poetry_venvs(repo, min_age_hours=min_age_hours)
+    fresh_in_use = compute_in_use_poetry_venvs(repo, main_venv, min_age_hours=min_age_hours)
     for decision in decisions:
         if decision.action != "delete":
             continue
