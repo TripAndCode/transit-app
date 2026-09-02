@@ -52,10 +52,12 @@ VPS loop; it defaults to dry-run and rechecks mutable state before applying a pl
 comments beside changed code via `--stale-candidates`, and banners, over-long blocks,
 pointers at other comments, and line-number references the diff introduced via
 `--diff --warn`. No hook or CI step runs it, so that dimension is the only place those
-rules are applied — `--warn` reports without gating. It reads Python and TypeScript
-only, so it has nothing to say about a Markdown-only diff. All three scripts are
-versioned here on purpose: a review rule living in one machine's home directory is not
-a rule the VPS loop or a second checkout can apply.
+rules are applied — `--warn` reports without gating. `--baseline` sweeps every tracked
+source for the same rules, for a deliberate repository-wide pass rather than a review.
+It reads Python, TypeScript, and JavaScript only, so it has nothing to say about a
+Markdown-only diff. All three scripts are versioned here on purpose: a review rule
+living in one machine's home directory is not a rule the VPS loop or a second checkout
+can apply.
 
 Each command file states its own token-frugality rules inline, in the phase they apply
 to. This README is a map, not a rule store: no command loads it, so nothing here is

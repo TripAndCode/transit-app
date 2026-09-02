@@ -39,9 +39,9 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   back to reading the comments and prose adjacent to the prepared diff's changed
   lines: the script succeeding with an empty candidate list, and the script failing to
   run, which is a real defect in repository tooling and belongs in your obstacles
-  note. It reads Python and TypeScript sources only, so a diff touching neither —
-  Markdown-only process-doc diffs among them — produces nothing to list, and an empty
-  list is not coverage.
+  note. It reads Python, TypeScript, and JavaScript sources only, so a diff touching
+  none of them — Markdown-only process-doc diffs among them — produces nothing to
+  list, and an empty list is not coverage.
   Then run `python3 <linter> --root <worktree> --diff <merge-base> --warn` as a second
   invocation — the two modes are mutually exclusive — and report what it lists:
   over-long blocks, banners, pointers at other comments, and line-number references

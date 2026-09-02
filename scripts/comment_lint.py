@@ -66,6 +66,26 @@ def _comment_body(line, prefix):
     return None if _PRAGMA.match(body) else body
 
 
+def _diff_caused(pair, only_lines, max_block):
+    """Whether the diff, not the code it landed in, produced this violation.
+
+    A per-line rule is the diff's doing when the diff wrote that line. A long
+    block is the diff's doing when the diff extended its tail and what came
+    before was within the limit: a block already over the limit stays the
+    surrounding code's problem, and a line rewritten in its middle does not
+    lengthen it. Both edits and appends read as added lines in a diff, so the
+    tail is what separates them.
+    """
+    violation, span = pair
+    if violation.rule != "long-block":
+        return violation.line in only_lines
+    span = list(span)
+    if span[-1] not in only_lines:
+        return False
+    pre_existing = sum(1 for number in span if number not in only_lines)
+    return pre_existing <= max_block
+
+
 def find_violations(path, lines, max_block=6, only_lines=None):
     """Return policy violations for `lines`, the contents of `path`.
 
@@ -77,14 +97,23 @@ def find_violations(path, lines, max_block=6, only_lines=None):
     if prefix is None:
         return []
 
-    violations = []
+    # Each entry pairs a violation with the span that produced it: one line for
+    # a per-line rule, the whole block for a long one. `only_lines` needs the
+    # span to tell a block this diff lengthened from one it merely touched.
+    found = []
     start = None
     run = 0
 
     def close_block():
         if run > max_block:
-            violations.append(Violation(start, "long-block", f"{run}-line comment block"))
+            violations.append(
+                (
+                    Violation(start, "long-block", f"{run}-line comment block"),
+                    range(start, start + run),
+                )
+            )
 
+    violations = found
     for number, line in enumerate(lines, start=1):
         body = _comment_body(line, prefix)
         if body is None:
@@ -96,11 +125,11 @@ def find_violations(path, lines, max_block=6, only_lines=None):
         run += 1
         for rule, pattern, message in _LINE_RULES:
             if pattern.search(body):
-                violations.append(Violation(number, rule, message))
+                found.append((Violation(number, rule, message), (number,)))
     close_block()
     if only_lines is not None:
-        violations = [v for v in violations if v.line in only_lines]
-    return sorted(violations, key=lambda v: (v.line, v.rule))
+        found = [pair for pair in found if _diff_caused(pair, only_lines, max_block)]
+    return sorted((v for v, _ in found), key=lambda v: (v.line, v.rule))
 
 
 def stale_candidates(path, lines, changed, radius=3):
@@ -187,7 +216,11 @@ def _read(root, path):
 
 def _tracked_sources(root):
     globs = ["*.py", "*.ts", "*.tsx", "*.js", "*.jsx"]
-    return [p for p in _git(["ls-files", *globs], root).splitlines() if p]
+    try:
+        listing = _git(["ls-files", *globs], root)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    return [p for p in listing.splitlines() if p]
 
 
 def _report(hits, root, label, limit=None):
@@ -199,7 +232,7 @@ def _report(hits, root, label, limit=None):
     if not hits:
         print(f"{label}: clean")
         return 0
-    by_rule = Counter(rule for _, v in hits for rule in [v.rule])
+    by_rule = Counter(v.rule for _, v in hits)
     print(f"{label}: {len(hits)} finding(s)")
     for rule, count in by_rule.most_common():
         print(f"  {rule:<16} {count}")
@@ -233,8 +266,12 @@ def main(argv=None):
 
     root = args.root
     if args.baseline:
+        sources = _tracked_sources(root)
+        if sources is None:
+            print(f"comment policy: skipped (cannot list sources under {root})", file=sys.stderr)
+            return 0
         hits = []
-        for path in _tracked_sources(root):
+        for path in sources:
             lines = _read(root, path)
             if lines is None:
                 continue
@@ -245,12 +282,18 @@ def main(argv=None):
     requested = args.diff or args.stale
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
-        print(f"comment policy: no baseline ref for {requested!r} — skipped")
+        print(
+            f"comment policy: no baseline ref for {requested!r} — skipped",
+            file=sys.stderr,
+        )
         return 0
     try:
         diff = _git(["diff", "-U0", f"{base}...HEAD"], root)
     except (subprocess.CalledProcessError, OSError) as error:
-        print(f"comment policy: skipped ({error.__class__.__name__})")
+        print(
+            f"comment policy: skipped ({error.__class__.__name__})",
+            file=sys.stderr,
+        )
         return 0
     added = parse_added_lines(diff)
 

@@ -90,9 +90,9 @@ scoped to this delta only:
   `python3 <linter> --root <worktree> --stale-candidates <merge_base>` and judging only
   what it lists. `<linter>` is the absolute path passed in the payload below, resolved
   from the invoking checkout and never from the reviewed branch, for the same reason
-  `prepare_review.py` is run from there. If it fails or
-  returns an empty list — it reads Python and TypeScript sources only — fall back to
-  the comments and prose beside the delta's changed lines.
+  `prepare_review.py` is run from there. If it fails or returns an empty list — it
+  reads Python, TypeScript, and JavaScript sources only — fall back to the comments
+  and prose beside the delta's changed lines.
 - **Refactor opportunities** — duplication or unnecessary ceremony the new commits
   introduce or leave behind, with a concrete simpler alternative.
 

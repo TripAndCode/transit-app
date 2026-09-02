@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "comment_lint.py"
 SPEC = importlib.util.spec_from_file_location("comment_lint", SCRIPT)
@@ -116,6 +118,15 @@ def test_ignores_a_pre_existing_block_edited_in_place():
     assert lint.find_violations("x.py", lines, max_block=3, only_lines={3}) == []
 
 
+def test_reports_a_block_the_diff_pushed_over_the_limit():
+    """The block starts on an untouched line, but the added tail is what
+    exceeded the limit, so scoping to added lines must still surface it."""
+
+    lines = ["# a", "# b", "# c", "# d", "x = 1"]
+    found = lint.find_violations("x.py", lines, max_block=3, only_lines={4})
+    assert rules(found) == [(1, "long-block")]
+
+
 def test_reports_untouched_comment_next_to_a_changed_line():
     lines = ["# explains the call", "do_work()", "unrelated()"]
     found = lint.stale_candidates("x.py", lines, changed={2}, radius=1)
@@ -206,7 +217,8 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(("git", "-C", str(repo), *args), check=True, capture_output=True)
 
 
-def fixture_repo(tmp_path: Path) -> Path:
+@pytest.fixture
+def repository(tmp_path: Path) -> Path:
     """Build a repo whose tip changes code beside an untouched comment."""
 
     repo = tmp_path / "repo"
@@ -229,35 +241,31 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run((sys.executable, str(SCRIPT), *args), capture_output=True, text=True)
 
 
-def test_cli_stale_candidates_names_the_untouched_comment(tmp_path):
-    repo = fixture_repo(tmp_path)
-    result = run_cli("--root", str(repo), "--stale-candidates", "HEAD~1")
+def test_cli_stale_candidates_names_the_untouched_comment(repository):
+    result = run_cli("--root", str(repository), "--stale-candidates", "HEAD~1")
     assert result.returncode == 0
     assert "mod.py:1" in result.stdout
     assert "stale-candidate" in result.stdout
 
 
-def test_cli_stale_candidates_never_gates(tmp_path):
+def test_cli_stale_candidates_never_gates(repository):
     """The review dimension reads this mode's output; it must not fail the caller."""
 
-    repo = fixture_repo(tmp_path)
-    assert run_cli("--root", str(repo), "--stale-candidates", "HEAD~1").returncode == 0
+    assert run_cli("--root", str(repository), "--stale-candidates", "HEAD~1").returncode == 0
 
 
-def test_cli_diff_mode_gates_on_a_violation(tmp_path):
-    repo = fixture_repo(tmp_path)
-    (repo / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
-    git(repo, "commit", "-qam", "banner")
-    result = run_cli("--root", str(repo), "--diff", "HEAD~1")
+def test_cli_diff_mode_gates_on_a_violation(repository):
+    (repository / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
+    git(repository, "commit", "-qam", "banner")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1")
     assert result.returncode == 2
     assert "banner" in result.stdout
 
 
-def test_cli_warn_downgrades_a_gate_failure(tmp_path):
-    repo = fixture_repo(tmp_path)
-    (repo / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
-    git(repo, "commit", "-qam", "banner")
-    assert run_cli("--root", str(repo), "--diff", "HEAD~1", "--warn").returncode == 0
+def test_cli_warn_downgrades_a_gate_failure(repository):
+    (repository / "mod.py").write_text("# explains the call\nvalue = 2\n# ==========\n")
+    git(repository, "commit", "-qam", "banner")
+    assert run_cli("--root", str(repository), "--diff", "HEAD~1", "--warn").returncode == 0
 
 
 def test_cli_requires_a_mode():
@@ -266,15 +274,53 @@ def test_cli_requires_a_mode():
     assert "--baseline" in result.stderr
 
 
-def test_cli_rejects_two_modes_at_once(tmp_path):
-    repo = fixture_repo(tmp_path)
-    result = run_cli("--root", str(repo), "--diff", "HEAD~1", "--stale-candidates", "HEAD~1")
+def test_cli_rejects_two_modes_at_once(repository):
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--stale-candidates", "HEAD~1")
     assert result.returncode == 2
     assert "not allowed with argument" in result.stderr
 
 
-def test_cli_skips_a_missing_base_instead_of_failing(tmp_path):
-    repo = fixture_repo(tmp_path)
-    result = run_cli("--root", str(repo), "--stale-candidates", "no-such-ref")
+def test_cli_skips_a_missing_base_instead_of_failing(repository):
+    """A run that could not look is an anomaly, so it reports on stderr."""
+
+    result = run_cli("--root", str(repository), "--stale-candidates", "no-such-ref")
     assert result.returncode == 0
-    assert "no baseline ref" in result.stdout
+    assert "no baseline ref" in result.stderr
+    assert "no baseline ref" not in result.stdout
+
+
+def test_cli_diff_mode_flags_a_block_the_diff_extended(repository):
+    """Appending to an existing comment block is the common way to exceed the
+    limit; the block's first line stays untouched, so anchoring on it alone
+    would drop the finding."""
+
+    (repository / "block.py").write_text("# one\n# two\n# three\n# four\n# five\n# six\nvalue = 1\n")
+    git(repository, "add", "block.py")
+    git(repository, "commit", "-qm", "six-line block, within the limit")
+    assert run_cli("--root", str(repository), "--diff", "HEAD~1").returncode == 0
+
+    (repository / "block.py").write_text("# one\n# two\n# three\n# four\n# five\n# six\n# seven\nvalue = 1\n")
+    git(repository, "commit", "-qam", "one more line tips it over")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1")
+    assert result.returncode == 2
+    assert "long-block" in result.stdout
+
+
+def test_cli_baseline_scans_tracked_sources(repository):
+    """`--baseline` sweeps the whole repository and never gates."""
+
+    (repository / "banner.py").write_text("# ==========\nvalue = 1\n")
+    git(repository, "add", "banner.py")
+    git(repository, "commit", "-qm", "banner")
+    result = run_cli("--root", str(repository), "--baseline")
+    assert result.returncode == 0
+    assert "banner.py:1" in result.stdout
+    assert "banner" in result.stdout
+
+
+def test_cli_baseline_degrades_outside_a_repository(tmp_path):
+    """Every other mode degrades instead of crashing; this one now does too."""
+
+    result = run_cli("--root", str(tmp_path), "--baseline")
+    assert result.returncode == 0
+    assert "skipped" in result.stderr
