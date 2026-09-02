@@ -133,9 +133,19 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   only handles reactively or never handles at all: local worktree/branch
   cleanup (handled reactively as a tick side effect, but not during long
   idle stretches or a stuck loop), merged `vps-loop/item-*` branches piling
-  up unbounded on GitHub (never deleted by the loop itself), and stale local
+  up unbounded on GitHub (never deleted by the loop itself), stale local
   `-superseded-<sha>` backup branches (created by Step 2b, never pushed —
-  no automated prune path existed at all). Like `/root/claude-loop.sh`, the
+  no automated prune path existed at all), and orphaned poetry virtualenvs:
+  poetry names a project's venv by hashing its absolute path, so a worktree
+  this script's own first stage (or the loop's own Step 2/2b) deletes
+  leaves its now-unreachable venv behind at several GB apiece with no automated
+  prune path of its own — poetry itself never revisits a path once it stops
+  existing. This requires `poetry` to be reachable from the cron shell's
+  `PATH` (see the non-interactive-shell note above — the same `/usr/local/bin`
+  reachability requirement applies here as for any other binary this job
+  shells out to), and it assumes `/root/transit-app` is the only clone of
+  this project on the host — an independent second clone's own venv isn't
+  detectable as in-use and would eventually be pruned. Like `/root/claude-loop.sh`, the
   crontab wiring itself is VPS-local infrastructure, not tracked in this
   repo — only the
   script it invokes is.

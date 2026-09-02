@@ -62,10 +62,13 @@ _log = logging.getLogger(__name__)
 
 # How many days before ``ctx.from_date`` the shared grain has to reach.
 # ``compute_overview_summary`` builds its two comparison windows inline as
-# ``cur_from = max(anchor - 6, ctx.from_date)`` and ``base_from = cur_from - 7``,
-# so the earliest date any consumer can ask for is ``ctx.from_date - 7`` — the
-# ``max(..., ctx.from_date)`` clamp on ``cur_from`` is what makes 7 the exact
-# worst case rather than a heuristic. See :func:`_fetch_grain`, and note that
+# ``cur_from = max(anchor - 6, ctx.from_date)`` and
+# ``base_from = cur_from - cur_ctx.days``, where ``cur_ctx.days`` is
+# ``cur_ctx``'s own width (at most 7, and exactly 7 whenever the
+# ``max(..., ctx.from_date)`` clamp doesn't bite). So the earliest date any
+# consumer can ask for is ``ctx.from_date - 7`` in the unclamped case — 7
+# remains a safe (if now slightly conservative for a clamped/narrow ctx)
+# worst case, not a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
 
@@ -236,9 +239,13 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       grain spans their union and each consumer re-filters. The union bound is
       ``[ctx.from_date - 7, ctx.to_date]``:
       ``cur_ctx.from_date = max(anchor - 6, ctx.from_date) >= ctx.from_date``
-      and ``base_ctx.from_date = cur_ctx.from_date - 7``, so no consumer ever
-      reaches further back than 7 days before ``ctx.from_date``; and
-      ``anchor`` is either a date inside ``ctx`` or ``ctx.to_date`` itself, so
+      and ``base_ctx.from_date = cur_ctx.from_date - cur_ctx.days`` where
+      ``cur_ctx.days`` (``cur_ctx``'s own width) is at most 7, so no
+      consumer ever reaches further back than 7 days before
+      ``ctx.from_date`` — reached only when ``cur_ctx`` is the full 7 days;
+      a narrower ``cur_ctx`` (clamped ``ctx``) gives an even shallower
+      ``base_ctx``, still inside this bound; and ``anchor`` is either a date
+      inside ``ctx`` or ``ctx.to_date`` itself, so
       ``cur_ctx.to_date = anchor <= ctx.to_date`` bounds the far end. Because
       this bound needs no knowledge of ``anchor``, ``_latest_data_date`` —
       which computes ``anchor`` — can be served from the grain too, instead of
@@ -309,9 +316,11 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> date | None:
     """Most recent date inside ctx that has any samples.
 
-    Used to anchor the headline's 7-day window to where data actually
-    exists. Keeps the "this week vs last week" semantics meaningful
-    when ingest is lagging or the user selects a wide historical range.
+    Used to anchor the headline's current/baseline windows (up to 7 days
+    wide, narrower only when the user's selected range itself is narrower)
+    to where data actually exists. Keeps the "this week vs last week"
+    semantics meaningful when ingest is lagging or the user selects a wide
+    historical range.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` for
     sub-millisecond response. Slow path (any other time band) reads the shared
@@ -695,9 +704,10 @@ async def _top_delayed_routes(
     now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
     (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
 
-    Uses cur_ctx (the same last-7-days-of-ctx window compute_overview_summary
-    already builds for the headline), not the full ctx, so the KPI row's
-    three stats and the routes list all describe the same snapshot.
+    Uses cur_ctx (the same current-window — up to 7 days, narrower only when
+    ctx itself is narrower — compute_overview_summary already builds for the
+    headline), not the full ctx, so the KPI row's three stats and the routes
+    list all describe the same snapshot.
 
     Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
     each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
@@ -1013,8 +1023,9 @@ async def _movers(
     """Top-10 worsened + top-10 improved routes by signed delta_min.
 
     Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
-    ``compute_overview_summary`` so the comparison is a true 7-day
-    week-over-week regardless of the user's selected range). Requires
+    ``compute_overview_summary`` as same-width current/baseline windows,
+    up to 7 days, narrower only when the user's selected range itself is
+    narrower). Requires
     >= 10 samples in BOTH windows for a route to enter the ranking — a
     route with a handful of obs can swing a huge delta_pct and would
     otherwise dominate top-3 with low statistical confidence.
@@ -1192,11 +1203,16 @@ async def compute_overview_summary(
 ) -> dict:
     """Build the 概況 payload for one agency over ``ctx``.
 
-    Headline math uses the LAST 7 days of ``ctx`` and compares against
-    the 7-day window immediately prior, so the "this week vs last week"
-    copy is honest regardless of how the user has widened the ctx range.
-    Concentration / peak / service_split / sparkline still aggregate over
-    the full ctx to surface broader patterns.
+    Headline math uses the LAST UP-TO-7 days of ``ctx`` (``cur_ctx``) and
+    compares against a window of the SAME WIDTH immediately prior
+    (``base_ctx``), so the "vs. the period before it" copy stays honest
+    both when the user has widened the ctx range (both windows are a full
+    7 days, unaffected by the widening) and when they have narrowed it
+    below 7 days (both windows shrink to match, rather than comparing a
+    genuine N-day average against an always-7-day one and manufacturing a
+    delta from day-of-week composition alone). Concentration / peak /
+    service_split / sparkline still aggregate over the full ctx to surface
+    broader patterns.
 
     When ``pool`` is supplied (non-None), the ten stage queries are
     dispatched as concurrent asyncio tasks, each acquiring its own
@@ -1236,8 +1252,8 @@ async def compute_overview_summary(
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
 
-    # Build current + baseline 7-day windows anchored at `anchor`, but
-    # clamped inside ctx.
+    # Build current + baseline windows anchored at `anchor`, but clamped
+    # inside ctx.
     cur_to = anchor
     cur_from = max(cur_to - timedelta(days=6), ctx.from_date)
     cur_ctx = RangeCtx(
@@ -1248,8 +1264,19 @@ async def compute_overview_summary(
         service=ctx.service,
         routes=ctx.routes,
     )
+    # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it — not
+    # always a fixed 7 days. cur_ctx is 7 days wide whenever ctx reaches at
+    # least 7 days back from anchor, but the `max(..., ctx.from_date)` clamp
+    # above narrows it for a tighter ctx (e.g. a custom 3-day range). An
+    # always-7-day baseline would then compare a genuine N-day average
+    # against a genuine 7-day average — two windows with different
+    # day-of-week composition — and could manufacture a delta that is an
+    # artifact of window width, not a real trend change. Matching widths
+    # keeps every comparison "this window vs. the same-length one before
+    # it" honest, and is a no-op for the common (ctx >= 7 days) case, since
+    # cur_ctx.days is always 7 there — see the docstring above.
     base_to = cur_from - timedelta(days=1)
-    base_from = base_to - timedelta(days=6)
+    base_from = base_to - timedelta(days=cur_ctx.days - 1)
     base_ctx = RangeCtx(
         from_date=base_from,
         to_date=base_to,

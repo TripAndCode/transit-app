@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRangeContext, type TimeBand } from "../../api/rangeContext";
-import { DELAY_RAMP, delayColor } from "../../styles/tokens";
+import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 
 export type HourlyCell = {
   date: string;
@@ -103,10 +103,28 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             }}
           >
             <span>{t("reports.heatmap.delay_label")}</span>
-            <Swatch color={DELAY_RAMP.ok} label={t("reports.heatmap.lt_2")} />
-            <Swatch color={DELAY_RAMP.mild} label="2-5" />
-            <Swatch color={DELAY_RAMP.moderate} label="5-10" />
-            <Swatch color={DELAY_RAMP.severe} label=">10" />
+            <Swatch
+              color={DELAY_RAMP.ok}
+              label={t("reports.heatmap.band_lt", { min: DELAY_THRESHOLDS.mild })}
+            />
+            <Swatch
+              color={DELAY_RAMP.mild}
+              label={t("reports.heatmap.band_range", {
+                min: DELAY_THRESHOLDS.mild,
+                max: DELAY_THRESHOLDS.moderate,
+              })}
+            />
+            <Swatch
+              color={DELAY_RAMP.moderate}
+              label={t("reports.heatmap.band_range", {
+                min: DELAY_THRESHOLDS.moderate,
+                max: DELAY_THRESHOLDS.severe,
+              })}
+            />
+            <Swatch
+              color={DELAY_RAMP.severe}
+              label={t("reports.heatmap.band_gt", { min: DELAY_THRESHOLDS.severe })}
+            />
             <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>
               {t("reports.heatmap.legend_explainer")}
             </span>
