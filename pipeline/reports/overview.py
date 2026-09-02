@@ -1044,8 +1044,6 @@ async def _movers(
     for code in common:
         cur_avg, cur_n = cur[code]
         prv_avg, prv_n = prv[code]
-        if prv_avg == 0:
-            continue
         if cur_n < MIN_SAMPLES or prv_n < MIN_SAMPLES:
             continue
         d_min = cur_avg - prv_avg
