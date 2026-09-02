@@ -58,10 +58,43 @@ describe("PeakHourModal", () => {
       ],
     };
     render(<PeakHourModal data={mixed} loading={false} onClose={() => {}} />);
-    const bar = screen.getByTestId("peak-hour-modal-bar-K37");
+    const bar = screen.getByTestId("peak-hour-modal-bar-K37-平日");
     expect(bar.style.width).toBe("0%");
     // The label still shows the true negative value.
     expect(screen.getByText(/-3\.2/)).toBeInTheDocument();
+  });
+
+  it("does not render a NaN width when every route has avg_min of exactly 0", () => {
+    // maxAvg used to be 0 in this case (no `|| 1` fallback), so
+    // (0/0)*100 was NaN, and Math.max(NaN, 0) is NaN (not 0) since any
+    // comparison with NaN is false in JS.
+    const allZero: PeakHourBreakdown = {
+      hour: 8,
+      dow: 5,
+      routes: [
+        { route_code: "K31", service_type: "平日", avg_min: 0, samples: 50 },
+        { route_code: "K37", service_type: "平日", avg_min: 0, samples: 30 },
+      ],
+    };
+    render(<PeakHourModal data={allZero} loading={false} onClose={() => {}} />);
+    expect(screen.getByTestId("peak-hour-modal-bar-K31-平日").style.width).toBe("0%");
+    expect(screen.getByTestId("peak-hour-modal-bar-K37-平日").style.width).toBe("0%");
+  });
+
+  it("caps the bar width at 100 instead of overflowing when every route is early-running", () => {
+    // maxAvg is itself negative here (least-negative of the two), so a more
+    // negative avg_min divided by a negative maxAvg is a ratio > 1 — the
+    // one-sided clamp used to let this exceed 100%.
+    const allNegative: PeakHourBreakdown = {
+      hour: 8,
+      dow: 5,
+      routes: [
+        { route_code: "K31", service_type: "平日", avg_min: -0.5, samples: 50 },
+        { route_code: "K37", service_type: "平日", avg_min: -6.5, samples: 30 },
+      ],
+    };
+    render(<PeakHourModal data={allNegative} loading={false} onClose={() => {}} />);
+    expect(screen.getByTestId("peak-hour-modal-bar-K37-平日").style.width).toBe("100%");
   });
 
   describe("title grammar in Japanese", () => {

@@ -27,7 +27,7 @@ export function PeakHourModal({
 
   const maxAvg =
     data?.routes.length
-      ? Math.max(...data.routes.map((r) => r.avg_min))
+      ? Math.max(...data.routes.map((r) => r.avg_min)) || 1
       : 1;
 
   const title =
@@ -134,14 +134,16 @@ export function PeakHourModal({
                 }}
               >
                 <div
-                  data-testid={`peak-hour-modal-bar-${r.route_code}`}
+                  data-testid={`peak-hour-modal-bar-${r.route_code}-${r.service_type}`}
                   style={{
                     height: "100%",
-                    // avg_min can be negative for early-running routes; clamp
-                    // to 0 (no bar) rather than emit an invalid negative CSS
-                    // width, matching PeakHourRibbon's bar_h clamp. The text
-                    // label still shows the true (possibly negative) value.
-                    width: `${Math.max((r.avg_min / maxAvg) * 100, 0)}%`,
+                    // avg_min can be negative for early-running routes, and
+                    // maxAvg itself can be negative (every route in this
+                    // breakdown early-running) — clamp to [0, 100] rather
+                    // than emit an invalid negative or over-100% CSS width,
+                    // matching PeakHourRibbon's bar_h clamp. The text label
+                    // still shows the true (possibly negative) value.
+                    width: `${Math.min(Math.max((r.avg_min / maxAvg) * 100, 0), 100)}%`,
                     background: "var(--accent)",
                     borderRadius: 4,
                   }}

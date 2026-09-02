@@ -155,7 +155,12 @@ function PeakHourChart({
         {hourValues.map((v, h) => {
           if (v == null) return null;
           const x = PAD_LEFT + h * CELL_W + 1;
-          const y = toY(v);
+          // `denom` (peak_avg_min) can itself be negative when every hour
+          // runs early, which can push toY(v) far outside the plot area for
+          // hours more extreme than the peak — clamp y to the visible band
+          // so a bar can never render above/below the chart regardless of
+          // how extreme the value/denom ratio gets.
+          const y = Math.min(Math.max(toY(v), PAD_TOP), H - PAD_BOTTOM);
           const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
           const isPeak = h === peakIdx;
           const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
