@@ -9,11 +9,7 @@
 import type { TFunction } from "i18next";
 import { LOW_CONFIDENCE_SAMPLES, type RouteSummary } from "../../api/types";
 import { delayColor } from "../../styles/tokens";
-
-/** Whole-minute string for a second value (no sign). */
-function minStr(sec: number): string {
-  return Math.round(sec / 60).toString();
-}
+import { signedMin } from "./signedMin";
 
 export function RouteRow({
   route,
@@ -71,8 +67,8 @@ export function RouteRow({
       {route.has_baseline && route.baseline_avg_sec != null && (
         <span style={{ fontSize: 12, color: "var(--text-tertiary)", minWidth: 150 }}>
           {t("live.row.baseline_today", {
-            baseline: `+${minStr(route.baseline_avg_sec)}`,
-            today: `+${minStr(route.avg_delay_sec)}`,
+            baseline: signedMin(route.baseline_avg_sec, t),
+            today: signedMin(route.avg_delay_sec, t),
           })}
         </span>
       )}
