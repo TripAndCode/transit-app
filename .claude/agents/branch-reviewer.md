@@ -42,14 +42,18 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   note. It reads Python and TypeScript sources only, so a diff touching neither —
   Markdown-only process-doc diffs among them — produces nothing to list, and an empty
   list is not coverage.
-  Judge only what a machine cannot: does each comment still describe what the code
-  now does? Apply the repository's durable-content
-  rule — a comment must not cite a PR number, an issue, a past bug, or a date as the
-  reason code looks the way it does, and must not freeze a measured row count,
-  latency, or duration as a permanent fact. Where a comment asserts testable
-  behaviour, name the test that should replace it. The script's gate mode already
-  rejects over-long blocks, banners, pointers at other comments, and line-number
-  references, so do not re-report those.
+  Then run `python3 <linter> --root <worktree> --diff <merge-base> --warn` as a second
+  invocation — the two modes are mutually exclusive — and report what it lists:
+  over-long blocks, banners, pointers at other comments, and line-number references
+  the diff introduced. `--warn` keeps it reporting rather than gating. Nothing in this
+  repository runs the linter as a commit or push gate, so this dimension is where
+  those four rules are applied; do not assume some other check caught them.
+  Judge the rest by what a machine cannot: does each comment still describe what the
+  code now does? Apply the repository's durable-content rule — a comment must not cite
+  a PR number, an issue, a past bug, or a date as the reason code looks the way it
+  does, and must not freeze a measured row count, latency, or duration as a permanent
+  fact. Where a comment asserts testable behaviour, name the test that should replace
+  it.
 - **alternatives** — a materially simpler, faster, or lower-memory way to meet the
   objective; do not report speculative rewrites.
 - **enforcement** — for lint, CI, hook, or static-analysis changes only. Require a

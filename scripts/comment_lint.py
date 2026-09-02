@@ -1,6 +1,11 @@
 """Detect comment-policy violations in Python and TypeScript sources."""
 
+import argparse
+import os
 import re
+import subprocess
+import sys
+from collections import Counter
 from dataclasses import dataclass
 
 _PREFIX_BY_SUFFIX = {".py": "#", ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//"}
@@ -154,14 +159,10 @@ def exit_code(count, gating, warn_only):
 
 
 def _git(args, cwd):
-    import subprocess
-
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
 def _ref_exists(root):
-    import subprocess
-
     def check(ref):
         return (
             subprocess.run(
@@ -176,8 +177,6 @@ def _ref_exists(root):
 
 
 def _read(root, path):
-    import os
-
     full = os.path.join(root, path)
     try:
         with open(full, encoding="utf-8", errors="replace") as handle:
@@ -191,9 +190,12 @@ def _tracked_sources(root):
     return [p for p in _git(["ls-files", *globs], root).splitlines() if p]
 
 
-def _report(hits, root, label):
-    from collections import Counter
+def _report(hits, root, label, limit=None):
+    """Print findings. `limit=None` prints all of them.
 
+    A mode whose output another process consumes as its complete work list must
+    not be truncated: a dropped row there reads as nothing to review.
+    """
     if not hits:
         print(f"{label}: clean")
         return 0
@@ -202,29 +204,29 @@ def _report(hits, root, label):
     for rule, count in by_rule.most_common():
         print(f"  {rule:<16} {count}")
     print()
-    for path, v in hits[:40]:
+    shown = hits if limit is None else hits[:limit]
+    for path, v in shown:
         print(f"  {path}:{v.line}  [{v.rule}] {v.message}")
-    if len(hits) > 40:
-        print(f"  ... and {len(hits) - 40} more")
+    if limit is not None and len(hits) > limit:
+        print(f"  ... and {len(hits) - limit} more")
     return len(hits)
 
 
 def main(argv=None):
     """Run the comment policy over a repo, a diff, or a stale-comment sweep."""
-    import argparse
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="repository root")
     parser.add_argument("--max-block", type=int, default=6)
-    parser.add_argument("--baseline", action="store_true", help="scan every tracked source")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--baseline", action="store_true", help="scan every tracked source")
+    mode.add_argument(
         "--diff",
         metavar="BASE",
         nargs="?",
         const="auto",
         help="only lines added since BASE ('auto': origin/HEAD, master, main)",
     )
-    parser.add_argument("--stale-candidates", metavar="BASE", dest="stale")
+    mode.add_argument("--stale-candidates", metavar="BASE", dest="stale")
     parser.add_argument("--radius", type=int, default=3)
     parser.add_argument("--warn", action="store_true", help="report but never fail the gate")
     args = parser.parse_args(argv)
@@ -237,20 +239,17 @@ def main(argv=None):
             if lines is None:
                 continue
             hits += [(path, v) for v in find_violations(path, lines, args.max_block)]
-        _report(hits, root, "baseline")
+        _report(hits, root, "baseline", limit=40)
         return 0
 
     requested = args.diff or args.stale
-    if not requested:
-        parser.error("one of --baseline, --diff, --stale-candidates is required")
-
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
         print(f"comment policy: no baseline ref for {requested!r} — skipped")
         return 0
     try:
         diff = _git(["diff", "-U0", f"{base}...HEAD"], root)
-    except Exception as error:  # a repo we can't diff is not a policy breach
+    except (subprocess.CalledProcessError, OSError) as error:
         print(f"comment policy: skipped ({error.__class__.__name__})")
         return 0
     added = parse_added_lines(diff)
@@ -264,11 +263,14 @@ def main(argv=None):
             hits += [(path, c) for c in stale_candidates(path, lines, lines_added, args.radius)]
         else:
             hits += [(path, v) for v in find_violations(path, lines, args.max_block, only_lines=lines_added)]
-    count = _report(hits, root, "stale candidates" if args.stale else "comment policy")
+    count = _report(
+        hits,
+        root,
+        "stale candidates" if args.stale else "comment policy",
+        limit=None if args.stale else 40,
+    )
     return exit_code(count, gating=bool(args.diff), warn_only=args.warn)
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.exit(main())

@@ -87,9 +87,10 @@ scoped to this delta only:
 - **Staleness** — comments, docstrings, tests, locale entries, or docs that the new
   commits leave contradicting the code, including anything the same commits
   refactored away. Narrow this half first by running
-  `python3 <invoking-checkout>/scripts/comment_lint.py --root <worktree> --stale-candidates <merge_base>`
-  and judging only what it lists — the invoking checkout's copy, never the reviewed
-  branch's, for the same reason `prepare_review.py` is run from there. If it fails or
+  `python3 <linter> --root <worktree> --stale-candidates <merge_base>` and judging only
+  what it lists. `<linter>` is the absolute path passed in the payload below, resolved
+  from the invoking checkout and never from the reviewed branch, for the same reason
+  `prepare_review.py` is run from there. If it fails or
   returns an empty list — it reads Python and TypeScript sources only — fall back to
   the comments and prose beside the delta's changed lines.
 - **Refactor opportunities** — duplication or unnecessary ceremony the new commits
@@ -97,7 +98,10 @@ scoped to this delta only:
 
 That dispatch receives only: the delta manifest path, the delta diff path, the PR
 objective, the brief above, the review worktree path, the delta manifest's
-`merge_base` — the brief's staleness bullet names it — and this exact line:
+`merge_base`, the invoking checkout's absolute path to `scripts/comment_lint.py` — the
+staleness bullet names both, and a dispatched subagent shares none of this session's
+working directory, so an unresolved placeholder reaches it as literal text — and this
+exact line:
 
 `Deliberately excluded, do NOT re-derive: <manifest paths>. This is not truncation.`
 
