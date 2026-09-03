@@ -59,9 +59,15 @@ exists when you wire the app.
    default (`main`) to **`production`**. Do this for every service in this
    guide (`db`, `app`, `ingest`) — see the note above on why.
 4. `db` service → **Settings → Build**:
+   - Root Directory: `db`
    - Builder: **Dockerfile**
-   - Dockerfile Path: `db/Dockerfile`
-5. `db` → **Variables** (these feed the `postgis/postgis` image):
+   - Dockerfile Path: `Dockerfile`
+
+   The root directory is what makes the build context `db/`, matching every
+   other caller. The Dockerfile copies its extension gate from alongside
+   itself, so a context rooted at the repository instead cannot resolve it and
+   the build fails on the COPY.
+5. `db` → **Variables** (these feed the `postgres` image `db/Dockerfile` builds on):
    ```
    POSTGRES_USER=transit
    POSTGRES_PASSWORD=<openssl rand -hex 24>
