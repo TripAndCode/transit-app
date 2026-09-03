@@ -1,0 +1,174 @@
+/* LandingPage -- pre-authentication marketing entry point. Deliberately
+   more cinematic than the rest of the app (motion, a tilted 3D hero) as a
+   scoped exception; the signed-in dashboard's calm-UI rule is untouched. */
+
+.landing-shell {
+  min-height: 100vh;
+  background: var(--bg-page);
+  color: var(--text-primary);
+}
+
+.landing-hero {
+  position: relative;
+  height: 100vh;
+  min-height: 560px;
+  overflow: hidden;
+  background: var(--bg-page);
+  perspective: 1400px;
+}
+
+/* The canvas's own layout box stays untransformed (100% of this wrapper) --
+   CityMapHero.tsx sizes its internal pixel grid from that, via
+   clientWidth/clientHeight. The tilt lives entirely on this wrapper, which
+   nothing reads the size of. */
+.landing-hero__scene-tilt {
+  position: absolute;
+  inset: -15% -10% -35%;
+  transform: rotateX(55deg) scale(1.15);
+  transform-origin: 50% 100%;
+}
+
+.landing-hero__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Radial edge vignette: fades the scene toward the page background at the
+   hero's outer edges. */
+.landing-hero__vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, var(--bg-page) 100%);
+  pointer-events: none;
+}
+
+/* Dark horizontal gradient band behind the text column -- keeps the
+   headline/subhead/CTA legible regardless of what the animated scene is
+   doing underneath, independent of the vignette above (that fades the
+   scene's outer edges; this specifically shields the text). */
+.landing-hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    var(--bg-page) 0%,
+    color-mix(in srgb, var(--bg-page) 78%, transparent) 42%,
+    transparent 72%
+  );
+  pointer-events: none;
+}
+
+.landing-hero__content {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 0 6vw;
+}
+
+.landing-hero__brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.landing-hero__eyebrow {
+  font-family: var(--font-body);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.landing-hero__title {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(28px, 4.5vw, 48px);
+  line-height: 1.2;
+  letter-spacing: 0.005em;
+  color: var(--text-primary);
+}
+
+.landing-hero__subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 46ch;
+}
+
+.landing-hero__cta {
+  align-self: flex-start;
+  margin-top: 18px;
+  padding: 12px 28px;
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity var(--transition);
+}
+.landing-hero__cta:hover { opacity: 0.9; }
+.landing-hero__cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Explorer section -- one list, one panel; no second interaction pattern. */
+.landing-explorer {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 56px 24px 80px;
+}
+
+.landing-explorer__heading {
+  margin: 0 0 24px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.landing-explorer__body {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.landing-explorer__panel {
+  flex: 1;
+  min-width: 260px;
+  padding: 24px 28px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.landing-explorer__panel-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.landing-explorer__panel-preview {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.landing-explorer__panel-excerpt {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}

@@ -25,6 +25,17 @@
     "subtitle": "あなたの事業者を選んでください",
     "no_agencies": "事業者がまだ登録されていません。"
   },
+  "landing": {
+    "hero": {
+      "title": "今すぐ何が起きているか。どこで起きているか。",
+      "subtitle": "各事業者のリアルタイムな車両位置、遅延分析、事業者間の比較をまとめて確認できます。"
+    },
+    "explorer": {
+      "heading": "中身をのぞいてみる",
+      "ask_preview": "自然な言葉で自由に質問して、すぐに答えを得られます。",
+      "excerpt_unavailable": "マニュアルのプレビューは利用できません。"
+    }
+  },
   "forecast": {
     "overview_worst_label": "いま見るべき時間帯",
     "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均 +{{min}}分）",
