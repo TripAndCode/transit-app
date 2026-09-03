@@ -177,7 +177,7 @@ def suggested_tier(paths: list[str]) -> str:
 
     if not paths:
         return "empty"
-    if all(path == "CLAUDE.md" or path.startswith(".claude/") for path in paths):
+    if any(path == "CLAUDE.md" or path.startswith(".claude/") for path in paths):
         return "process-doc"
     if all(path.endswith(".md") for path in paths):
         return "trivial"

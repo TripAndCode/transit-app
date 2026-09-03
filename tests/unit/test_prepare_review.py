@@ -153,6 +153,26 @@ def test_process_doc_and_enforcement_flags_are_deterministic(repository: Path, t
     assert manifest["enforcement"] is True
 
 
+def test_process_doc_wins_when_mixed_with_an_ordinary_markdown_file(repository: Path, tmp_path: Path):
+    """CLAUDE.md is an executable process doc even when a diff also touches an
+    ordinary top-level doc -- `all(path.endswith(".md"))` would otherwise
+    mis-classify the mix as "trivial" instead of "process-doc", understating
+    the review tier for a change that governs enforcement itself."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "CLAUDE.md").write_text("# rules\n", encoding="utf-8")
+    docs = repository / "docs" / "features"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("feature notes\n", encoding="utf-8")
+    git(repository, "add", "CLAUDE.md", "docs/features/foo.md")
+    git(repository, "commit", "-m", "mix process doc with ordinary doc")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["CLAUDE.md", "docs/features/foo.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
 def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: Path, tmp_path: Path):
     """frontend/scripts/check-entry-chunk.mjs enforces "MapLibre stays out of
     the entry chunk" -- a real quality gate outside the top-level scripts/
