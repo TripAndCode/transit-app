@@ -47,6 +47,25 @@ def commit_at(repo: Path, message: str, when: str) -> None:
     )
 
 
+def create_backup_branch_at(repo: Path, branch: str, start_point: str, when: str) -> None:
+    """Create a local branch whose own reflog creation entry is timestamped `when` (ISO-8601).
+
+    Mirrors `commit_at`'s `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` technique, but applied to a
+    ref update instead of a commit: a reflog entry always records the *committer* identity
+    and timestamp for whichever command touched the ref, `git branch` just as much as `git
+    commit`, so this backdates the branch's OWN creation time -- deliberately not the
+    backing commit's, which is exactly the distinction under test throughout this file.
+    """
+
+    subprocess.run(
+        ("git", "-C", str(repo), "branch", branch, start_point),
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when},
+    )
+
+
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
     """Create a repository whose local main exactly matches a bare `origin`."""
@@ -227,10 +246,10 @@ def test_backup_branch_younger_than_retention_is_retained():
     """A superseded-backup branch inside the retention window is kept."""
 
     now = 1_000_000
-    commit_epoch = now - (29 * 86400)  # 29 days old, under a 30-day window
+    creation_epoch = now - (29 * 86400)  # 29 days old, under a 30-day window
 
     decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", commit_epoch, now_epoch=now, retention_days=30
+        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
     )
 
     assert decision.action == "keep"
@@ -240,10 +259,10 @@ def test_backup_branch_exactly_at_retention_boundary_is_retained():
     """Exactly at the retention window is not yet 'older than' it."""
 
     now = 1_000_000
-    commit_epoch = now - (30 * 86400)
+    creation_epoch = now - (30 * 86400)
 
     decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", commit_epoch, now_epoch=now, retention_days=30
+        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
     )
 
     assert decision.action == "keep"
@@ -253,14 +272,42 @@ def test_backup_branch_older_than_retention_is_deletable():
     """A superseded-backup branch past the retention window is deletable."""
 
     now = 1_000_000
-    commit_epoch = now - (31 * 86400)
+    creation_epoch = now - (31 * 86400)
 
     decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", commit_epoch, now_epoch=now, retention_days=30
+        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
     )
 
     assert decision.action == "delete"
     assert "31.0d old" in decision.reason
+
+
+def test_backup_branch_ages_from_its_own_creation_not_an_old_backing_commit():
+    """The whole point of the fix: a backup branch created *today* for an already-old,
+    long-stale branch must not look instantly past retention just because its backing
+    commit is old."""
+
+    now = 1_000_000
+    old_backing_commit_epoch = now - (365 * 86400)  # a year-old commit
+    creation_epoch = now  # the backup branch itself was just created
+
+    decision = hygiene.decide_backup_branch(
+        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
+    )
+
+    assert decision.action == "keep"
+    assert old_backing_commit_epoch < creation_epoch  # sanity: the two clocks really do differ
+
+
+def test_backup_branch_with_unknown_creation_time_is_retained():
+    """No reflog entry to measure age from -- always kept, never guessed at either extreme."""
+
+    decision = hygiene.decide_backup_branch(
+        "vps-loop/item-5-superseded-abc1234", None, now_epoch=1_000_000, retention_days=30
+    )
+
+    assert decision.action == "keep"
+    assert "unknown" in decision.reason
 
 
 # ---------------------------------------------------------------------------
@@ -656,16 +703,14 @@ def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
 # ---------------------------------------------------------------------------
 
 
-def test_load_local_superseded_branches_reads_committer_time_in_bulk(repository: Path):
-    """One `for-each-ref` call returns the exact committer-time epoch per backup branch,
-    and excludes a plain (non-superseded) `vps-loop/item-<N>` branch.
+def test_load_local_superseded_branches_reads_creation_time_from_reflog_in_bulk(repository: Path):
+    """One bulk reflog read returns each backup branch's own creation epoch -- not its
+    backing commit's committer time -- and excludes a plain (non-superseded)
+    `vps-loop/item-<N>` branch.
     """
 
     when = "2000-01-01T00:00:00+0000"
-    git(repository, "branch", "vps-loop/item-1-superseded-deadbee", "main")
-    git(repository, "checkout", "vps-loop/item-1-superseded-deadbee")
-    commit_at(repository, "old superseded backup", when)
-    git(repository, "checkout", "main")
+    create_backup_branch_at(repository, "vps-loop/item-1-superseded-deadbee", "main", when)
     git(repository, "branch", "vps-loop/item-2", "main")  # not a backup branch; must be excluded
 
     branches = hygiene.load_local_superseded_branches(repository)
@@ -673,22 +718,56 @@ def test_load_local_superseded_branches_reads_committer_time_in_bulk(repository:
     assert branches == {"vps-loop/item-1-superseded-deadbee": 946_684_800}
 
 
+def test_load_local_superseded_branches_uses_branch_creation_time_not_backing_commit_time(
+    repository: Path,
+):
+    """The whole point of the fix: an old backing commit must not make a brand-new backup
+    branch look already old. The branch here is created with a plain, un-backdated
+    `git branch` -- its reflog timestamp is real "now", even though it points at a
+    40-day-old commit.
+    """
+
+    old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
+    git(repository, "checkout", "-b", "old-work")
+    commit_at(repository, "old work", old_when)
+    old_tip = git(repository, "rev-parse", "HEAD")
+    git(repository, "checkout", "main")
+
+    git(repository, "branch", "vps-loop/item-4-superseded-a1d1234", old_tip)
+
+    branches = hygiene.load_local_superseded_branches(repository)
+
+    creation_epoch = branches["vps-loop/item-4-superseded-a1d1234"]
+    assert creation_epoch is not None
+    assert abs(creation_epoch - time.time()) < 60  # created just now, not 40 days ago
+
+
+def test_load_local_superseded_branches_reports_none_for_a_branch_with_no_reflog(
+    repository: Path,
+):
+    """A real branch that happens to have no reflog (disabled, or expired) must be reported
+    with an unknown (`None`) creation time -- not silently omitted from the result."""
+
+    git(repository, "config", "core.logAllRefUpdates", "false")
+    git(repository, "branch", "vps-loop/item-7-superseded-0decafe", "main")
+
+    branches = hygiene.load_local_superseded_branches(repository)
+
+    assert branches == {"vps-loop/item-7-superseded-0decafe": None}
+
+
 def test_run_backup_branch_pruning_deletes_only_stale_branches(tmp_path: Path, repository: Path):
-    """Apply removes only the superseded-backup branch older than the retention window."""
+    """Apply removes only the superseded-backup branch older than the retention window --
+    based on when each backup BRANCH was created, not its (here, identical and fresh)
+    backing commit.
+    """
 
     now = time.time()
     old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(now - 40 * 86400))
     new_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(now - 5 * 86400))
 
-    git(repository, "branch", "vps-loop/item-1-superseded-deadbee", "main")
-    git(repository, "checkout", "vps-loop/item-1-superseded-deadbee")
-    commit_at(repository, "old superseded backup", old_when)
-    git(repository, "checkout", "main")
-
-    git(repository, "branch", "vps-loop/item-2-superseded-cafef00d", "main")
-    git(repository, "checkout", "vps-loop/item-2-superseded-cafef00d")
-    commit_at(repository, "recent superseded backup", new_when)
-    git(repository, "checkout", "main")
+    create_backup_branch_at(repository, "vps-loop/item-1-superseded-deadbee", "main", old_when)
+    create_backup_branch_at(repository, "vps-loop/item-2-superseded-cafef00d", "main", new_when)
 
     log_path = tmp_path / "git-hygiene.log"
     hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
@@ -704,10 +783,7 @@ def test_run_backup_branch_pruning_dry_run_deletes_nothing(tmp_path: Path, repos
     """Without --apply, planning must not remove anything nor write the log."""
 
     old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
-    git(repository, "branch", "vps-loop/item-3-superseded-1234567", "main")
-    git(repository, "checkout", "vps-loop/item-3-superseded-1234567")
-    commit_at(repository, "old superseded backup", old_when)
-    git(repository, "checkout", "main")
+    create_backup_branch_at(repository, "vps-loop/item-3-superseded-1234567", "main", old_when)
 
     log_path = tmp_path / "git-hygiene.log"
     hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=False, log_file=log_path)
@@ -934,10 +1010,7 @@ def test_run_backup_branch_pruning_continues_after_one_delete_error(
 
     old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
     for branch in ("vps-loop/item-6-superseded-1111111", "vps-loop/item-6-superseded-2222222"):
-        git(repository, "branch", branch, "main")
-        git(repository, "checkout", branch)
-        commit_at(repository, "old superseded backup", old_when)
-        git(repository, "checkout", "main")
+        create_backup_branch_at(repository, branch, "main", old_when)
 
     def _flaky_delete(repo: Path, branch: str) -> None:
         if branch == "vps-loop/item-6-superseded-1111111":
