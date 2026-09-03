@@ -153,6 +153,70 @@ def test_process_doc_and_enforcement_flags_are_deterministic(repository: Path, t
     assert manifest["enforcement"] is True
 
 
+def test_process_doc_wins_when_mixed_with_an_ordinary_markdown_file(repository: Path, tmp_path: Path):
+    """CLAUDE.md is an executable process doc even when a diff also touches an
+    ordinary top-level doc -- `all(path.endswith(".md"))` would otherwise
+    mis-classify the mix as "trivial" instead of "process-doc", understating
+    the review tier for a change that governs enforcement itself."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "CLAUDE.md").write_text("# rules\n", encoding="utf-8")
+    docs = repository / "docs" / "features"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("feature notes\n", encoding="utf-8")
+    git(repository, "add", "CLAUDE.md", "docs/features/foo.md")
+    git(repository, "commit", "-m", "mix process doc with ordinary doc")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["CLAUDE.md", "docs/features/foo.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
+def test_process_doc_wins_when_a_claude_markdown_file_mixes_with_an_ordinary_markdown_file(
+    repository: Path, tmp_path: Path
+):
+    """`.claude/**` is as much an executable process doc as root `CLAUDE.md` --
+    a `.claude/commands/*.md` file mixed with an ordinary top-level doc must
+    route to "process-doc" the same way, not fall through to "trivial" just
+    because neither path is the literal string "CLAUDE.md"."""
+
+    git(repository, "switch", "-c", "feature")
+    commands = repository / ".claude" / "commands"
+    commands.mkdir(parents=True)
+    (commands / "foo.md").write_text("# foo command\n", encoding="utf-8")
+    docs = repository / "docs" / "features"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("feature notes\n", encoding="utf-8")
+    git(repository, "add", ".claude/commands/foo.md", "docs/features/foo.md")
+    git(repository, "commit", "-m", "mix a .claude markdown file with an ordinary doc")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [".claude/commands/foo.md", "docs/features/foo.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
+def test_process_doc_does_not_win_when_mixed_with_a_non_markdown_file(repository: Path, tmp_path: Path):
+    """A `CLAUDE.md` edit alongside a real code change must stay on the
+    "standard" two-reviewer tier, not collapse to process-doc's single
+    reviewer -- process-doc drops `bugs`/`perf`/`alternatives` coverage
+    entirely, which is wrong for a diff that also carries a non-Markdown
+    source change."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "CLAUDE.md").write_text("# rules\n", encoding="utf-8")
+    (repository / "scripts").mkdir(parents=True, exist_ok=True)
+    (repository / "scripts" / "foo.py").write_text("value = 1\n", encoding="utf-8")
+    git(repository, "add", "CLAUDE.md", "scripts/foo.py")
+    git(repository, "commit", "-m", "mix process doc with a real code change")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["CLAUDE.md", "scripts/foo.py"]
+    assert manifest["suggested_tier"] == "standard"
+
+
 def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: Path, tmp_path: Path):
     """frontend/scripts/check-entry-chunk.mjs enforces "MapLibre stays out of
     the entry chunk" -- a real quality gate outside the top-level scripts/

@@ -172,15 +172,28 @@ def build_diff(
     return Path(name).resolve()
 
 
+def _is_process_doc_path(path: str) -> bool:
+    """CLAUDE.md and everything under .claude/** are executable process docs,
+    not ordinary prose -- see CLAUDE.md's own "Git and pull requests" section."""
+    return path == "CLAUDE.md" or path.startswith(".claude/")
+
+
 def suggested_tier(paths: list[str]) -> str:
     """Classify obvious path-only tiers; the coordinator still checks semantics."""
 
     if not paths:
         return "empty"
-    if all(path == "CLAUDE.md" or path.startswith(".claude/") for path in paths):
+    if all(_is_process_doc_path(path) for path in paths):
         return "process-doc"
     if all(path.endswith(".md") for path in paths):
+        if any(_is_process_doc_path(path) for path in paths):
+            return "process-doc"
         return "trivial"
+    # A non-Markdown process-doc path (e.g. .claude/settings.json) mixed with
+    # an ordinary Markdown doc falls through to here rather than process-doc:
+    # that mix isn't "only .claude/**/CLAUDE.md" per this tier's own
+    # definition, and "standard" dispatches strictly more review than
+    # process-doc, so this never under-reviews -- deliberate, not a gap.
     return "standard"
 
 
