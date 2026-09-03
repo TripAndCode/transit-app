@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -22,13 +22,6 @@ function renderLanding() {
 }
 
 describe("LandingPage", () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: true, text: async () => "# Manual\n\n## 3. Overview tab\n\nExcerpt.\n" })),
-    );
-  });
-
   it("renders the hero headline, subtitle, and a sign-in CTA linking to /login", () => {
     renderLanding();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -43,9 +36,11 @@ describe("LandingPage", () => {
     expect(cta).toHaveAttribute("href", "/login");
   });
 
-  it("renders the tab explorer below the hero", () => {
+  it("renders the dashboard-preview shell below the hero", () => {
     renderLanding();
     expect(screen.getByRole("heading", { name: "See what's inside" })).toBeTruthy();
+    // The sidebar's real nav set, not a top-nav bar -- see DashboardPreview.test.tsx
+    // for the full structural/interaction assertions.
     expect(screen.getByRole("button", { name: /Overview/ })).toBeTruthy();
   });
 });
