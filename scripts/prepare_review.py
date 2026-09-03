@@ -172,14 +172,22 @@ def build_diff(
     return Path(name).resolve()
 
 
+def _is_process_doc_path(path: str) -> bool:
+    """CLAUDE.md and everything under .claude/** are executable process docs,
+    not ordinary prose -- see CLAUDE.md's own "Git and pull requests" section."""
+    return path == "CLAUDE.md" or path.startswith(".claude/")
+
+
 def suggested_tier(paths: list[str]) -> str:
     """Classify obvious path-only tiers; the coordinator still checks semantics."""
 
     if not paths:
         return "empty"
-    if any(path == "CLAUDE.md" or path.startswith(".claude/") for path in paths):
+    if all(_is_process_doc_path(path) for path in paths):
         return "process-doc"
     if all(path.endswith(".md") for path in paths):
+        if any(_is_process_doc_path(path) for path in paths):
+            return "process-doc"
         return "trivial"
     return "standard"
 
