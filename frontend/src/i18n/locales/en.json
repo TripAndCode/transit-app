@@ -25,6 +25,17 @@
     "subtitle": "Select your transit agency",
     "no_agencies": "No agencies are configured yet."
   },
+  "landing": {
+    "hero": {
+      "title": "What's happening right now — and where it's happening.",
+      "subtitle": "Live vehicle positions, delay analysis, and network comparisons for every agency you track."
+    },
+    "explorer": {
+      "heading": "See what's inside",
+      "ask_preview": "Ask freely in natural language and get an answer right away.",
+      "excerpt_unavailable": "Manual preview unavailable."
+    }
+  },
   "forecast": {
     "overview_worst_label": "When to watch out",
     "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg +{{min}} min)",
