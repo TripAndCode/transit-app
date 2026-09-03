@@ -210,6 +210,39 @@ async def test_on_time_appends_pct_low_confidence_flag(reports_client, ch_client
 
 
 @pytest.mark.asyncio
+async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, ch_client):
+    """format=csv for the on_time report must render the trailing
+    `low_confidence` flag as the same human-readable marker used by
+    frontend/src/components/ReportTable.tsx's fmtConfidence and
+    frontend/src/tabs/ask/RichResult.tsx (a short mark when true, blank
+    when false), not csv.writer's literalized "True"/"False" string form
+    of the raw Python bool."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route(pool, agency_id, "R_UNCERTAIN", "平日", day, [30] * 20 + [600] * 5)
+    await _seed_route(pool, agency_id, "R_CONFIDENT", "平日", day, [30] * 270 + [600] * 30)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&format=csv")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    body = resp.text
+    assert "True" not in body
+    assert "False" not in body
+
+    rows = list(csv.reader(io.StringIO(body)))
+    header, data_rows = rows[0], rows[1:]
+    assert header[-1] == "確信度低"
+    uncertain = next(r for r in data_rows if r[0] == "R_UNCERTAIN")
+    confident = next(r for r in data_rows if r[0] == "R_CONFIDENT")
+    assert uncertain[-1] == "幅あり"
+    assert confident[-1] == ""
+
+
+@pytest.mark.asyncio
 async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
     """NULL service_type routes must still rank (the '' sentinel maps back to
     None), matching the old live query which never filtered them."""

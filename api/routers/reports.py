@@ -316,6 +316,13 @@ async def forecast_overview(
     return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
 
 
+# Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
+# export, mirroring the caveat mark frontend/src/components/ReportTable.tsx's
+# fmtConfidence and frontend/src/tabs/ask/RichResult.tsx render for the same
+# signal (a short mark when true, blank when false) rather than the raw
+# Python bool's str() form.
+_LOW_CONFIDENCE_CSV_MARK = "幅あり"
+
 # Column headers used when emitting CSV. Japanese labels for operator-facing
 # downloads. Must match the row tuple shape produced by each compute_*.
 _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
@@ -341,6 +348,10 @@ def _csv_response(report_type: str, rows: list, ctx: RangeCtx) -> StreamingRespo
         for d in rows:
             offenders = "; ".join(o.get("route_code", "") for o in (d.get("top_offenders") or []))
             w.writerow([d.get("date"), d.get("avg_min"), d.get("avg_min_smoothed"), d.get("samples"), offenders])
+    elif report_type == "on_time":
+        for r in rows:
+            *lead, low_confidence = r
+            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else ""])
     else:
         for r in rows:
             w.writerow(list(r))
