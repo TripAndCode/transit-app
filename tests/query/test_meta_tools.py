@@ -281,9 +281,7 @@ async def test_sample_counts_dedupes_repeated_polls(conn_with_duplicate_polls_ch
     tool in this module already routes through for its own "samples"."""
     pool, agency_id, ch = conn_with_duplicate_polls_ch
     async with pool.acquire() as conn:
-        result = await describe_data(
-            {"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja", ch=ch
-        )
+        result = await describe_data({"kind": "sample_counts", "limit": 5}, _ctx(), conn, agency_id, locale="ja", ch=ch)
     assert result.kind == "table"
     assert result.rows[0][0] == "1021"
     assert result.rows[0][1] == 2

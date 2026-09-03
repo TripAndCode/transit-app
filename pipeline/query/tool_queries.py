@@ -232,11 +232,7 @@ async def route_hour_dow_pattern(
         str(route),
         top_n,
     )
-    return [
-        (r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"])
-        for r in rows
-        if r["avg_min"] is not None
-    ]
+    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows if r["avg_min"] is not None]
 
 
 async def schedule_realism_segments(

@@ -133,8 +133,7 @@ async def test_aggregate_freshness_never_analyzed_reports_real_backlog_span(heal
     """
     async with health_pool.acquire() as conn:
         a = await conn.fetchrow(
-            "INSERT INTO agencies (agency_name, feed_url) VALUES ('NeverAnalyzed', 'http://never') "
-            "RETURNING agency_id"
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('NeverAnalyzed', 'http://never') RETURNING agency_id"
         )
         aid = a["agency_id"]
         # Five distinct completed days of unaggregated backlog, 2026-04-01..05.
