@@ -109,7 +109,7 @@ class BackupBranchDecision:
     branch: str
     action: Literal["keep", "delete"]
     reason: str
-    commit_epoch: int
+    creation_epoch: int | None
 
 
 @dataclass(frozen=True)
@@ -459,51 +459,94 @@ def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file:
 # ---------------------------------------------------------------------------
 
 
-def load_local_superseded_branches(repo: Path) -> dict[str, int]:
-    """Return local `vps-loop/item-<N>-superseded-<sha>` branches mapped to their
-    backing commit's timestamp, as a unix epoch.
+def load_local_superseded_branches(repo: Path) -> dict[str, int | None]:
+    """Return local `vps-loop/item-<N>-superseded-<sha>` branches mapped to when each was
+    itself CREATED, as a unix epoch -- or `None` if that can't be determined.
 
-    One bulk `git for-each-ref` call, mirroring the same bulk-read idiom
-    `cleanup_git_state.local_branches` already uses for the analogous local-branch
-    listing, instead of one `git log` subprocess per branch. A branch-creation
-    timestamp isn't directly available from a bare ref, so this uses the commit's
-    own recorded committer time instead. Being a single atomic read, it also has no
-    per-branch window in which a concurrently-deleted branch could abort the whole
-    listing -- unlike a per-branch loop, where one vanished branch would raise and
-    stop every subsequent one from being read.
+    Deliberately not the backing commit's own committer date: a branch Step 2b judges
+    "fully superseded" typically already has an old tip commit by definition, so a backup
+    created *today* for it would otherwise look instantly past retention -- defeating the
+    whole point of a retention window that exists to give a human time to notice and
+    recover from a wrong judgment call.
+
+    A plain `git branch <name> <start-point>` (or `git checkout -b <name> <start-point>`,
+    Step 2b's own form) writes exactly one reflog entry for the new branch, `branch:
+    Created from <start-point>`, timestamped at that command's own real wall-clock time
+    regardless of how old the start point itself is (confirmed live). This reads every
+    matching branch's reflog in one bulk `git log -g --glob=...` call -- mirroring the same
+    bulk-read idiom this module already uses for `for-each-ref` -- rather than one `git
+    reflog show` per branch, and keeps the MINIMUM epoch seen per branch across every entry
+    `git log` reports for it: `--walk-reflogs` can't be combined with `--reverse` to read
+    oldest-first directly, and the minimum is correct regardless of how a ref's own entries
+    (there should only ever be one, for a branch nothing else ever updates) interleave with
+    other refs' entries in one combined stream.
+
+    Branch enumeration itself still goes through `for-each-ref`, not "whatever the reflog
+    scan happens to find": a real branch with no reflog at all (`core.logAllRefUpdates`
+    disabled, or an entry old enough to have been `git gc`-expired) is a distinct, visible
+    "unknown" outcome -- mapped to `None` so its decision says so explicitly, rather than
+    silently vanishing from the result the way it would if this function only reported
+    branches its reflog scan actually matched. Being built from two atomic reads (not a
+    per-branch loop), this also has no window in which a concurrently-deleted branch could
+    abort the whole listing.
     """
 
-    output = cleanup_git_state.run_command(
-        (
-            "git",
-            "for-each-ref",
-            "--format=%(refname:short)\t%(committerdate:unix)",
-            "refs/heads/vps-loop/item-*-superseded-*",
-        ),
+    branch_output = cleanup_git_state.run_command(
+        ("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/vps-loop/item-*-superseded-*"),
         cwd=repo,
     ).stdout
-    branches: dict[str, int] = {}
-    for line in output.splitlines():
-        if not line.strip():
+    branches: dict[str, int | None] = {
+        name: None
+        for name in (line.strip() for line in branch_output.splitlines())
+        if name and SUPERSEDED_BRANCH_RE.match(name)
+    }
+    if not branches:
+        return branches
+
+    reflog_output = cleanup_git_state.run_command(
+        ("git", "log", "-g", "--glob=refs/heads/vps-loop/item-*-superseded-*", "--date=unix", "--format=%gd|%gs"),
+        cwd=repo,
+    ).stdout
+    for line in reflog_output.splitlines():
+        if not line.strip() or "|" not in line:
             continue
-        name, epoch = line.split("\t", 1)
-        if SUPERSEDED_BRANCH_RE.match(name):
-            branches[name] = int(epoch)
+        selector, _subject = line.split("|", 1)
+        match = re.match(r"^(.*)@\{(\d+)\}$", selector)
+        if not match:
+            continue
+        name, epoch = match.group(1), int(match.group(2))
+        if name not in branches:
+            continue  # defensive; the glob above is already scoped to this exact shape
+        current = branches[name]
+        if current is None or epoch < current:
+            branches[name] = epoch
     return dict(sorted(branches.items()))
 
 
 def decide_backup_branch(
-    branch: str, commit_epoch: int, *, now_epoch: int, retention_days: int
+    branch: str, creation_epoch: int | None, *, now_epoch: int, retention_days: int
 ) -> BackupBranchDecision:
-    """Decide whether a superseded-backup branch has aged past its retention window."""
+    """Decide whether a superseded-backup branch has aged past its retention window.
 
-    age_days = (now_epoch - commit_epoch) / 86400
+    Age is measured from when the backup branch was itself created (see
+    `load_local_superseded_branches`'s own docstring for why), not from its backing
+    commit's committer date. `creation_epoch` of `None` means that couldn't be determined
+    at all (no reflog entry) -- there is no safe default to fall back to, so this always
+    keeps rather than guessing "brand new" or "ancient".
+    """
+
+    if creation_epoch is None:
+        return BackupBranchDecision(
+            branch, "keep", "branch creation time unknown (no reflog entry); keeping conservatively", None
+        )
+
+    age_days = (now_epoch - creation_epoch) / 86400
     if age_days > retention_days:
         return BackupBranchDecision(
-            branch, "delete", f"backing commit is {age_days:.1f}d old, past {retention_days}d retention", commit_epoch
+            branch, "delete", f"branch is {age_days:.1f}d old, past {retention_days}d retention", creation_epoch
         )
     return BackupBranchDecision(
-        branch, "keep", f"backing commit is {age_days:.1f}d old, within {retention_days}d retention", commit_epoch
+        branch, "keep", f"branch is {age_days:.1f}d old, within {retention_days}d retention", creation_epoch
     )
 
 
@@ -525,8 +568,8 @@ def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, l
     print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
     now_epoch = int(time.time())
     decisions = [
-        decide_backup_branch(branch, commit_epoch, now_epoch=now_epoch, retention_days=retention_days)
-        for branch, commit_epoch in load_local_superseded_branches(repo).items()
+        decide_backup_branch(branch, creation_epoch, now_epoch=now_epoch, retention_days=retention_days)
+        for branch, creation_epoch in load_local_superseded_branches(repo).items()
     ]
     for decision in decisions:
         print(f"{decision.action.upper():6} {decision.branch} — {decision.reason}")
