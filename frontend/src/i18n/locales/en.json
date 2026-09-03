@@ -34,6 +34,45 @@
       "heading": "See what's inside",
       "ask_preview": "Ask freely in natural language and get an answer right away.",
       "excerpt_unavailable": "Manual preview unavailable."
+    },
+    "preview": {
+      "heading": "See what's inside",
+      "route_label": "Route {{code}}",
+      "agency": {
+        "riverside": "Riverside Transit",
+        "harborline": "Harborline",
+        "hillcrest": "Hillcrest Connect"
+      },
+      "overview": {
+        "filter_all": "All routes",
+        "filter_on_time": "On-time",
+        "filter_delayed": "Delayed"
+      },
+      "live": {
+        "sort_latest": "Latest",
+        "sort_delay": "Most delayed",
+        "stop_label": "Stop {{n}}",
+        "minutes_ago": "{{n}} min ago"
+      },
+      "ask": {
+        "q1": "Which route is running late right now?",
+        "a1": "Route H9 is currently averaging a 4.4 min delay, the most of any route today.",
+        "q2": "How does this agency compare to others?",
+        "a2": "This agency's on-time rate is 92%, ahead of the network average.",
+        "q3": "When does this route usually run late?",
+        "a3": "Delays tend to peak in the evening commute, around 18:00.",
+        "generic_reply": "Here's a quick look based on your question — sign in to ask about your own agency's real data.",
+        "empty_hint": "Try a suggestion below, or ask your own question.",
+        "input_label": "Ask a question",
+        "input_placeholder": "Ask about delays, routes, or on-time performance…",
+        "send": "Send"
+      },
+      "map": {
+        "style_standard": "Standard",
+        "style_muted": "Muted",
+        "legend_on_time": "On-time route",
+        "legend_delayed": "Delayed route"
+      }
     }
   },
   "forecast": {

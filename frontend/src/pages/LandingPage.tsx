@@ -1,16 +1,18 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CityMapHero } from "./landing/CityMapHero";
-import { TabExplorer } from "./landing/TabExplorer";
+import { DashboardPreview } from "./landing/DashboardPreview";
 import "./LandingPage.css";
 
 /** Pre-authentication marketing/landing page -- a cinematic first
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
- *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). Two
- *  sections only: an animated hero, and a single tab-explorer widget below
- *  it -- see TabExplorer's own doc comment for why that widget is
- *  deliberately the page's only navigation/interaction pattern. */
+ *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
+ *  (animated scene + headline + sign-in CTA) is the entry point; below it,
+ *  `DashboardPreview` renders a shell structurally matching the real
+ *  `Sidebar.tsx` + `App.tsx` (collapsible sidebar, real nav set, full-bleed
+ *  Map tab, functional controls throughout) rather than a scrolling,
+ *  top-nav-style marketing page. */
 export function LandingPage() {
   const { t } = useTranslation();
   return (
@@ -36,7 +38,7 @@ export function LandingPage() {
           </Link>
         </div>
       </section>
-      <TabExplorer />
+      <DashboardPreview />
     </div>
   );
 }
