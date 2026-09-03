@@ -375,3 +375,43 @@ def test_cli_diff_mode_ignores_a_line_rewritten_in_a_long_block(repository):
     git(repository, "commit", "-qam", "rewrite one line in place")
     result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "3")
     assert result.returncode == 0, result.stdout
+
+
+def test_ignores_a_block_an_insertion_and_a_deletion_left_the_same_length():
+    """A diff that adds one line to a block and drops another elsewhere in it
+    has not lengthened it, and git reports those as two separate hunks."""
+
+    lines = ["# a", "# b", "# NEW", "# c", "# d", "# e", "# g", "code = 1"]
+    hunks = [
+        lint.Hunk(start=3, added=1, removed=0),
+        lint.Hunk(start=6, added=0, removed=1),
+    ]
+    found = lint.find_violations("x.py", lines, max_block=6, only_lines={3}, hunks=hunks)
+    assert found == []
+
+
+def test_cli_ignores_a_net_zero_edit_inside_a_long_block(repository):
+    """The same shape end to end, so the hunk parsing is covered too."""
+
+    (repository / "blocks.py").write_text("# a\n# b\n# c\n# d\n# e\n# f\n# g\ncode = 1\n")
+    git(repository, "add", "blocks.py")
+    git(repository, "commit", "-qm", "seven-line block, already over a limit of six")
+
+    (repository / "blocks.py").write_text("# a\n# b\n# NEW\n# c\n# d\n# e\n# g\ncode = 1\n")
+    git(repository, "commit", "-qam", "insert one line, delete another")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "6")
+    assert result.returncode == 0, result.stdout
+
+
+def test_cli_still_flags_a_net_growth_edit_inside_a_long_block(repository):
+    """The counterpart: same block, but the diff only adds."""
+
+    (repository / "grow.py").write_text("# a\n# b\n# c\n# d\n# e\n# f\ncode = 1\n")
+    git(repository, "add", "grow.py")
+    git(repository, "commit", "-qm", "six-line block, at a limit of six")
+
+    (repository / "grow.py").write_text("# a\n# b\n# NEW\n# c\n# d\n# e\n# f\ncode = 1\n")
+    git(repository, "commit", "-qam", "insert one line mid-block")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "6")
+    assert result.returncode == 2
+    assert "long-block" in result.stdout

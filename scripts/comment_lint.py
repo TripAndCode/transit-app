@@ -75,6 +75,21 @@ def _comment_body(line, prefix):
     return None if _PRAGMA.match(body) else body
 
 
+def _touches(hunk, span):
+    """Whether a hunk's new-file range meets a block's span.
+
+    A removal-only hunk has an empty range and so meets the span only from
+    within it — which is what a deletion inside the block looks like — while a
+    hunk landing wholly before or after the block does not count.
+    """
+    return hunk.start <= span[-1] and span[0] <= hunk.start + hunk.added
+
+
+def _added_lines(hunks):
+    """The new-file line numbers a file's hunks introduced."""
+    return {number for hunk in hunks for number in range(hunk.start, hunk.start + hunk.added)}
+
+
 def _diff_caused(pair, only_lines, max_block, hunks=()):
     """Whether the diff, not the code it landed in, produced this violation.
 
@@ -84,6 +99,10 @@ def _diff_caused(pair, only_lines, max_block, hunks=()):
     before this diff and is over it now — wherever the new lines landed, tail
     or middle. A block already too long stays the surrounding code's problem,
     even if the diff touched it.
+
+    A deletion counts as much as an insertion: a diff that adds one line to a
+    block and drops another leaves its length alone, so skipping the
+    removal-only hunk would credit the diff with growth it did not cause.
 
     Recovering the earlier length needs the removals, not just the additions:
     a rewritten line is reported as added while leaving the block the same
@@ -99,9 +118,7 @@ def _diff_caused(pair, only_lines, max_block, hunks=()):
     added = sum(1 for number in span if number in only_lines)
     if not added:
         return False
-    removed = sum(
-        hunk.removed for hunk in hunks if hunk.added and hunk.start < span[-1] + 1 and span[0] < hunk.start + hunk.added
-    )
+    removed = sum(hunk.removed for hunk in hunks if _touches(hunk, span))
     previously = len(span) - max(added - removed, 0)
     return previously <= max_block
 
@@ -197,7 +214,7 @@ def parse_hunks(diff_text):
 def parse_added_lines(diff_text):
     """Map each file in a `git diff -U0` to the line numbers it gained."""
     return {
-        path: {number for hunk in file_hunks for number in range(hunk.start, hunk.start + hunk.added)}
+        path: _added_lines(file_hunks)
         for path, file_hunks in parse_hunks(diff_text).items()
         if any(hunk.added for hunk in file_hunks)
     }
@@ -334,7 +351,7 @@ def main(argv=None):
 
     hits = []
     for path, hunks in sorted(file_hunks.items()):
-        lines_added = {number for hunk in hunks for number in range(hunk.start, hunk.start + hunk.added)}
+        lines_added = _added_lines(hunks)
         if not lines_added:
             continue
         lines = _read(root, path)
