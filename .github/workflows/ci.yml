@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches: ["**"]
@@ -77,6 +76,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # This runner's root filesystem is small and shared with a lot of
+      # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
+      # etc.) — reclaim it before anything else runs, including `poetry
+      # install` itself: the ML embedder dependency alone is large enough
+      # that installing it before this cleanup can exhaust the disk before
+      # the db/Dockerfile image build (the other big consumer, see below)
+      # ever starts. Hundreds of small Postgres data files written by the
+      # suite have also tipped this already-tight disk into intermittent
+      # `DiskFull` mid-run in the past.
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
+            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
+          df -h /
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -86,18 +101,6 @@ jobs:
 
       - name: Install dependencies
         run: poetry install
-
-      # This runner's root filesystem is small and shared with a lot of
-      # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
-      # etc.). Hundreds of small Postgres data files written by the suite have
-      # tipped this already-tight disk into intermittent `DiskFull` mid-run,
-      # so reclaim the unused tooling before the database starts.
-      - name: Free disk space on the runner
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
 
       - name: Start Postgres from db/Dockerfile
         uses: ./.github/actions/start-test-postgres
@@ -142,3 +145,4 @@ jobs:
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
         run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term
+

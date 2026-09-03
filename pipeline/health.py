@@ -130,9 +130,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     earliest_live: dict[int, date | None] = {}
     if never_analyzed_ids:
         probed_earliest = await min_captured_at_by_agency(ch, never_analyzed_ids, _log)
-        earliest_live = {
-            aid: None if mn is None else mn.astimezone(_JST).date() for aid, mn in probed_earliest.items()
-        }
+        earliest_live = {aid: None if mn is None else mn.astimezone(_JST).date() for aid, mn in probed_earliest.items()}
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:

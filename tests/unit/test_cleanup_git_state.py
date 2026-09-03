@@ -44,6 +44,15 @@ def repository(tmp_path: Path) -> Path:
     git(repo, "commit", "-m", "initial")
     git(repo, "remote", "add", "origin", str(remote))
     git(repo, "push", "-u", "origin", "main")
+    # `init --bare` points HEAD at the environment's `init.defaultBranch`
+    # (unset in some CI images, defaulting to "master"), independent of
+    # which branch actually gets pushed here. Left unpinned, a later
+    # `git clone` of this bare repo checks out that stale HEAD target
+    # instead of "main" — if no such ref exists, the clone lands on an
+    # unborn branch under that name, so a subsequent `git push origin
+    # main` in the clone fails with "src refspec main does not match
+    # any" (the clone's current branch was never actually named "main").
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
     return repo
 
 

@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 
-export type SidebarNavItem<K extends string | number = string> = {
+type SidebarNavItem<K extends string | number = string> = {
   key: K;
   label: ReactNode;
 };

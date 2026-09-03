@@ -113,9 +113,7 @@ async def test_health_and_network_freshness_agree_after_atomic_analyze(pg_conn, 
 
         health_rows_after = await aggregate_freshness(conn, ch_async_client)
         health_row_after = next(r for r in health_rows_after if r.agency_id == agency_id)
-        network_rows_after = await compute_network_summary(
-            conn, ch_async_client, date(2026, 3, 1), date(2026, 12, 31)
-        )
+        network_rows_after = await compute_network_summary(conn, ch_async_client, date(2026, 3, 1), date(2026, 12, 31))
         network_row_after = next(r for r in network_rows_after if r["agency_id"] == agency_id)
 
         assert health_row_after.is_stale is False  # agg_route_daily untouched, still covers 04-02
