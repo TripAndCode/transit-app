@@ -185,7 +185,7 @@ export function useAdminOps() {
   });
 }
 
-// ── Architecture docs (developer/internal page, item 25) ────────────────
+// ── Architecture docs (developer/internal page) ─────────────────────────
 
 type ArchitectureDocSummary = {
   slug: string;

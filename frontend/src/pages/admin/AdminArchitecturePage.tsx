@@ -30,13 +30,13 @@ flowchart LR
 \`\`\`
 `;
 
-/** Developer/internal-only page at \`/admin/architecture\` (item 25): a
- * Mermaid rendering of CLAUDE.md's "Architecture pointers" (part A), plus a
+/** Developer/internal-only page at \`/admin/architecture\`: a Mermaid
+ * rendering of CLAUDE.md's "Architecture pointers" (part A), plus a
  * sidebar-navigable index of \`docs/features/*.md\` (part B). Reuses the
  * existing \`RequireAdmin\` + \`AdminLayout\` gate exactly like
- * \`/admin/agencies\`, \`/admin/users\`, and \`/admin/ops\` -- no new
- * permission concept, per the explicit decision recorded in NEXT_TASK.md's
- * item 25 to keep \`role=admin\` a single, carefully-scoped concept. */
+ * \`/admin/agencies\`, \`/admin/users\`, and \`/admin/ops\` -- reusing
+ * \`role=admin\` rather than introducing a separate internal/developer
+ * permission flag. */
 export function AdminArchitecturePage() {
   const { t } = useTranslation();
   const { data: docs, error: docsError } = useArchitectureDocs();

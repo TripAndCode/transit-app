@@ -174,8 +174,9 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // above and for the identical reason: the anchor-handoff scenario this
     // merge exists for can ONLY happen on an agency's first effect run this
     // session (computeAnchorRange only ever fires before any filter
-    // interaction, so by construction this hook can defer to it — see line
-    // 85 above — at most once per agency, on that very first render).
+    // interaction, so by construction this hook can defer to it — see this
+    // hook's computeAnchorRange early-return above — at most once per
+    // agency, on that very first render).
     // Beyond the first attempt, a field absent from `nextStored` reflects a
     // real, later, in-session change (e.g. the user explicitly clearing just
     // `dow` while `from`/`to`/`time_band` stay put) that must be allowed to
