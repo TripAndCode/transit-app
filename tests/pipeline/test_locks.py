@@ -3,6 +3,7 @@ advisory lock shared by api/routers/internal.py's cron endpoint and
 gtfs_pipeline.py's ingest/ingest_live/analyze/analyze_all CLI commands."""
 
 import os
+import time
 
 import psycopg2
 
@@ -44,7 +45,18 @@ def test_try_lock_ingest_analyze_releases_on_connection_close(pg_conn):
         assert cur.fetchone()[0] is True
     holder.close()
 
-    assert try_lock_ingest_analyze(pg_conn) is True
+    # `close()` returns once the client socket is gone, but the server frees a
+    # session's advisory locks while tearing its backend down, which happens
+    # afterwards. Retry until it does: asserting once, immediately, races that
+    # teardown and fails whenever the acquirer wins. A caller cannot observe an
+    # instantaneous release either, so "released within a bounded wait" is the
+    # property being relied on, and a release that never lands still fails here.
+    deadline = time.monotonic() + 10.0
+    while True:
+        if try_lock_ingest_analyze(pg_conn) is True:
+            break
+        assert time.monotonic() < deadline, "lock still held 10s after the holding connection closed"
+        time.sleep(0.05)
 
 
 def test_try_lock_ingest_analyze_survives_txn_rollback(pg_conn):

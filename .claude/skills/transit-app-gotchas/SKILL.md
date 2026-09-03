@@ -25,8 +25,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 - Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —
   BOTH are required for any test touching `updates` (which is most of
   `tests/api/`, `tests/pipeline/`, `tests/query/`). Postgres image built from
-  `db/` (the bare pgvector image lacks PostGIS and migration 0001 fails on
-  `CREATE EXTENSION postgis`):
+  `db/`, which layers PostGIS and pgvector onto the official multi-architecture
+  `postgres` base — a stock `postgres` or bare pgvector image lacks PostGIS and
+  migration 0001 fails on `CREATE EXTENSION postgis`. It builds natively on
+  amd64 and arm64 alike; if `docker` reports a platform mismatch for this
+  container, something is forcing an architecture and every query will pay an
+  emulation tax large enough to push the full suite past the pre-push gate's
+  timeout:
   ```bash
   docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
     -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \

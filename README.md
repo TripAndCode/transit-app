@@ -653,7 +653,8 @@ are never deleted by this workflow.
 Run a specific test file. **Point `DATABASE_URL` at the throwaway test DB on
 `:5544`, never the dev DB on `:5433`** — the test suite auto-migrates its
 target, and the dev DB holds real data. Start the throwaway database with the custom
-PostGIS + pgvector image (and run `make ch-test` when ClickHouse is required):
+PostGIS + pgvector image (and run `make ch-test` when ClickHouse is required). The
+image builds for the host's own architecture, so arm64 machines run it natively:
 
 ```bash
 docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
