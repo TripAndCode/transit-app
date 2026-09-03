@@ -142,6 +142,13 @@ def test_the_dockerfile_runs_the_gate_and_lets_it_fail_the_build():
         "the Dockerfile must run the gate as its own command, with nothing appended that could swallow a non-zero exit"
     )
 
+    # A SHELL directive rewrites how every later RUN is invoked, so one ending
+    # in `|| true` makes the gate inert while leaving its own line untouched.
+    # This image has no reason to override the default shell at all.
+    assert not re.search(r"^\s*SHELL\b", dockerfile, re.MULTILINE | re.IGNORECASE), (
+        "db/Dockerfile must not override SHELL: it changes how every RUN reports its exit status, including the gate's"
+    )
+
 
 def test_rejects_a_spec_with_an_empty_minimum(extension_dir, stub_path):
     """`name=` must not degrade into a presence-only check that always passes."""
