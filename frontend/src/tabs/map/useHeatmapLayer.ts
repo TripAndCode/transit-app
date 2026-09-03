@@ -24,9 +24,28 @@ const IS_STOP: maplibregl.ExpressionSpecification = ["!", ["has", "point_count"]
 
 // Solid fills — delay is encoded by color + dot SIZE, not by opacity, and a
 // focused band now FILTERS the data (below) rather than dimming non-matching
-// dots, so these are plain constants.
+// dots, so these are plain constants EXCEPT for the low-confidence dimming
+// below, a different signal (statistical confidence, not delay severity or
+// focus state) applied uniformly on top of either constant.
 const DOT_OPACITY = 0.92;
 const CASING_OPACITY = 0.85;
+// A thin-sample stop (see api.triage.LOW_CONFIDENCE_SAMPLES, mirrored onto
+// each feature's `low_confidence` property) renders at reduced opacity
+// rather than being hidden or resized — consistent with this codebase's
+// "flag, don't hide/reshape" convention for low-confidence figures
+// elsewhere (e.g. RouteForecastSection's opacity dimming).
+export const LOW_CONFIDENCE_OPACITY_FACTOR = 0.45;
+
+/** Wrap a full-confidence opacity value in a MapLibre `case` expression that
+ * dims it when the feature's `low_confidence` property is true. */
+function dimIfLowConfidence(fullOpacity: number): maplibregl.ExpressionSpecification {
+  return [
+    "case",
+    ["boolean", ["get", "low_confidence"], false],
+    fullOpacity * LOW_CONFIDENCE_OPACITY_FACTOR,
+    fullOpacity,
+  ];
+}
 
 /**
  * JS predicate mirroring the legend's delay bands. Used to FILTER the stops fed
@@ -217,7 +236,7 @@ export function useHeatmapLayer(
           "circle-stroke-width": [
             "case", ["boolean", ["feature-state", "hover"], false], 7, 5,
           ],
-          "circle-stroke-opacity": CASING_OPACITY,
+          "circle-stroke-opacity": dimIfLowConfidence(CASING_OPACITY),
           "circle-pitch-alignment": "map",
         },
       });
@@ -230,7 +249,7 @@ export function useHeatmapLayer(
         paint: {
           "circle-radius": DOT_RADIUS,
           "circle-color": colorExpr,
-          "circle-opacity": DOT_OPACITY,
+          "circle-opacity": dimIfLowConfidence(DOT_OPACITY),
           // White stroke reads against ANY basemap — light (淡色), busy/warm
           // (OSM, 標準), and dark imagery (航空写真) — where the old faint dark
           // stroke vanished. Thickens on hover for emphasis.

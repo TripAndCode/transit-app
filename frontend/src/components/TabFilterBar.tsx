@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { routeDisplayName } from "../api/routeDisplayName";
 import {
   useRangeContext,
   type DowFilter,
@@ -11,6 +12,7 @@ import {
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
+import { buildTimeBandOptions } from "./timeBandOptions";
 
 const pill = (active: boolean): CSSProperties => ({
   background: active ? "var(--accent-soft)" : "var(--bg-surface)",
@@ -54,48 +56,28 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   });
   const { data: routes } = useRoutes(agencyIdNum);
 
-  const dowOptions = useMemo<{ value: DowFilter; label: string }[]>(
-    () => [
-      { value: "all", label: t("filters.dow.all") },
-      { value: "weekday", label: t("filters.dow.weekday") },
-      { value: "weekend", label: t("filters.dow.weekend") },
-    ],
-    [t],
-  );
+  const dowOptions: { value: DowFilter; label: string }[] = [
+    { value: "all", label: t("filters.dow.all") },
+    { value: "weekday", label: t("filters.dow.weekday") },
+    { value: "weekend", label: t("filters.dow.weekend") },
+  ];
 
-  const serviceOptions = useMemo<{ value: ServiceFilter; label: string }[]>(
-    () => [
-      { value: "all", label: t("filters.service.all") },
-      // value stays as the raw JP string (URL query value); only the label is translated
-      { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
-      { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
-    ],
-    [t],
-  );
+  const serviceOptions: { value: ServiceFilter; label: string }[] = [
+    { value: "all", label: t("filters.service.all") },
+    // value stays as the raw JP string (URL query value); only the label is translated
+    { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
+    { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
+  ];
 
-  const timeBandOptions = useMemo<{ value: TimeBand; label: string }[]>(
-    () => [
-      { value: "all", label: t("filters.time_band.all") },
-      { value: "morning", label: t("filters.time_band.morning") },
-      { value: "forenoon", label: t("filters.time_band.forenoon") },
-      { value: "noon", label: t("filters.time_band.noon") },
-      { value: "afternoon", label: t("filters.time_band.afternoon") },
-      { value: "evening", label: t("filters.time_band.evening") },
-      { value: "night", label: t("filters.time_band.night") },
-      { value: "late_night", label: t("filters.time_band.late_night") },
-    ],
-    [t],
-  );
+  const timeBandOptions = buildTimeBandOptions(t);
 
-  const timeBandLabel = useMemo<Record<TimeBand, string>>(
-    () => Object.fromEntries(timeBandOptions.map((o) => [o.value, o.label])) as Record<TimeBand, string>,
-    [timeBandOptions],
-  );
+  const timeBandLabel = Object.fromEntries(
+    timeBandOptions.map((o) => [o.value, o.label]),
+  ) as Record<TimeBand, string>;
 
-  const serviceLabel = useMemo<Record<ServiceFilter, string>>(
-    () => Object.fromEntries(serviceOptions.map((o) => [o.value, o.label])) as Record<ServiceFilter, string>,
-    [serviceOptions],
-  );
+  const serviceLabel = Object.fromEntries(
+    serviceOptions.map((o) => [o.value, o.label]),
+  ) as Record<ServiceFilter, string>;
 
   // Mirror external ctx changes (chip clears, presets, drilldowns) into the
   // popover draft via the render-adjust pattern — same semantics as the old
@@ -127,28 +109,24 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
     (ctx.service !== "all" ? 1 : 0) +
     (ctx.routes.length > 0 ? 1 : 0);
 
-  const routeNameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    if (routes) for (const r of routes) {
-      if (r.route_code) m.set(r.route_code, r.route_short_name || r.route_id);
-    }
-    return m;
-  }, [routes]);
+  // See routeDisplayName's doc comment for the fallback order rationale
+  // (shared with useRouteNames.ts to avoid the two diverging again).
+  const routeNameMap = new Map<string, string>();
+  if (routes) for (const r of routes) {
+    if (r.route_code) routeNameMap.set(r.route_code, routeDisplayName(r));
+  }
 
   // route_short_name → list of route_codes that share it.
   // A single display name like "K37 観光通り線" maps to several codes // i18n-ignore: comment
   // (different operating variants); the picker can collapse-select all
   // of them, and the chips below merge accordingly.
-  const groupCodesByName = useMemo(() => {
-    const m = new Map<string, string[]>();
-    if (routes) for (const r of routes) {
-      if (!r.route_code || !r.route_short_name) continue;
-      const arr = m.get(r.route_short_name) || [];
-      arr.push(r.route_code);
-      m.set(r.route_short_name, arr);
-    }
-    return m;
-  }, [routes]);
+  const groupCodesByName = new Map<string, string[]>();
+  if (routes) for (const r of routes) {
+    if (!r.route_code || !r.route_short_name) continue;
+    const arr = groupCodesByName.get(r.route_short_name) || [];
+    arr.push(r.route_code);
+    groupCodesByName.set(r.route_short_name, arr);
+  }
 
   // Decide which selected route codes collapse into a single "by-name" chip
   // and which stand alone. A group collapses only when *all* its codes are
@@ -157,21 +135,18 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   type ChipSpec =
     | { kind: "name"; name: string; codes: string[] }
     | { kind: "code"; code: string };
-  const routeChips = useMemo<ChipSpec[]>(() => {
-    const sel = new Set(ctx.routes);
-    const used = new Set<string>();
-    const chips: ChipSpec[] = [];
-    for (const [name, codes] of groupCodesByName) {
-      if (codes.length > 1 && codes.every((c) => sel.has(c))) {
-        chips.push({ kind: "name", name, codes });
-        for (const c of codes) used.add(c);
-      }
+  const selectedRouteCodes = new Set(ctx.routes);
+  const usedRouteCodes = new Set<string>();
+  const routeChips: ChipSpec[] = [];
+  for (const [name, codes] of groupCodesByName) {
+    if (codes.length > 1 && codes.every((c) => selectedRouteCodes.has(c))) {
+      routeChips.push({ kind: "name", name, codes });
+      for (const c of codes) usedRouteCodes.add(c);
     }
-    for (const code of ctx.routes) {
-      if (!used.has(code)) chips.push({ kind: "code", code });
-    }
-    return chips;
-  }, [ctx.routes, groupCodesByName]);
+  }
+  for (const code of ctx.routes) {
+    if (!usedRouteCodes.has(code)) routeChips.push({ kind: "code", code });
+  }
 
   function apply() {
     setCtx({

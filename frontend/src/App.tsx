@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { Outlet, useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
+import { HelpHint } from "./components/HelpHint";
 import { Sidebar } from "./components/Sidebar";
 
 /**
@@ -28,7 +30,9 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  useDefaultRangeAnchor(agencyId ? Number(agencyId) : null);
+  const agencyIdNum = agencyId ? Number(agencyId) : null;
+  useDefaultRangeAnchor(agencyIdNum);
+  useAnonymousFilterPersistence(agencyIdNum);
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar />
@@ -36,10 +40,15 @@ export default function App() {
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
-            that has nothing to do with feed staleness or in-flight mutations). */}
-        <GuestPrompt />
+            that has nothing to do with feed staleness or in-flight mutations).
+            Data-quality warnings render before the guest-login nudge: both are
+            persistent until dismissed, but a warning about the data itself
+            should outrank a suggestion to sign in when more than one banner
+            is showing at once. */}
         <DataStalenessBanner />
         <FeedHealthBanner />
+        <GuestPrompt />
+        <HelpHint />
         <ActivityStrip />
         {/* flex: 1, not height: "100%" — main is now a flex column whose
             other children (the banners/strip above) take variable height, so

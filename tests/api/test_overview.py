@@ -24,25 +24,48 @@ async def _seed_agg_daily(
     service_type: str,
     avg_min: float,
     samples: int,
+    sum_late_sec: int | None = None,
 ):
     """Insert (or upsert) one ``agg_daily_trend`` row.
 
     ``date_`` may be a :class:`datetime.date` or an ISO string;
     ``agg_daily_trend.date`` is TEXT per schema, so we coerce both shapes.
+
+    ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)`` —
+    the exact raw-seconds sum a real analyze() run would have stored for an
+    ``avg_min`` that is itself already exact (true of every value seeded by
+    this helper), so the fast path's ``SUM(sum_delay_sec) / SUM(samples)``
+    reproduces the same figure these tests were already asserting on.
+
+    ``sum_late_sec`` defaults to ``round(max(avg_min, 0) * 60 * samples)`` —
+    exact whenever every observation behind this row shares ``avg_min``'s
+    sign (true of every caller that seeds a uniformly early or uniformly
+    late day). A caller exercising a day that MIXES early and late trips —
+    exactly the case where the per-observation clamped sum and the
+    clamped-average approximation this column replaced used to diverge —
+    must pass the true value explicitly; there is no way to derive it from
+    ``avg_min``/``samples`` alone.
     """
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
+    samples = int(samples)
+    sum_delay_sec = round(float(avg_min) * 60 * samples)
+    if sum_late_sec is None:
+        sum_late_sec = round(max(float(avg_min), 0.0) * 60 * samples)
     await aconn.execute(
         "INSERT INTO agg_daily_trend "
-        "(agency_id, date, route_code, service_type, avg_min, samples) "
-        "VALUES ($1, $2, $3, $4, $5, $6) "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec, sum_late_sec) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec, "
+        "sum_late_sec = EXCLUDED.sum_late_sec",
         agency_id,
         iso,
         route_code,
         service_type,
         float(avg_min),
-        int(samples),
+        samples,
+        sum_delay_sec,
+        sum_late_sec,
     )
 
 
@@ -56,35 +79,54 @@ async def _seed_agg_route_hour(
     samples: int,
 ):
     """Insert one ``agg_route_hour`` row. ``scheduled_time`` is HH:MM text;
-    schema column is TIME (post 0011), so we cast on the server side."""
+    schema column is TIME (post 0011), so we cast on the server side.
+
+    ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)``, the
+    same exact-reconstruction convention ``_seed_agg_daily`` above uses, so
+    ``_peak_hour``'s ``SUM(sum_delay_sec) / SUM(samples)`` fast path reproduces
+    the same figure these tests were already asserting on.
+    """
+    sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     await aconn.execute(
         "INSERT INTO agg_route_hour "
-        "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples) "
-        "VALUES ($1, $2, $3, ($4::text)::time, $5, NULL, NULL, $6) "
+        "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, $3, ($4::text)::time, $5, NULL, NULL, $6, $7) "
         "ON CONFLICT (agency_id, route_code, service_type, scheduled_time) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
         route_code,
         service_type,
         scheduled_time,
         float(avg_min),
         int(samples),
+        sum_delay_sec,
     )
 
 
-async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples):
-    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day)."""
+async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, sum_delay_sec=None):
+    """Insert one ``agg_hour_daily`` row (per-day, per-hour-of-day).
+
+    sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
+    pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (
+    _peak_hour_by_dow's fast path) agrees with the plain avg_min this helper's
+    callers assert on, unless a test explicitly passes a mismatched value to
+    prove the exact-vs-reweighted divergence -- mirrors _seed_agg_route_hour_dow's
+    identical pattern.
+    """
+    if sum_delay_sec is None:
+        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
     await aconn.execute(
-        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples) "
-        "VALUES ($1, ($2::text)::date, $3, $4, $5) "
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, ($2::text)::date, $3, $4, $5, $6) "
         "ON CONFLICT (agency_id, date, hour) DO UPDATE "
-        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples",
+        "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
         iso,
         int(hour),
         float(avg_min),
         int(samples),
+        int(sum_delay_sec),
     )
 
 
@@ -106,13 +148,22 @@ async def _seed_agg_route_stats(aconn, agency_id, route_code, service_type, avg_
     )
 
 
-async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples):
+async def _seed_agg_route_hour_dow(
+    aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec=None
+):
+    # sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
+    # pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (peak_hour_
+    # breakdown's dow=None path) agrees with the plain avg_min this helper's
+    # callers assert on, unless a test explicitly passes a mismatched value to
+    # prove the exact-vs-reweighted divergence.
+    if sum_delay_sec is None:
+        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
     await aconn.execute(
         "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7) "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) "
         "ON CONFLICT (agency_id, route_code, service_type, dow, hour) DO UPDATE "
-        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples",
+        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples, sum_delay_sec=EXCLUDED.sum_delay_sec",
         agency_id,
         route_code,
         service_type,
@@ -120,6 +171,7 @@ async def _seed_agg_route_hour_dow(aconn, agency_id, route_code, service_type, d
         hour,
         float(avg_min),
         int(samples),
+        int(sum_delay_sec),
     )
 
 
@@ -127,8 +179,8 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) "
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) "
         "ON CONFLICT (agency_id, date, route_code, service_type) DO NOTHING",
         agency_id,
         date_,
@@ -139,6 +191,7 @@ async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_typ
         1,
         int(samples),
         datetime.combine(date_, time(12, 0), tzinfo=timezone.utc),
+        int(avg_delay_sec) * int(samples),
     )
 
 
@@ -218,6 +271,91 @@ async def test_headline_avg_and_samples_from_seeded_rows(aconn, aagency_id):
     # equals ctx.to_date in this test, so window is last 7 days of ctx.
     assert h["window_from"] == "2026-05-18"
     assert h["window_to"] == "2026-05-24"
+
+
+@pytest.mark.asyncio
+async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aagency_id):
+    """_headline_stats' fast path must pool the EXACT sum_delay_sec across
+    agg_daily_trend rows, not re-weight each day's own already-rounded
+    avg_min.
+
+    Day 1 (3 samples, raw-seconds sum 124 -> analyze() rounds that day's own
+    avg_min to 0.69 min) and day 2 (7 samples, raw-seconds sum 700 -> rounds
+    to 1.67 min). Pooling the exact sums gives (124+700)/10/60 = 1.37333...
+    -> rounds to 1.37; re-weighting the rounded 0.69/1.67 instead (the
+    pre-fix pattern) gives (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
+    measurably different (and wrong) answer that exists purely from the
+    intermediate rounding.
+    """
+    for day, avg_min, samples, sum_delay_sec in (
+        (date(2026, 5, 23), 0.69, 3, 124),
+        (date(2026, 5, 24), 1.67, 7, 700),
+    ):
+        await aconn.execute(
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R_HL', '平日', $3, $4, $5)",
+            aagency_id,
+            day.isoformat(),
+            avg_min,
+            samples,
+            sum_delay_sec,
+        )
+
+    from pipeline.reports.overview import _headline_stats
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
+    assert samples_out == 10
+    assert avg == 1.37  # NOT the buggy re-weighted 1.38
+
+
+@pytest.mark.asyncio
+async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples(aconn, aagency_id):
+    """A row with ``samples`` set but ``sum_delay_sec`` still NULL (migration
+    0028's column is nullable on every table — any ``agg_daily_trend`` row
+    analyze() hasn't rewritten since that migration can be in this state)
+    must be excluded from BOTH avg_min's numerator AND denominator, not just
+    silently dropped from the numerator while still counted in the
+    denominator (which would bias avg_min down). The returned ``samples``
+    count, by contrast, stays the TRUE total across every row regardless of
+    whether sum_delay_sec is populated — a distinct "how much data backs
+    this figure" count, per pipeline/reports/overview.py's _per_route_avg
+    docstring convention.
+
+    Day 1 (5 samples, sum_delay_sec NULL) must contribute 0 to avg_min's
+    pooling; day 2 (5 samples, raw-seconds sum 300 -> exact avg 1.0 min) is
+    the only day that should determine avg_min. Pre-fix, day 1's 5 samples
+    would still land in SUM(samples) while contributing nothing to
+    SUM(sum_delay_sec), giving (0+300)/10/60=0.5 instead of the correct
+    (300)/5/60=1.0.
+    """
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
+        aagency_id,
+        date(2026, 5, 23).isoformat(),
+        0.5,  # pre-migration-style rounded avg_min; not used by the fast path
+        5,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_daily_trend "
+        "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, $5)",
+        aagency_id,
+        date(2026, 5, 24).isoformat(),
+        1.0,
+        5,
+        300,
+    )
+
+    from pipeline.reports.overview import _headline_stats
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
+    assert samples_out == 10  # true total across both rows
+    assert avg == 1.0  # NOT the buggy 0.5 from counting the NULL row's samples
 
 
 @pytest.mark.asyncio
@@ -368,6 +506,158 @@ async def test_movers_ranks_top_worse_and_better(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_movers_delta_min_rounds_half_up_not_half_to_even(aconn, aagency_id):
+    """``_movers``'s delta_min must use the same ROUND_HALF_UP convention as
+    every other avg_min-class figure in this module, not Python's plain
+    round() (round-half-to-even).
+
+    prior avg = 1.0 min, current avg = 3.155 min -> delta_min_raw = 2.155,
+    an exact tie at the 2dp boundary the same way 2.15 is an exact tie at
+    1dp for pipeline.query.formatter._r (see test_formatter.py's identical
+    repro). ROUND_HALF_UP gives 2.16; plain round() lands fractionally
+    below the tie (2.155 is not exactly representable as a binary float)
+    and would give 2.15 instead.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc).date()
+    prv = cur - timedelta(days=7)
+    await _seed_agg_daily(aconn, aagency_id, prv, "R_BOUND", "平日", 1.0, 10)
+    await _seed_agg_daily(aconn, aagency_id, cur, "R_BOUND", "平日", 3.155, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+    assert worse_by_code["R_BOUND"]["delta_min"] == 2.16
+
+
+@pytest.mark.asyncio
+async def test_movers_suppresses_delta_pct_below_prv_avg_floor(aconn, aagency_id):
+    """A near-zero previous-window average must not produce a triple-digit
+    delta_pct off a trivial absolute change — delta_pct is suppressed to
+    None instead, while delta_min (and the route's place in the ranking)
+    is unaffected. A normal-magnitude route in the same response keeps its
+    real delta_pct.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv = cur - timedelta(days=7)
+    # (route, prior_avg_sec, current_avg_sec)
+    routes = [
+        # prior avg = 0.05 min; +0.5 min absolute would otherwise read as a
+        # 1000% delta_pct despite being a trivial real-world change.
+        ("R_TINY", 3, 33),
+        # Normal-magnitude route: prior avg = 2 min, +1 min -> a real 50%.
+        ("R_NORM", 120, 180),
+    ]
+    SAMPLES_PER_SIDE = 10
+    for code, prior_dep, cur_dep in routes:
+        for i in range(SAMPLES_PER_SIDE):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"pf_prv_{code}_{i}",
+                prv + timedelta(minutes=i),
+                code,
+                i + 1,
+                prior_dep,
+            )
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"pf_cur_{code}_{i}",
+                cur + timedelta(minutes=i),
+                code,
+                i + 1,
+                cur_dep,
+            )
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 17), code, "平日", prior_dep / 60.0, SAMPLES_PER_SIDE)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), code, "平日", cur_dep / 60.0, SAMPLES_PER_SIDE)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+
+    tiny = worse_by_code["R_TINY"]
+    assert tiny["delta_min"] == pytest.approx(0.5, abs=0.01)
+    assert tiny["delta_pct"] is None
+
+    norm = worse_by_code["R_NORM"]
+    assert norm["delta_min"] == pytest.approx(1.0, abs=0.01)
+    assert norm["delta_pct"] == pytest.approx(50.0, abs=0.5)
+
+
+@pytest.mark.asyncio
+async def test_movers_includes_route_with_zero_baseline_avg(aconn, aagency_id):
+    """A route whose PRIOR window average is exactly 0.0 (all on-time,
+    still >= MIN_SAMPLES) must still be ranked on ``delta_min`` — it is
+    excluded only from the *percentage* comparison (``delta_pct`` stays
+    None via the existing near-zero-baseline floor), never from the
+    ranking itself. Dropping the whole route here would hide the single
+    most dramatic possible "worsened" case: baseline perfectly on-time,
+    current window running a real delay.
+    """
+    cur = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
+    prv = cur - timedelta(days=7)
+    # (route, prior_avg_sec, current_avg_sec)
+    routes = [
+        ("R_ZERO", 0, 300),  # prior avg exactly 0.0 min -> current avg 5 min
+        ("R_NORM", 120, 180),  # normal-magnitude route stays in the list too
+    ]
+    SAMPLES_PER_SIDE = 10
+    for code, prior_dep, cur_dep in routes:
+        for i in range(SAMPLES_PER_SIDE):
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"zb_prv_{code}_{i}",
+                prv + timedelta(minutes=i),
+                code,
+                i + 1,
+                prior_dep,
+            )
+            await aconn.execute(
+                "INSERT INTO updates "
+                "(agency_id, file_name, captured_at, trip_id, service_type, "
+                " scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES ($1, $2, $3, 'trip_' || $4, '平日', '10:00', $4, $5, $6)",
+                aagency_id,
+                f"zb_cur_{code}_{i}",
+                cur + timedelta(minutes=i),
+                code,
+                i + 1,
+                cur_dep,
+            )
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 17), code, "平日", prior_dep / 60.0, SAMPLES_PER_SIDE)
+        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 24), code, "平日", cur_dep / 60.0, SAMPLES_PER_SIDE)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    worse_by_code = {m["route_code"]: m for m in out["movers"]["worse"]}
+
+    assert "R_ZERO" in worse_by_code
+    zero = worse_by_code["R_ZERO"]
+    assert zero["delta_min"] == pytest.approx(5.0, abs=0.01)
+    assert zero["delta_pct"] is None
+
+    norm = worse_by_code["R_NORM"]
+    assert norm["delta_min"] == pytest.approx(1.0, abs=0.01)
+    assert norm["delta_pct"] == pytest.approx(50.0, abs=0.5)
+
+
+@pytest.mark.asyncio
 async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
     """A route worsening for 3 of the past 4 weeks reports streak=3
     and 4 ascending sparkline points (oldest-first).
@@ -415,10 +705,12 @@ async def test_mover_has_4_week_sparkline_and_streak_count(aconn, aagency_id):
 async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
     """6 routes all surfaced (limit is now 20); rest_share is 0%.
 
-    Concentration is computed as ``SUM(GREATEST(avg_min, 0) * samples)``
-    per route on ``agg_daily_trend`` — directly proportional to total
-    positive delay minutes. The card variant on the frontend slices the
-    top 5; the modal variant uses all 20.
+    Concentration is computed as ``SUM(sum_late_sec) / 60`` per route on
+    ``agg_daily_trend`` — directly proportional to total positive delay
+    minutes (every row seeded here is uniformly late, so this coincides
+    with ``avg_min * samples``; see the mixed-day tests below for where the
+    two diverge). The card variant on the frontend slices the top 5; the
+    modal variant uses all 20.
     """
     base = datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc)
     rows = [
@@ -465,8 +757,7 @@ async def test_concentration_top_routes_and_rest_share(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency_id):
     """Two routes tied on total_late_min (agg_daily_trend fast path) must
-    rank by route_code, ascending — the fast path used to lack the
-    route_code tie-break its own slow path already had (see NOTES.md);
+    rank by route_code, ascending, matching its slow-path counterpart;
     without it, Postgres's GROUP BY order for a tie is unspecified.
     """
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TIE_B", "平日", 5.0, 2)  # total=10
@@ -478,6 +769,82 @@ async def test_concentration_fast_path_tie_break_is_deterministic(aconn, aagency
     out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
     codes = [r["route_code"] for r in out["concentration"]["top_routes"] if r["route_code"].startswith("R_TIE")]
     assert codes == ["R_TIE_A", "R_TIE_B"]
+
+
+@pytest.mark.asyncio
+async def test_concentration_fast_path_counts_clamped_observations_not_clamped_average(aconn, aagency_id):
+    """A day whose trips mix early and late running must score its true
+    per-observation clamped lateness, not its already-signed average
+    clamped to zero.
+
+    R_MIX runs 5 trips at +10 min and 5 at -8 min: avg_min = +1.0. The old
+    ``SUM(GREATEST(avg_min, 0) * samples)`` approximation would have scored
+    this as ``1.0 * 10 = 10`` late-minutes. The true clamped sum — what
+    ``sum_late_sec`` now stores exactly — is ``5 * 10 = 50`` (the -8 min
+    trips contribute 0, never a negative offset). R_OTHER runs uniformly at
+    +2 min for the same 10 samples: true total ``2.0 * 10 = 20``.
+
+    Under the old approximation R_OTHER (20) would have outranked R_MIX
+    (10) — backwards, since R_MIX's real contribution (50) is more than
+    double R_OTHER's. The fix must rank R_MIX first.
+    """
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_MIX", "平日", 1.0, 10, sum_late_sec=3000)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OTHER", "平日", 2.0, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    top = out["concentration"]["top_routes"]
+    assert [r["route_code"] for r in top] == ["R_MIX", "R_OTHER"]
+    # grand_total = 50 + 20 = 70 late-minutes.
+    assert top[0]["share_pct"] == pytest.approx(50.0 / 70.0 * 100.0, abs=0.05)
+    assert top[1]["share_pct"] == pytest.approx(20.0 / 70.0 * 100.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_concentration_fast_and_slow_paths_agree_on_mixed_early_late_day(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """The fast (``time_band='all'``) and slow (any other ``time_band``) paths
+    must score an identical mixed early/late day identically — the exact
+    case ``SUM(GREATEST(avg_min, 0) * samples)`` used to understate relative
+    to the slow path's per-observation ``SUM(GREATEST(dep_delay, 0))``, which
+    could rank routes differently depending only on which ``time_band`` a
+    request happened to use, not on the underlying data.
+
+    Same R_MIX (5 trips +10 min, 5 trips -8 min -> true total 50 min) /
+    R_OTHER (10 trips uniformly +2 min -> true total 20 min) shape as
+    :func:`test_concentration_fast_path_counts_clamped_observations_not_clamped_average`,
+    seeded into BOTH ``agg_daily_trend`` (what a real analyze() run over
+    this data would store) and raw ``updates``/ClickHouse (what the slow
+    path reads directly), then asserted to agree.
+    """
+    when = datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc)
+    for i in range(5):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=i), "R_MIX", 600, seq=i + 1)
+    for i in range(5):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=5 + i), "R_MIX", -480, seq=6 + i)
+    for i in range(10):
+        await _seed_update(aconn, aagency_id, when + timedelta(minutes=i), "R_OTHER", 120, seq=100 + i)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 20), "R_MIX", "平日", 1.0, 10, sum_late_sec=3000)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 20), "R_OTHER", "平日", 2.0, 10)
+
+    from pipeline.reports import compute_overview_summary
+
+    fast_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
+    fast_out = await compute_overview_summary(aagency_id, fast_ctx, aconn, "ja")
+    slow_ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    slow_out = await compute_overview_summary(aagency_id, slow_ctx, aconn, "ja", ch=ch_async_client)
+
+    for out in (fast_out, slow_out):
+        top = out["concentration"]["top_routes"]
+        assert [r["route_code"] for r in top] == ["R_MIX", "R_OTHER"]
+        assert top[0]["share_pct"] == pytest.approx(50.0 / 70.0 * 100.0, abs=0.05)
+        assert top[1]["share_pct"] == pytest.approx(20.0 / 70.0 * 100.0, abs=0.05)
 
 
 @pytest.mark.asyncio
@@ -504,9 +871,9 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
 @pytest.mark.asyncio
 async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aagency_id):
     """Two routes tied on weighted avg_min (agg_daily_trend fast path) must
-    rank by route_code, ascending — same fix as concentration's fast path
-    (see NOTES.md); each route here is a single-day row, so its weighted
-    average is just its own avg_min.
+    rank by route_code, ascending — same tie-break as concentration's fast
+    path; each route here is a single-day row, so its weighted average is
+    just its own avg_min.
     """
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 2)
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 3)  # tied avg, diff samples
@@ -807,6 +1174,31 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
+    """_peak_hour_by_dow's fast path pools multiple agg_hour_daily days for the
+    same hour. Pooling must use SUM(sum_delay_sec)/SUM(samples) (exact), not
+    the old SUM(avg_min * samples)/SUM(samples) reweighting of an
+    already-rounded per-day average -- mirrors peak_hour_breakdown's identical
+    fix for agg_route_hour_dow (migration 0028's sum_delay_sec rollout,
+    extended to agg_hour_daily)."""
+    # Two weekday Tuesdays at hour 15, with non-round per-row avg_min values
+    # whose sum_delay_sec is seeded to the TRUE underlying sum rather than
+    # backed out from the rounded avg_min, so the two pooling formulas diverge.
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 19), 15, 1.61, 3, sum_delay_sec=290)
+    await _seed_agg_hour_daily(aconn, aagency_id, date(2026, 5, 26), 15, 2.0, 1000, sum_delay_sec=100000)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    pk_wd = out["peak_hour_weekday"]
+    assert pk_wd is not None
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert pk_wd["by_hour"][15] == pytest.approx(1.67, abs=0.01)
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
     """The agg fast path weights each day's hourly avg by its sample count, not
     a plain mean — two weekday Tuesdays at hour 8 with unequal weights."""
@@ -907,6 +1299,31 @@ async def test_service_split_daily_returns_per_date_rows(aconn, aagency_id):
     assert by_date["2026-05-19"]["weekend"] == pytest.approx(5.0, abs=0.05)
     assert by_date["2026-05-20"]["weekday"] is None
     assert by_date["2026-05-20"]["weekend"] == pytest.approx(4.0, abs=0.05)
+
+
+@pytest.mark.asyncio
+async def test_service_split_daily_rounds_same_precision_as_service_split(aconn, aagency_id):
+    """service_split_daily's per-day avg must round to the same 2dp
+    precision as its sibling service_split for identical underlying data —
+    both read the same agg_daily_trend sum_delay_sec/samples pair, so a
+    single-date window makes the two report the exact same number.
+
+    100 delay-seconds over 3 samples is the canonical repro: 100/3/60 =
+    0.5555...5556 min, an infinite-precision value that must round to
+    0.56 rather than leak through unrounded (e.g. 0.5555555555555556).
+    """
+    d = date(2026, 5, 18)
+    avg_min = 100.0 / 3 / 60
+    await _seed_agg_daily(aconn, aagency_id, d, "R_SSD2", "平日", avg_min, 3)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=d, to_date=d + timedelta(days=6))
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja")
+    by_date = {row["date"]: row for row in out["service_split_daily"]}
+    daily_avg = by_date[d.isoformat()]["weekday"]
+    assert daily_avg == pytest.approx(0.56, abs=1e-9)
+    assert daily_avg == out["service_split"]["平日"]
 
 
 @pytest.mark.asyncio
@@ -1062,12 +1479,61 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
     assert "Z1" in codes
 
 
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_pools_exact_sum_delay_sec_not_reweighted_avg(client, aconn, aagency_id):
+    """Without dow, peak_hour_breakdown pools multiple dow rows for the same
+    route/service/hour. Pooling must use SUM(sum_delay_sec)/SUM(samples)
+    (exact), not the old SUM(avg_min * samples)/SUM(samples) reweighting of
+    an already-rounded per-row average -- mirrors forecast_heatmap's
+    identical fix (migration 0028's sum_delay_sec rollout)."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 3, 15, 1.61, 3, sum_delay_sec=290)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 4, 15, 2.0, 1000, sum_delay_sec=100000)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 15})
+    assert r.status_code == 200
+    routes = {x["route_code"]: x for x in r.json()["routes"]}
+    q1 = routes["Q1"]
+    assert q1["samples"] == 1003
+    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
+    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
+    assert q1["avg_min"] == pytest.approx(1.67, abs=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(client, aconn, aagency_id):
+    """A (route, service_type) group at this hour whose every contributing
+    row has sum_delay_sec NULL (migration 0028's column is nullable on every
+    table) still passes the unfiltered ``HAVING SUM(samples) >= 3`` gate, so
+    the FILTER-guarded exact-sum SQL returns avg_min=NULL for that group.
+    Pre-fix, rounding that NULL into a non-optional Pydantic field raised an
+    unhandled TypeError; the group must instead be omitted, while a normal
+    group at the same hour still comes through.
+
+    Seeds 20 distinct all-NULL groups -- one per LIMIT 20 slot -- so this
+    also proves ``ORDER BY avg_min DESC NULLS LAST``: without NULLS LAST,
+    Postgres's default NULLS FIRST for DESC would let these NULL groups fill
+    the entire LIMIT and push R_OK out entirely, which a single-NULL-group
+    seed can't distinguish from "correctly excluded" since both rows would
+    fit under the limit regardless of sort order."""
+    await aconn.executemany(
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, '平日', 1, 20, 0.5, 5, NULL)",
+        [(aagency_id, f"R_NULL{i}") for i in range(20)],
+    )
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "R_OK", "平日", 1, 20, 4.0, 10)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 20})
+    assert r.status_code == 200
+    codes = [x["route_code"] for x in r.json()["routes"]]
+    assert "R_OK" in codes
+    assert not any(c.startswith("R_NULL") for c in codes)
+
+
 # ---------------------------------------------------------------------------
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper used to run its OWN dedup scan of `updates`
-# (~12 per request; 8-22s each on real agency-8 data, enough to blow the
-# ClickHouse client's 30s max_execution_time). They now all derive from a
+# (~12 per request), each one slow enough on its own to risk blowing the
+# ClickHouse client's 30s max_execution_time. They now all derive from a
 # single `_fetch_grain` round trip. These tests pin both halves of that: the
 # round-trip count, and the semantics that the consolidation had to preserve
 # (per-consumer date windows, per-consumer DOW, hour-of-day extraction).
@@ -1176,19 +1642,22 @@ async def test_slow_path_movers_add_exactly_one_more_query(aconn, aagency_id, ch
 
 @pytest.mark.asyncio
 async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aagency_id, ch_client, ch_async_client):
-    """The grain must span 7 days BEFORE ctx.from_date.
+    """The grain must span days BEFORE ctx.from_date, even for a single-day ctx.
 
-    The baseline window is the 7 days immediately before the current one, and
-    the current window is clamped to start no earlier than ctx.from_date — so
-    the baseline can legitimately fall entirely outside ctx. A grain that only
-    covered ctx would silently report `baseline_avg_min: None`.
+    The baseline window is the SAME WIDTH as the current one, immediately
+    before it, and the current window is clamped to start no earlier than
+    ctx.from_date — so the baseline can legitimately fall entirely outside
+    ctx. A grain that only covered ctx would silently report
+    `baseline_avg_min: None`.
     """
-    # ctx is a single day; its baseline is 2026-05-11..2026-05-17, wholly before it.
+    # ctx is a single day (05-18) -> cur_ctx is also a single day, so its
+    # same-width baseline is the single day immediately before it, 05-17,
+    # wholly before ctx.
     await _seed_update(
         aconn, aagency_id, datetime.combine(date(2026, 5, 18), time(12, 0), tzinfo=timezone.utc), "R_BL", 600
     )
     await _seed_update(
-        aconn, aagency_id, datetime.combine(date(2026, 5, 14), time(12, 0), tzinfo=timezone.utc), "R_BL", 300, seq=2
+        aconn, aagency_id, datetime.combine(date(2026, 5, 17), time(12, 0), tzinfo=timezone.utc), "R_BL", 300, seq=2
     )
     from tests.conftest import mirror_updates_to_ch
 
@@ -1203,6 +1672,57 @@ async def test_slow_path_baseline_window_reaches_before_ctx_from_date(aconn, aag
     assert out["headline"]["delta_min"] == pytest.approx(5.0, abs=0.01)
     # The pre-ctx baseline day must NOT leak into the ctx-windowed surfaces.
     assert out["sparkline_points"] == [10.0]
+
+
+@pytest.mark.asyncio
+async def test_narrow_ctx_baseline_matches_current_window_width(aconn, aagency_id, ch_client, ch_async_client):
+    """A ctx narrower than 7 days must get a same-width baseline, not an
+    always-7-day one.
+
+    ctx is a 3-day range (05-16..05-18) with data on every one of those days
+    plus its immediately-preceding 3-day window (05-13..05-15) *and* two
+    more days further back (05-09, 05-12) that only an unclamped 7-day
+    baseline would reach. Those two extra days are seeded with a sharply
+    different average (15.0 min) from the 05-13..05-15 tier (1.0 min) —
+    seeding them uniformly, or leaving them empty, would make the old
+    (buggy) 7-day-wide baseline and the fixed same-width baseline produce
+    the identical result, so this test would pass either way and catch
+    nothing. With the distinct third tier, the old formula's
+    baseline_avg_min would be pulled toward the 15.0-min days while the
+    fixed formula's stays at exactly 1.0, so only the fixed code satisfies
+    the assertion below.
+    """
+    for d, dep in [
+        (date(2026, 5, 9), 900),
+        (date(2026, 5, 12), 900),
+        (date(2026, 5, 13), 60),
+        (date(2026, 5, 14), 60),
+        (date(2026, 5, 15), 60),
+        (date(2026, 5, 16), 300),
+        (date(2026, 5, 17), 300),
+        (date(2026, 5, 18), 300),
+    ]:
+        await _seed_update(
+            aconn, aagency_id, datetime.combine(d, time(12, 0), tzinfo=timezone.utc), "R_NW", dep, seq=d.day
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 16), to_date=date(2026, 5, 18), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
+    h = out["headline"]
+    # cur_ctx == ctx (already <= 7 days wide, so no clamping): 3 days at 5.0 min.
+    assert h["window_from"] == "2026-05-16"
+    assert h["window_to"] == "2026-05-18"
+    assert h["avg_min"] == pytest.approx(5.0, abs=0.01)
+    # base_ctx must be the SAME 3-day width immediately before cur_ctx
+    # (05-13..05-15, avg 1.0 min) rather than an unclamped 7-day window
+    # reaching back to 05-09/05-12's 15.0-min tier.
+    assert h["baseline_avg_min"] == pytest.approx(1.0, abs=0.01)
+    assert h["delta_min"] == pytest.approx(4.0, abs=0.01)
 
 
 @pytest.mark.asyncio

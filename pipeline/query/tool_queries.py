@@ -145,8 +145,10 @@ async def segment_hotspots(
 
     Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
     avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
-    are returned (matches agg_stop_seq's own noise gate in
-    pipeline/analyze.py). Backs tools._tool_segment_hotspots.
+    are returned — this tool's own noise gate on its live ClickHouse scan
+    (independent of agg_stop_seq, which this tool does not read and which
+    carries no insert-time sample gate of its own). Backs
+    tools._tool_segment_hotspots.
 
     `updates` lives in ClickHouse; static_stop_times/static_stops live in
     Postgres — no cross-database join, so this runs in two steps: (1) a
@@ -213,20 +215,24 @@ async def route_hour_dow_pattern(
     limited to top_n.
     """
     rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see api/routers/reports.py's forecast_heatmap
+        # identical rationale.
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour "
         "HAVING SUM(samples) > 5 "
-        "ORDER BY avg_min DESC "
+        "ORDER BY avg_min DESC NULLS LAST "
         "LIMIT $3",
         agency_id,
         str(route),
         top_n,
     )
-    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows]
+    return [(r["dow"], r["hour"], _round2(r["avg_min"]), r["samples"]) for r in rows if r["avg_min"] is not None]
 
 
 async def schedule_realism_segments(
@@ -319,17 +325,17 @@ async def route_trend_shift(
     through the window (regime shift); a small delta_min means the pattern
     has been consistent throughout (chronic). Backs tools._tool_trend_shift.
 
-    Returns None when there are no daily buckets for the route in ctx.
+    Returns None when there are fewer than two daily buckets for the route in
+    ctx — a single day has no first/second half to compare, so a mechanical
+    0.00 delta would misreport "not enough data" as "stable, no change."
     """
     route_ctx = replace(ctx, routes=(str(route),))
     series = await compute_trend_series(agency_id, route_ctx, conn, ch=ch)
     days = [d for d in series.get("days", []) if d.get("samples")]
-    if not days:
+    if len(days) < 2:
         return None
     midpoint = len(days) // 2
-    if midpoint == 0:
-        midpoint = 1
-    first_half, second_half = days[:midpoint], days[midpoint:] or days[midpoint - 1 :]
+    first_half, second_half = days[:midpoint], days[midpoint:]
 
     def _weighted_mean(bucket: list[dict]) -> float:
         total_samples = sum(d["samples"] for d in bucket)

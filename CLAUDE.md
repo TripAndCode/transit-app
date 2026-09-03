@@ -1,85 +1,158 @@
 # CLAUDE.md
 
-Conventions for AI-assisted work in this repo. The README covers architecture; this file covers the rules that aren't derivable from code.
+Repository rules that are unsafe or expensive to rediscover. Architecture, setup,
+and feature walkthroughs live in `README.md` and `docs/features/`; load them only when
+the task needs them.
 
-**Where the big picture lives** (read these before deep changes, all in README): the request path is `gtfs_pipeline.py` ingest → `pipeline/analyze.py` SQL aggs → `agg_*` tables → FastAPI routers under `api/routers/` → React SPA in `frontend/`. The Ask tab is a 3-stage router (rules → e5-small embedding NN → RAG-augmented LLM) in `pipeline/query/` — only stage 3 calls an LLM. The default request (no `time_band`/service/route filter) is served from precomputed `agg_*` tables, not live scans; a `time_band`-filtered or otherwise narrow request falls back to a live ClickHouse scan of the raw `updates` fact table. Adding a report usually means adding/extending an aggregate (see the perf-work pattern in commit history, PRs #75–79).
+## Architecture pointers
 
-## Databases — read this first
+- Data path: `gtfs_pipeline.py` → `pipeline/analyze.py` → `agg_*` tables → FastAPI
+  routers → React SPA.
+- Raw GTFS-RT `updates` is in ClickHouse. Postgres holds aggregates, OLTP, PostGIS,
+  and pgvector. Default reports use precomputed aggregates; narrow filters may scan
+  ClickHouse.
+- Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
+  calls an LLM.
 
-- Raw GTFS-RT `updates` (~575M rows, 4 agencies) lives in **ClickHouse**, not Postgres — migrated; `agg_*`/OLTP/PostGIS/pgvector stay on Postgres. The old Postgres `updates` table still exists as a rollback safety net but has zero production readers.
-- `postgresql://transit:transit@localhost:5433/transit` (the Makefile default, container `transit-pg`) is the **dev Postgres DB with real data**. Treat it as read-only: never run write SQL, migrations-down, resets, or `make db-reset`-style targets against it for testing. It has been wiped by careless test runs before. (Too large to clone whole — to demo on real data, slice one agency + a bounded date window with read-only `\copy (SELECT … WHERE …)` into a throwaway DB.)
-- The dev **ClickHouse** instance (`transit-ch`, ~575M real rows) is the same rule: read-only, no manual `INSERT`/`ALTER`/`DROP`. The one sanctioned exception is `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see `db/clickhouse/bootstrap.py`).
-- Tests use a **throwaway Postgres on :5544 AND a throwaway ClickHouse on :8124** — both are required for any test touching `updates` (most of `tests/api/`, `tests/pipeline/`, `tests/query/`). Postgres schema needs
-  **PostGIS + pgvector + pg_trgm**, so build the image from `db/` — the bare
-  `pgvector/pgvector:pg16` image lacks PostGIS and migration `0001` fails on
-  `CREATE EXTENSION postgis`:
-  ```bash
-  docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
-    -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \
-    -p 5544:5432 "$(docker build -q db/)"
-  make ch-test   # throwaway ClickHouse on :8124, matches CI's pinned 26.3
-  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-    RUN_CH_INTEGRATION=1 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8124 \
-    CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \
-    poetry run pytest
-  ```
-  Omitting `RUN_CH_INTEGRATION=1` does NOT fail the suite — every ClickHouse-gated test silently SKIPS instead, easy to mistake for "all passing." `make test`/`make check` don't set it either, so export the block above by hand for a run that actually covers the ClickHouse path.
-- Verification against either dev DB (EXPLAIN, SELECT, API smoke tests) is fine — read-only only.
+## Database safety
 
-## Commands
+- Dev Postgres `localhost:5433/transit` and dev ClickHouse `transit-ch` contain real
+  data and are read-only for agents. SELECT/EXPLAIN is allowed; never run writes,
+  DDL, resets, down migrations, or destructive Make targets against them.
+- Tests use throwaway Postgres `:5544/transit_test` and ClickHouse `:8124`. Before a
+  DB test, load `transit-app-gotchas` for the complete environment block and image
+  requirements.
+- ClickHouse-gated tests silently skip unless `RUN_CH_INTEGRATION=1` and the
+  `CLICKHOUSE_*` test variables are set. A passing run with skips is not full
+  integration evidence.
+- Put pure logic tests under `tests/unit/`; that directory bypasses DB fixtures.
+  Mock the ML embedder unless a test is explicitly slow.
 
-Backend: `make serve` (FastAPI :8000), `make test` (pytest — set DATABASE_URL to :5544, see above), `make check` (fmt + lint + test), `poetry run ruff check`, `poetry run mypy`. After any fresh ingest, `make analyze` recomputes the `agg_*` tables that the default (unfiltered) read path serves from (one agency; pass `AGENCY_ID=`) — a `time_band`-filtered or otherwise narrow request instead falls back to a live ClickHouse scan, so a stale/missing `agg_*` table doesn't block those. For a full rebuild across **all** agencies use `make analyze-all` — it's fail-loud (nonzero exit if any agency fails), so a partial run can't pass silently. After a merge that changes analyze logic, run `make check-aggs` to confirm every agency's aggregates are fresh (it compares each agency's newest completed day in `updates` against `agg_route_daily` and exits nonzero if any lag). `analyze()` also stamps an audit row per agency in `agg_meta` (last-built time); it's forensic-only, nothing reads it for logic.
+## Verification commands
 
-Focused test run — **use :5544, not :5433**. The README's single-test example (`README.md` ▸ Development) points `DATABASE_URL` at the dev DB; because the root `conftest.py` auto-migrates, that recipe runs migrations against the real-data dev DB. Safe form (add the `RUN_CH_INTEGRATION`/`CLICKHOUSE_*` block above too if the target test touches `updates`, which most of `tests/query/` does):
-```bash
-DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
-  RUN_CH_INTEGRATION=1 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8124 \
-  CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \
-  poetry run pytest tests/query/test_tool_queries.py -k some_name -v
-```
-DB-free `tests/unit/` need no DATABASE_URL. Frontend single test: `cd frontend && npm run test -- MapTab` (vitest filter).
+- Backend: `make serve`, `make test`, `make check`, `poetry run ruff check`,
+  `poetry run mypy`. Never let `make test/check` inherit the default `:5433` URL;
+  point it at `:5544`.
+- Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
+  `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, then
+  `npm run build:bundle && npm run check:entry-chunk`.
+- Run the smallest relevant check during iteration and the required complete check
+  once before completion. Capture verbose output to a file and surface only the
+  useful summary or failure tail.
+- After analyze changes, rebuild affected aggregates. Use `make analyze-all` for all
+  agencies and `make check-aggs` to detect stale aggregates.
 
-Test layout: `tests/unit/` holds **DB-free** tests — its `conftest.py` no-ops the session `apply_schema` fixture, so pure-logic tests run in <1s without Postgres. Everything else under `tests/` (and the domain subpackages `tests/api/`, `tests/query/`, `tests/scripts/`) inherits the root `conftest.py` that auto-migrates `transit_test`. Put a new pure test in `tests/unit/`; a DB/endpoint test in the matching subpackage. Tests needing the ML embedder must mock it (see `tests/scripts/test_promote_intent_cache.py`) or gate behind `@pytest.mark.slow` (`RUN_SLOW=1`).
+## Frontend and user-facing text
 
-Frontend (`cd frontend`): `npm run typecheck && npm run test && npm run lint && npm run lint:i18n && npm run lint:i18n-strings` — all five must pass before a PR. `npm run dev` for the hot-reload loop (proxies `/api` to :8000).
-
-## Frontend rules
-
-- React 19.2 with the **React Compiler enabled** — do not add `useMemo`/`useCallback`/`React.memo` for performance. For fresh-props-in-stable-handlers, use `useEffectEvent` (see `MapTab`), never render-time ref writes.
-- eslint `react-hooks` compiler rules: `set-state-in-effect` and `purity` are `warn` only for pre-existing code. New code keeps them clean — prefer derived state over sync-effects.
-- No hardcoded UI strings: every user-visible string goes through `t()` with keys in **both** `frontend/src/i18n/locales/{ja,en}.json` (key parity is CI-linted). Kana in `.ts/.tsx` source fails `lint:i18n-strings`; suppress intentional cases with `i18n-ignore`.
-- Calm UI: no alarm reds, no dense panels, no stressful motion. Severity uses the existing warm ramp.
-- New routes/pages must be `React.lazy` like the existing ones; keep MapLibre out of the entry chunk.
+- React Compiler is enabled. Do not add `useMemo`, `useCallback`, or `React.memo` as
+  performance fixes. Use `useEffectEvent` for fresh props in stable handlers; never
+  write refs during render.
+- `react-hooks/set-state-in-effect` and `react-hooks/purity` are errors. Prefer
+  derived state over synchronization effects.
+- All visible strings use `t()` with matching keys in both
+  `frontend/src/i18n/locales/{ja,en}.json`. Intentional source-language exceptions
+  require `i18n-ignore`.
+- Keep UI calm: no alarm-red defaults, dense panels, or stressful motion.
+- New pages are lazy-loaded. Keep MapLibre out of the entry chunk.
+- Server-side strings live in `_LOCALES` in `pipeline/query/tools.py`; update both
+  languages and exact-string tests together.
 
 ## LLM features
 
-- Primary Ask path is deterministic SQL tools — no LLM. Anything LLM-grounded ships behind an env kill switch with a graceful disable path (pattern: `ASK_FOLLOWUP_ENABLED`), and needs an objective stop criterion defined up front.
-- Server-side user-facing strings live in the `_LOCALES` table in `pipeline/query/tools.py` (ja + en per key); tests pin exact strings, so update both together.
+- Prefer deterministic SQL tools. New LLM-grounded behavior needs an environment
+  kill switch, graceful disabled path, and objective stopping criterion.
 
-## Git / PRs
+## Git and pull requests
 
-- Default branch is `main` (not master); diff and open PRs against `main`.
-- Squash merges to `main`; Conventional Commits subjects.
-- Stacked PRs: merge bottom-up, but **don't `--delete-branch` while a dependent PR still targets that branch** — GitHub closes (not retargets) the dependent PR and it can't be reopened once its base is gone. Retarget the next PR to `main` first; delete branches at the end.
-- Phase-sized features get functional reviews on live data before merge (see `review-branch.md` flow).
-- CI is intentionally skipped on every commit right now (add `[skip ci]` on its own line/trailer to every commit message, including ordinary code changes) — rely on the local checks below (and the pre-push hook) instead of GitHub Actions.
+- Base branch is `main`; squash merge with Conventional Commit subjects.
+- Every PR runs `/review-branch` at least twice before opening as a draft: an
+  initial invocation, then a second full invocation on the (possibly fixed) diff
+  before opening, even if the first found nothing worth fixing. Each invocation
+  uses one pass and two merged reviewers for normal changes, with extra review
+  only for enforcement, high-risk paths, or material fixes. Human prose outside
+  `.claude/**` may use its direct trivial path; `.claude/**` and this file are
+  executable process docs.
+- Open PRs as drafts. Mark ready only after both required `/review-branch` passes
+  are clean. Once ready and GitHub reports the PR mergeable/clean (no conflicts)
+  AND `main` has not advanced since those two passes ran, it may be squash-merged
+  — by an interactive session or by `/vps-loop-run` itself — then run
+  `/cleanup-merged` to remove the now-stale branch/worktree. GitHub's
+  `mergeable`/`mergeStateStatus` alone does NOT catch a `main` that moved on
+  without a textual conflict (this repo has no branch-protection "must be
+  up to date" rule to surface that as `BEHIND`) — check the actual SHA. Either a
+  `CONFLICTING`/`DIRTY` state or `main` having advanced at all requires the same
+  fix: merge latest `main`, resolve any conflicts, and re-run both review passes
+  on the result before readying or merging. Every PR body states `**Origin:**
+  Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
+- CI is currently skipped: every commit message includes `[skip ci]` as its own
+  line/trailer. Local verification and the pre-push hook are therefore mandatory.
+- For stacked PRs, retarget dependants to `main` before deleting their base branch;
+  GitHub otherwise closes them.
+- After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
+  `scripts/cleanup_git_state.py` dry run is the deletion authority: only clean local
+  worktrees and branches proven recoverable from `main` or an exact merged-PR head
+  may be removed. Remote branches, `production`, and unique post-merge commits stay.
+
+## Process rules
+
+- A mistake repeated twice is a missing guardrail. Capture it in the relevant skill
+  during the second session.
+- Promote recurring rules up the enforcement ladder: code structure → static
+  analysis/tests → hooks → skills → this file. Do not keep expanding always-loaded
+  prose when a deterministic check can enforce the invariant.
+- Keep one canonical home per rule. Other files should point to it instead of copying
+  its rationale and edge cases.
+
+## Durable content only
+
+- Comments and docs state current, permanent facts, never who changed what or when.
+  Do not cite a PR/issue number, a past bug, or a date as the reason code looks the
+  way it does; state the underlying invariant directly instead (e.g. "ties break on
+  route_code ascending because the GROUP BY gives no ordering guarantee within a tie"
+  — not "fixed in PR #196"). The task/PR narrative belongs in the PR description and
+  commit history, not the source tree.
+- Do not hardcode a measured benchmark (a specific row count, latency, or duration) as
+  if it were a fixed fact — live datasets and hardware drift, so a "measured 46.5s on
+  574M rows" comment goes stale silently and misleads the next reader. State the
+  durable design rationale instead; an order-of-magnitude scale ("hundreds of millions
+  of rows") is fine when it adds real intuition, a specific decaying number is not.
+- Do not commit a markdown file that is a log of a past dev/refactor session (dated
+  entries, "found X, fixed Y", slice-by-slice narrative) as permanent repo content —
+  that belongs in the PR body or commit message, not a tracked file. `docs/refactor-
+  log.md` is the one deliberate exception: it is `/vps-loop-run`'s own required
+  operational trail (see `.claude/commands/vps-loop-run.md`), not free-standing dev
+  narration, and stays out of this rule.
 
 ## Autonomous VPS loop
 
-A Claude Code CLI instance runs unattended on a dedicated VPS (separate from any dev machine), driven by cron, to advance work incrementally without a human keeping a session open.
-
-- **Where**: a small VPS clone of this repo (not the primary dev machine), authenticated to GitHub via a personal token (`gh auth login`) and to Anthropic via `claude setup-token` (a long-lived OAuth token, not a metered API key).
-- **Cadence**: a system cron job runs a fixed wrapper script hourly (off the round-minute mark) that invokes `claude -p` non-interactively with a fixed meta-prompt, then exits — it does not stay resident between runs.
-- **`NEXT_TASK.md`** (repo root, untracked/local — not meant to be committed as part of normal feature work) is the loop's only input: freeform markdown describing the current task, a refactor backlog (candidates found but not yet started — split into small steps before starting any), and a status log the loop appends to after each run. Empty or missing file → the run is a safe no-op ("standing by"). There is no other entry point — to hand it a new task, either write it locally and push it to the VPS:
-  ```bash
-  scp -i ~/.ssh/conoha/<key>.pem ./NEXT_TASK.md root@<vps-ip>:/root/transit-app/NEXT_TASK.md
-  ```
-  or edit the file on the VPS directly:
-  ```bash
-  ssh -i ~/.ssh/conoha/<key>.pem root@<vps-ip>
-  nano /root/transit-app/NEXT_TASK.md
-  ```
-  Either way, the change takes effect on the loop's next hourly run — there's no way to trigger it early short of SSHing in and running `/root/claude-loop.sh` manually.
-- **Per run**: read `NEXT_TASK.md` → advance by one incremental step only (never attempt the whole task in one run) → run the relevant tests → commit (with `[skip ci]`, per above) → push a feature branch and open/update a PR via `gh` → update the status log. Every commit still goes through review like any other PR; the loop never merges its own work.
-- **Safety layering**: the shared, tracked `.claude/settings.json` hooks (`guard-dev-db.sh` blocking write/DDL SQL against the dev DB on :5433, `guard-push-quality.sh` gating `git push` on lint/tests) apply here same as anywhere. On top of that, the VPS checkout has its own `.claude/settings.local.json` (gitignored, VPS-only — never commit this) that allowlists the narrow set of safe operations the unattended loop needs (reads, the test/lint commands, `git`/`gh` up through opening a PR) and explicitly denies `git push` to `main`, force-push, `reset --hard`, `rm -rf`, and DB-reset targets. The loop can never push to `main` directly or merge — only open PRs for a human to review.
-- **Known limitation**: `guard-push-quality.sh`'s backend-test timeout (240s) was tuned on faster hardware than the current VPS plan (4 vCPU/4GB), where a full `pytest` run takes ~6.5 minutes — a clean push can still fail the gate on timeout alone. Not yet resolved; if pushes start failing consistently with no real test failure in the log, that's the likely cause.
+- `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked
+  input and status log; one run advances at most one item.
+- The loop may create worktrees, commit, push feature branches, open draft PRs,
+  mark its own PR ready, and squash-merge it once both required `/review-branch`
+  passes are clean, GitHub reports the PR mergeable/clean, AND `main` hasn't
+  advanced since those passes ran (Step 5 gates this unconditionally before Step
+  6 runs; Step 6 re-checks the `main` SHA immediately before merging, since a
+  non-conflicting advance is invisible to `mergeable`/`mergeStateStatus` alone)
+  — then run `/cleanup-merged` to remove the now-stale branch/worktree. It never
+  pushes directly to `main` (only via a reviewed, merged PR), never force-pushes,
+  and never bypasses the two-pass review gate, a `CONFLICTING` merge state, or a
+  `main` that moved on to force a merge through.
+- Shared hooks apply on the VPS. VPS-only permissions live in ignored
+  `.claude/settings.local.json` and must never be committed.
+- Operational setup, non-interactive-shell environment rules, and current timeout
+  limitations are documented in `.claude/README.md`, not repeated in every session.
+- For a `NEXT_TASK.md`-tracked backlog item, the VPS loop is the default place
+  that work happens, not an interactive session (this doesn't apply to ordinary
+  interactive feature work outside the backlog, e.g. work requested directly in
+  a session — see `## Git and pull requests` above). Prefer reporting status and
+  letting the next tick continue over fixing/finishing a stuck or blocked item
+  yourself; only take over in-progress worker state when explicitly asked to. A
+  specific ask to intervene ("if it stops, resolve it" / "fix the root cause")
+  authorizes that one intervention — not a chain into full interactive
+  development of everything downstream. After finishing the thing that was
+  actually asked for, check whether the loop's next tick can plausibly continue
+  from here; if so, stop and let it, rather than proactively continuing the
+  chain of related fixes yourself. (This is a session-discipline rule, not a
+  code-enforceable one, so it skips the usual skill-first promotion ladder in
+  `## Process rules` — there's no existing skill for session behavior to have
+  captured it in.)

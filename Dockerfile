@@ -5,6 +5,13 @@ COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
+# Strip the build-time-only Vite manifest dir before it ships into the
+# production static tree, where api/main.py's SPA fallback would otherwise
+# serve it publicly. Shared with Makefile's `bake` target via
+# scripts/strip_vite_manifest.sh — see that file for why — so the two build
+# paths (container image vs. `make bake`) can't drift out of sync.
+COPY scripts/strip_vite_manifest.sh /tmp/strip_vite_manifest.sh
+RUN sh /tmp/strip_vite_manifest.sh dist
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
 FROM python:3.12-slim

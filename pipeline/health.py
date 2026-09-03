@@ -73,7 +73,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
     """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
-    from api.clickhouse import max_captured_at_before_by_agency
+    from api.clickhouse import max_captured_at_before_by_agency, min_captured_at_by_agency
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
@@ -92,8 +92,8 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
     # the whole `updates` table: the GROUP BY form has no `agency_id`
     # predicate at all, so it reads the `captured_at` column for every row in
-    # the table (measured 46.5s / 574M rows on real dev data) — worse than
-    # even a per-agency full scan. `agencies` here is already filtered to
+    # the table — worse than even a per-agency full scan, and it gets worse
+    # as the table grows. `agencies` here is already filtered to
     # non-deleted agencies (the query above), so no separate active-id filter
     # is needed. The "only a COMPLETED day counts" cutoff is baked into the
     # helper's `before` predicate (see its docstring and `pipeline.freshness`'s
@@ -116,6 +116,21 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     live_max: dict[int, date | None] = {
         aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
     }
+
+    # A never-analyzed agency (agg_day is None) needs the earliest live day
+    # too, to size agg_behind_days off the real unaggregated span instead of
+    # a flat placeholder. Only probed for that (normally rare) subset —
+    # every other agency already has everything it needs from agg_max/live_max
+    # above, so this never adds a query for the common already-analyzed case.
+    never_analyzed_ids = [
+        a["agency_id"]
+        for a in agencies
+        if agg_max.get(a["agency_id"]) is None and live_max.get(a["agency_id"]) is not None
+    ]
+    earliest_live: dict[int, date | None] = {}
+    if never_analyzed_ids:
+        probed_earliest = await min_captured_at_by_agency(ch, never_analyzed_ids, _log)
+        earliest_live = {aid: None if mn is None else mn.astimezone(_JST).date() for aid, mn in probed_earliest.items()}
 
     # agg_feed_health may not exist in all environments — degrade gracefully
     try:
@@ -141,7 +156,15 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
         if live_day is None:
             behind = 0
         elif agg_day is None:
-            behind = 1
+            earliest_day = earliest_live.get(aid)
+            # Inclusive day count from the earliest unaggregated day through
+            # the newest completed one — e.g. a single day of unaggregated
+            # data (earliest_day == live_day) is 1 day behind, not 0. Falls
+            # back to the old flat placeholder only if the earliest-day probe
+            # itself degraded to None (e.g. a ClickHouse hiccup for this one
+            # agency), matching this function's usual "degrade, don't fail
+            # the whole call" shape.
+            behind = (live_day - earliest_day).days + 1 if earliest_day is not None else 1
         else:
             behind = max(0, (live_day - agg_day).days)
 

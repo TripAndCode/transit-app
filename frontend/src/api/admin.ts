@@ -184,3 +184,37 @@ export function useAdminOps() {
     staleTime: 30_000,
   });
 }
+
+// ── Architecture docs (developer/internal page) ─────────────────────────
+
+type ArchitectureDocSummary = {
+  slug: string;
+  title: string;
+};
+
+type ArchitectureDoc = ArchitectureDocSummary & {
+  content: string;
+};
+
+/** The `/admin/architecture` page's sidebar index of `docs/features/*.md`.
+ * Enumerated server-side (fresh glob per request), never hardcoded here. */
+export function useArchitectureDocs() {
+  return useQuery({
+    queryKey: ["adminArchitectureDocs"],
+    queryFn: ({ signal }) => apiGet<ArchitectureDocSummary[]>("/api/admin/architecture/docs", { signal }),
+    staleTime: 30_000,
+  });
+}
+
+/** One feature doc's full Markdown content, fetched only once a sidebar
+ * entry is selected. `slug === null` (nothing selected yet) disables the
+ * query instead of firing a request for a not-yet-known doc. */
+export function useArchitectureDoc(slug: string | null) {
+  return useQuery({
+    queryKey: ["adminArchitectureDoc", slug],
+    queryFn: ({ signal }) =>
+      apiGet<ArchitectureDoc>(`/api/admin/architecture/docs/${encodeURIComponent(slug ?? "")}`, { signal }),
+    enabled: slug != null,
+    staleTime: 30_000,
+  });
+}

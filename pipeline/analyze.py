@@ -20,6 +20,34 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
 - agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
+
+None of the builders below gate a group out at insert time by its sample
+count, however thin. Every row carries its own `samples` column instead, so a
+low-sample row still exists for a reader to weight, pool across a coarser
+grain, or flag as low-confidence (see api.triage.LOW_CONFIDENCE_SAMPLES) —
+rather than silently vanishing below some insert-time threshold that varies
+table to table.
+
+agg_route_stats / agg_route_hour / agg_route_dow / agg_route_hour_dow /
+agg_daily_trend / agg_route_daily / agg_hour_daily each carry a
+`sum_delay_sec` column alongside their pre-rounded `avg_min` (or, for
+agg_route_daily, `avg_delay_sec`) — the exact SUM(dep_delay) in seconds
+behind that mean. A reader pooling MULTIPLE rows of one of these tables must
+divide SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than
+re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
+samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
+values, which is not the same as the true pooled mean over the underlying
+raw observations. agg_route_daily_dist already followed this pattern from
+the start (see its own `sum_delay_sec`); these seven tables now match it.
+
+agg_daily_trend additionally carries `sum_late_sec`, the exact
+SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
+a reader pooling multiple rows sums it directly (no division). A route's
+total lateness contribution must be computed by summing this per-observation
+clamped value, never by clamping an already-pooled avg_min/sum_delay_sec to
+zero first: a day (or route) whose trips mix early and late running can
+average out to near zero, which would silently zero out that day's real
+lateness contribution instead of counting it.
 """
 
 import logging
@@ -171,8 +199,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # dedup result in memory at once. `.query()` buffers the ENTIRE
             # result as a Python list (`result_rows`) before returning it, and
             # the tzinfo fixup below used to build a SECOND full-size list from
-            # that — two live copies of a set measured at 5.3M rows / 1.6-3.4GB
-            # for agency 8. Streaming yields one block (a list of row-tuples)
+            # that — two live copies of a set that scales with the agency's
+            # total row count. Streaming yields one block (a list of row-tuples)
             # at a time, so peak memory is bounded by one block, not the whole
             # table. Each block is tzinfo-fixed and INSERTed independently;
             # `execute_values`'s own page_size=10_000 chunking of the Postgres
@@ -210,26 +238,50 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────
+        # No minimum-sample HAVING here — see the module docstring's no-gate
+        # policy.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
-            ranked AS (
-                SELECT *, PERCENT_RANK() OVER (
-                    PARTITION BY route_code, service_type ORDER BY dep_delay
-                ) AS pct FROM deduped
+            grouped AS (
+                SELECT
+                    route_code, service_type,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC (not _CONT) so p50_min/p90_min are always
+                    -- an actual observed dep_delay value. It handles ties and
+                    -- single-row groups correctly by construction: it picks the
+                    -- smallest ordered value whose cumulative distribution is
+                    -- >= the target fraction, so a tied cluster or an n=1
+                    -- partition always resolves to a real value instead of
+                    -- skipping every row below the threshold. NOTE: this does
+                    -- NOT match pipeline/reports/rankings.py's _ranking_live
+                    -- ClickHouse fallback, which intentionally reproduces the
+                    -- old min-rank tie formula this column used to use — see
+                    -- that function's docstring for the known, accepted
+                    -- divergence on tied data. Computing both fractions from
+                    -- one ARRAY[...] call (rather than two separate
+                    -- PERCENTILE_DISC calls) keeps this to a single per-group
+                    -- sort of dep_delay.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END) AS late_5min_plus,
+                    SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
+                    SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type
             )
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2)  AS avg_min,
-                ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
-                ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
-                SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END)  AS late_5min_plus,
-                ROUND(SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS on_time_pct,
-                ROUND(SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*), 1) AS late5_pct,
-                COUNT(*) AS samples
-            FROM ranked
-            GROUP BY route_code, service_type
-            HAVING COUNT(*) > 20
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                late_5min_plus,
+                ROUND(on_time_pct_raw, 1) AS on_time_pct,
+                ROUND(late5_pct_raw, 1) AS late5_pct,
+                samples,
+                sum_delay_sec
+            FROM grouped
             ORDER BY avg_min DESC
         """
         _build_and_insert(
@@ -246,6 +298,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "on_time_pct",
                 "late5_pct",
                 "samples",
+                "sum_delay_sec",
             ],
             p,
             conn,
@@ -254,26 +307,42 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
-            ranked AS (
-                SELECT *, PERCENT_RANK() OVER (
-                    PARTITION BY route_code, service_type, scheduled_time ORDER BY dep_delay
-                ) AS pct FROM deduped
+            grouped AS (
+                SELECT
+                    route_code, service_type, scheduled_time,
+                    AVG(dep_delay) AS avg_delay_sec,
+                    -- PERCENTILE_DISC: see agg_route_stats's identical column above.
+                    PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
+                    COUNT(*) AS samples,
+                    SUM(dep_delay) AS sum_delay_sec
+                FROM deduped
+                GROUP BY route_code, service_type, scheduled_time
             )
             SELECT
                 %(agency_id)s AS agency_id,
                 route_code, service_type, scheduled_time,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                ROUND(MIN(CASE WHEN pct>=0.5 THEN dep_delay END)/60.0::numeric, 2) AS p50_min,
-                ROUND(MIN(CASE WHEN pct>=0.9 THEN dep_delay END)/60.0::numeric, 2) AS p90_min,
-                COUNT(*) AS samples
-            FROM ranked
-            GROUP BY route_code, service_type, scheduled_time
+                ROUND(avg_delay_sec/60.0::numeric, 2) AS avg_min,
+                ROUND(pctl_sec[1]/60.0::numeric, 2) AS p50_min,
+                ROUND(pctl_sec[2]/60.0::numeric, 2) AS p90_min,
+                samples,
+                sum_delay_sec
+            FROM grouped
             ORDER BY route_code, scheduled_time
         """
         _build_and_insert(
             sql,
             "agg_route_hour",
-            ["agency_id", "route_code", "service_type", "scheduled_time", "avg_min", "p50_min", "p90_min", "samples"],
+            [
+                "agency_id",
+                "route_code",
+                "service_type",
+                "scheduled_time",
+                "avg_min",
+                "p50_min",
+                "p90_min",
+                "samples",
+                "sum_delay_sec",
+            ],
             p,
             conn,
         )
@@ -286,7 +355,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 route_code, service_type,
                 EXTRACT(ISODOW FROM date::date)::smallint AS dow,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
             ORDER BY route_code
@@ -294,7 +364,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_route_dow",
-            ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples"],
+            ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -303,7 +373,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # Per route × service × day-of-week × hour, for the Forecast heatmap.
         # `scheduled_time IS NOT NULL` guards the NOT NULL `hour` column: a typed
         # row lacking a scheduled time would otherwise yield a NULL hour and abort
-        # the whole-agency analyze transaction.
+        # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
+        # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
+        # notation, e.g. "25:30:00") is rejected at ingest time (see
+        # pipeline/strategies/_time.py) and never reaches `_analyze_deduped`, so
+        # a late-night continuation trip is absent from this aggregate rather
+        # than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
                 SELECT * FROM _analyze_deduped
@@ -315,7 +390,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 EXTRACT(ISODOW FROM date::date)::smallint AS dow,
                 EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             GROUP BY route_code, service_type,
                      EXTRACT(ISODOW FROM date::date), EXTRACT(HOUR FROM scheduled_time)
@@ -324,7 +400,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_route_hour_dow",
-            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples"],
+            ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -344,7 +420,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 date::text, route_code,
                 COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec,
+                SUM(GREATEST(dep_delay, 0)) AS sum_late_sec
             FROM deduped
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
@@ -352,7 +430,16 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_daily_trend",
-            ["agency_id", "date", "route_code", "service_type", "avg_min", "samples"],
+            [
+                "agency_id",
+                "date",
+                "route_code",
+                "service_type",
+                "avg_min",
+                "samples",
+                "sum_delay_sec",
+                "sum_late_sec",
+            ],
             p,
             conn,
         )
@@ -371,7 +458,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 MAX(dep_delay)             AS worst_delay_sec,
                 COUNT(DISTINCT trip_id)    AS trips_observed,
                 COUNT(*)                   AS samples,
-                MAX(captured_at)           AS last_seen_at
+                MAX(captured_at)           AS last_seen_at,
+                SUM(dep_delay)             AS sum_delay_sec
             FROM deduped
             GROUP BY date, route_code, COALESCE(service_type, '')
             ORDER BY date, route_code
@@ -389,6 +477,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 "trips_observed",
                 "samples",
                 "last_seen_at",
+                "sum_delay_sec",
             ],
             p,
             conn,
@@ -440,11 +529,16 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         )
 
         # ── agg_hour_daily (per-day, per-hour-of-day across all routes) ──
-        # Powers Overview's peak-hour-by-DOW (its ~96% cold cost). UNTYPED dedup
-        # (all observations, no service filter) since that panel aggregates
+        # Powers Overview's peak-hour-by-DOW (its dominant cold-load cost) and
+        # the reports/trend hourly heatmap (same grain). UNTYPED dedup (all
+        # observations, no service filter) since both readers aggregate
         # hour-of-day across every route; a service/route filter falls back to
-        # the live path on read. (The reports/trend hourly heatmap is the same
-        # grain and a natural future consumer, but is not wired here yet.)
+        # the live path on read. `sum_delay_sec` lets a caller that pools
+        # MULTIPLE rows of this table (e.g. the trend heatmap's
+        # dow×band grid) divide an exact raw-seconds total once, at the end,
+        # instead of re-weighting this row's own already-rounded `avg_min`.
+        # `EXTRACT(HOUR FROM scheduled_time)` is always 0-23, same invariant as
+        # the agg_route_hour_dow comment above (see pipeline/strategies/_time.py).
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
@@ -452,7 +546,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 date,
                 EXTRACT(HOUR FROM scheduled_time)::smallint AS hour,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples
+                COUNT(*) AS samples,
+                SUM(dep_delay) AS sum_delay_sec
             FROM deduped
             WHERE scheduled_time IS NOT NULL
             GROUP BY date, EXTRACT(HOUR FROM scheduled_time)
@@ -461,7 +556,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         _build_and_insert(
             sql,
             "agg_hour_daily",
-            ["agency_id", "date", "hour", "avg_min", "samples"],
+            ["agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
         )
@@ -471,6 +566,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # join static_stop_times/static_stops for the real name; without it,
         # synthesize a numbered placeholder ("N番停留所") from stop_sequence
         # alone, since there's no other source of stop names to key on.
+        # No minimum-sample HAVING here either — see the module docstring's
+        # no-gate policy.
         if has_static:
             sql = """
                 WITH deduped AS (SELECT * FROM _analyze_deduped)
@@ -491,7 +588,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     AND ss.agency_id = %(agency_id)s
                 WHERE d.stop_sequence IS NOT NULL
                 GROUP BY d.route_code, d.stop_sequence
-                HAVING COUNT(*) > 5
                 ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) DESC
             """
         else:
@@ -506,7 +602,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 FROM deduped
                 WHERE stop_sequence IS NOT NULL
                 GROUP BY route_code, stop_sequence
-                HAVING COUNT(*) > 5
                 ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) DESC
             """
         _build_and_insert(
@@ -608,12 +703,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # BETWEEN -MAX_PLAUSIBLE_DELAY_SEC AND MAX_PLAUSIBLE_DELAY_SEC`),
             # so a (route_code, trip_id, stop_sequence) whose every observation
             # was NULL/implausible would silently drop out of stop coverage —
-            # measured on real agency-8 data at ~3.7% of keys, 39 stops losing
-            # ALL route coverage. `agg_stop_routes` is about which routes serve
-            # a stop, independent of whether any of those observations happened
-            # to carry a numeric delay — the extra ClickHouse round-trip
-            # (measured ~113s on agency 8's 336M rows) is the correctness-over-
-            # perf trade this table's semantics require.
+            # a real, non-trivial share of keys, enough to lose stops' entire
+            # route coverage in practice. `agg_stop_routes` is about which
+            # routes serve a stop, independent of whether any of those
+            # observations happened to carry a numeric delay — the extra,
+            # non-trivial ClickHouse round-trip (a second full scan of the
+            # agency's keys, not a cheap add-on) is the correctness-over-perf
+            # trade this table's semantics require.
             with conn.cursor() as cur:
                 cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
                 cur.execute(
@@ -621,12 +717,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "ON COMMIT DROP"
                 )
                 # `query_row_block_stream` (not `query`), same rationale as
-                # _analyze_deduped above: this key set is ~3.7% LARGER than
-                # _analyze_deduped by design (that's the correctness fix this
-                # block exists for), so buffering the whole thing in
-                # `.query()`'s result_rows would be the same 5.3M-row /
-                # 1.6-3.4GB-for-agency-8 shape that streaming was introduced
-                # to eliminate 40 lines up, just for a bigger set.
+                # _analyze_deduped above: this key set is deliberately LARGER
+                # than _analyze_deduped by design (that's the correctness fix
+                # this block exists for), so buffering the whole thing in
+                # `.query()`'s result_rows would hit the same unbounded-memory
+                # shape that streaming was introduced to eliminate 40 lines
+                # up, just for a bigger set.
                 ch_keys_sql = (
                     "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
                     "WHERE agency_id = {agency_id:UInt16}"

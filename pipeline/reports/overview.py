@@ -28,10 +28,10 @@ The shared slow-path grain
 --------------------------
 Every slow-path helper used to issue its OWN ``_dedup_cte_ch`` scan of
 ``updates``, so one Overview request fanned out ~12 independent full dedup
-scans of *substantially the same rows* — measured at 8-22 s and ~170 M rows
-read EACH on agency 8 over a 30-day window, which put several of them over
-``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a real
-500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
+scans of *substantially the same rows* — each one reading a large fraction
+of an agency's history over even a 30-day window, which put several of them
+over ``api.clickhouse.get_ch_client``'s 30 s ``max_execution_time`` cap (a
+real 500). They now share ONE round trip: :func:`_fetch_grain` pre-aggregates the
 dedup output to ``(date, route_code, service_type, hour)`` once, and each
 helper derives its own answer from that grain in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three
@@ -56,15 +56,19 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
+from pipeline.reports.rankings import _round1
 
 _log = logging.getLogger(__name__)
 
 # How many days before ``ctx.from_date`` the shared grain has to reach.
 # ``compute_overview_summary`` builds its two comparison windows inline as
-# ``cur_from = max(anchor - 6, ctx.from_date)`` and ``base_from = cur_from - 7``,
-# so the earliest date any consumer can ask for is ``ctx.from_date - 7`` — the
-# ``max(..., ctx.from_date)`` clamp on ``cur_from`` is what makes 7 the exact
-# worst case rather than a heuristic. See :func:`_fetch_grain`, and note that
+# ``cur_from = max(anchor - 6, ctx.from_date)`` and
+# ``base_from = cur_from - cur_ctx.days``, where ``cur_ctx.days`` is
+# ``cur_ctx``'s own width (at most 7, and exactly 7 whenever the
+# ``max(..., ctx.from_date)`` clamp doesn't bite). So the earliest date any
+# consumer can ask for is ``ctx.from_date - 7`` in the unclamped case — 7
+# remains a safe (if now slightly conservative for a clamped/narrow ctx)
+# worst case, not a heuristic. See :func:`_fetch_grain`, and note that
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
 
@@ -235,9 +239,13 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
       grain spans their union and each consumer re-filters. The union bound is
       ``[ctx.from_date - 7, ctx.to_date]``:
       ``cur_ctx.from_date = max(anchor - 6, ctx.from_date) >= ctx.from_date``
-      and ``base_ctx.from_date = cur_ctx.from_date - 7``, so no consumer ever
-      reaches further back than 7 days before ``ctx.from_date``; and
-      ``anchor`` is either a date inside ``ctx`` or ``ctx.to_date`` itself, so
+      and ``base_ctx.from_date = cur_ctx.from_date - cur_ctx.days`` where
+      ``cur_ctx.days`` (``cur_ctx``'s own width) is at most 7, so no
+      consumer ever reaches further back than 7 days before
+      ``ctx.from_date`` — reached only when ``cur_ctx`` is the full 7 days;
+      a narrower ``cur_ctx`` (clamped ``ctx``) gives an even shallower
+      ``base_ctx``, still inside this bound; and ``anchor`` is either a date
+      inside ``ctx`` or ``ctx.to_date`` itself, so
       ``cur_ctx.to_date = anchor <= ctx.to_date`` bounds the far end. Because
       this bound needs no knowledge of ``anchor``, ``_latest_data_date`` —
       which computes ``anchor`` — can be served from the grain too, instead of
@@ -254,12 +262,13 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     that are too narrow to be covered.
 
     ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
-    fetched separately for ``_peak_hour_by_dow``: measured on live agency-8
-    data, adding it costs nothing (the group-by cardinality rises 4.8 k → 10 k
-    rows on a 30-day morning window while wall time stays ~7.7 s — the cost is
-    all in the scan), whereas a second query genuinely doubles it. Even a
-    full-365-day window stays around 120 k grain rows, inside
-    ``get_ch_client``'s 200 k ``max_result_rows`` cap.
+    fetched separately for ``_peak_hour_by_dow``: adding it to the existing
+    group-by costs nothing extra (the cost is all in the scan, not the
+    group-by cardinality), whereas a second query genuinely doubles it. Even
+    a full-365-day window stays under ``get_ch_client``'s 200 k-row
+    ``max_result_rows`` cap, though not with so much headroom that adding
+    another group-by dimension or widening the window further is free to do
+    without rechecking against the cap.
 
     The hour is read off ``scheduled_time``'s first two characters, exactly as
     ``_peak_hour_by_dow``'s live path did: it is a zero-padded ``'HH:MM[:SS]'``
@@ -307,9 +316,11 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> date | None:
     """Most recent date inside ctx that has any samples.
 
-    Used to anchor the headline's 7-day window to where data actually
-    exists. Keeps the "this week vs last week" semantics meaningful
-    when ingest is lagging or the user selects a wide historical range.
+    Used to anchor the headline's current/baseline windows (up to 7 days
+    wide, narrower only when the user's selected range itself is narrower)
+    to where data actually exists. Keeps the "this week vs last week"
+    semantics meaningful when ingest is lagging or the user selects a wide
+    historical range.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` for
     sub-millisecond response. Slow path (any other time band) reads the shared
@@ -341,8 +352,13 @@ async def _headline_stats(
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
         sql = (
-            "SELECT CASE WHEN SUM(samples) > 0\n"
-            "            THEN ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2)\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides of
+            # avg_min's division to the same row population — see
+            # _route_weekly_history's identical rationale. The returned
+            # `samples` column below stays the TRUE total (unfiltered) count.
+            "SELECT CASE WHEN SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
+            "            THEN ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "                / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
             "       COALESCE(SUM(samples), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
@@ -377,12 +393,19 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min,\n"
+            # See _route_weekly_history's identical FILTER rationale: match
+            # avg_min's numerator/denominator to the same sum_delay_sec
+            # IS NOT NULL row population. The returned `samples` column below
+            # stays the TRUE total (unfiltered) sample count — a distinct,
+            # legitimate "how much data backs this route" figure independent
+            # of whether sum_delay_sec has been backfilled yet.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
             "       SUM(samples)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(avg_min * samples) IS NOT NULL"
+            "HAVING SUM(samples) > 0 AND SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -450,9 +473,8 @@ async def _route_weekly_history(
     default ``weeks_back=4`` the grain covers it whenever ``ctx`` is at least
     ~21 days wide — i.e. every default 30-day request, which is the common
     case. That matters because this was the second ClickHouse round trip of an
-    otherwise one-round-trip slow path (measured at 5-19 s on live data, on top
-    of the grain's own 8-19 s), and it fires whenever ``_movers`` has any
-    candidate routes at all.
+    otherwise one-round-trip slow path, on top of the grain's own scan cost,
+    and it fires whenever ``_movers`` has any candidate routes at all.
 
     The live fallback (narrow ``ctx`` only) is ONE dedup scan over the full
     ``weeks_back * 7``-day span, bucketed by week index, rather than
@@ -482,7 +504,15 @@ async def _route_weekly_history(
             where_clause = f" AND ({where})" if where else ""
             rows = await conn.fetch(
                 "SELECT route_code,\n"
-                "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+                # sum_delay_sec is nullable (unlike samples); a row can have
+                # samples set but sum_delay_sec still NULL (pre-backfill row,
+                # hand-seeded fixture, or any row analyze() hasn't rewritten
+                # since migration 0028) — FILTER both sides to the same row
+                # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+                # silently dropped, matching pipeline/digest/build.py's
+                # _ROUTE_BASELINE_SQL.
+                "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+                "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
                 "FROM agg_daily_trend\n"
                 f"WHERE agency_id=$1{where_clause}\n"
                 f"  AND route_code = ANY(${n}::text[])\n"
@@ -597,15 +627,21 @@ def _streak_weeks(history: list[float | None], *, direction: str) -> int:
 async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
     """Top-20 routes by total positive delay contribution + rest share.
 
-    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` and
-    approximates ``SUM(GREATEST(dep_delay, 0))`` as
-    ``SUM(GREATEST(avg_min, 0) * samples)`` per route, in minutes. Routes
-    that ran early on net (negative ``avg_min``) contribute zero — same
-    intent as the per-row metric: contribution to LATENESS, not the
-    signed sum.
+    Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend``'s
+    ``sum_late_sec`` — the exact per-row ``SUM(GREATEST(dep_delay, 0))`` — and
+    sums it directly per route, in minutes. This is a TOTAL, not a mean, so
+    pooling multiple day-rows is a plain SUM with no division; unlike
+    ``avg_min``, clamping a signed value to zero BEFORE summing across
+    observations would understate (never overstate) a route's true lateness
+    contribution whenever a day mixes early and late trips — the day's mean
+    can land at or below zero while individual late trips still contributed
+    real lateness. ``sum_late_sec`` avoids that by clamping each observation
+    before it is ever summed, so the fast and slow paths agree exactly on this
+    metric (mirroring ``sum_delay_sec``'s exact-vs-rounded pooling fix, but for
+    the clamped total rather than the signed mean).
 
     Slow path (any non-default time band) reads the shared grain
-    (:func:`_fetch_grain`), whose ``sum_late_sec`` column is the per-row
+    (:func:`_fetch_grain`), whose ``sum_late_sec`` column is the same per-row
     ``SUM(GREATEST(dep_delay, 0))`` computed exactly, so the hour-of-day filter
     is honored.
     """
@@ -614,7 +650,11 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT route_code,\n"
-            "       SUM(GREATEST(avg_min, 0) * samples)::float AS total_late_min\n"
+            # sum_late_sec is nullable (not backfilled — see migration 0029):
+            # a row analyze() hasn't rewritten since that migration contributes
+            # 0 here (Postgres SUM skips NULLs), understating rather than
+            # crashing or looking like a genuine zero-lateness day.
+            "       (SUM(sum_late_sec)::numeric / 60.0) AS total_late_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
@@ -664,13 +704,16 @@ async def _top_delayed_routes(
     now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
     (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
 
-    Uses cur_ctx (the same last-7-days-of-ctx window compute_overview_summary
-    already builds for the headline), not the full ctx, so the KPI row's
-    three stats and the routes list all describe the same snapshot.
+    Uses cur_ctx (the same current-window — up to 7 days, narrower only when
+    ctx itself is narrower — compute_overview_summary already builds for the
+    headline), not the full ctx, so the KPI row's three stats and the routes
+    list all describe the same snapshot.
 
     Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
-    each route's true weighted average (SUM(avg_min*samples)/SUM(samples)),
-    not _concentration()'s "total lateness contribution" sum — a route with
+    each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
+    dividing once at the end rather than re-weighting each day's already-
+    rounded avg_min — see pipeline/analyze.py's module docstring), not
+    _concentration()'s "total lateness contribution" sum — a route with
     few samples but a high average must outrank a route with more samples
     but a lower average, which _concentration()'s metric would get backwards.
     Slow path reads the shared grain (:func:`_fetch_grain`) for a non-default
@@ -681,11 +724,17 @@ async def _top_delayed_routes(
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT route_code,\n"
-            "       SUM(avg_min * samples)::float / NULLIF(SUM(samples), 0) AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0\n"
+            # Guard against a NULL pooled average reaching the unguarded
+            # _round2(...) below.
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             # Ties broken by route_code, same as the slow path just below and
             # as _concentration()'s fast path.
             "ORDER BY avg_min DESC NULLS LAST, route_code",
@@ -714,7 +763,7 @@ async def _top_delayed_routes(
             {
                 "route_code": r["route_code"],
                 "route_short_name": names.get(r["route_code"]),
-                "avg_min": round(float(r["avg_min"]), 2),
+                "avg_min": float(_round2(r["avg_min"])),
             }
             for r in top_n
         ],
@@ -755,7 +804,11 @@ async def _peak_hour(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     where_clause = (" AND " + " AND ".join(parts)) if parts else ""
     sql = (
         "SELECT EXTRACT(HOUR FROM scheduled_time)::int AS h,\n"
-        "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+        # the same row population — see _route_weekly_history's identical
+        # rationale.
+        "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
         "FROM agg_route_hour\n"
         f"WHERE agency_id=$1{where_clause}\n"
         "GROUP BY EXTRACT(HOUR FROM scheduled_time)"
@@ -772,7 +825,7 @@ async def _peak_hour_by_dow(
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW), a sample-weighted average across the range — sub-second instead of
-    the raw dedup scan that was ~96% of Overview's cold load. That table is
+    the raw dedup scan that used to dominate Overview's cold load. That table is
     aggregated across all routes/services, so a ``service``/``routes`` filter,
     or any ``time_band`` other than ``'all'``, has to leave it.
 
@@ -793,7 +846,11 @@ async def _peak_hour_by_dow(
         dow_pred = "BETWEEN 1 AND 5" if dow_group == "weekday" else "IN (6, 7)"
         sql = (
             "SELECT hour AS h,\n"
-            "       SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_hour_daily\n"
             "WHERE agency_id = $1 AND date >= ($2::text)::date AND date <= ($3::text)::date\n"
             f"  AND EXTRACT(ISODOW FROM date) {dow_pred}\n"
@@ -886,7 +943,7 @@ def _peak_from_hour_rows(rows) -> dict | None:
             continue
         h = int(r["h"])
         if 0 <= h < 24:
-            by_hour[h] = round(float(r["avg_min"]), 2)
+            by_hour[h] = float(_round2(r["avg_min"]))
     valid = [h for h in range(24) if by_hour[h] is not None]
     if not valid:
         return None
@@ -916,7 +973,11 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT date, service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg\n"
+            # sum_delay_sec is nullable (unlike samples); FILTER both sides to
+            # the same row population — see _route_weekly_history's identical
+            # rationale.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date, service_type\n"
@@ -939,7 +1000,9 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         d_raw = r["date"]
         d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
         st = r["service_type"]
-        avg = float(r["avg"]) if r["avg"] is not None else None
+        # 2dp, half-up — matches the sibling _service_split's rounding so the
+        # two report the same precision for the same underlying metric.
+        avg = float(_round2(r["avg"])) if r["avg"] is not None else None
         by_date.setdefault(d, {})[st] = avg
     out: list[dict] = []
     for d in sorted(by_date):
@@ -960,8 +1023,9 @@ async def _movers(
     """Top-10 worsened + top-10 improved routes by signed delta_min.
 
     Compares ``cur_ctx`` against ``base_ctx`` (both built upstream by
-    ``compute_overview_summary`` so the comparison is a true 7-day
-    week-over-week regardless of the user's selected range). Requires
+    ``compute_overview_summary`` as same-width current/baseline windows,
+    up to 7 days, narrower only when the user's selected range itself is
+    narrower). Requires
     >= 10 samples in BOTH windows for a route to enter the ranking — a
     route with a handful of obs can swing a huge delta_pct and would
     otherwise dominate top-3 with low statistical confidence.
@@ -978,18 +1042,24 @@ async def _movers(
     # window, has two routes at -1.7244 and -1.7203, which both round to -1.72.
     # Ranking on the rounded value made the top-10 cutoff between them a
     # coin-flip; ranking on the raw value orders them by their actual deltas.
-    deltas: list[tuple[str, float, float, float]] = []
+    deltas: list[tuple[str, float, float | None, float]] = []
     MIN_SAMPLES = 10
+    # A previous-window average below this floor makes delta_pct meaningless:
+    # dividing by a near-zero baseline can turn a trivial absolute change into
+    # a triple-digit-or-larger swing that reads as a real signal but isn't,
+    # even past the MIN_SAMPLES gate above (a small sample can still average
+    # to a near-zero delay). The floor matches this app's own delay-severity
+    # ramp elsewhere, which already treats anything below it as background
+    # noise rather than a noticeable delay.
+    MIN_PRV_AVG_FOR_PCT_MIN = 1.5
     for code in common:
         cur_avg, cur_n = cur[code]
         prv_avg, prv_n = prv[code]
-        if prv_avg == 0:
-            continue
         if cur_n < MIN_SAMPLES or prv_n < MIN_SAMPLES:
             continue
         d_min = cur_avg - prv_avg
-        d_pct = (d_min / prv_avg) * 100.0
-        deltas.append((code, round(d_min, 2), round(d_pct, 1), d_min))
+        d_pct = round((d_min / prv_avg) * 100.0, 1) if abs(prv_avg) >= MIN_PRV_AVG_FOR_PCT_MIN else None
+        deltas.append((code, float(_round2(d_min)), d_pct, d_min))
     # `(raw delta, route_code)` is a TOTAL order — route_codes are dict keys, so
     # they're distinct — which is what makes the ranking reproducible: the order
     # `common` happens to be iterated in cannot influence the result. It used to:
@@ -1026,8 +1096,8 @@ async def _movers(
             "delta_pct": dp,
             # Absolute averages for both windows so the UI can show
             # "last week X min → this week Y min" instead of a bare Δ%.
-            "current_avg_min": round(cur[code][0], 1),
-            "previous_avg_min": round(prv[code][0], 1),
+            "current_avg_min": float(_round1(cur[code][0])),
+            "previous_avg_min": float(_round1(prv[code][0])),
             "streak_weeks": _streak_weeks(history.get(code, []), direction=direction),
             "sparkline_points": pts,
         }
@@ -1050,7 +1120,15 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT service_type,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); a row can have
+            # samples set but sum_delay_sec still NULL (pre-backfill row,
+            # hand-seeded fixture, or any row analyze() hasn't rewritten
+            # since migration 0028) — FILTER both sides to the same row
+            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+            # silently dropped, matching pipeline/digest/build.py's
+            # _ROUTE_BASELINE_SQL.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY service_type",
@@ -1067,7 +1145,7 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
             for service_type, (n, total) in sorted(((k, v) for k, v in by_service.items() if k), key=lambda kv: kv[0])
         ]
     return {
-        r["service_type"]: round(float(r["avg_min"]), 2) for r in rows if r["service_type"] and r["avg_min"] is not None
+        r["service_type"]: float(_round2(r["avg_min"])) for r in rows if r["service_type"] and r["avg_min"] is not None
     }
 
 
@@ -1087,7 +1165,15 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         where_clause = f" AND ({where})" if where else ""
         rows = await conn.fetch(
             "SELECT date AS day,\n"
-            "       (SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric AS avg_min\n"
+            # sum_delay_sec is nullable (unlike samples); a row can have
+            # samples set but sum_delay_sec still NULL (pre-backfill row,
+            # hand-seeded fixture, or any row analyze() hasn't rewritten
+            # since migration 0028) — FILTER both sides to the same row
+            # population so SUM(samples) never counts a row SUM(sum_delay_sec)
+            # silently dropped, matching pipeline/digest/build.py's
+            # _ROUTE_BASELINE_SQL.
+            "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+            "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY date\n"
@@ -1100,7 +1186,7 @@ async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: 
         rows = [
             {"day": d, "avg_min": (total / n) / 60.0} for d, (n, total) in sorted(by_day.items(), key=lambda kv: kv[0])
         ]
-    pts = [round(float(r["avg_min"]), 2) for r in rows if r["avg_min"] is not None]
+    pts = [float(_round2(r["avg_min"])) for r in rows if r["avg_min"] is not None]
     return pts
 
 
@@ -1117,11 +1203,16 @@ async def compute_overview_summary(
 ) -> dict:
     """Build the 概況 payload for one agency over ``ctx``.
 
-    Headline math uses the LAST 7 days of ``ctx`` and compares against
-    the 7-day window immediately prior, so the "this week vs last week"
-    copy is honest regardless of how the user has widened the ctx range.
-    Concentration / peak / service_split / sparkline still aggregate over
-    the full ctx to surface broader patterns.
+    Headline math uses the LAST UP-TO-7 days of ``ctx`` (``cur_ctx``) and
+    compares against a window of the SAME WIDTH immediately prior
+    (``base_ctx``), so the "vs. the period before it" copy stays honest
+    both when the user has widened the ctx range (both windows are a full
+    7 days, unaffected by the widening) and when they have narrowed it
+    below 7 days (both windows shrink to match, rather than comparing a
+    genuine N-day average against an always-7-day one and manufacturing a
+    delta from day-of-week composition alone). Concentration / peak /
+    service_split / sparkline still aggregate over the full ctx to surface
+    broader patterns.
 
     When ``pool`` is supplied (non-None), the ten stage queries are
     dispatched as concurrent asyncio tasks, each acquiring its own
@@ -1161,8 +1252,8 @@ async def compute_overview_summary(
     # still has a sensible window_to.
     anchor = latest if latest is not None else ctx.to_date
 
-    # Build current + baseline 7-day windows anchored at `anchor`, but
-    # clamped inside ctx.
+    # Build current + baseline windows anchored at `anchor`, but clamped
+    # inside ctx.
     cur_to = anchor
     cur_from = max(cur_to - timedelta(days=6), ctx.from_date)
     cur_ctx = RangeCtx(
@@ -1173,8 +1264,19 @@ async def compute_overview_summary(
         service=ctx.service,
         routes=ctx.routes,
     )
+    # base_ctx is the SAME WIDTH as cur_ctx, immediately preceding it — not
+    # always a fixed 7 days. cur_ctx is 7 days wide whenever ctx reaches at
+    # least 7 days back from anchor, but the `max(..., ctx.from_date)` clamp
+    # above narrows it for a tighter ctx (e.g. a custom 3-day range). An
+    # always-7-day baseline would then compare a genuine N-day average
+    # against a genuine 7-day average — two windows with different
+    # day-of-week composition — and could manufacture a delta that is an
+    # artifact of window width, not a real trend change. Matching widths
+    # keeps every comparison "this window vs. the same-length one before
+    # it" honest, and is a no-op for the common (ctx >= 7 days) case, since
+    # cur_ctx.days is always 7 there — see the docstring above.
     base_to = cur_from - timedelta(days=1)
-    base_from = base_to - timedelta(days=6)
+    base_from = base_to - timedelta(days=cur_ctx.days - 1)
     base_ctx = RangeCtx(
         from_date=base_from,
         to_date=base_to,
@@ -1192,7 +1294,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
@@ -1266,7 +1368,7 @@ async def compute_overview_summary(
         delta_min = None
         delta_pct = None
         if avg_min is not None and baseline_avg is not None:
-            delta_min = round(avg_min - baseline_avg, 2)
+            delta_min = float(_round2(avg_min - baseline_avg))
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 

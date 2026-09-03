@@ -13,6 +13,7 @@
     "network_subtitle": "他社と比べてどうか",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
+    "open_menu": "メニューを開く",
     "account_menu": "アカウントメニュー",
     "help": "ヘルプ",
     "prototype_section_label": "PROTOTYPE",
@@ -207,7 +208,7 @@
     "title_dow": "{{dow}}曜 {{hour}}時台 — 遅延路線",
     "title_all": "毎日 {{hour}}時台 — 遅延路線",
     "noData": "この時間帯に十分なデータがありません",
-    "avgMin": "+{{value}}分",
+    "avgMin": "{{sign}}{{value}}分",
     "routeCount_one": "{{count}}路線",
     "routeCount_other": "{{count}}路線"
   },
@@ -265,7 +266,11 @@
     }
   },
   "help": {
-    "title": "利用マニュアル"
+    "title": "利用マニュアル",
+    "sections_nav": "マニュアルの目次",
+    "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
+    "hint_cta": "ヘルプを見る",
+    "hint_dismiss_aria": "ヘルプのヒントを閉じる"
   },
   "account": {
     "admin_link": "管理",
@@ -384,7 +389,8 @@
       "few_to_many": "遅延 小 → 大",
       "color_explainer": "色: 平均遅延の段階",
       "bubble_explainer": "バブル: 停留所のまとまり（数字 = 停留所の数）",
-      "size_explainer": "ドットの大きさ: 遅延が大きいほど大きく"
+      "size_explainer": "ドットの大きさ: 遅延が大きいほど大きく",
+      "low_confidence_explainer": "薄い点: 観測数が少ないため参考値"
     },
     "popup": {
       "platform_label": "のりば",
@@ -525,8 +531,10 @@
       "stop_name": "停留所名",
       "hour": "時",
       "next_stop_sequence": "次の停留所順",
-      "avg_added_min": "追加遅延(分)"
+      "avg_added_min": "追加遅延(分)",
+      "low_confidence": "確信度"
     },
+    "low_confidence_mark": "幅あり",
     "more_rows": "…他{{count}}件",
     "chips": {
       "more": "もっと"
@@ -608,6 +616,7 @@
     },
     "sidebar": {
       "new_thread": "新しい会話",
+      "open_threads": "会話一覧",
       "pinned": "ピン留め",
       "today": "今日",
       "yesterday": "昨日",
@@ -774,6 +783,7 @@
       "baseline_today": "平常 {{baseline}} → 今日 {{today}}",
       "no_baseline_note": "平常データ準備中",
       "low_confidence": "要確認（観測少）",
+      "low_confidence_baseline": "平常値要確認（母数少）",
       "samples": "{{count}}観測",
       "late5_pct": "5分超 {{value}}%"
     },
@@ -787,6 +797,7 @@
       "stop_label_no_name": "停留所 #{{seq}}",
       "stop_outlier_one": "他{{count}}路線の平均より{{delta}}分多い",
       "stop_outlier_other": "他{{count}}路線の平均より{{delta}}分多い",
+      "stop_outlier_low_confidence": "観測数が少ない",
       "close": "閉じる",
       "empty": "この路線の便データがありません"
     },
@@ -828,8 +839,10 @@
       "weekday": "平日",
       "weekend": "土日祝",
       "diff": "差",
-      "direction": "向き"
+      "direction": "向き",
+      "confidence": "確信度"
     },
+    "confidence_low_mark": "幅あり",
     "direction": {
       "weekend_higher": "土日祝>平日",
       "weekday_higher": "平日>土日祝"
@@ -861,7 +874,9 @@
       "subtitle": "縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み",
       "legend_aria": "凡例を表示",
       "delay_label": "遅延:",
-      "lt_2": "<2分",
+      "band_lt": "< {{min}}分",
+      "band_range": "{{min}} – {{max}}分",
+      "band_gt": "> {{min}}分",
       "legend_explainer": "・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
@@ -876,6 +891,8 @@
       "empty": "期間内にデータがありません。",
       "svg_aria": "日次平均遅延チャート",
       "tooltip_metrics": "平均{{min}}分 / {{count}}件",
+      "smoothed_tooltip": "7日移動平均{{min}}分",
+      "smoothed_label": "- - - 7日移動平均",
       "worst_label": "悪化:",
       "offender": "路線{{code}}({{min}}分)"
     }
@@ -949,7 +966,8 @@
       "label": "管理ナビゲーション",
       "agencies": "事業者管理",
       "users": "ユーザー管理",
-      "ops": "運用状況"
+      "ops": "運用状況",
+      "architecture": "アーキテクチャ"
     },
     "ops": {
       "title": "運用状況",
@@ -1001,6 +1019,13 @@
       "form_submit_edit": "更新",
       "form_submitting": "保存中...",
       "form_error_feed_url": "フィードURLが無効です"
+    },
+    "architecture": {
+      "title": "アーキテクチャ",
+      "diagram_title": "データフロー",
+      "docs_title": "機能ドキュメント",
+      "docs_nav_label": "機能ドキュメント一覧",
+      "docs_empty": "機能ドキュメントが見つかりません。"
     }
   }
 }

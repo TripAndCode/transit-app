@@ -4,10 +4,39 @@ Covers the 5 query_types api/routers/reports.py dispatches:
 ranking / on_time / worst_5min / compare_ranking / dow_ranking.
 
 Label-helper coverage (dow_label / time_label) lives in
-tests/unit/test_labels.py.
+tests/unit/test_labels.py. format_trend_text's NULL-day handling is covered
+below, cross-checked against pipeline.reports.rankings._weighted_avg_min
+(whose own NULL-skipping behavior is pinned separately in
+tests/unit/test_trend_weighted_avg.py).
 """
 
-from pipeline.query.formatter import format_result
+from datetime import date
+
+from pipeline.query.formatter import _r, format_result, format_trend_text
+from pipeline.reports.rankings import _weighted_avg_min
+
+
+def test_r_rounds_half_up_not_half_to_even():
+    """`_r` must match this codebase's ROUND_HALF_UP convention (Postgres's
+    ROUND), not Python's round-half-to-even. 2.15 rounded to 1dp is the
+    canonical divergence point: half-to-even gives '2.1' (2.15 is not exactly
+    representable as a binary float and lands fractionally below the half,
+    but even where it would land exactly on it, banker's rounding would still
+    pick the even digit), half-up gives '2.2'."""
+    assert _r(2.15) == "2.2"
+    assert _r(2.25) == "2.3"
+    assert _r(None) == "—"
+
+
+def test_fmt_ranking_rounds_avg_min_half_up():
+    """An avg_min of 2.15 (e.g. 129 delay-seconds over 1 sample) must render
+    as '2.2' in Reports text, matching the Ask tab's ROUND_HALF_UP convention
+    for the exact same underlying number — not '2.1' (Python round-half-to-
+    even) and not the unrounded '2.15'."""
+    rows = [("49022", "平日", 2.15, 2.15, 2.15, 1)]
+    result = format_result("ranking", rows, {"limit": 15})
+    assert "平均2.2分" in result
+    assert "平均2.1分" not in result
 
 
 def test_fmt_ranking_basic():
@@ -118,3 +147,58 @@ def test_fmt_dow_ranking_en_translates_iso_dow_and_rollup():
     result = format_result("dow_ranking", rollup_rows, {"dow_group": "weekday"}, locale="en")
     assert "Weekday delay ranking" in result
     assert "Weekday" in result  # the per-row label too
+
+
+def test_format_trend_text_empty_days_list():
+    result = format_trend_text([], date(2026, 4, 1), date(2026, 4, 3))
+    assert "データがありません" in result
+
+
+def test_format_trend_text_all_null_days_reports_no_data():
+    """Every bucket NULL (e.g. none re-analyzed since migration 0028 yet) —
+    there is no measured sample anywhere, so this must render the same
+    "no data" text as an empty list, not "0.00 min"."""
+    days = [
+        {"date": "2026-04-01", "avg_min": None, "samples": 0},
+        {"date": "2026-04-02", "avg_min": None, "samples": 0},
+    ]
+    result = format_trend_text(days, date(2026, 4, 1), date(2026, 4, 2))
+    assert "データがありません" in result
+
+
+def test_format_trend_text_skips_null_day_not_zero():
+    """A single all-NULL day amid two real days must not drag the mean down
+    toward 0, and must not count in the rendered observed-day total."""
+    days = [
+        {"date": "2026-04-01", "avg_min": None, "samples": 0},
+        {"date": "2026-04-02", "avg_min": 2.0, "samples": 1000},
+        {"date": "2026-04-03", "avg_min": 10.0, "samples": 5},
+    ]
+    result = format_trend_text(days, date(2026, 4, 1), date(2026, 4, 3))
+    # Old buggy behavior: sum(0 + 2.00 + 10.00) / 3 = 4.00.
+    assert "4.00" not in result
+    # Correct sample-weighted mean over the two real days only.
+    expected_avg = _weighted_avg_min(days)
+    assert expected_avg is not None
+    assert f"{expected_avg:.2f}" in result
+    # Observed-day count excludes the NULL day (2, not 3).
+    assert "観測日数: 2日" in result
+
+
+def test_format_trend_text_matches_weighted_avg_min_helper():
+    """format_trend_text's mean must agree with _weighted_avg_min (the same
+    sample-weighted, NULL-skipping pooling the Ask tab's time_series tool
+    uses on identical compute_trend_series output) to within rounding —
+    the two surfaces must not show different headline numbers for the same
+    underlying data.
+    """
+    days = [
+        {"date": "2026-04-01", "avg_min": None, "samples": 0},
+        {"date": "2026-04-02", "avg_min": 2.0, "samples": 1000},
+        {"date": "2026-04-03", "avg_min": 10.0, "samples": 5},
+    ]
+    result = format_trend_text(days, date(2026, 4, 1), date(2026, 4, 3))
+    weighted = _weighted_avg_min(days)
+    assert weighted is not None
+    # format_trend_text renders avg via "{avg:.2f}" (see _LOCALES["trend_header"]).
+    assert f"{weighted:.2f}" in result

@@ -434,8 +434,8 @@ async def test_list_agencies_includes_latest_data_date(agencies_client):
         await conn.execute(
             "INSERT INTO agg_route_daily "
             "(agency_id, date, route_code, service_type, avg_delay_sec, "
-            "worst_delay_sec, trips_observed, samples, last_seen_at) "
-            "VALUES ($1, $2, 'R1', '平日', 120, 180, 5, 50, now())",
+            "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES ($1, $2, 'R1', '平日', 120, 180, 5, 50, now(), 6000)",
             aid,
             date(2026, 6, 15),
         )
@@ -477,8 +477,8 @@ async def test_get_agency_includes_latest_data_date(agencies_client):
         await conn.execute(
             "INSERT INTO agg_route_daily "
             "(agency_id, date, route_code, service_type, avg_delay_sec, "
-            "worst_delay_sec, trips_observed, samples, last_seen_at) "
-            "VALUES ($1, $2, 'R1', '平日', 60, 90, 3, 20, now())",
+            "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES ($1, $2, 'R1', '平日', 60, 90, 3, 20, now(), 1200)",
             aid,
             date(2026, 5, 1),
         )

@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
@@ -43,9 +42,11 @@ export function QuestionDock({
   onRunComplete,
   showToolbar,
 }: QuestionDockProps) {
-  const { t, i18n } = useTranslation();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
+  const { t } = useTranslation();
+  // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
+  // labels are translated later via t()), so it's cheap and safe to call
+  // directly on every render — no useMemo (see CLAUDE.md).
+  const templates = buildCardTemplates();
 
   const composing = templates.find((tpl) => tpl.id === composingId) ?? null;
 

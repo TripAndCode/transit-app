@@ -1,8 +1,9 @@
 -- Per-day, per-hour-of-day delay across all routes — powers the Overview
 -- peak-hour-by-DOW panels without scanning raw `updates`. That query needs
 -- hour-of-day delay restricted to weekday or weekend over a date range; no
--- existing aggregate carries hour AND date, so `_peak_hour_by_dow` (measured
--- ~96% of Overview cold-load time) fell back to the live dedup scan.
+-- existing aggregate carries hour AND date, so `_peak_hour_by_dow` fell back
+-- to the live dedup scan, by far the most expensive part of an Overview
+-- cold load.
 -- (The reports/trend hourly heatmap is the same grain and a natural future
 -- consumer, but is NOT wired to this table yet.)
 --

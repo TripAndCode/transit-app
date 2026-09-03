@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 
@@ -40,16 +40,13 @@ export function RangeBadge() {
   const ref = useRef<HTMLDivElement>(null);
   const active = !isDefault(ctx);
 
-  const presets = useMemo<Preset[]>(
-    () => [
-      { key: "last_7d", label: t("filters.range.last_7d"), from: () => isoDaysAgo(6), to: todayISO },
-      { key: "last_30d", label: t("filters.range.last_30d"), from: () => isoDaysAgo(29), to: todayISO },
-      { key: "last_90d", label: t("filters.range.last_90d"), from: () => isoDaysAgo(89), to: todayISO },
-      { key: "this_month", label: t("filters.range.this_month"), from: () => firstOfMonth(0), to: () => lastOfMonth(0) },
-      { key: "last_month", label: t("filters.range.last_month"), from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
-    ],
-    [t],
-  );
+  const presets: Preset[] = [
+    { key: "last_7d", label: t("filters.range.last_7d"), from: () => isoDaysAgo(6), to: todayISO },
+    { key: "last_30d", label: t("filters.range.last_30d"), from: () => isoDaysAgo(29), to: todayISO },
+    { key: "last_90d", label: t("filters.range.last_90d"), from: () => isoDaysAgo(89), to: todayISO },
+    { key: "this_month", label: t("filters.range.this_month"), from: () => firstOfMonth(0), to: () => lastOfMonth(0) },
+    { key: "last_month", label: t("filters.range.last_month"), from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
+  ];
 
   function presetLabel(ctx: RangeCtx): string {
     for (const p of presets) {

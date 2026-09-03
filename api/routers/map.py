@@ -30,7 +30,7 @@ from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
-from api.triage import classify_route
+from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 
 _log = logging.getLogger(__name__)
 
@@ -65,18 +65,17 @@ async def _route_exists(conn, agency_id: int, route_code: str) -> bool:
     """True if ``route_code`` has ever been analyzed for this agency.
 
     Checks ``agg_route_daily``, not ``agg_route_stats``: agg_route_stats is
-    built with ``HAVING COUNT(*) > 20`` and ``WHERE service_type IS NOT
-    NULL`` (pipeline/analyze.py), so it's a LOSSY existence oracle — a real,
-    legitimately-observed route with <=20 lifetime deduped samples or an
-    all-NULL service_type is invisible to it even though
+    built with ``WHERE service_type IS NOT NULL`` (pipeline/analyze.py), so
+    it's a LOSSY existence oracle — a real, legitimately-observed route with
+    an all-NULL service_type is invisible to it even though
     today_route_summary's route list (built from agg_route_daily, no such
     filter) would show it with bucket="no_baseline". Checking agg_route_daily
     instead matches the grain of the table that actually populates the route
     list users click through from. No secondary index on route_code
     (agg_route_daily's PK leads with (agency_id, date)), but the table holds
-    per-agency route×day×service rows, not raw `updates` — measured ~1ms on
-    real data even for agency 8's ~14k rows, for both a fabricated and a real
-    route_code. Accepted trade-off: a brand-new route that's been ingested
+    per-agency route×day×service rows, not raw `updates`, so this stays cheap
+    regardless of agency size, for both a fabricated and a real route_code.
+    Accepted trade-off: a brand-new route that's been ingested
     but not yet analyzed (no agg_route_daily row yet) reads as "not found"
     (or renders with no shape, for route_shape) for one cron cycle.
     """
@@ -134,8 +133,8 @@ async def live_delays(
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring),
     # matching the mechanism used at the other 3 sort-based-dedup sites in
     # this file (route_shape, route_trips, route_stop_profile). Unlike those,
-    # this query is always bounded to one JST day off the sort index (measured
-    # ~1s on real data, nowhere near the 30s max_execution_time cap) — the old
+    # this query is always bounded to one JST day off the sort index, well
+    # inside the 30s max_execution_time cap — the old
     # `ORDER BY ... LIMIT 1 BY` form was never a timeout risk here. The reason
     # to rewrite it anyway is consistency (one dedup idiom across the file,
     # not two) and determinism, per the tiebreak note below. Multiple non-key
@@ -161,10 +160,9 @@ async def live_delays(
     # live board. `scheduled_time` is the field this tie *most commonly*
     # touches (it's per-stop, so it differs across a trip's stop_sequence rows
     # whenever the poll spans multiple stops) — but `dep_delay` is ALSO
-    # per-stop and can differ across those tied rows too: measured on real
-    # data, a handful of tied trips (4/1245 on one agency, 7/266 on another)
-    # had a different dep_delay between stop_sequences, by as much as a few
-    # hundred seconds. route_code/service_type are trip-level and unaffected.
+    # per-stop and can differ across those tied rows too, by a real margin
+    # when it happens, not just noise. route_code/service_type are
+    # trip-level and unaffected.
     rows_result = await ch.query(
         """
         SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
@@ -241,13 +239,12 @@ async def route_shape(
     # Cheap existence precheck FIRST, before touching ClickHouse at all -- ahead
     # of the ctx-bounded dedup query below, not just inside the empty-window
     # fallback branch further down. A fabricated route_code must cost ~0
-    # ClickHouse work: measured on real data, with the precheck misplaced
-    # inside the fallback branch, a fabricated route_code under a wide ctx
-    # window still cost 336,368,237 rows / 923 MiB / 2.35s, because the
-    # ctx-bounded dedup query ran to completion first regardless (it's
-    # bounded, but still real, unnecessary work for a route that doesn't
-    # exist at all). See `_route_exists` for why this checks agg_route_daily
-    # rather than agg_route_stats.
+    # ClickHouse work: with the precheck misplaced inside the fallback branch,
+    # a fabricated route_code under a wide ctx window still pays the full
+    # ctx-bounded dedup query's cost, because that query runs to completion
+    # first regardless (it's bounded, but still real, unnecessary work for a
+    # route that doesn't exist at all). See `_route_exists` for why this
+    # checks agg_route_daily rather than agg_route_stats.
     if not await _route_exists(conn, agency_id, str(route)):
         return {"route": route, "geometry": None, "stops": [], "unobserved_stops": []}
 
@@ -283,10 +280,10 @@ async def route_shape(
     #
     # Bounded by the same `ctx`-derived filter (date range / DOW / time_band
     # / service) honored by every other analytical endpoint — an earlier
-    # version scanned the route's ENTIRE history here with no date bound
-    # (measured 32.1s on agency 8's real data for one route, returning only
-    # ~100 rows), even though the shape should reflect what's actually being
-    # shown for the user's selected range, not all-time history.
+    # version scanned the route's ENTIRE history here with no date bound,
+    # paying for a full-table scan to return only a small number of rows,
+    # even though the shape should reflect what's actually being shown for the
+    # user's selected range, not all-time history.
     ch_where_frag, ch_params = build_updates_filter_ch(ctx)
     # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
     # only one non-key column (dep_delay) is read off the winning row, so a
@@ -335,8 +332,8 @@ async def route_shape(
     # (bounded to the last 30 days off the agency's own latest data — see
     # below), solely to pick a shape for rendering purposes — this only
     # fires on the empty-window edge case (not the common case), so even
-    # its now-bounded form doesn't reintroduce the 32s-per-request problem
-    # the ctx bound above exists to fix. The per-stop delay stats
+    # its now-bounded form doesn't reintroduce the unbounded-full-history-scan
+    # problem the ctx bound above exists to fix. The per-stop delay stats
     # (`avg_min`/`samples`) stay empty regardless, since there really are
     # zero observations in the user's selected window.
     if not trip_counts:
@@ -609,8 +606,12 @@ async def today_route_summary(
     ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
     classifier (:func:`api.triage.classify_route`) then assigns each route a
     ``bucket`` (anomaly / watch / normal / no_baseline), a ``deviation_sec``
-    (today vs baseline), and a ``low_confidence`` flag for thin samples. The
-    client groups by bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    (today vs baseline), and a ``low_confidence`` flag for thin TODAY samples.
+    ``baseline_samples`` is the separate, un-gated sample count backing the
+    baseline itself (``agg_route_stats`` no longer drops thin route/service
+    groups at insert time) — the client decides its own low-confidence
+    treatment for a thin baseline from this field. The client groups by
+    bucket, so the SQL ``ORDER BY`` is only a sensible default.
 
     Reads the precomputed ``agg_route_daily`` (built by ``analyze``) for the
     latest date instead of scanning raw ``updates`` — a small indexed read
@@ -632,10 +633,39 @@ async def today_route_summary(
         WITH rb AS (
             -- Route-grain baseline (across service_types), so a NULL-service daily
             -- row (stored as '') still finds a baseline even though agg_route_stats
-            -- has no '' row. Mirrors the digest's route-grain baseline.
+            -- has no '' row. Mirrors the digest's route-grain baseline
+            -- (pipeline/digest/build.py's _ROUTE_BASELINE_SQL) for both columns.
+            -- base_avg_min is FILTERed the same way as base_p90_min below:
+            -- sum_delay_sec is nullable (unlike samples, unlike AVG()-backed
+            -- avg_min), so a pre-backfill NULL row's samples must not count in
+            -- the denominator without also contributing to the numerator, or
+            -- base_avg_min would be biased toward zero whenever any
+            -- contributing service_type hasn't been backfilled yet.
+            -- base_p90_min's numerator/denominator are both FILTERed to the same
+            -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
+            -- produce a null p90_min alongside a non-null avg_min/samples for a
+            -- live group (dep_delay is filtered non-null upstream, and analyze()
+            -- wipes and rebuilds each agency's rows from scratch every run), but
+            -- this FILTER stays as defense-in-depth against a stale pre-rebuild
+            -- row or a non-analyze() writer (e.g. a test fixture) inserting one
+            -- directly -- SUM() silently
+            -- skips a null numerator term but NOT its row's sample count in the
+            -- denominator, which would otherwise bias base_p90_min down whenever
+            -- any contributing service_type's row is null this way.
+            -- base_p90_min itself is a samples-weighted average of each
+            -- service_type's already-computed p90_min, not a percentile
+            -- recomputed over the pooled raw delay observations across
+            -- service_types -- agg_route_stats stores only a per-group p90
+            -- and sample count, never the raw distribution, so an exact
+            -- pooled percentile isn't computable from it. Same defensible-
+            -- approximation shape as the heatmap's p90_delay_min elsewhere
+            -- in this file.
             SELECT route_code,
-                   SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS base_avg_min,
-                   SUM(p90_min * samples) / NULLIF(SUM(samples), 0) AS base_p90_min
+                   SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
+                   SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
+                       / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
+                   SUM(samples) AS base_samples
             FROM agg_route_stats
             WHERE agency_id = $1 AND samples IS NOT NULL
             GROUP BY route_code
@@ -643,8 +673,30 @@ async def today_route_summary(
         SELECT
             d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
             d.trips_observed, d.samples, d.last_seen_at,
-            COALESCE(b.avg_min, rb.base_avg_min) AS baseline_avg_min,
-            COALESCE(b.p90_min, rb.base_p90_min) AS baseline_p90_min,
+            -- All three baseline columns are picked from the SAME source
+            -- (b or rb) via one shared condition, never coalesced
+            -- independently per column -- b.avg_min IS NOT NULL is the
+            -- correct "does b have a matching row" test (AVG() over a real
+            -- joined row is never null). `analyze()`'s own SQL can no longer
+            -- produce a null b.p90_min alongside a non-null b.avg_min for a
+            -- live (route, service_type) group (dep_delay is filtered
+            -- non-null upstream, and analyze() wipes and rebuilds every row
+            -- each run), but a stale pre-rebuild row or a non-analyze()
+            -- writer could still leave one, so this guard stays; independently
+            -- coalescing each column would then silently mix b's exact-match
+            -- avg with rb's pooled-across-service_types p90 -- two different
+            -- statistical populations reported as one baseline. Picking all
+            -- three from the same side means baseline_p90_min can be null
+            -- even when baseline_avg_min isn't (classify_route already
+            -- treats any null baseline input as "no_baseline"), which is
+            -- correct: a missing same-source p90 must not be papered over
+            -- with a different population's figure.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
+            CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
+            -- baseline_samples backs whichever source above was actually used,
+            -- so the client can flag a thin baseline -- not folded into
+            -- classify_route/low_confidence, which judges TODAY's sample count.
+            CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
             b.late5_pct
         FROM agg_route_daily d
         LEFT JOIN agg_route_stats b
@@ -712,10 +764,16 @@ async def today_route_summary(
                 "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
                 "baseline_avg_sec": baseline_avg_sec,
                 "baseline_p90_sec": baseline_p90_sec,
+                "baseline_samples": r["baseline_samples"],
                 "deviation_sec": deviation_sec,
                 "bucket": bucket,
                 "low_confidence": low_confidence,
-                "has_baseline": baseline_avg_sec is not None,
+                # bucket=="no_baseline" whenever classify_route treats any of
+                # avg/p90 as missing -- has_baseline must track that exactly
+                # (not just baseline_avg_sec) so a thin group with a real avg
+                # but a null p90 doesn't render as both "no baseline yet" and
+                # a concrete today-vs-baseline comparison at once.
+                "has_baseline": bucket != "no_baseline",
                 "late5_pct": r["late5_pct"],
             }
         )
@@ -746,10 +804,10 @@ async def route_trips(
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (measured: a date bound alone still
-    # read ~170M rows here, since no agency yet has more than ~130 days of
-    # history for the bound to actually exclude). See `_latest_route_observation`
-    # for the full existence-check and bound rationale.
+    # just a bounded-but-still-huge scan (a date bound alone isn't enough
+    # while every agency's full history still fits inside the bound's
+    # window). See `_latest_route_observation` for the full existence-check
+    # and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "trips": []}
@@ -821,16 +879,33 @@ async def route_trips(
 
 
 def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dict:
-    """Merge cohort stats for one stop into the stop dict."""
+    """Merge cohort stats for one stop into the stop dict.
+
+    ``cohort_low_confidence`` flags a thin total observation count behind
+    ``cohort_avg_delay_sec`` — independent of ``is_outlier``'s own
+    ``cohort_route_count >= 2`` gate, which only checks how many DISTINCT
+    routes contributed, not how many total observations they contributed
+    between them (two routes with 5 observations each still clears that
+    gate but is still a thin average).
+    """
     if stop_id is None or stop_id not in cohort:
-        return {"cohort_avg_delay_sec": None, "cohort_route_count": 0, "is_outlier": False}
+        return {
+            "cohort_avg_delay_sec": None,
+            "cohort_route_count": 0,
+            "cohort_samples": 0,
+            "cohort_low_confidence": False,
+            "is_outlier": False,
+        }
     c = cohort[stop_id]
     cohort_avg = c["cohort_avg_delay_sec"]
     route_count = c["cohort_route_count"]
+    cohort_samples = c["cohort_samples"] or 0
     is_outlier = cohort_avg is not None and route_count >= 2 and route_avg_sec > cohort_avg * 1.5
     return {
         "cohort_avg_delay_sec": cohort_avg,
         "cohort_route_count": route_count,
+        "cohort_samples": cohort_samples,
+        "cohort_low_confidence": cohort_avg is not None and cohort_samples < COHORT_LOW_CONFIDENCE_SAMPLES,
         "is_outlier": is_outlier,
     }
 
@@ -920,8 +995,9 @@ async def route_stop_profile(
             SELECT
                 stop_id,
                 COUNT(DISTINCT route_code) AS cohort_route_count,
+                SUM(samples)::int AS cohort_samples,
                 ROUND(
-                    AVG(delay_sum::float / NULLIF(samples, 0))::numeric, 0
+                    (SUM(delay_sum)::float / NULLIF(SUM(samples), 0))::numeric, 0
                 )::int AS cohort_avg_delay_sec
             FROM agg_route_stop_daily
             WHERE agency_id = $1
@@ -957,7 +1033,14 @@ def _heatmap_features(rows) -> dict:
     Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
     stop_codes, route_codes, avg_delay_min, p90_delay_min, samples.  Those columns
     are mapped to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
-    platform_code, avg_delay_min, p90_delay_min, samples, route_codes).
+    platform_code, avg_delay_min, p90_delay_min, samples, route_codes,
+    low_confidence).
+
+    ``low_confidence`` reuses the same sample-count floor as the route-level
+    baselines (``LOW_CONFIDENCE_SAMPLES``) rather than the cohort-specific one:
+    a heatmap cell pools the FULL requested date range (not a fixed 30-day
+    window at one stop), so its typical sample density is closer to a route
+    baseline's than to a cohort comparison's.
     """
     features = [
         {
@@ -972,6 +1055,7 @@ def _heatmap_features(rows) -> dict:
                 "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
+                "low_confidence": r["samples"] < LOW_CONFIDENCE_SAMPLES,
             },
         }
         for r in rows
@@ -1026,8 +1110,9 @@ async def delay_heatmap(
     # each land alone). `cluster_id` is DBSCAN's within-partition cluster label.
     # Computed once over `static_stops` (a few thousand rows/agency) rather
     # than inline against the agg join — running the window function per
-    # *stop* instead of per (stop, date, time_band) agg row it joins to
-    # measured ~4x faster on real data (429ms vs 1.86s for one agency-month).
+    # *stop* instead of per (stop, date, time_band) agg row it joins to is
+    # cheaper by construction, since the stop set is far smaller than the
+    # agg join it would otherwise run against.
     # `name_key` is computed in an inner SELECT so PARTITION BY can reference
     # its alias once, rather than repeating the CASE expression.
     stop_clusters_cte = """
@@ -1061,6 +1146,15 @@ async def delay_heatmap(
                 AS stop_codes,
             string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
             ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
+            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
+            -- own per-row averages (delay_sum/samples for each pre-cluster
+            -- stop/date/time_band row), not over the underlying raw
+            -- per-observation delays -- the agg schema stores only a summed
+            -- delay and a sample count per row, never the raw distribution,
+            -- so an exact percentile of individual observations isn't
+            -- computable from it. This is a percentile of row-level
+            -- averages: a defensible approximation given the schema, but a
+            -- different statistic from a true p90 of raw delays.
             ROUND(
                 PERCENTILE_CONT(0.9) WITHIN GROUP (
                     ORDER BY delay_sum::float / NULLIF(samples, 0)

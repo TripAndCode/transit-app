@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building2, Users, Activity, type LucideIcon } from "lucide-react";
+import { Building2, Users, Activity, Workflow, type LucideIcon } from "lucide-react";
 
 const NAV_ITEMS: readonly { to: string; labelKey: string; Icon: LucideIcon }[] = [
   { to: "/admin/agencies", labelKey: "admin.nav.agencies", Icon: Building2 },
   { to: "/admin/users", labelKey: "admin.nav.users", Icon: Users },
   { to: "/admin/ops", labelKey: "admin.nav.ops", Icon: Activity },
+  { to: "/admin/architecture", labelKey: "admin.nav.architecture", Icon: Workflow },
 ];
 
 export function AdminLayout() {

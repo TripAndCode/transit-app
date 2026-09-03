@@ -35,9 +35,29 @@ def _sec_to_min(sec: float | None) -> Decimal | None:
 
 
 def _round1(x: float) -> Decimal:
-    """Round an already-in-percent float to 1 dp, half-up — matches Postgres
-    ``ROUND(x::numeric, 1)``. Same rationale as :func:`_round2`."""
+    """Round a float to 1 dp, half-up — matches Postgres ``ROUND(x::numeric, 1)``.
+    Same rationale as :func:`_round2`."""
     return Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
+def _weighted_avg_min(days: list[dict]) -> float | None:
+    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
+
+    Each `days` entry is already a per-bucket sample-weighted mean with a
+    `samples` weight, so a plain mean-of-means would overweight thin days (one
+    sparse outlier day could dominate the headline). Null-`avg_min` days are
+    skipped (not counted as 0). Returns None when there are no measured samples.
+    """
+    num = 0.0
+    den = 0
+    for d in days:
+        v = d.get("avg_min")
+        if v is None:
+            continue
+        s = d.get("samples") or 0
+        num += v * s
+        den += s
+    return num / den if den else None
 
 
 async def _read_dist_scalars(agency_id: int, ctx: RangeCtx, conn) -> list:
@@ -133,8 +153,9 @@ async def compute_ranking(
     # avg_min is element 2; None never occurs (samples > 20), so plain sort.
     # Two-pass stable sort: pre-sort by route_code (element 0) so ties on
     # avg_min break deterministically in ascending route_code order
-    # regardless of `reverse` — same non-determinism this replaces as
-    # `_movers`/`_concentration` in overview.py (see NOTES.md).
+    # regardless of `reverse` — `rows` comes from a GROUP BY with no ordering
+    # guarantee, and an arbitrary tie order would make the ranking unstable
+    # run to run.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
@@ -143,16 +164,19 @@ async def compute_ranking(
 async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str, limit: int) -> list[tuple]:
     """Live raw-scan ranking — fallback for time_band-filtered queries.
 
-    p50/p90 reproduce the Postgres version's `PERCENT_RANK() OVER (...)`
-    window + boundary-row pick (min-rank ties: the smallest value whose
-    fraction-strictly-below is >= q) via `rank()`/`count()` window
-    functions instead — NOT ClickHouse's `quantileExact`, which is a pure
-    positional pick (`sorted[floor(q*n)]`) that silently disagrees with
-    PERCENT_RANK whenever `dep_delay` has ties (common: exact-zero delays
-    and clamped/rounded values dominate this column). E.g. sorted
-    `[0]*95 + [600]*5`: PERCENT_RANK's p90 is 600s, quantileExact's is 0s.
-    Every group here has > 20 rows (the HAVING gate), so `avg` is never
-    NULL/NaN — no empty-input guard needed.
+    p50/p90 are computed via `rank()`/`count()` window functions reproducing
+    the OLD min-rank-tie `PERCENT_RANK()` formula the Postgres aggregate path
+    (`agg_route_stats`/`agg_route_hour`) used before it migrated to
+    `PERCENTILE_DISC` — NOT ClickHouse's `quantileExact`, which is a pure
+    positional pick (`sorted[floor(q*n)]`). This is a known, accepted
+    divergence: this ClickHouse fallback can now disagree with the Postgres
+    aggregate path on tied/clustered `dep_delay` data (common: exact-zero
+    delays and clamped/rounded values dominate this column), since the two
+    paths use different tie-handling rules. E.g. sorted `[0]*95 + [600]*5`:
+    this function's p90 is 600s, `PERCENTILE_DISC`'s (the current aggregate
+    path) is 0s, and `quantileExact`'s would also be 0s. Every group here has
+    > 20 rows (the HAVING gate), so `avg` is never NULL/NaN — no empty-input
+    guard needed.
     """
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
@@ -178,11 +202,13 @@ async def _ranking_live(agency_id: int, ctx: RangeCtx, conn, ch, sort_order: str
     )
     # ClickHouse's round() is round-half-to-even; round in Python (half-up)
     # to match Postgres ROUND() and the agg fast path's _avg_min/_sec_to_min.
-    # p50/p90 can legitimately be None: PERCENT_RANK's min-rank tie handling
+    # p50/p90 can legitimately be None: this function's min-rank tie handling
     # gives every row in an all-tied (or heavily-tied) partition the SAME
     # rank, so `minIf(dep_delay, pct >= q)` matches zero rows once every
-    # row's pct sits below q — exactly what the pre-migration Postgres
-    # PERCENT_RANK query did too (MIN() of an empty CASE-filtered set).
+    # row's pct sits below q. The Postgres aggregate path no longer has this
+    # failure mode (`PERCENTILE_DISC` always resolves to a real value for a
+    # non-empty group) — this NULL case is specific to this ClickHouse
+    # fallback's still-old tie formula, per this function's own docstring.
     return [
         (
             route_code,
@@ -215,6 +241,14 @@ async def compute_on_time(
     Reads agg_route_daily_dist (exact). The on-time threshold is baked into
     ``on_time_count`` (<=60s) at analyze time, so a non-default ``threshold_sec``
     or a time_band filter falls back to the live scan (ClickHouse).
+
+    Returned percentages carry no confidence signal of their own -- a caller
+    displaying one of these percentages to a user should also call
+    :func:`pipeline.stats.annotate_on_time_pct_confidence` (see
+    api/routers/reports.py's ``on_time`` report and pipeline/query/tools.py's
+    ``on_time_rate`` tool for the existing pattern) rather than showing a
+    thin-sample percentage with the same visual weight as a well-supported
+    one.
     """
     if ctx.time_band != "all" or threshold_sec != 60:
         if ch is None:
@@ -240,8 +274,8 @@ async def compute_on_time(
             )
         )
     # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # on_time_pct in ascending order regardless of `reverse` — see
-    # compute_ranking above / NOTES.md.
+    # on_time_pct in ascending order regardless of `reverse` — same
+    # unordered-GROUP-BY source as compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
@@ -313,7 +347,8 @@ async def compute_worst_5min(
             )
         )
     # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # late5_count in ascending order — see compute_ranking above / NOTES.md.
+    # late5_count in ascending order — same unordered-GROUP-BY source as
+    # compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=True)
     return out[:limit]
@@ -378,7 +413,12 @@ async def compute_dow_ranking(
     sql = (
         # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
         f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
-        "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see pipeline/reports/overview.py's
+        # _route_weekly_history for the identical rationale. `samples` below
+        # stays the TRUE total (unfiltered) count.
+        "       ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
+        "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2) AS avg_min,\n"
         "       SUM(samples)::int AS samples\n"
         "FROM agg_daily_trend\n"
         f"WHERE agency_id = $1 AND {where}\n"
@@ -447,15 +487,24 @@ async def compute_compare_ranking(
     where, params, n = _agg_filter(agg_ctx, next_param=2)
     wd = "EXTRACT(ISODOW FROM date::date) BETWEEN 1 AND 5"
     we = "EXTRACT(ISODOW FROM date::date) IN (6, 7)"
+    # sum_delay_sec is nullable (unlike samples); each side's numerator AND
+    # denominator (including the wd_n/we_n minimum-sample gate below) are
+    # additionally FILTERed to sum_delay_sec IS NOT NULL so a row with
+    # samples set but sum_delay_sec still NULL can't inflate wd_n/we_n past
+    # the >10 gate while contributing nothing to wd_avg/we_avg — same
+    # matched-population rationale as pipeline/reports/overview.py's
+    # _route_weekly_history.
+    wd_pop = f"{wd} AND sum_delay_sec IS NOT NULL"
+    we_pop = f"{we} AND sum_delay_sec IS NOT NULL"
     sql = (
         "WITH per_route AS (\n"
         "    SELECT route_code,\n"
-        f"           SUM(avg_min * samples) FILTER (WHERE {wd})\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd}), 0) AS wd_avg,\n"
-        f"           SUM(samples) FILTER (WHERE {wd}) AS wd_n,\n"
-        f"           SUM(avg_min * samples) FILTER (WHERE {we})\n"
-        f"             / NULLIF(SUM(samples) FILTER (WHERE {we}), 0) AS we_avg,\n"
-        f"           SUM(samples) FILTER (WHERE {we}) AS we_n\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {wd_pop})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {wd_pop}), 0) / 60.0 AS wd_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {wd_pop}) AS wd_n,\n"
+        f"           SUM(sum_delay_sec) FILTER (WHERE {we_pop})::numeric\n"
+        f"             / NULLIF(SUM(samples) FILTER (WHERE {we_pop}), 0) / 60.0 AS we_avg,\n"
+        f"           SUM(samples) FILTER (WHERE {we_pop}) AS we_n\n"
         "    FROM agg_daily_trend\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "    GROUP BY route_code\n"
@@ -572,10 +621,24 @@ async def compute_hourly_heatmap(
 ) -> list[dict]:
     """Hour-of-day × date cells for the granular trend view.
 
-    Returns ``[ { date, hour, avg_min, samples } ]`` filtered by the same
-    ctx the rest of the trend uses. Hour is extracted from
+    Returns ``[ { date, hour, avg_min, samples, sum_delay_sec } ]`` filtered
+    by the same ctx the rest of the trend uses. Hour is extracted from
     ``scheduled_time`` (a TIME column post migration 0011); cells with too
     few samples (<3) are dropped to keep the rendering signal-strong.
+
+    ``sum_delay_sec`` is each cell's exact raw-seconds delay total — on the
+    fast path, nullable until the next ``make analyze-all`` rewrites the row
+    (migration 0030 added the column without a backfill, same rationale as
+    migration 0028). A caller that only reads one cell at a time (e.g.
+    rendering the raw per-hour heatmap) has no use for it and can ignore it;
+    a caller that pools MULTIPLE cells together (e.g.
+    ``pipeline.reports.forecast.hourly_cells_to_dow_band``, which pools
+    across dates into a dow×band grid) needs it to compute the true pooled
+    mean instead of re-weighting this function's own already-rounded
+    ``avg_min`` (each cell's ``avg_min`` here is itself a single rounding —
+    fine standalone, but re-weighting several already-rounded cells is a
+    second, compounding rounding — see migration 0030's own rationale for
+    the general defect class).
     """
     # agg_hour_daily is already (date, hour, avg_min, samples) across all routes —
     # a direct read. It has no service/route/hour-band dimension, so any of those
@@ -584,7 +647,7 @@ async def compute_hourly_heatmap(
     if ctx.time_band == "all" and ctx.service == "all" and not ctx.routes:
         where, params, _ = _dist_filter(ctx, next_param=2)
         sql = (
-            "SELECT date, hour, avg_min, samples\n"
+            "SELECT date, hour, avg_min, samples, sum_delay_sec\n"
             "FROM agg_hour_daily\n"
             f"WHERE agency_id = $1 AND {where} AND samples >= 3\n"
             "ORDER BY date, hour"
@@ -609,6 +672,7 @@ async def compute_hourly_heatmap(
             f"WITH {cte_sql}\n"
             f"SELECT date, {hour_expr} AS hour,\n"
             "       avg(dep_delay) / 60.0 AS avg_min,\n"
+            "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "WHERE scheduled_time IS NOT NULL\n"
@@ -620,13 +684,16 @@ async def compute_hourly_heatmap(
         rows = _ch_rows(result)
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     # Idempotent on the fast path, whose agg_hour_daily.avg_min is already
-    # stored rounded to 2 dp.
+    # stored rounded to 2 dp. sum_delay_sec is passed through unrounded (it's
+    # already an exact integer on both paths) — see this function's own
+    # docstring for why a pooling caller needs it.
     return [
         {
             "date": r["date"].isoformat(),
             "hour": int(r["hour"]),
             "avg_min": float(_round2(r["avg_min"])) if r["avg_min"] is not None else None,
             "samples": r["samples"],
+            "sum_delay_sec": int(r["sum_delay_sec"]) if r["sum_delay_sec"] is not None else None,
         }
         for r in rows
     ]
@@ -646,25 +713,50 @@ async def compute_trend_series(
 
     ``granularity`` controls the time bucket: ``'day'`` (default), ``'week'``,
     or ``'month'``. Returns
-    ``{ days: [{ date, avg_min, samples, top_offenders: [...] }] }``
-    where ``date`` is the bucket start date (ISO string).
+    ``{ days: [{ date, avg_min, samples, avg_min_smoothed, top_offenders: [...] }] }``
+    where ``date`` is the bucket start date (ISO string). ``avg_min_smoothed``
+    is a trailing sample-weighted mean over the last (up to) ``_SMOOTH_WINDOW``
+    OBSERVED buckets ending at that one (position-based, not calendar-day-
+    anchored — a bucket with no service that day simply isn't in the window,
+    same "observed days only" convention as
+    ``pipeline.reports.forecast.summarize_agency_overview``'s ``recent_daily``)
+    — a low-traffic route/day's raw figure is visually noisy day to day, and
+    this sits ALONGSIDE it (not a replacement) so the UI can show both.
+    Only computed for ``granularity == 'day'``; a week/month bucket is
+    already smoothed by its own wider width, so ``avg_min_smoothed`` is
+    ``None`` there.
     """
+    _SMOOTH_WINDOW = 7
     # Map granularity to a date_trunc unit; fall back to 'day' for unknown values.
     _TRUNC = {"day": "day", "week": "week", "month": "month"}
     trunc_unit = _TRUNC.get(granularity, "day")
 
     if ctx.time_band == "all":
         # Sum agg_daily_trend (already per date/route/service) into time buckets.
+        # A week/month bucket pools MULTIPLE agg_daily_trend rows, so this reads
+        # each row's exact sum_delay_sec (not its rounded avg_min) and divides
+        # once at the end — see analyze.py's module docstring for why pooling
+        # already-rounded per-bucket means would otherwise drift from the true
+        # pooled mean. sum_delay_sec is nullable (unlike samples), so a week/
+        # month bucket spanning a date whose row analyze() hasn't rewritten
+        # since migration 0028 could otherwise mix a populated date with a
+        # NULL one; FILTER both sides to the same row population — see
+        # pipeline/reports/overview.py's _route_weekly_history for the
+        # identical rationale (this SQL-level pooling is a separate, coarser
+        # grain from this function's own Python-side by_date_samples/
+        # by_date_weighted_sec pooling further below, which already applies
+        # the same guard one level up, across route/service groups within a
+        # bucket rather than across dates within one route/service group).
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
             f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
             "       route_code, NULLIF(service_type, '') AS service_type,\n"
-            "       ROUND((SUM(avg_min * samples) / NULLIF(SUM(samples), 0))::numeric, 2) AS avg_min,\n"
-            "       SUM(samples)::int AS samples\n"
+            "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::bigint AS sum_delay_sec,\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id = $1 AND {where}\n"
             "GROUP BY bucket, route_code, service_type\n"
-            "HAVING SUM(samples) > 5"
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5"
         )
         per_day = await conn.fetch(sql, agency_id, *params)
     else:
@@ -680,7 +772,7 @@ async def compute_trend_series(
             f"WITH {cte_sql}\n"
             f"SELECT {bucket_expr} AS bucket,\n"
             "       route_code, service_type,\n"
-            "       avg(dep_delay) / 60.0 AS avg_min,\n"
+            "       sum(dep_delay) AS sum_delay_sec,\n"
             "       count(*) AS samples\n"
             "FROM deduped\n"
             "GROUP BY bucket, route_code, service_type\n"
@@ -690,19 +782,26 @@ async def compute_trend_series(
         per_day = _ch_rows(result)
 
     by_date_samples: dict = {}
-    by_date_weighted: dict = {}
+    by_date_weighted_sec: dict = {}
     by_date: dict = {}
     for r in per_day:
         # SQL now aliases the time-bucketed column as "bucket".
         d = r["bucket"]
-        # Round in Python (half-up) to match Postgres ROUND() — see
-        # _ranking_live. Idempotent on the fast path (agg_daily_trend's
-        # avg_min is already rounded to 2 dp by the SQL above).
-        avg = float(_round2(r["avg_min"])) if r["avg_min"] is not None else None
         n = r["samples"]
-        by_date_samples[d] = by_date_samples.get(d, 0) + n
-        if avg is not None:
-            by_date_weighted[d] = by_date_weighted.get(d, 0.0) + avg * n
+        sum_sec = r["sum_delay_sec"]
+        # Per-(bucket, route, service) display average, rounded once straight
+        # from the exact raw-seconds sum (half-up, matching Postgres ROUND()).
+        avg = float(_round2(sum_sec / n / 60.0)) if n and sum_sec is not None else None
+        # sum_delay_sec is nullable (unlike samples); only add a group's n to
+        # by_date_samples alongside its sum_sec to by_date_weighted_sec — both
+        # dicts must describe the same row population, or the bucket-level
+        # avg_min computed from them below would be silently biased down by
+        # a group whose samples counted here but whose delay total didn't
+        # (matches pipeline/reports/overview.py's identical FILTER rationale
+        # applied at the SQL layer for other queries).
+        if sum_sec is not None:
+            by_date_samples[d] = by_date_samples.get(d, 0) + n
+            by_date_weighted_sec[d] = by_date_weighted_sec.get(d, 0) + sum_sec
         by_date.setdefault(d, []).append(
             {
                 "route_code": r["route_code"],
@@ -714,25 +813,48 @@ async def compute_trend_series(
 
     daily = []
     for d in sorted(by_date.keys()):
-        n = by_date_samples[d]
-        avg = round(by_date_weighted.get(d, 0.0) / n, 2) if n else None
+        # by_date always gets an entry per bucket (line above, unconditional);
+        # by_date_samples only gets one when at least one group's sum_delay_sec
+        # was populated (see the loop above) — a bucket where every group is
+        # still NULL has no by_date_samples entry at all, not just a zero one.
+        n = by_date_samples.get(d, 0)
+        # Whole-bucket total pooled from every route/service group's exact
+        # raw-seconds sum, dividing once at the end — NOT from re-weighting
+        # each group's already-rounded display avg_min above.
+        avg = round((by_date_weighted_sec.get(d, 0) / n) / 60, 2) if n else None
         daily.append({"date": d, "avg_min": avg, "samples": n})
 
     days = []
-    for r in daily:
+    for i, r in enumerate(daily):
         # None (no data) sorts last; among real values, worst delay first.
         # Two-pass stable sort: pre-sort by route_code so ties on avg_min
         # break deterministically in ascending route_code order — `per_day`
-        # comes from a GROUP BY with no ordering guarantee, same fix class
-        # as PR #196 (see NOTES.md).
+        # comes from a GROUP BY with no ordering guarantee, so leaving ties
+        # unresolved would make the top-offenders cut unstable run to run.
         offenders = sorted(
             sorted(by_date.get(r["date"], []), key=lambda x: x["route_code"]),
             key=lambda x: (x["avg_min"] is None, -(x["avg_min"] or 0)),
         )[:top_offenders]
+        # Trailing window over the last _SMOOTH_WINDOW OBSERVED buckets
+        # (position-based via `daily`'s sorted index), pooled from the same
+        # exact raw-seconds sums as the per-bucket avg_min above — dividing
+        # once at the end, not re-weighting already-rounded per-bucket means.
+        avg_min_smoothed = None
+        # trunc_unit (not the raw `granularity` arg) is the actual bucket
+        # width used above on BOTH the fast (`_TRUNC.get`) and live
+        # (`_CH_BUCKET_EXPR.get`) paths, including their identical
+        # unrecognized-value fallback to a per-day bucket.
+        if trunc_unit == "day":
+            window_dates = [daily[j]["date"] for j in range(max(0, i - _SMOOTH_WINDOW + 1), i + 1)]
+            window_samples = sum(by_date_samples.get(d, 0) for d in window_dates)
+            if window_samples:
+                window_sec = sum(by_date_weighted_sec.get(d, 0) for d in window_dates)
+                avg_min_smoothed = round((window_sec / window_samples) / 60, 2)
         days.append(
             {
                 "date": r["date"].isoformat(),
                 "avg_min": r["avg_min"],
+                "avg_min_smoothed": avg_min_smoothed,
                 "samples": r["samples"],
                 "top_offenders": offenders,
             }

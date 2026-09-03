@@ -6,7 +6,7 @@ function r(route_code: string, bucket: RouteSummary["bucket"], deviation_sec: nu
   return {
     route_code, service_type: "weekday", avg_delay_sec: 0, worst_delay_sec: 0,
     trips_observed: 1, samples: 50, last_seen_at: null,
-    baseline_avg_sec: null, baseline_p90_sec: null, deviation_sec, bucket,
+    baseline_avg_sec: null, baseline_p90_sec: null, baseline_samples: null, deviation_sec, bucket,
     low_confidence: false, has_baseline: bucket !== "no_baseline",
   };
 }

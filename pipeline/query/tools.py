@@ -55,6 +55,8 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
+from pipeline.reports.rankings import _weighted_avg_min
+from pipeline.stats import annotate_on_time_pct_confidence
 
 TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
 
@@ -152,6 +154,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_shift_second_half", "en"): "Second-half avg",
     ("trend_shift_delta", "ja"): "変化幅",
     ("trend_shift_delta", "en"): "Delta",
+    ("trend_shift_days", "ja"): "日数",
+    ("trend_shift_days", "en"): "Days",
+    ("trend_shift_days_value", "ja"): "{n}日",
+    ("trend_shift_days_value", "en"): "{n}",
     ("meta_label_name", "ja"): "路線名",
     ("meta_label_name", "en"): "Route name",
     ("meta_label_stops", "ja"): "停留所数",
@@ -183,9 +189,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("more_rows", "en"): "…{n} more",
     ("route_prefix", "ja"): "路線{route}",
     ("route_prefix", "en"): "route {route}",
-    # pipeline.query.meta_tools's describe_data/capabilities strings —
-    # migrated onto this shared table so the merged tool-calling surface
-    # has one localization mechanism instead of two (see NOTES.md).
+    # pipeline.query.meta_tools's describe_data/capabilities strings live here
+    # too, so the merged tool-calling surface (tools.py + meta_tools.py share
+    # one TOOLS/_HANDLERS namespace) has a single localization mechanism
+    # instead of two.
     ("mt_unknown_kind", "ja"): "未知の kind: {kind}。有効値: {valid}",
     ("mt_unknown_kind", "en"): "unknown kind: {kind}. valid: {valid}",
     ("mt_routes_filter_no_match", "ja"): "「{substring}」に該当する路線がありません。",
@@ -583,6 +590,17 @@ No prose, no markdown fences. `confidence` should reflect how sure you are about
 choice; use lower values when the user's wording is ambiguous.
 """
 
+# Appended alongside JSON_MODE_ADDENDUM only for a recognized follow-up that
+# is continuing the user's own prior tool call (see chat.py's use_cache
+# branch — response_format=json_object can't be combined with tool_choice,
+# so this is the JSON-mode equivalent of forcing tool_choice="required").
+JSON_MODE_FORCE_TOOL_ADDENDUM = """\
+This question is a recognized continuation of your own previous tool call
+(e.g. "next 50" continuing a listing). "tool" MUST name that same tool
+(with "args" adjusted, e.g. an incremented offset) — it must NOT be null
+or omitted.
+"""
+
 
 # Human-readable name of each locale, for the "Reply in ..." system addendum
 # (see :mod:`pipeline.query.chat`). Kept here so the LLM-related strings live
@@ -674,8 +692,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency_id/date/route_code/service_type) rather than going straight to a
     # live ClickHouse scan of `updates`: route_code there is the 3rd sort-key
     # column behind an unconstrained captured_at, so proving a route was
-    # never observed forces a full-column scan — measured at 336M rows read /
-    # 400-1500ms on real data. Most Ask-tab queries name a route that HAS
+    # never observed forces a full-column scan of the whole table. Most
+    # Ask-tab queries name a route that HAS
     # been analyzed at least once, so this fast path resolves the common case
     # without ever touching ClickHouse.
     fast_row = await conn.fetchrow(
@@ -700,10 +718,9 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # Bounded the same way api/routers/map.py's route-scoped fallback probes
     # are: route_code sits behind an unconstrained captured_at in the sort
     # key, so an unbounded scan for a route that genuinely doesn't exist
-    # reads the whole agency partition (336M rows / 400-1500ms measured on
-    # real data) — and this path is reached on arbitrary, LLM/user-supplied
-    # route strings from the anonymous /ask endpoint, the cheapest input for
-    # a client to produce repeatedly.
+    # reads the whole agency partition — and this path is reached on
+    # arbitrary, LLM/user-supplied route strings from the anonymous /ask
+    # endpoint, the cheapest input for a client to produce repeatedly.
     #
     # The bound must NOT be derived from a fixed window or from the user's
     # ctx: this fallback exists ONLY to catch observations analyze() hasn't
@@ -721,8 +738,8 @@ async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None)
     # agency avoids that: it doesn't depend on which route or which window
     # was asked about, so it can't reintroduce the conflation, and it's
     # tighter than a fixed constant (typically "yesterday", not 30 days
-    # back). Residual gap, same shape as agg_stop_routes' documented ~3.7%
-    # trade-off (pipeline/analyze.py): a route whose EVERY observation ever
+    # back). Residual gap, same shape as agg_stop_routes' own NULL/implausible-
+    # delay trade-off (pipeline/analyze.py): a route whose EVERY observation ever
     # recorded was NULL/implausible delay (permanently invisible to
     # agg_route_daily's dedup filter, regardless of recency) still reads as
     # unregistered if its last observation predates the horizon. Accepted —
@@ -846,7 +863,10 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         # BUG-3 fix: pass sort_order so best_first=False yields worst routes (ASC).
         sort_order = "desc" if best_first else "asc"
         rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n, sort_order=sort_order)
-        cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples"]
+        # Display-only annotation (pipeline/stats.py) — does not change
+        # compute_on_time's own contract.
+        rows = annotate_on_time_pct_confidence(rows)
+        cols = ["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     elif metric == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
@@ -913,26 +933,6 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
     return ToolResult(kind="empty", summary=_summary("unknown_dimension", lang=locale, dimension=dimension))
 
 
-def _weighted_avg_min(days: list[dict]) -> float | None:
-    """Sample-weighted mean delay across trend buckets — the exact pooled mean.
-
-    Each `days` entry is already a per-bucket sample-weighted mean with a
-    `samples` weight, so a plain mean-of-means would overweight thin days (one
-    sparse outlier day could dominate the headline). Null-`avg_min` days are
-    skipped (not counted as 0). Returns None when there are no measured samples.
-    """
-    num = 0.0
-    den = 0
-    for d in days:
-        v = d.get("avg_min")
-        if v is None:
-            continue
-        s = d.get("samples") or 0
-        num += v * s
-        den += s
-    return num / den if den else None
-
-
 async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     # When the LLM scopes to a single route, push it into ctx so the
     # compute function narrows the trend to that route only. Without this
@@ -970,6 +970,9 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     rows = await compute_on_time(agency_id, ctx, conn, ch=ch, threshold_sec=threshold_sec, limit=n)
     if not rows:
         return ToolResult(kind="empty", summary=_summary("on_time_no_data", lang=locale))
+    # Display-only annotation (pipeline/stats.py) — does not change
+    # compute_on_time's own contract.
+    rows = annotate_on_time_pct_confidence(rows)
     return ToolResult(
         kind="table",
         summary=_summary(
@@ -979,7 +982,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
             count=len(rows),
         ),
         rows=[list(r) for r in rows],
-        columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples"],
+        columns=["route_code", "service_type", "on_time_pct", "avg_min", "samples", "low_confidence"],
     )
 
 
@@ -1071,6 +1074,10 @@ async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             (_summary("trend_shift_first_half", lang=locale), f"{result['first_half_avg_min']:.2f}"),
             (_summary("trend_shift_second_half", lang=locale), f"{result['second_half_avg_min']:.2f}"),
             (_summary("trend_shift_delta", lang=locale), f"{result['delta_min']:+.2f}"),
+            (
+                _summary("trend_shift_days", lang=locale),
+                _summary("trend_shift_days_value", lang=locale, n=result["days"]),
+            ),
         ],
     )
 

@@ -10,7 +10,6 @@ import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
 import { RouteError } from "./components/RouteError";
 import { ChunkLoading } from "./components/RoutePlaceholders";
-import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles/global.css";
 
 // Tabs and pages are code-split per route — MapTab alone pulls in
@@ -41,6 +40,9 @@ const AdminAgenciesPage = lazy(() =>
 );
 const AdminOpsPage = lazy(() =>
   import("./pages/admin/AdminOpsPage").then((m) => ({ default: m.AdminOpsPage }))
+);
+const AdminArchitecturePage = lazy(() =>
+  import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
 );
 
 /** Wrap a lazy route element in the shared Suspense fallback. */
@@ -102,6 +104,7 @@ const router = createBrowserRouter([
           { path: "users", element: el(<AdminUsersPage />) },
           { path: "users/:uid", element: el(<AdminUserDetailPage />) },
           { path: "ops", element: el(<AdminOpsPage />) },
+          { path: "architecture", element: el(<AdminArchitecturePage />) },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },

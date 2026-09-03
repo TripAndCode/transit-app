@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -42,10 +42,12 @@ bootstrap:
 	@echo "    make serve        # then open http://localhost:8000"
 
 # Copy the Vite build into api/static so FastAPI serves SPA + API on one origin.
-# Same layout the Dockerfile uses in prod.
+# Same layout the Dockerfile uses in prod. Manifest-stripping is shared with
+# the Dockerfile via scripts/strip_vite_manifest.sh — see that file for why.
 bake:
 	@rm -rf api/static
 	@cp -R frontend/dist api/static
+	@sh scripts/strip_vite_manifest.sh api/static
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
@@ -91,6 +93,14 @@ lint:
 
 check: fmt lint test
 
+# Post-merge local maintenance. Planning is the default; apply rechecks every
+# candidate immediately before removing local refs/worktrees.
+git-cleanup:
+	python3 scripts/cleanup_git_state.py
+
+git-cleanup-apply:
+	python3 scripts/cleanup_git_state.py --apply
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 test:
@@ -105,7 +115,7 @@ serve:
 
 db:
 	docker compose up -d --build
-	docker compose exec db sh -c 'until pg_isready -U transit -d transit; do sleep 1; done'
+	docker compose exec db sh -c 'until pg_isready -h localhost -U transit -d transit; do sleep 1; done'
 	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
 	@$(MAKE) ch-bootstrap
@@ -141,6 +151,13 @@ migrate-down:
 
 # ── Data fetch (pull from Oracle Cloud collection server) ────────────────────
 # Requires: ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY or ORACLE_SSH_KEY_PATH
+#
+# `fetch` + `sync-r2` were the primary path for mirroring the collector VM's
+# archives to Cloudflare R2 until 2026-08-29, when oracle_cloud/v3/bin/sync-r2.sh
+# started running daily in cron directly on the VM (see MIGRATION.md's 9b).
+# These two targets are now a manual/disaster-recovery fallback (e.g. rebuild
+# a local copy for inspection) — not required for the VM's own R2 mirror to
+# stay current.
 
 fetch:
 	bash scripts/fetch_archives.sh
@@ -149,7 +166,8 @@ fetch-ingest:
 	bash scripts/fetch_and_ingest.sh
 
 # Mirror local raw_archives/raw_archives_static to Cloudflare R2 (see .env's
-# OBJECT_STORE_* vars). Run after `make fetch`.
+# OBJECT_STORE_* vars). Run after `make fetch`. Manual/backup path only — see
+# the note above.
 sync-r2:
 	bash scripts/sync_archives_to_r2.sh
 

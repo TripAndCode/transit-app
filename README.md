@@ -197,8 +197,9 @@ Both paths land in the same `updates` (ClickHouse) / `static_*` / `agg_*`
 
 Data is stored in a named Docker volume (`transit-app_transit_pgdata`) — it survives container restarts.
 
-`make db` also brings up ClickHouse (raw `updates`, ~575M rows across 4
-agencies) and applies `db/clickhouse/schema.sql` via `make ch-bootstrap` —
+`make db` also brings up ClickHouse (raw `updates`, hundreds of millions of
+rows across 4 agencies) and applies `db/clickhouse/schema.sql` via
+`make ch-bootstrap` —
 see [`db/clickhouse/`](db/clickhouse/). `make ch-test` starts the separate
 throwaway ClickHouse instance tests run against (`:8124`); set
 `RUN_CH_INTEGRATION=1` to include ClickHouse-gated tests in a `pytest` run.
@@ -448,7 +449,7 @@ Single-page React app at `frontend/` (React 19.2 + React Compiler, Vite 7, TypeS
 Platform notes (since the React 19 modernization, PRs #43/#46/#45):
 
 - **Code splitting** — every tab/page route is `React.lazy`; MapLibre (~800 KB) loads only when the Map tab is visited. Entry chunk ≈ 440 KB. A router-level `RouteError` boundary degrades render crashes to an inline message instead of a white screen.
-- **React Compiler** is on (`babel-plugin-react-compiler` in `vite.config.ts`). Don't add `useMemo`/`useCallback`/`React.memo` for performance — the compiler memoizes automatically. Existing manual memoization is harmless and pruned opportunistically.
+- **React Compiler** is on (`babel-plugin-react-compiler` in `vite.config.ts`). Manual `useMemo`/`useCallback`/`React.memo` are banned as a hard ESLint error — the compiler memoizes automatically; use `useEffectEvent` for fresh-props-in-stable-handlers instead.
 - **Compiler lint** — `eslint-plugin-react-hooks` v7 `recommended-latest`. Two rules are staged at `warn` for pre-existing code (`set-state-in-effect`, `purity`); new code must keep them clean. Handlers that need fresh props inside once-registered listeners use `useEffectEvent` (see `MapTab`), not render-time ref mirroring.
 - **Request cancellation** — all GET hooks thread TanStack Query's `AbortSignal` into `apiGet`; filter changes abort in-flight requests.
 - **i18n lints** — `npm run lint:i18n` checks ja/en key parity; `npm run lint:i18n-strings` fails on hardcoded kana in `src/` (comment-only lines and `.test.` files are skipped; suppress legitimate cases with `i18n-ignore`).
@@ -524,7 +525,7 @@ flowchart TD
 
     subgraph RAILWAY["Railway project · private network"]
         job["Daily ingest job · cron 1×/day<br/>ingest → analyze_all → prune"]
-        ch["ClickHouse · MergeTree<br/>raw: updates (~575M rows, 4 agencies)<br/>sort key: agency_id, captured_at, route_code, ..."]
+        ch["ClickHouse · MergeTree<br/>raw: updates (hundreds of millions of rows, 4 agencies)<br/>sort key: agency_id, captured_at, route_code, ..."]
         subgraph DB["Postgres · PostGIS + pgvector"]
             static["static_* tables"]
             agg["precomputed: agg_* tables"]
@@ -555,8 +556,9 @@ Five things this encodes:
   — those fall back to a live ClickHouse scan, since `agg_*` doesn't carry an
   hour-of-day column.
 - **Raw `updates` lives in ClickHouse, not Postgres.** A columnar MergeTree
-  table gives better compression and scan throughput at ~575M-row scale than
-  Postgres did; Postgres keeps `static_*`/`agg_*`/OLTP/PostGIS/pgvector, none
+  table gives better compression and scan throughput at this table's scale
+  (hundreds of millions of rows and growing) than Postgres did; Postgres
+  keeps `static_*`/`agg_*`/OLTP/PostGIS/pgvector, none
   of which benefit from a columnar store. `analyze` reads ClickHouse and
   writes `agg_*` back into Postgres — every downstream aggregate-builder query
   is otherwise unchanged.
@@ -639,12 +641,28 @@ make fmt       # ruff format
 make lint      # ruff check
 make test      # pytest (requires DATABASE_URL + running container)
 make check     # fmt + lint + test
+make git-cleanup        # post-merge dry run for local branches/worktrees
+make git-cleanup-apply  # apply that plan with deletion-time safety rechecks
 ```
+
+After merging a PR, sync `main`, run the cleanup dry run, then apply it in each
+persistent clone. Claude Code users can run `/cleanup-merged`; pass its `--vps`
+arguments to repeat the same policy remotely. Remote branches and unique local work
+are never deleted by this workflow.
 
 Run a specific test file. **Point `DATABASE_URL` at the throwaway test DB on
 `:5544`, never the dev DB on `:5433`** — the test suite auto-migrates its
-target, and the dev DB holds tens of millions of rows of real data (see `CLAUDE.md` ▸
-Databases for the one-line container build):
+target, and the dev DB holds real data. Start the throwaway database with the custom
+PostGIS + pgvector image (and run `make ch-test` when ClickHouse is required). The
+image builds for the host's own architecture, so arm64 machines run it natively:
+
+```bash
+docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
+  -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \
+  -p 5544:5432 "$(docker build -q db/)"
+```
+
+Then run the test:
 
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
@@ -659,8 +677,11 @@ DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
 Railway runs the two Docker images — the **app** (`Dockerfile`, with the SPA
 baked in, serving API + UI on one origin) and the **database** (custom
 `db/Dockerfile`: PostGIS + pgvector + pg_trgm, on a persistent volume) — with
-free TLS, a managed domain, and auto-deploy on `git push`. ~$10–18/mo,
-usage-based. No box to harden, no reverse proxy to run. The DB stays on the
+free TLS, a managed domain, and auto-deploy on push to a dedicated
+`production` branch (never `main` directly — see
+[`docs/deploy-railway.md`](docs/deploy-railway.md) for why and how commits
+get promoted there). ~$10–18/mo, usage-based. No box to harden, no reverse
+proxy to run. The DB stays on the
 private network; a **daily Railway scheduled job** ingests the day's Oracle
 archives from object storage — no public DB, no always-on worker. `ingest_live`
 (via the `CRON_SECRET`-gated `POST /internal/cron/ingest` endpoint) remains a

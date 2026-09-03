@@ -36,6 +36,7 @@ from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
+from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
 from pipeline.query.router import _load_golden, is_follow_up, route_or_examples
@@ -165,6 +166,21 @@ async def ask(
     # last few turns attached. History is capped at 3 turns.
     history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
+    # A forced tool call only makes sense when there is an actual prior tool
+    # invocation to continue (e.g. re-paginating the same describe_data
+    # call). is_follow_up()'s regex also matches ordinary continuation
+    # phrasing ("さらに", "それを", "他には") that can legitimately follow a
+    # free-text answer (e.g. an out-of-scope refusal, history[-1]["tool"] is
+    # None) — forcing a tool call there would remove the model's only
+    # correct move (decline again) and risk a hallucinated call instead.
+    # Scoped further to tools that actually support a continuation axis
+    # (i.e. take an ``offset``, per ``_TOOL_DEFAULTS`` — currently only
+    # ``describe_data``): a prior turn's tool without one (e.g.
+    # ``on_time_rate``) has no valid re-invocation for a bare "もっと", so
+    # forcing tool_choice="required" there would risk a nonsensical re-call
+    # instead of a legitimate prose answer.
+    _prior_tool = history[-1].get("tool") if follow_up else None
+    force_tool_call = bool(_prior_tool) and "offset" in _PAGINATABLE_TOOL_DEFAULTS.get(_prior_tool or "", {})
 
     # Follow-up phrasing ("もっと", "次の50件") with NO prior result to
     # continue: short-circuit to a gentle prompt. Otherwise the question
@@ -270,6 +286,7 @@ async def ask(
             rag_examples=examples,
             history=history,
             ch=ch,
+            force_tool_call=force_tool_call,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")

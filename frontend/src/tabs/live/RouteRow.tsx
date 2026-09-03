@@ -1,16 +1,15 @@
 /**
  * One clickable triage row in the 最新観測 list: route name, severity dot,
  * deviation-from-baseline label, baseline→today comparison, and sample count.
- * Low-confidence routes render muted with a 要確認 marker.
+ * Low-confidence routes (thin today sample) render muted with a 要確認
+ * marker; a route whose baseline itself rests on few observations gets a
+ * separate 平常値要確認 marker instead (its `low_confidence` flag may still
+ * be false if today's own sample count is fine).
  */
 import type { TFunction } from "i18next";
-import type { RouteSummary } from "../../api/types";
+import { LOW_CONFIDENCE_SAMPLES, type RouteSummary } from "../../api/types";
 import { delayColor } from "../../styles/tokens";
-
-/** Whole-minute string for a second value (no sign). */
-function minStr(sec: number): string {
-  return Math.round(sec / 60).toString();
-}
+import { signedMin } from "./signedMin";
 
 export function RouteRow({
   route,
@@ -23,6 +22,11 @@ export function RouteRow({
   onOpen: (route: RouteSummary) => void;
   t: TFunction;
 }) {
+  // The baseline itself can now rest on very few observations (agg_route_stats
+  // no longer drops thin route/service groups at insert time) — independent of
+  // `low_confidence`, which only judges today's sample count.
+  const baselineLowConfidence =
+    route.has_baseline && route.baseline_samples != null && route.baseline_samples < LOW_CONFIDENCE_SAMPLES;
   const dev = route.deviation_sec;
   const devLabel =
     dev == null
@@ -63,13 +67,16 @@ export function RouteRow({
       {route.has_baseline && route.baseline_avg_sec != null && (
         <span style={{ fontSize: 12, color: "var(--text-tertiary)", minWidth: 150 }}>
           {t("live.row.baseline_today", {
-            baseline: `+${minStr(route.baseline_avg_sec)}`,
-            today: `+${minStr(route.avg_delay_sec)}`,
+            baseline: signedMin(route.baseline_avg_sec, t),
+            today: signedMin(route.avg_delay_sec, t),
           })}
         </span>
       )}
       {route.low_confidence && (
         <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("live.row.low_confidence")}</span>
+      )}
+      {!route.low_confidence && baselineLowConfidence && (
+        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("live.row.low_confidence_baseline")}</span>
       )}
       {route.late5_pct != null && (
         <span style={{ fontSize: 11, color: "var(--text-tertiary)", minWidth: 72, textAlign: "right" }}>

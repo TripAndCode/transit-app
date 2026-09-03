@@ -16,7 +16,7 @@ function route(over: Partial<RouteSummary>): RouteSummary {
   return {
     route_code: "R1", service_type: "weekday", avg_delay_sec: 300, worst_delay_sec: 600,
     trips_observed: 5, samples: 50, last_seen_at: null, baseline_avg_sec: 120,
-    baseline_p90_sec: 360, deviation_sec: 180, bucket: "anomaly",
+    baseline_p90_sec: 360, baseline_samples: 50, deviation_sec: 180, bucket: "anomaly",
     low_confidence: false, has_baseline: true, ...over,
   };
 }
@@ -76,5 +76,46 @@ describe("LiveTab", () => {
       />
     );
     expect(getByText(/live\.row\.late5_pct/)).toBeInTheDocument();
+  });
+
+  it("shows a baseline low-confidence marker when the baseline itself is thin, even if today's own samples are not", () => {
+    const testRoute = route({ low_confidence: false, baseline_samples: 3 });
+    const mockT = ((key: string, opts?: Record<string, unknown>) =>
+      opts ? `${key}:${JSON.stringify(opts)}` : key
+    ) as never;
+    const { getByText, queryByText } = render(
+      <RouteRow route={testRoute} formatRoute={(rc: string) => rc} onOpen={() => {}} t={mockT} />
+    );
+    expect(getByText(/live\.row\.low_confidence_baseline/)).toBeInTheDocument();
+    expect(queryByText(/^live\.row\.low_confidence$/)).not.toBeInTheDocument();
+  });
+
+  it("does not show the baseline low-confidence marker when the baseline has enough samples", () => {
+    const testRoute = route({ low_confidence: false, baseline_samples: 50 });
+    const mockT = ((key: string, opts?: Record<string, unknown>) =>
+      opts ? `${key}:${JSON.stringify(opts)}` : key
+    ) as never;
+    const { queryByText } = render(
+      <RouteRow route={testRoute} formatRoute={(rc: string) => rc} onOpen={() => {}} t={mockT} />
+    );
+    expect(queryByText(/live\.row\.low_confidence_baseline/)).not.toBeInTheDocument();
+  });
+
+  it("renders a single '-' sign (never '+-') for a route that runs early on average", () => {
+    // A route with a negative baseline_avg_sec/avg_delay_sec genuinely runs early
+    // on average; the baseline/today comparison label must not double up the sign.
+    const testRoute = route({ baseline_avg_sec: -90, avg_delay_sec: -120 });
+    const mockT = ((key: string, opts?: Record<string, unknown>) =>
+      opts ? `${key}:${JSON.stringify(opts)}` : key
+    ) as never;
+    const { getByText, queryByText } = render(
+      <RouteRow route={testRoute} formatRoute={(rc: string) => rc} onOpen={() => {}} t={mockT} />
+    );
+    expect(
+      getByText(
+        'live.row.baseline_today:{"baseline":"common.unit_min_signed:{\\"sign\\":\\"-\\",\\"value\\":1}","today":"common.unit_min_signed:{\\"sign\\":\\"-\\",\\"value\\":2}"}',
+      ),
+    ).toBeInTheDocument();
+    expect(queryByText(/\+-/)).not.toBeInTheDocument();
   });
 });

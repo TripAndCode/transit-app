@@ -38,7 +38,19 @@ export default tseslint.config(
     rules: {
       // 'recommended-latest' includes the React Compiler diagnostics shipped
       // with eslint-plugin-react-hooks v7 (flags code the compiler can't
-      // optimize), on top of the classic rules-of-hooks set.
+      // optimize), on top of the classic rules-of-hooks set. Its actual
+      // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
+      // at 'warn', and `npm run lint` is bare `eslint .` with no
+      // `--max-warnings` — so a warn-level bailout doesn't fail the build
+      // today. `react-hooks/todo` ("unimplemented compiler features", Hint
+      // severity, off by default upstream) was previously promoted to
+      // 'error' here as an attempted bailout signal — removed: it isn't
+      // actually a bailout diagnostic, and promoting an unverified
+      // off-by-default rule risks failing lint on unrelated files with no
+      // lint run available in this sandbox to confirm it's clean. Needs a
+      // human to either add `--max-warnings 0` to `frontend/package.json`'s
+      // `lint` script, or promote `unsupported-syntax`/`incompatible-library`
+      // to `error` after a verified clean `npm run lint` run.
       ...reactHooks.configs['recommended-latest'].rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
@@ -54,6 +66,84 @@ export default tseslint.config(
       // `any` is a code smell, not a correctness bug — surface it as a warning
       // during adoption rather than blocking on the existing uses.
       '@typescript-eslint/no-explicit-any': 'warn',
+      // React Compiler (enabled repo-wide, see CLAUDE.md) auto-memoizes —
+      // manual useMemo/useCallback/React.memo are redundant at best and can
+      // mask compiler bailouts at worst. Banned as a hard error; use
+      // useEffectEvent for fresh-props-in-stable-handlers instead (see
+      // MapTab).
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Bare-identifier form only; the member-expression form
+          // (`React.useMemo`/`.useCallback`/`.memo`, any receiver, and
+          // literal computed access like `React["useMemo"]`) is fully
+          // covered by no-restricted-properties below — a separate
+          // MemberExpression selector here would just double-report the
+          // same violation.
+          selector: "CallExpression[callee.name=/^(useMemo|useCallback|memo)$/]",
+          message:
+            'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
+        },
+      ],
+      // Closes the aliased-import hole the syntax selectors above can't see
+      // (e.g. `import { useMemo as m } from "react"`). Only matches *named*
+      // imports (`importNames`) — a namespace import (`import * as React
+      // from "react"`) isn't targeted by name, so this rule instead flags
+      // the whole `react` module the moment ANY of useMemo/useCallback/memo
+      // exist among its exports, regardless of whether the importing file
+      // actually uses them. No file uses `import * as React` today (grepped
+      // clean), so this causes no false positive now, but a future
+      // namespace import (e.g. for `React.forwardRef`) would fail here with
+      // a misleading "do not import useMemo/useCallback/memo" message even
+      // if it never touches them.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react',
+              importNames: ['useMemo', 'useCallback', 'memo'],
+              message:
+                'Do not import useMemo/useCallback/memo — the React Compiler handles memoization automatically. Use useEffectEvent for fresh-props-in-stable-handlers.',
+            },
+          ],
+        },
+      ],
+      // Catches every member-expression form of the ban: the conventional
+      // `React.useMemo(...)`/`.useCallback(...)`/`.memo`, a default-import
+      // alias (`import Reakt from "react"; Reakt.useMemo(...)`), and
+      // *literal* computed property access (`React["useMemo"]`) — all
+      // otherwise slip past no-restricted-imports (a default specifier
+      // resolves to the name `"default"`, which isn't in `importNames`).
+      // Receiver-agnostic by design, since the property name itself is the
+      // signal; verified no existing `.memo`/`.useMemo`/`.useCallback`
+      // property access exists in frontend/src today, so this introduces no
+      // false positive. Does NOT catch a *dynamically computed* property
+      // name (e.g. `x["use" + "Memo"]`) — an inherent ESLint static-analysis
+      // limitation, not closeable without a custom scope-aware rule; this
+      // requires deliberate obfuscation to hit, not an easy accidental
+      // route-around. Matches the property name on ANY receiver, not just
+      // React imports — an unrelated future `.memo`/`.useMemo`/
+      // `.useCallback` property (e.g. an unrelated memoization-cache object
+      // or a GraphQL field literally named `memo`) would also trip this.
+      // No such usage exists today; if one is legitimately needed later,
+      // scope this rule to a receiver check or add a targeted
+      // eslint-disable with a one-line reason at that call site.
+      'no-restricted-properties': [
+        'error',
+        {
+          property: 'useMemo',
+          message: 'Do not use useMemo — the React Compiler handles memoization automatically. Inline the computation.',
+        },
+        {
+          property: 'useCallback',
+          message: 'Do not use useCallback — the React Compiler handles memoization automatically. Use a plain function.',
+        },
+        {
+          property: 'memo',
+          message: 'Do not use React.memo — the React Compiler handles memoization automatically.',
+        },
+      ],
     },
   },
 )

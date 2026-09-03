@@ -9,7 +9,7 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -23,6 +23,7 @@ import {
   useFollowupEnabled,
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
@@ -38,7 +39,7 @@ import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
 
 export function AskTab() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const [rangeCtx] = useRangeContext();
@@ -56,8 +57,10 @@ export function AskTab() {
   // unmount while a follow-up request is in flight (row is hidden during
   // followup.isPending below).
   const [followupDraft, setFollowupDraft] = useState("");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const templates = useMemo(() => buildCardTemplates(), [i18n.language]);
+  // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
+  // labels are translated later via t()), so it's cheap and safe to call
+  // directly on every render — no useMemo (see CLAUDE.md).
+  const templates = buildCardTemplates();
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
@@ -353,7 +356,7 @@ export function AskTab() {
 
       {/* Responsive CSS for the two-column grid */}
       <style>{`
-        @media (max-width: 640px) {
+        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
           .ask-tab-grid {
             grid-template-columns: 1fr !important;
           }

@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
@@ -56,6 +55,10 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+    // 95% Wilson interval too wide to trust the percentage (see
+    // pipeline/stats.py) — a caveat marker, not a plain value, so it's
+    // blank rather than "false" for the common (confident) case.
+    { index: 5, labelKey: "reports.col.confidence", align: "left", format: (v, t) => fmtConfidence(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
@@ -105,6 +108,28 @@ function fmtNum(v: unknown, _t: TFunction): string {
   return n.toLocaleString();
 }
 
+function fmtConfidence(v: unknown, t: TFunction): string {
+  return v === true ? t("reports.confidence_low_mark") : "";
+}
+
+// Module-scope pure function rather than an in-render IIFE — see
+// eslint.config.js's manual-memoization ban comment for why this shape is
+// preferred over an inline immediately-invoked function expression.
+function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Map<number, number> {
+  if (!schema) return new Map<number, number>();
+  const m = new Map<number, number>();
+  for (const col of schema) {
+    if (!col.bar) continue;
+    let mx = 0;
+    for (const row of rows) {
+      const v = Number(row[col.index]);
+      if (isFinite(v) && Math.abs(v) > mx) mx = Math.abs(v);
+    }
+    m.set(col.index, mx || 1);
+  }
+  return m;
+}
+
 type Props = {
   reportType: string;
   rows: unknown[][];
@@ -117,20 +142,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
-  const maxes = useMemo(() => {
-    if (!schema) return new Map<number, number>();
-    const m = new Map<number, number>();
-    for (const col of schema) {
-      if (!col.bar) continue;
-      let mx = 0;
-      for (const row of rows) {
-        const v = Number(row[col.index]);
-        if (isFinite(v) && Math.abs(v) > mx) mx = Math.abs(v);
-      }
-      m.set(col.index, mx || 1);
-    }
-    return m;
-  }, [rows, schema]);
+  const maxes = computeColumnMaxes(schema, rows);
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table

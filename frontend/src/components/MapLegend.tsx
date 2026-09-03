@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_RAMP } from "../styles/tokens";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 
 export type SeverityKey = "ok" | "mild" | "moderate" | "severe";
 
@@ -18,9 +19,11 @@ type MapLegendProps = {
  * Fixed, translucent-blurred legend badge in the map's top-left corner,
  * matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
  * Not draggable — that stays removed as chrome, not real functionality.
- * Collapsible (added back 2026-07-18: the legend takes up more noticeable
- * map space now the map fills the full viewport height) via a chevron
- * toggle in the header; starts expanded on every mount, no persistence.
+ * Collapsible via a chevron toggle in the header; starts expanded on every
+ * mount, no persistence, except below the shared MOBILE_BREAKPOINT_QUERY
+ * (see useMediaQuery.ts) where it starts collapsed, since the expanded
+ * panel would otherwise cover nearly the entire map on a phone-width first
+ * paint, defeating the point of a map-viewing tab.
  * Everything else (click-to-filter, per-band counts, the single-sample-stops
  * checkbox, the size/density key, the no-data key, and the explainer text)
  * stays exactly as before.
@@ -37,7 +40,13 @@ export function MapLegend({
   bandCounts,
 }: MapLegendProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  // Default collapsed on phone-width first paint (isMobile is already correct
+  // synchronously — see useMediaQuery's doc comment), expanded everywhere
+  // else. Only the initial value is derived from the viewport; toggling
+  // still has no persistence and resizing after mount doesn't re-collapse
+  // or re-expand it.
+  const [collapsed, setCollapsed] = useState(isMobile);
 
   return (
     <div
@@ -185,7 +194,8 @@ export function MapLegend({
         <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
           {t("map.legend.color_explainer")}<br />
           {t("map.legend.bubble_explainer")}<br />
-          {t("map.legend.size_explainer")}
+          {t("map.legend.size_explainer")}<br />
+          {t("map.legend.low_confidence_explainer")}
         </div>
       </div>
       )}

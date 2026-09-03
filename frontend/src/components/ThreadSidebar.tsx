@@ -1,10 +1,13 @@
-import { useState, useRef, useEffect, useCallback, type CSSProperties, type RefObject } from "react";
+import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import { MessageSquareText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
+import { Z_INDEX } from "../styles/zIndex";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +60,7 @@ type Props = {
 
 export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const { data: conversations = [], isLoading } = useConversations(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
@@ -89,40 +93,40 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }, [renamingId]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const openMenu = useCallback((e: any, convId: string) => {
+  function openMenu(e: any, convId: string) {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
-  }, []);
+  }
 
-  const handleRename = useCallback((conv: Conversation) => {
+  function handleRename(conv: Conversation) {
     setMenu(null);
     setRenamingId(conv.conversation_id);
     setRenameValue(conv.title);
-  }, []);
+  }
 
-  const commitRename = useCallback((convId: string) => {
+  function commitRename(convId: string) {
     const trimmed = renameValue.trim();
     if (trimmed) {
       updateConv.mutate({ id: convId, patch: { title: trimmed } });
     }
     setRenamingId(null);
     setRenameValue("");
-  }, [renameValue, updateConv]);
+  }
 
-  const handleTogglePin = useCallback((conv: Conversation) => {
+  function handleTogglePin(conv: Conversation) {
     setMenu(null);
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
-  }, [updateConv]);
+  }
 
-  const handleDelete = useCallback((conv: Conversation) => {
+  function handleDelete(conv: Conversation) {
     setMenu(null);
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
     }
-  }, [t, deleteConv, activeId, onSelect]);
+  }
 
   // Group conversations
   const pinned = conversations.filter((c) => c.pinned);
@@ -229,155 +233,172 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     </div>
   );
 
-  return (
-    <>
-      {/* Desktop sidebar */}
-      <aside
-        style={{
-          width: 240,
-          flexShrink: 0,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-          position: "relative",
-        }}
-        className="thread-sidebar-desktop"
-      >
-        {sidebarContent}
-      </aside>
+  // ── context menu (shared by both variants) ───────────────────────────────
+  const contextMenu = menu && activeConv && (
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        top: menu.y,
+        left: menu.x,
+        zIndex: 500,
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        minWidth: 160,
+        padding: "var(--space-1) 0",
+      }}
+    >
+      <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
+      <ContextMenuItem
+        label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
+        onClick={() => handleTogglePin(activeConv)}
+      />
+      <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
+      <ContextMenuItem
+        label={t("ask.sidebar.delete")}
+        onClick={() => handleDelete(activeConv)}
+        danger
+      />
+    </div>
+  );
 
-      {/* Mobile: hamburger + slide-in drawer */}
-      <div className="thread-sidebar-mobile">
-        {/* Hamburger button */}
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label={t("ask.sidebar.new_thread")}
-          style={{
-            position: "fixed",
-            top: 60,
-            left: 12,
-            zIndex: 200,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            width: 36,
-            height: 36,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
-          }}
-        >
-          <span style={{ fontSize: 18, lineHeight: 1 }}>☰</span>
-        </button>
-
-        {/* Backdrop */}
-        {mobileOpen && (
-          <div
-            onClick={() => setMobileOpen(false)}
-            role="presentation"
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.3)",
-              zIndex: 300,
-            }}
-          />
-        )}
-
-        {/* Drawer */}
+  if (!isMobile) {
+    return (
+      <>
+        {/* Desktop sidebar */}
         <aside
           style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            bottom: 0,
-            width: 260,
-            zIndex: 301,
-            transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
-            transition: "transform 200ms ease-out",
+            width: 240,
+            flexShrink: 0,
             background: "var(--bg-surface)",
             borderRight: "1px solid var(--border-soft)",
             display: "flex",
             flexDirection: "column",
+            height: "100%",
+            position: "relative",
           }}
         >
-          {/* Close row */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              padding: "var(--space-2) var(--space-3)",
-              borderBottom: "1px solid var(--border-soft)",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setMobileOpen(false)}
-              style={{
-                background: "none",
-                border: "none",
-                fontSize: 20,
-                cursor: "pointer",
-                color: "var(--text-secondary)",
-                lineHeight: 1,
-                padding: 4,
-              }}
-              aria-label={t("common.close")}
-            >
-              ×
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "hidden" }}>{sidebarContent}</div>
+          {sidebarContent}
         </aside>
+
+        {contextMenu}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* Mobile: a persistent in-flow trigger row, not a floating
+          position:fixed button. Sidebar.tsx's own mobile nav trigger
+          (its isMobile branch) is deliberately a slim, non-fixed rail so
+          it doesn't float on top of the sticky GuestPrompt/data-staleness/
+          feed-health banners; this trigger used to be position:fixed at a
+          hardcoded top/left, which landed it directly on top of that rail
+          on the Ask tab specifically (the one place both components render
+          together) -- two stacked, near-identical hamburger glyphs opening
+          two different drawers. Keeping this trigger in normal flow at the
+          top of the Ask tab's own content area, with a distinct labeled
+          icon (MessageSquareText, vs. Sidebar's unlabeled PanelLeft), makes
+          the two triggers sit side by side instead of overlapping, and
+          makes their different purposes (app navigation vs. conversation
+          history) obvious. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          height: 36,
+          flexShrink: 0,
+          padding: "0 var(--space-2)",
+          background: "var(--bg-surface)",
+          borderBottom: "1px solid var(--border-soft)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label={t("ask.sidebar.open_threads")}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 500,
+            padding: "4px 8px",
+            borderRadius: "var(--radius)",
+          }}
+        >
+          <MessageSquareText size={16} strokeWidth={1.5} aria-hidden="true" />
+          {t("ask.sidebar.open_threads")}
+        </button>
       </div>
 
-      {/* Context menu */}
-      {menu && activeConv && (
+      {/* Backdrop */}
+      {mobileOpen && (
         <div
-          ref={menuRef}
+          onClick={() => setMobileOpen(false)}
+          role="presentation"
           style={{
             position: "fixed",
-            top: menu.y,
-            left: menu.x,
-            zIndex: 500,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            minWidth: 160,
-            padding: "var(--space-1) 0",
+            inset: 0,
+            background: "rgba(0,0,0,0.3)",
+            zIndex: Z_INDEX.drawerBackdrop,
           }}
-        >
-          <ContextMenuItem label={t("ask.sidebar.rename")} onClick={() => handleRename(activeConv)} />
-          <ContextMenuItem
-            label={activeConv.pinned ? t("ask.sidebar.unpin") : t("ask.sidebar.pin")}
-            onClick={() => handleTogglePin(activeConv)}
-          />
-          <div style={{ height: 1, background: "var(--border-subtle)", margin: "var(--space-1) 0" }} />
-          <ContextMenuItem
-            label={t("ask.sidebar.delete")}
-            onClick={() => handleDelete(activeConv)}
-            danger
-          />
-        </div>
+        />
       )}
 
-      {/* Responsive CSS */}
-      <style>{`
-        @media (max-width: 640px) {
-          .thread-sidebar-desktop { display: none !important; }
-          .thread-sidebar-mobile { display: block; }
-        }
-        @media (min-width: 641px) {
-          .thread-sidebar-desktop { display: flex !important; }
-          .thread-sidebar-mobile { display: none; }
-        }
-      `}</style>
+      {/* Drawer */}
+      <aside
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: 260,
+          zIndex: Z_INDEX.drawer,
+          transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 200ms ease-out",
+          background: "var(--bg-surface)",
+          borderRight: "1px solid var(--border-soft)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Close row */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            padding: "var(--space-2) var(--space-3)",
+            borderBottom: "1px solid var(--border-soft)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: 20,
+              cursor: "pointer",
+              color: "var(--text-secondary)",
+              lineHeight: 1,
+              padding: 4,
+            }}
+            aria-label={t("common.close")}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: "hidden" }}>{sidebarContent}</div>
+      </aside>
+
+      {contextMenu}
     </>
   );
 }

@@ -7,7 +7,7 @@ time_band/dow/routes are not applied). Reuses the pure freshness rule.
 ``samples`` is the deduped observation count (from agg_route_daily_dist);
 ``raw_samples``/``clamp_count`` are raw poll counts (from agg_feed_health) —
 different populations. ``clamp_pct`` is the implausible-reading ratio
-(clamp_count / raw_samples; higher = worse), matching the #86 feed-health banner.
+(clamp_count / raw_samples; higher = worse) shown by the feed-health banner.
 """
 
 import logging
@@ -58,8 +58,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # One indexed read per agency (api.clickhouse.max_captured_at_before —
     # same index-served ORDER BY ... LIMIT 1 form as pipeline.clickhouse's
     # sync sibling; see its docstring) instead of `maxOrNull`, which is a
-    # full per-agency scan (measured ~24s total for 4 agencies vs ~4s for the
-    # indexed form on real dev data).
+    # full per-agency scan, materially slower than the indexed form.
     #
     # This probe backs ONLY the `is_stale` field below — every other field in
     # this function's result (avg_delay_min, on_time_pct, samples,
@@ -113,8 +112,9 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # Ties on avg_delay_min ARE already deterministic without an explicit
     # tie-break: `rows` is built 1:1 from `agencies`, which the query above
     # orders by agency_id, and Python's sort() is stable — so equal-delay
-    # rows keep their agency_id-ascending relative order. Verified not the
-    # same bug as NOTES.md's ranking-family tie-break issue (those sort rows
-    # coming from a GROUP BY with no such prior ordering guarantee).
+    # rows keep their agency_id-ascending relative order. This differs from
+    # the reports family's other ranking sorts, which need an explicit
+    # route_code tie-break because their rows come from a GROUP BY with no
+    # such prior ordering guarantee.
     rows.sort(key=lambda r: (r["avg_delay_min"] is None, -(r["avg_delay_min"] or 0.0)))
     return rows

@@ -1,0 +1,165 @@
+name: Ask Eval (weekly)
+
+# Runs the golden-set live-LLM eval (tests/ask_eval/test_baseline.py) on a
+# schedule so router/LLM regressions on the Ask tab actually get caught,
+# instead of relying on RUN_LLM_EVAL=1 being run by hand. Doesn't conflict
+# with the [skip ci] convention — schedule/workflow_dispatch triggers are
+# unaffected by that commit-trailer, same as vps-heartbeat-watchdog.yml.
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Monday 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.3
+        env:
+          CLICKHOUSE_USER: transit
+          CLICKHOUSE_PASSWORD: transit
+          CLICKHOUSE_DB: transit_test
+        ports:
+          - 8124:8123
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: 8124
+      CLICKHOUSE_USER: transit
+      CLICKHOUSE_PASSWORD: transit
+      CLICKHOUSE_DATABASE: transit_test
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      # Hiroden (agency 8) has full static+realtime fixtures under
+      # tests/fixtures/; Aomori (agency 1, test_baseline.py's own default)
+      # only has a raw .pb sample for parser-regression tests, not enough
+      # to seed a full ask-eval run. golden_set.jsonl's questions test
+      # router/intent-classification patterns (aliasing, vagueness,
+      # out-of-scope, negation, ...) rather than agency-specific facts, so
+      # they're expected to still score meaningfully against Hiroden data.
+      EVAL_AGENCY_ID: "8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
+            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
+
+      - name: Start Postgres from db/Dockerfile
+        uses: ./.github/actions/start-test-postgres
+        with:
+          container-name: transit-eval-db
+
+      - name: Apply Postgres schema
+        run: poetry run python gtfs_pipeline.py migrate up
+
+      - name: Apply ClickHouse schema
+        run: |
+          poetry run python -c "from pipeline.clickhouse import get_client; \
+          from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
+
+      - name: Seed agencies
+        run: poetry run python gtfs_pipeline.py seed_agencies agencies.csv
+
+      - name: Load Hiroden static GTFS
+        run: poetry run python gtfs_pipeline.py load_static tests/fixtures/hiroden_static.zip --agency-id 8
+
+      - name: Ingest Hiroden realtime fixture
+        run: |
+          mkdir -p /tmp/hiroden_ingest
+          cp tests/fixtures/hiroden_tu.bin "/tmp/hiroden_ingest/hiroden_sample.pb"
+          poetry run python gtfs_pipeline.py ingest /tmp/hiroden_ingest --agency-id 8
+
+      - name: Build aggregates
+        run: poetry run python gtfs_pipeline.py analyze --agency-id 8
+
+      # Without this, Stage 2 (embedding nearest-neighbor) has nothing to
+      # match against, so the router only ever resolves via Stage 1 rules
+      # or falls straight through to the Stage 3 LLM — the first real run
+      # showed 0 embedding-stage hits and a 0.50 aggregate score because
+      # of exactly this missing step.
+      - name: Build the RAG/embedding index
+        run: poetry run python gtfs_pipeline.py build_rag_index --all-agencies
+
+      - name: Start the API server
+        run: |
+          poetry run uvicorn api.main:app --port 8000 --no-access-log &
+          echo $! > /tmp/uvicorn.pid
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "API server did not become healthy in time" >&2
+          exit 1
+
+      # Scoped to the golden-set aggregate test only. This workflow's job is
+      # automating that one (previously RUN_LLM_EVAL=1 by hand, never run in
+      # CI). test_followup_pagination_two_turns lives in the same file and
+      # is a separate, narrower pagination-continuation check; it failed in
+      # early runs of this workflow (turn-2 tool_call came back empty even
+      # with 2400+ real stops in the Hiroden fixture, so it wasn't a
+      # too-small-dataset artifact) and needs its own investigation — not
+      # something to fix or paper over here. Leaving it out of automated
+      # runs is the status quo, not a regression: it was never run
+      # automatically before this workflow existed either.
+      - name: Run the golden-set eval
+        env:
+          RUN_LLM_EVAL: "1"
+          EVAL_API_BASE: http://localhost:8000
+        run: poetry run pytest tests/ask_eval/test_baseline.py::test_golden_set_aggregate_score -v
+
+      # Verifies the Ask tab's numeric answers, not just its tool choice,
+      # against synthetic ground truth. Must run after the golden-set eval
+      # above, never before or in parallel with it: this
+      # test module's fixtures wipe shared state the golden-set step (and
+      # its still-running API server) depend on — `ch_client`
+      # (tests/conftest.py) DROPs and recreates ClickHouse's `updates`
+      # table, and `pg_conn`'s teardown TRUNCATEs the Hiroden fixture's
+      # Postgres tables (agencies/static_*/agg_*/rag_chunks/users/...) —
+      # so "this step must be last among steps that need seeded
+      # Postgres/ClickHouse data" is the real ordering constraint, not just
+      # "watch out for ClickHouse". `if: ${{ !cancelled() }}` (rather than
+      # no condition) so this gate still runs and reports independently
+      # even when the golden-set step above fails, since the two check
+      # different failure modes (tool selection vs. numeric-answer
+      # correctness) and this job only runs weekly — a silently-skipped
+      # gate here could go unnoticed for a long time. Deliberately
+      # `!cancelled()` rather than `always()`: unlike the cheap cleanup
+      # below, this step makes real, potentially slow, quota-consuming
+      # live-LLM (Groq) calls, so an explicit run cancellation should still
+      # skip it rather than let it start and burn quota/runtime anyway.
+      # Talks to api.main.app directly via an in-process ASGI transport,
+      # not the external uvicorn server above, so RUN_CH_INTEGRATION=1
+      # (not needed by the golden-set step, which never touches the
+      # pytest-level ch_client fixture) is set here specifically for this
+      # step's DB-backed fixtures.
+      - name: Run the numeric-ground-truth eval
+        if: ${{ !cancelled() }}
+        env:
+          RUN_LLM_EVAL: "1"
+          RUN_CH_INTEGRATION: "1"
+        run: poetry run pytest tests/ask_eval/test_synthetic_numeric.py -v
+
+      - name: Stop the API server
+        if: always()
+        run: kill "$(cat /tmp/uvicorn.pid)" 2>/dev/null || true

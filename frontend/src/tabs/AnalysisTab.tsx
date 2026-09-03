@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
@@ -17,6 +16,7 @@ import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 import { RouteForecastSection } from "../components/RouteForecastSection";
+import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -39,26 +39,39 @@ export function AnalysisTab() {
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
 
-  const reportLabels: Record<string, string> = useMemo(
-    () => ({
-      ranking: t("reports.type.ranking"),
-      ranking_best: t("reports.type.ranking_best"),
-      on_time: t("reports.type.on_time"),
-      worst_5min: t("reports.type.worst_5min"),
-      trend: t("reports.type.trend"),
-      compare_ranking: t("reports.type.compare_ranking"),
-      dow_weekday: t("reports.type.dow_weekday"),
-      dow_weekend: t("reports.type.dow_weekend"),
-      route_forecast: t("reports.type.route_forecast"),
-    }),
-    [t],
-  );
+  const reportLabels: Record<string, string> = {
+    ranking: t("reports.type.ranking"),
+    ranking_best: t("reports.type.ranking_best"),
+    on_time: t("reports.type.on_time"),
+    worst_5min: t("reports.type.worst_5min"),
+    trend: t("reports.type.trend"),
+    compare_ranking: t("reports.type.compare_ranking"),
+    dow_weekday: t("reports.type.dow_weekday"),
+    dow_weekend: t("reports.type.dow_weekend"),
+    route_forecast: t("reports.type.route_forecast"),
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TabFilterBar />
-      <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-      <div style={{ width: 280, flexShrink: 0 }}>
+      {/* Below ~640px this row's 280px report list + flex:1 report body +
+          260px InsightPanel force a combined min-width the phone viewport
+          can't satisfy, pushing the whole page into horizontal scroll (the
+          tables inside are already self-contained via ReportTable's own
+          overflow-x:auto, so it's only this outer row that needs help).
+          This tab's dense multi-column reports stay desktop-oriented by
+          design -- the fix here is just to stack the three sections
+          vertically instead of side-by-side, not to redesign them for
+          touch. */}
+      <style>{`
+        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
+          .analysis-body { flex-direction: column; }
+          .analysis-report-list { width: 100% !important; }
+          .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
+        }
+      `}</style>
+      <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
+      <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
           {t("reports.list_title")}
           <InsightHint
@@ -240,7 +253,7 @@ export function AnalysisTab() {
           state is seeded once from sessionStorage per mount; without this,
           switching agencies would keep the previous agency's exclude set
           in React state even though its sessionStorage key is now separate. */}
-      <InsightPanel key={id} />
+      <InsightPanel key={id} className="analysis-insights" />
       </div>
     </div>
   );

@@ -56,6 +56,70 @@ def test_analyze_creates_agg_route_stats(pg_conn, agency_id, ch_client):
     assert rows[0][2] is not None
 
 
+def _seed_thin_route(pg_conn, agency_id, route_code, n):
+    """Insert *n* fake rows for a single (route_code, service_type='平日',
+    stop_sequence=1) group — deliberately fewer than both agg_route_stats'
+    former per-(route, service_type) gate (`HAVING COUNT(*) > 20`) and
+    agg_stop_seq's former per-(route, stop_sequence) gate
+    (`HAVING COUNT(*) > 5`). A unique day per row (like _seed_updates) keeps
+    every row a distinct post-dedup (trip_id, date, stop_sequence) key, so
+    the post-dedup sample count is exactly *n*.
+    """
+    with pg_conn.cursor() as cur:
+        for i in range(n):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"thin{i}.pb",
+                    f"2026-04-{i + 1:02d}T09:00:00",
+                    f"平日_9時_系統{route_code}",
+                    "平日",
+                    time(9, 0),
+                    route_code,
+                    1,
+                    30,
+                ),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_keeps_low_sample_agg_route_stats_row(pg_conn, agency_id, ch_client):
+    """analyze() has no insert-time minimum-sample gate on any agg_* table —
+    a (route, service_type) group with only 3 samples must still appear in
+    agg_route_stats (with samples=3), not be silently dropped the way the
+    former `HAVING COUNT(*) > 20` gate would have dropped it."""
+    _seed_thin_route(pg_conn, agency_id, "99999", 3)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples FROM agg_route_stats WHERE agency_id = %s AND route_code = %s",
+            (agency_id, "99999"),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 3
+
+
+def test_analyze_keeps_low_sample_agg_stop_seq_row(pg_conn, agency_id, ch_client):
+    """analyze() has no insert-time minimum-sample gate on any agg_* table —
+    a (route, stop_sequence) group with only 3 samples must still appear in
+    agg_stop_seq (with samples=3), not be silently dropped the way the former
+    `HAVING COUNT(*) > 5` gate would have dropped it."""
+    _seed_thin_route(pg_conn, agency_id, "99998", 3)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples FROM agg_stop_seq WHERE agency_id = %s AND route_code = %s AND stop_sequence = 1",
+            (agency_id, "99998"),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 3
+
+
 def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
@@ -183,6 +247,139 @@ def test_analyze_creates_agg_daily_trend(pg_conn, agency_id, ch_client):
     assert count > 0
 
 
+def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, agency_id, ch_client):
+    """analyze() must store the exact raw-seconds sum alongside avg_min, so a
+    multi-row pool over agg_daily_trend can divide once at the end instead of
+    re-weighting each row's own already-rounded avg_min.
+
+    Day 1: 3 observations at 41s/41s/42s -> sum=124s, avg=41.333s (rounds to
+    0.69 min). Day 2: 7 observations at 100s each -> sum=700s, avg=100s
+    (rounds to 1.67 min). The true combined mean is 824s / 10 / 60 = 1.3733
+    min, which rounds to 1.37 -- but re-weighting the two ALREADY-ROUNDED
+    per-day avg_min values instead (the pre-fix pattern) gives
+    (0.69*3 + 1.67*7) / 10 = 1.376, which rounds to 1.38: a different, wrong
+    answer that exists purely because of the intermediate rounding.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for day, delays in (("2026-04-01", [41, 41, 42]), ("2026-04-02", [100] * 7)):
+            for dep in delays:
+                cur.execute(
+                    "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                    "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                    "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        agency_id,
+                        f"sdw{i}.pb",
+                        f"{day}T09:00:00",
+                        f"trip_sdw_{i}",
+                        "平日",
+                        time(9, 0),
+                        "SDW1",
+                        1,
+                        dep,
+                    ),
+                )
+                i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, samples, sum_delay_sec FROM agg_daily_trend "
+            "WHERE agency_id = %s AND route_code = 'SDW1' ORDER BY date",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+        assert len(rows) == 2
+        (_d1, n1, s1), (_d2, n2, s2) = rows
+        # sum_delay_sec is the exact SUM(dep_delay) behind each row's avg_min --
+        # not itself rounded, unlike avg_min.
+        assert (n1, s1) == (3, 124)
+        assert (n2, s2) == (7, 700)
+
+        # Fixed pooling: divide the exact raw-seconds sums once, at the end.
+        cur.execute(
+            "SELECT ROUND((SUM(sum_delay_sec)::numeric / SUM(samples) / 60.0), 2) "
+            "FROM agg_daily_trend WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        fixed_avg = float(cur.fetchone()[0])
+
+        # The bug this migration fixes: re-weighting each row's own
+        # already-rounded avg_min instead of the raw sum.
+        cur.execute(
+            "SELECT ROUND((SUM(avg_min * samples) / SUM(samples))::numeric, 2) "
+            "FROM agg_daily_trend WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        buggy_avg = float(cur.fetchone()[0])
+
+        # From-scratch cross-check directly over the raw per-observation data
+        # (mirrors the slow/live path, which averages raw seconds with no
+        # intermediate rounding) -- the fixed figure must match this exactly.
+        cur.execute(
+            "SELECT ROUND((AVG(dep_delay) / 60.0)::numeric, 2) FROM updates "
+            "WHERE agency_id = %s AND route_code = 'SDW1'",
+            (agency_id,),
+        )
+        raw_avg = float(cur.fetchone()[0])
+
+    assert fixed_avg == 1.37
+    assert buggy_avg == 1.38
+    assert fixed_avg != buggy_avg
+    assert fixed_avg == raw_avg
+
+
+def test_analyze_sum_late_sec_is_clamped_per_observation_not_clamped_average(pg_conn, agency_id, ch_client):
+    """analyze() must store the exact per-observation clamped sum
+    (SUM(GREATEST(dep_delay, 0))) alongside avg_min, so a downstream reader
+    computing a route's total lateness contribution never has to clamp the
+    already-signed, already-rounded avg_min instead.
+
+    5 observations at +600s (10 min) and 5 at -480s (-8 min): the day's
+    signed average is (5*600 + 5*(-480)) / 10 / 60 = 1.0 min. Clamping THAT
+    average (the bug this column fixes) would score the day as
+    ``1.0 * 10 = 10`` late-minutes. The true per-observation clamped sum is
+    ``5 * 600 = 3000`` seconds = 50 minutes -- the -480s trips contribute 0,
+    never a negative offset.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for dep in [600, 600, 600, 600, 600, -480, -480, -480, -480, -480]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"mix{i}.pb",
+                    "2026-04-01T09:00:00",
+                    f"trip_mix_{i}",
+                    "平日",
+                    time(9, 0),
+                    "MIX1",
+                    1,
+                    dep,
+                ),
+            )
+            i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples, avg_min, sum_delay_sec, sum_late_sec FROM agg_daily_trend "
+            "WHERE agency_id = %s AND route_code = 'MIX1'",
+            (agency_id,),
+        )
+        samples, avg_min, sum_delay_sec, sum_late_sec = cur.fetchone()
+    assert samples == 10
+    assert float(avg_min) == 1.0
+    assert sum_delay_sec == 600
+    assert sum_late_sec == 3000
+
+
 def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
     # _seed_updates schedules every row at 11:37 → all land in hour 11.
     _seed_updates(pg_conn, agency_id)
@@ -200,6 +397,56 @@ def test_analyze_creates_agg_hour_daily(pg_conn, agency_id, ch_client):
         well_formed = cur.fetchone()[0]
     assert hours == [11]  # every seeded row is at 11:37
     assert well_formed
+
+
+def test_analyze_hour_daily_sum_delay_sec_is_exact_raw_sum(pg_conn, agency_id, ch_client):
+    """agg_hour_daily must carry the exact SUM(dep_delay) alongside its
+    rounded avg_min, mirroring the six tables migration 0028 already covers
+    (see pipeline/analyze.py's module docstring) -- a downstream reader
+    pooling multiple agg_hour_daily rows (pipeline/reports/overview.py's
+    _peak_hour_by_dow fast path) divides SUM(sum_delay_sec) / SUM(samples)
+    once, rather than re-weighting the already-rounded avg_min.
+
+    3 observations at +601s and 3 at +599s: the rounded avg_min is exactly
+    10.0 either way, but the raw seconds sum (3600) is what a correct
+    downstream pool must reproduce -- an implementation that instead backs
+    sum_delay_sec out of the rounded avg_min*60*samples would also land on
+    3600 here, so this asserts the exact raw total directly rather than
+    relying on a coincidental match.
+    """
+    with pg_conn.cursor() as cur:
+        i = 0
+        for dep in [601, 601, 601, 599, 599, 599]:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    agency_id,
+                    f"hd{i}.pb",
+                    "2026-04-01T09:00:00",
+                    f"trip_hd_{i}",
+                    "平日",
+                    time(9, 0),
+                    "HD1",
+                    1,
+                    dep,
+                ),
+            )
+            i += 1
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT samples, avg_min, sum_delay_sec FROM agg_hour_daily "
+            "WHERE agency_id = %s AND date = '2026-04-01' AND hour = 9",
+            (agency_id,),
+        )
+        samples, avg_min, sum_delay_sec = cur.fetchone()
+    assert samples == 6
+    assert float(avg_min) == 10.0
+    assert sum_delay_sec == 3600
 
 
 def test_analyze_buckets_dates_in_jst(pg_conn, agency_id, ch_client):
@@ -508,8 +755,9 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
 
     Regression: agg_stop_routes was derived from _analyze_deduped for one
     perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
-    silently dropped this exact case (measured on real data: ~3.7% of keys,
-    39 stops losing all route coverage). Restored to the ClickHouse-sourced
+    silently dropped this exact case (a real, non-trivial share of keys,
+    enough to lose stops' entire route coverage in practice). Restored to
+    the ClickHouse-sourced
     _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
     only and never touches dep_delay."""
     with pg_conn.cursor() as cur:

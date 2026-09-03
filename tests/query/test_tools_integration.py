@@ -235,8 +235,8 @@ async def test_is_route_registered_fast_path_hits_agg_route_daily_not_clickhouse
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'FASTPATH', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'FASTPATH', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     result = await _is_route_registered("FASTPATH", aconn, aagency_id, ch=_ExplodingChClient())
@@ -343,8 +343,8 @@ async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
     # analyzed route) -- simulates analyze() being stuck there.
     await aconn.execute(
         "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
-        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at) "
-        "VALUES ($1, $2, 'OTHERROUTE', 'weekday', 30, 60, 1, 5, $3)",
+        "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, $2, 'OTHERROUTE', 'weekday', 30, 60, 1, 5, $3, 150)",
         aagency_id,
         horizon_date,
         now,
@@ -469,16 +469,17 @@ async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     await aconn.execute(
-        "INSERT INTO agg_route_hour_dow (agency_id, route_code, service_type, dow, hour, avg_min, samples) "
+        "INSERT INTO agg_route_hour_dow "
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
         "VALUES "
-        "  ($1, 'R1', '平日', 1, 8, 2.0, 20),"
-        "  ($1, 'R1', '平日', 5, 18, 6.5, 40),"
-        "  ($1, 'R1', '平日', 3, 9, 1.0, 3)",  # below the samples > 5 gate
+        "  ($1, 'R1', '平日', 1, 8, 2.0, 20, 2400),"
+        "  ($1, 'R1', '平日', 5, 18, 6.5, 40, 15600),"
+        "  ($1, 'R1', '平日', 3, 9, 1.0, 3, 180)",  # below the samples > 5 gate
         aagency_id,
     )
     result = await dispatch("time_pattern", {"route": "R1"}, _ctx(), aconn, aagency_id, locale="ja")
@@ -510,26 +511,30 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
     await aconn.execute(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at) "
-        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now())",
+        " trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1, CURRENT_DATE, 'R1', '平日', 60, 120, 3, 10, now(), 600)",
         aagency_id,
     )
     for d, avg in zip(days, avgs, strict=True):
         await aconn.execute(
-            "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
-            "VALUES ($1, $2, 'R1', '平日', $3, 20)",
+            "INSERT INTO agg_daily_trend "
+            "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
+            "VALUES ($1, $2, 'R1', '平日', $3, 20, $4)",
             aagency_id,
             d.isoformat(),
             avg,
+            round(avg * 60 * 20),
         )
     ctx = RangeCtx(from_date=days[0], to_date=days[-1])
     result = await dispatch("trend_shift", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja")
     assert result.kind == "kv"
     labels = [p[0] for p in result.pairs]
     values = [p[1] for p in result.pairs]
-    assert labels == ["前半平均", "後半平均", "変化幅"]
+    assert labels == ["前半平均", "後半平均", "変化幅", "日数"]
     assert float(values[0]) < float(values[1])
     assert float(values[2]) == pytest.approx(4.15, abs=0.1)
+    # 4 seeded days, all with samples, none filtered out.
+    assert values[3] == "4日"
 
 
 @pytest.mark.asyncio
@@ -540,8 +545,8 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
 async def test_dispatch_missing_route_arg_returns_empty(aconn, aagency_id, tool_name):
     """Route-required tools must short-circuit with the 'route_arg_required'
     message (not attempt registration/data lookup) when no route arg is
-    given. Characterization test pinning this branch ahead of slice 2's
-    ``_resolve_and_check_route`` guard consolidation (docs/refactor-plan.md)."""
+    given. Characterization test pinning ``_resolve_and_check_route``'s
+    shared guard behavior across all five route-required tools."""
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
     result = await dispatch(tool_name, {}, ctx, aconn, aagency_id, locale="ja")
     assert result.kind == "empty"

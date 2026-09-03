@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.reports.forecast import BANDS, band_of, hourly_cells_to_dow_band, summarize_agency_overview
+from pipeline.reports.forecast import BANDS, _pooled, band_of, hourly_cells_to_dow_band, summarize_agency_overview
 
 
 def test_band_of_boundaries():
@@ -57,9 +57,8 @@ def test_routes_ranked_desc_low_conf_last_and_capped():
 
 def test_routes_tie_break_by_route_code_regardless_of_input_order():
     """Two routes tied on expected_avg_min must rank by route_code, ascending
-    — deterministic regardless of route_rows' incoming order. See NOTES.md's
-    "same unguarded-tie shape, three more sites" entry (fix extends PR #196's
-    tie-break convention here).
+    — deterministic regardless of route_rows' incoming order, since the
+    caller gives no ordering guarantee of its own.
     """
     route_rows = [
         {"route_code": "R_Z", "route_name": "Zulu", "avg_min": 5.0, "samples": 100},
@@ -86,6 +85,76 @@ def test_hourly_cells_to_dow_band_pools_by_derived_dow():
     assert tue_midday["samples"] == 50
     wed_evening = next(c for c in out["grid"] if c["dow"] == 3 and c["band"] == "evening")
     assert wed_evening["expected_avg_min"] == pytest.approx(5.0, abs=0.05)
+
+
+def test_pooled_sums_totals_not_reweighted_averages():
+    """_pooled's contract is (TOTAL minutes, samples) pairs -> exact pooled
+    mean, not (per-bucket avg, samples) pairs to be weighted here -- the fix
+    for compounding rounding across the grid pool. Reproduces the two-row
+    example from this module's own docstring: sum_delay_sec=1000/samples=21
+    and sum_delay_sec=50/samples=21 have a true combined mean of
+    1050/42/60, which pooling their own already-rounded per-row averages
+    (0.79, 0.04) would instead land on 0.415 -- a real, if small, divergence
+    this function's new contract avoids by never re-deriving a per-row
+    average in the first place.
+    """
+    mean, n = _pooled([(1000 / 60, 21), (50 / 60, 21)])
+    assert n == 42
+    assert mean == pytest.approx(1050 / 42 / 60, abs=1e-9)
+    assert mean != pytest.approx(0.415, abs=1e-9)  # the old, imprecise pooled-of-rounded result
+
+
+def test_pooled_empty_returns_none_mean_zero_samples():
+    assert _pooled([]) == (None, 0)
+
+
+def test_summarize_agency_overview_grid_prefers_exact_sum_delay_sec():
+    """When a grid row carries the exact raw-seconds sum, the grid must pool
+    from THAT (dividing once at the end) rather than re-weighting the row's
+    own (already-rounded, and here deliberately wrong) avg_min * samples --
+    the two cells below have identical (misleading) avg_min/samples but
+    wildly different sum_delay_sec, so the two computations land on
+    unmistakably different pooled means (1.0 vs 0.5), isolating which one
+    the implementation actually used.
+    """
+    rows = [
+        {"dow": 1, "hour": 9, "avg_min": 1.0, "samples": 100, "sum_delay_sec": 3000},
+        {"dow": 1, "hour": 10, "avg_min": 1.0, "samples": 100, "sum_delay_sec": 3000},
+    ]
+    out = summarize_agency_overview(rows, [])
+    cell = next(c for c in out["grid"] if c["dow"] == 1 and c["band"] == "midday")
+    # True pooled mean from the exact sums: (3000 + 3000) / 60 / 200 = 0.5.
+    assert cell["expected_avg_min"] == pytest.approx(0.5, abs=0.05)
+    # NOT the naive avg_min * samples reweighting, which would give 1.0.
+    assert cell["expected_avg_min"] != pytest.approx(1.0, abs=0.05)
+    assert cell["samples"] == 200
+
+
+def test_summarize_agency_overview_grid_falls_back_when_sum_delay_sec_absent():
+    """A caller with no sum_delay_sec at all (e.g. an older row shape) must
+    keep working exactly as before the fix: fall back to avg_min * samples."""
+    rows = [
+        {"dow": 1, "hour": 9, "avg_min": 2.0, "samples": 10},
+        {"dow": 1, "hour": 12, "avg_min": 8.0, "samples": 40},
+    ]
+    out = summarize_agency_overview(rows, [])
+    cell = next(c for c in out["grid"] if c["dow"] == 1 and c["band"] == "midday")
+    assert cell["expected_avg_min"] == pytest.approx((2 * 10 + 8 * 40) / 50, abs=0.05)
+
+
+def test_hourly_cells_to_dow_band_uses_exact_sum_delay_sec():
+    """hourly_cells_to_dow_band threads compute_hourly_heatmap's sum_delay_sec
+    through to the grid pool -- same discriminator as
+    test_summarize_agency_overview_grid_prefers_exact_sum_delay_sec, via the
+    dict shape compute_hourly_heatmap actually returns."""
+    hourly = [
+        {"date": "2026-05-19", "hour": 9, "avg_min": 1.0, "samples": 100, "sum_delay_sec": 3000},
+        {"date": "2026-05-19", "hour": 10, "avg_min": 1.0, "samples": 100, "sum_delay_sec": 3000},
+    ]
+    out = hourly_cells_to_dow_band(hourly)
+    # 2026-05-19 is a Tuesday (dow=2); hours 9 and 10 both fall in "midday".
+    tue_midday = next(c for c in out["grid"] if c["dow"] == 2 and c["band"] == "midday")
+    assert tue_midday["expected_avg_min"] == pytest.approx(0.5, abs=0.05)
 
 
 def test_hourly_cells_to_dow_band_no_routes_or_disclaimer_keys():

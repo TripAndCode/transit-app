@@ -21,7 +21,10 @@ provider sub creates a fresh user.
 """
 
 import json
+import re
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import asyncpg
@@ -372,3 +375,96 @@ async def list_admin_agencies(
         "FROM agencies ORDER BY agency_id"
     )
     return [dict(r) for r in rows]
+
+
+# ── Architecture docs (developer/internal) endpoints ─────────────────────
+#
+# Backs `/admin/architecture` (item 25): a developer-only page rendering
+# CLAUDE.md's "Architecture pointers" as a Mermaid diagram plus a
+# sidebar-navigable index of `docs/features/*.md`. Filesystem-only (no DB
+# connection needed) -- gated on `require_admin` the same way every other
+# `/api/admin/*` route is, per the item's explicit decision to reuse the
+# existing `admin` role rather than add a new "internal/developer" flag.
+_FEATURE_DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "features"
+
+_DOC_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+class ArchitectureDocSummary(BaseModel):
+    """One `docs/features/*.md` file, for the page's sidebar index."""
+
+    slug: str
+    title: str
+
+
+class ArchitectureDocDetail(ArchitectureDocSummary):
+    """Full Markdown content of one feature doc."""
+
+    content: str
+
+
+def _feature_doc_title(text: str, fallback_slug: str) -> str:
+    """The file's own leading `# Title` line, or ``fallback_slug`` if it has
+    none (e.g. the doc is empty or malformed) -- never raises."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = _DOC_H1_RE.match(stripped)
+        return m.group(1) if m else fallback_slug
+    return fallback_slug
+
+
+def _has_real_content(text: str) -> bool:
+    """Return whether ``text`` has anything beyond HTML comments/whitespace --
+    filters placeholder/scratch docs (e.g. an HTML-comment-only file) out of
+    the admin doc listing without needing to delete them from git history."""
+    return bool(_HTML_COMMENT_RE.sub("", text).strip())
+
+
+def _iter_feature_docs() -> Iterator[tuple[Path, str]]:
+    """Yield ``(path, content)`` for every `docs/features/*.md` file with real
+    content, sorted by filename for a stable, deterministic sidebar order.
+    Never cached at import time -- a doc file added while the server is
+    already running (this directory grows over time; see docs/refactor-log.md
+    item 26) shows up on the next request with no restart needed. Reads each
+    file's content exactly once, so callers should consume this instead of
+    re-reading a path returned by ``_list_feature_docs``."""
+    if not _FEATURE_DOCS_DIR.is_dir():
+        return
+    for path in sorted(_FEATURE_DOCS_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if _has_real_content(text):
+            yield path, text
+
+
+def _list_feature_docs() -> list[Path]:
+    """Enumerate `docs/features/*.md` fresh on every call. Skips files with
+    no real content (e.g. HTML-comment-only placeholders)."""
+    return [path for path, _ in _iter_feature_docs()]
+
+
+@router.get("/architecture/docs", response_model=list[ArchitectureDocSummary])
+async def list_architecture_docs(_admin: User = Depends(require_admin)):
+    """List every `docs/features/*.md` file for the architecture page's
+    sidebar. Read-only and filesystem-only -- no DB round trip."""
+    return [
+        ArchitectureDocSummary(slug=path.stem, title=_feature_doc_title(text, path.stem))
+        for path, text in _iter_feature_docs()
+    ]
+
+
+@router.get("/architecture/docs/{slug}", response_model=ArchitectureDocDetail)
+async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)):
+    """Serve one feature doc's raw Markdown by slug (filename minus `.md`).
+
+    ``slug`` is matched against the live enumeration from
+    ``_iter_feature_docs`` rather than joined directly into a filesystem
+    path, so a request can't escape `docs/features/` via `..`, an absolute
+    path, or a symlink-following trick smuggled through the path param.
+    """
+    for path, text in _iter_feature_docs():
+        if path.stem == slug:
+            return ArchitectureDocDetail(slug=slug, title=_feature_doc_title(text, slug), content=text)
+    raise HTTPException(404, "doc not found")

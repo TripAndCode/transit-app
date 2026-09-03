@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -7,6 +7,19 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
 
 function renderSidebar(path = "/agencies/1/map") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -166,5 +179,85 @@ describe("Sidebar", () => {
     localStorage.clear();
     renderSidebar();
     expect(await screen.findByRole("button", { name: "Account menu" })).toBeTruthy();
+  });
+
+  describe("desktop/mobile split", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("renders only the desktop rail (no mobile trigger) on a wide viewport", () => {
+      mockMatchMedia(false);
+      renderSidebar();
+      // Previously both the desktop <aside> and the mobile rail+trigger
+      // mounted unconditionally (toggled only via a CSS display media
+      // query), so the mobile trigger existed in the DOM at every viewport
+      // width. Conditionally rendering on isMobile means it's now absent
+      // entirely on a wide viewport.
+      expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+
+    it("renders only the mobile rail (no desktop nav) on a narrow viewport", () => {
+      mockMatchMedia(true);
+      renderSidebar();
+      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
+      expect(screen.queryByText("Overview")).toBeNull();
+    });
+  });
+
+  describe("mobile drawer", () => {
+    beforeEach(() => {
+      mockMatchMedia(true);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("renders the hamburger trigger without mounting the nav until opened", () => {
+      renderSidebar();
+      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
+      // No "Map" link should exist yet — the drawer body is lazily mounted
+      // on open, and (unlike the old always-mounted-desktop-plus-CSS-hidden
+      // pattern) the desktop nav isn't rendered at all on a narrow viewport,
+      // so the common (closed) case has zero nav links in the DOM.
+      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+    });
+
+    it("mounts the nav links once the hamburger is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+    });
+
+    it("closes the drawer (unmounting the nav) when a nav link inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      const mapLinks = screen.getAllByRole("link", { name: /Map/ });
+      expect(mapLinks.length).toBe(1);
+      await user.click(mapLinks[0]);
+      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+    });
+
+    it("closes the drawer when the close button inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+    });
+
+    it("closes the drawer when the backdrop is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "Open menu" }));
+      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      await user.click(screen.getByRole("presentation"));
+      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+    });
   });
 });

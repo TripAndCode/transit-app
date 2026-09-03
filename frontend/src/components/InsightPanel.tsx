@@ -84,7 +84,7 @@ function addSeen(agencyId: number, key: string): void {
   }
 }
 
-export function InsightPanel() {
+export function InsightPanel({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
@@ -128,6 +128,7 @@ export function InsightPanel() {
 
   return (
     <div
+      className={className}
       style={{
         width: collapsed ? 40 : 260,
         flexShrink: 0,

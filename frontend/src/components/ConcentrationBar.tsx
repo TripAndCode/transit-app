@@ -1,5 +1,4 @@
 // frontend/src/components/ConcentrationBar.tsx
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
@@ -180,6 +179,67 @@ const LZ_PAD_BOTTOM = 28;
 const LZ_PAD_TOP = 12;
 const LZ_PAD_RIGHT = 12;
 
+// Module-scope pure function rather than an in-render IIFE — see
+// eslint.config.js's manual-memoization ban comment for why this shape is
+// preferred over an inline immediately-invoked function expression.
+function buildLorenzCurve(
+  topRoutes: OverviewConcentration["top_routes"],
+  restSharePct: number,
+  restRouteCount: number,
+): { path: string; ticks20: { x: number; y: number } | null; share20Pct: number } {
+  // Build ascending shares: rest is one aggregate bucket (the
+  // long tail of small routes), followed by top_routes sorted
+  // ascending so the curve climbs from flat -> steep.
+  const shares: number[] = [];
+  if (restRouteCount > 0 && restSharePct > 0) {
+    // Treat each rest-route as carrying an equal slice; this
+    // smooths the long tail rather than spiking it.
+    const per = restSharePct / restRouteCount;
+    for (let i = 0; i < restRouteCount; i++) shares.push(per);
+  }
+  const ascendingTop = [...topRoutes].map((r) => r.share_pct).sort((a, b) => a - b);
+  shares.push(...ascendingTop);
+  const totalRoutes = shares.length;
+  if (totalRoutes === 0) return { path: "", ticks20: null, share20Pct: 0 };
+  const grand = shares.reduce((s, v) => s + v, 0) || 1;
+
+  const xs: number[] = [0];
+  const ys: number[] = [0];
+  let cum = 0;
+  for (let i = 0; i < totalRoutes; i++) {
+    cum += shares[i];
+    xs.push(((i + 1) / totalRoutes) * 100);
+    ys.push((cum / grand) * 100);
+  }
+
+  const innerW = LZ_W - LZ_PAD_LEFT - LZ_PAD_RIGHT;
+  const innerH = LZ_H - LZ_PAD_TOP - LZ_PAD_BOTTOM;
+  const toX = (xp: number) => LZ_PAD_LEFT + (xp / 100) * innerW;
+  // Y axis is inverted: 100% at top, 0% at bottom.
+  const toY = (yp: number) => LZ_PAD_TOP + (1 - yp / 100) * innerH;
+  const pathStr = xs
+    .map((xp, i) => `${i === 0 ? "M" : "L"} ${toX(xp).toFixed(1)},${toY(ys[i]).toFixed(1)}`)
+    .join(" ");
+
+  // "top 20% of routes carry X% of delay" — read the curve at x=80%
+  // from the right side (since we sorted ascending, the rightmost
+  // 20% is the most concentrated).
+  const cutoff = 80;
+  let interpY = 0;
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] >= cutoff) {
+      const t = (cutoff - xs[i - 1]) / (xs[i] - xs[i - 1] || 1);
+      interpY = ys[i - 1] + t * (ys[i] - ys[i - 1]);
+      break;
+    }
+  }
+  return {
+    path: pathStr,
+    ticks20: { x: toX(cutoff), y: toY(interpY) },
+    share20Pct: 100 - interpY,
+  };
+}
+
 function LorenzCurve({
   topRoutes,
   restSharePct,
@@ -190,61 +250,7 @@ function LorenzCurve({
   restRouteCount: number;
 }) {
   const { t } = useTranslation();
-  const { path, ticks20, share20Pct } = useMemo(() => {
-    // Build ascending shares: rest is one aggregate bucket (the
-    // long tail of small routes), followed by top_routes sorted
-    // ascending so the curve climbs from flat -> steep.
-    const shares: number[] = [];
-    if (restRouteCount > 0 && restSharePct > 0) {
-      // Treat each rest-route as carrying an equal slice; this
-      // smooths the long tail rather than spiking it.
-      const per = restSharePct / restRouteCount;
-      for (let i = 0; i < restRouteCount; i++) shares.push(per);
-    }
-    const ascendingTop = [...topRoutes]
-      .map((r) => r.share_pct)
-      .sort((a, b) => a - b);
-    shares.push(...ascendingTop);
-    const totalRoutes = shares.length;
-    if (totalRoutes === 0) return { path: "", ticks20: null, share20Pct: 0 };
-    const grand = shares.reduce((s, v) => s + v, 0) || 1;
-
-    const xs: number[] = [0];
-    const ys: number[] = [0];
-    let cum = 0;
-    for (let i = 0; i < totalRoutes; i++) {
-      cum += shares[i];
-      xs.push(((i + 1) / totalRoutes) * 100);
-      ys.push((cum / grand) * 100);
-    }
-
-    const innerW = LZ_W - LZ_PAD_LEFT - LZ_PAD_RIGHT;
-    const innerH = LZ_H - LZ_PAD_TOP - LZ_PAD_BOTTOM;
-    const toX = (xp: number) => LZ_PAD_LEFT + (xp / 100) * innerW;
-    // Y axis is inverted: 100% at top, 0% at bottom.
-    const toY = (yp: number) => LZ_PAD_TOP + (1 - yp / 100) * innerH;
-    const pathStr = xs
-      .map((xp, i) => `${i === 0 ? "M" : "L"} ${toX(xp).toFixed(1)},${toY(ys[i]).toFixed(1)}`)
-      .join(" ");
-
-    // "top 20% of routes carry X% of delay" — read the curve at x=80%
-    // from the right side (since we sorted ascending, the rightmost
-    // 20% is the most concentrated).
-    const cutoff = 80;
-    let interpY = 0;
-    for (let i = 1; i < xs.length; i++) {
-      if (xs[i] >= cutoff) {
-        const t = (cutoff - xs[i - 1]) / (xs[i] - xs[i - 1] || 1);
-        interpY = ys[i - 1] + t * (ys[i] - ys[i - 1]);
-        break;
-      }
-    }
-    return {
-      path: pathStr,
-      ticks20: { x: toX(cutoff), y: toY(interpY) },
-      share20Pct: 100 - interpY,
-    };
-  }, [topRoutes, restSharePct, restRouteCount]);
+  const { path, ticks20, share20Pct } = buildLorenzCurve(topRoutes, restSharePct, restRouteCount);
 
   if (!path) return null;
   const innerW = LZ_W - LZ_PAD_LEFT - LZ_PAD_RIGHT;

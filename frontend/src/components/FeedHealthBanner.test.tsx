@@ -32,6 +32,21 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
+// Mirrors Sidebar.test.tsx's mockMatchMedia helper — same shared
+// max-width:640px query used by useTapToExpandBanner.
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(max-width: 640px)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
+
 describe("FeedHealthBanner", () => {
   it("shows the count when clamp_count > 0", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
@@ -40,6 +55,21 @@ describe("FeedHealthBanner", () => {
     renderBanner();
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("1906");
+  });
+
+  it("renders the message as a single tappable line on a narrow viewport", () => {
+    mockMatchMedia(true);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ clamp_count: 5 }),
+    } as never);
+    renderBanner();
+    // The message itself becomes a second, distinctly-named "button" (tap to
+    // expand) alongside the existing dismiss "×" button — getByRole with a
+    // name scopes to it specifically, so this fails loudly if the dismiss
+    // button's own accessible name ever collided with the message text.
+    const messageButton = screen.getByRole("button", { name: /5/ });
+    expect(messageButton).toHaveAttribute("aria-expanded", "false");
+    vi.restoreAllMocks();
   });
 
   it("renders nothing when clamp_count is 0 (healthy feed)", () => {

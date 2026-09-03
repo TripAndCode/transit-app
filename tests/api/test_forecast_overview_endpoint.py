@@ -39,31 +39,40 @@ async def overview_client(apply_schema):
     )
     await pool.executemany(
         "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
         [
-            # route 100: Mon midday pooled (8*200 + 2*50)/250 = 6.8
-            (aid, "100", "平日", 1, 12, 8.0, 200),
-            (aid, "100", "平日", 1, 9, 2.0, 50),
+            # route 100: Mon midday pooled (8*200 + 2*50)/250 = 6.8. sum_delay_sec
+            # is an exact multiple of avg_min*60*samples here, so exact-sum
+            # pooling agrees with the values above (dedicated exactness
+            # coverage lives in test_forecast_heatmap.py).
+            (aid, "100", "平日", 1, 12, 8.0, 200, int(8.0 * 60 * 200)),
+            (aid, "100", "平日", 1, 9, 2.0, 50, int(2.0 * 60 * 50)),
             # route 200: huge but low-sample (4 < 30) -> excluded from worst, muted, sorted last
-            (aid, "200", "平日", 3, 17, 40.0, 4),
+            (aid, "200", "平日", 3, 17, 40.0, 4, int(40.0 * 60 * 4)),
         ],
     )
+    daily_rows = [
+        # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
+        # 7-day window at agency, not route, grain — but only route 100
+        # has any agg_route_daily rows here). Window is
+        # (latest-7, latest] = (2026-05-26, 2026-06-02].
+        (aid, date(2026, 5, 26), "100", "平日", 600, 600, 5, 50),  # 10.0 min — latest-7, EXCLUDED
+        (aid, date(2026, 5, 27), "100", "平日", 60, 60, 5, 50),  # 1.0 min — latest-6, INCLUDED (oldest in-window)
+        (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
+        (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
+    ]
     await pool.executemany(
         "INSERT INTO agg_route_daily "
         "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        "trips_observed, samples, last_seen_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())",
-        [
-            # latest date for route 100 is 2026-06-02 (MAX(date) anchors the
-            # 7-day window at agency, not route, grain — but only route 100
-            # has any agg_route_daily rows here). Window is
-            # (latest-7, latest] = (2026-05-26, 2026-06-02].
-            (aid, date(2026, 5, 26), "100", "平日", 600, 600, 5, 50),  # 10.0 min — latest-7, EXCLUDED
-            (aid, date(2026, 5, 27), "100", "平日", 60, 60, 5, 50),  # 1.0 min — latest-6, INCLUDED (oldest in-window)
-            (aid, date(2026, 6, 1), "100", "平日", 120, 180, 5, 50),  # 2.0 min
-            (aid, date(2026, 6, 2), "100", "平日", 240, 300, 5, 50),  # 4.0 min
-        ],
+        "trips_observed, samples, last_seen_at, sum_delay_sec) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)",
+        # sum_delay_sec computed in Python (avg_delay_sec * samples, exact
+        # reconstruction) rather than in SQL: asyncpg's prepared-statement
+        # type inference can't resolve a bare "$5*$8" (both operands
+        # deduced as "unknown" from position alone) without conflicting
+        # explicit casts on a parameter already typed by its own column.
+        [(*row, row[4] * row[7]) for row in daily_rows],
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client, aid, aid_empty

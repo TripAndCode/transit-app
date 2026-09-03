@@ -308,6 +308,18 @@ def _maybe_mount_static(app: FastAPI) -> None:
         JSON 404 for unknown API paths; otherwise ``index.html`` for SPA routes."""
         if full_path.startswith(_API_PREFIXES):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # Dot-prefixed segments (.vite/manifest.json, .env, .git/...) never
+        # belong to the SPA's own public assets -- treat them as an SPA
+        # route rather than a file lookup so a build-time artifact that
+        # shouldn't have shipped (or any other dotfile that lands in
+        # STATIC_DIR) is never served, regardless of what the build step
+        # did or didn't clean up.
+        # Trade-off: this blanket-blocks every dot-prefixed path segment, not
+        # just the .vite leak it was added for -- a future legitimate route
+        # (e.g. /.well-known/...) would silently get this 200 SPA shell
+        # instead of the real file or a real 404. No such route exists today.
+        if any(part.startswith(".") for part in full_path.split("/")):
+            return FileResponse(index_path)
         # realpath collapses any ".." before the containment check, so a path
         # like "../../etc/passwd" can't escape static_root.
         candidate = os.path.realpath(os.path.join(STATIC_DIR, full_path))

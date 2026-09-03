@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
 import { FOLLOWUP_CHIPS } from "../../components/askFollowupChips";
@@ -41,6 +41,14 @@ export function FollowupChipsRow({
   // hook order stays unconditional.
   const isComposingRef = useRef(false);
 
+  // Tracks the chip most recently clicked *for the currently-grounded
+  // message* so it can be visually de-emphasized instead of re-showing every
+  // chip with identical weight after it was just asked. Keyed on both the
+  // chip id and the grounding message id (not just the chip id) so a new
+  // tool result -- a fresh context to ask the same question type about --
+  // clears the de-emphasis automatically, with no reset effect needed.
+  const [lastClickedChip, setLastClickedChip] = useState<{ msgId: number; chipId: string } | null>(null);
+
   const lastResultMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -74,32 +82,44 @@ export function FollowupChipsRow({
           gap: 6,
         }}
       >
-        {FOLLOWUP_CHIPS.map((chip) => (
-          <button
-            key={chip.id}
-            type="button"
-            onClick={() => onFollowup(lastResultMsgId, t(chip.prompt_key), false)}
-            style={{
-              padding: "5px 12px",
-              fontSize: 12,
-              background: "var(--bg-soft, #f4f4f5)",
-              color: "var(--text-secondary, #52525b)",
-              border: "1px solid var(--border-soft, #e4e4e7)",
-              borderRadius: 999,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
-            }}
-          >
-            {t(chip.label_key)}
-          </button>
-        ))}
+        {FOLLOWUP_CHIPS.map((chip) => {
+          const isLastClicked =
+            lastClickedChip?.msgId === lastResultMsgId && lastClickedChip?.chipId === chip.id;
+          return (
+            <button
+              key={chip.id}
+              type="button"
+              aria-pressed={isLastClicked}
+              onClick={() => {
+                setLastClickedChip({ msgId: lastResultMsgId, chipId: chip.id });
+                onFollowup(lastResultMsgId, t(chip.prompt_key), false);
+              }}
+              style={{
+                padding: "5px 12px",
+                fontSize: 12,
+                background: "var(--bg-soft, #f4f4f5)",
+                color: "var(--text-secondary, #52525b)",
+                border: "1px solid var(--border-soft, #e4e4e7)",
+                borderRadius: 999,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "background 0.15s, opacity 0.15s",
+                // De-emphasize (not remove) the chip just asked about this
+                // result -- it's still available to ask again, but shouldn't
+                // read with the same weight as the untried options next to it.
+                opacity: isLastClicked ? 0.55 : 1,
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
+              }}
+            >
+              {t(chip.label_key)}
+            </button>
+          );
+        })}
       </div>
 
       <form

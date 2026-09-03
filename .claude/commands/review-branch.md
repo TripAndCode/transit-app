@@ -1,84 +1,104 @@
 ---
 name: review-branch
-description: Senior-staff review of the current branch vs main using fresh-context subagents, then safe cleanup.
+description: Token-bounded review of the current branch vs main, followed by proportional verification.
 ---
 
-Review the current branch for project $ARGUMENTS as a principal engineer.
+Review the current branch for project $ARGUMENTS. Optimize for evidence per token:
+normal changes get two complementary reviewers and one pass; extra calls require a
+specific risk signal or a material fix.
 
-## Skills (invoke these every run)
-- `superpowers:systematic-debugging` — whenever a test, lint, or build check fails
-  in Phase 3, before proposing any fix.
-- `superpowers:verification-before-completion` — before claiming the review or
-  cleanup is done; report evidence, not assertions.
-- `postgres-perf` / `maplibre-map` — invoke ONLY when the diff touches ClickHouse/
-  Postgres queries or MapLibre layers, respectively.
+## 1. Prepare once
 
-## Phase 1 — Understand (you, directly)
-1. Diff the current branch against `main` (NOT master).
-2. Deduce the branch objective and how the new code builds on `main`.
-3. Write a short context intro stating that objective before any findings.
-4. Risk-tier classification: if the diff touches ONLY `.md` files and/or is a
-   pure additive doc change with zero code/config/script changes, mark it
-   **trivial tier** and say so in the context intro — this skips Phase 2
-   subagent dispatch (see below) and shortens the review gate to a single
-   pass. Everything else (any code, config, CI, hook, or script change, no
-   matter how small) is **standard tier** — full dimension dispatch, full
-   3-pass gate, no shortcuts.
-5. Test-delta gate (standard tier only — trivial tier has no code to gate):
-   compare lines changed under `tests/` and
-   `frontend/src/**/*.{test,spec}.{ts,tsx}` (this repo's tests are colocated next to
-   source per `frontend/vitest.config.ts`, including under nested `__tests__` dirs —
-   the `**` glob matches both) against total lines changed. If the test share is
-   under 15% AND the diff adds new logic
-   (not a pure refactor/wiring/config change), report this as a Major finding
-   before dimension findings arrive — name which new/changed functions or
-   components have no apparent matching test.
-   **Exemption:** a diff whose only substantive changes are a lint rule, CI
-   check, git hook, or static-analysis gate (the same surface the
-   `enforcement` dimension covers — see `branch-reviewer.md`) is exempt from
-   this line-count gate; it has no `tests/` line share by nature. Instead,
-   confirm the PR description/commit documents a positive+negative
-   verification (violation caught, legitimate code passes) — if that
-   evidence is missing, report THAT as the Major finding instead of a bare
-   test-coverage percentage.
+1. Run `git status --porcelain` and inspect changed **path names only** for an
+   unexpected credential-bearing file. Never print its contents.
+2. Create a private scratch directory and run:
+   ```bash
+   python3 scripts/prepare_review.py \
+     --repo <worktree-absolute-path> --base main --output-dir <scratch-directory> \
+     > <scratch-directory>/manifest.json
+   ```
+   If step 1 found an additional sensitive path, add `--exclude '<path-or-glob>'` to
+   this **first** invocation; never create an unfiltered artifact and clean it up
+   afterward. Treat `manifest.json` as canonical; do not recalculate its file list,
+   line counts, exclusions, or test share in prose.
+3. Confirm the manifest's `head` still equals the reviewed worktree's `HEAD`. Deduce
+   the objective and state it in one short paragraph.
 
-## Phase 2 — Fresh-context review (dispatch subagents)
-**Trivial tier: skip this phase entirely.** There's no code for any dimension to
-review — read the doc diff yourself directly and move to Phase 3.
+The script writes committed, untracked, unstaged, and staged changes into one
+mode-0600 diff without serializing known lockfiles or credential carriers.
 
-**Standard tier:** dispatch the `branch-reviewer` subagent once per dimension listed
-under "Dimensions you may be asked for" in `.claude/agents/branch-reviewer.md` —
-that file is the single source of truth for the dimension list, so it doesn't drift
-out of sync with this one. Always dispatch: bugs, logic, consistency, perf,
-practices, security, alternatives. Additionally dispatch `enforcement` ONLY when the
-diff touches `.claude/hooks/`, `frontend/eslint.config.js`, `.github/workflows/`,
-`pyproject.toml` lint/type config, or a new/changed `scripts/check-*` script — skip
-it otherwise, same as `postgres-perf`/`maplibre-map` are conditional. Run all
-dispatched dimensions in parallel, each with a clean context and the diff + stated
-objective only — none sees another's output.
-Then YOU synthesize: dedupe, rank by severity, drop low-confidence noise. Keep only
-findings that affect correctness or the objective.
+## 2. Route the review
 
-## Phase 3 — Cleanup (only after review reported)
-- Remove unnecessary comments and dead code in the diff.
-- Add docstrings: file header + new/changed funcs and classes.
-- Run `make check` (fmt + lint + test). DB SAFETY: tests must point at the throwaway DB —
-  `DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`. NEVER let
-  a run hit dev DB :5433. See CLAUDE.md / transit-app-gotchas.
-- Fix only errors related to the changed files.
-- Before reporting the flow complete, invoke `superpowers:verification-before-completion`
-  and show the actual `make check` output — no success claims without evidence.
+Use the manifest's path-only tier as a suggestion and correct it when semantics show
+otherwise:
 
-## Review gate
-Standard tier: before a PR is considered ready, run this whole flow THREE times,
-each pass approaching the diff as if seeing the PR for the first time (reset
-mindset between passes). Each fresh read surfaces issues the prior
-context-anchored read glossed over.
-Trivial tier: one pass is enough — there's no dimension-review or fix-iterate
-loop to re-run against.
+- **Trivial:** human-facing Markdown outside `.claude/**` and root `CLAUDE.md`, with
+  no executable instructions. Review directly; no subagent.
+- **Process-doc:** only `.claude/**` and/or root `CLAUDE.md`. Dispatch one
+  `branch-reviewer` for `logic+consistency+practices+comments+security`. If
+  `enforcement` is true, add one standalone `enforcement` call.
+- **Standard:** dispatch exactly two `branch-reviewer` calls:
+  1. `bugs+logic+consistency+security`
+  2. `perf+practices+comments+alternatives`
+  Add one standalone `enforcement` call only when the manifest flag is true and the
+  diff actually changes a quality gate.
+
+A process-doc diff is Markdown, which `comment_lint.py` does not read, so `comments`
+runs there on its empty-list fallback. The agent file owns what that fallback is.
+
+**High-risk overlay:** auth/session/admin authorization, credential or PII handling,
+user-supplied URLs, schema/data migrations, destructive data paths, or security
+controls. For these diffs, keep the total at three calls by splitting `security` from
+the first group; merge `security+enforcement` when both apply.
+
+Every dispatch receives only: manifest path, diff path, objective, assigned
+dimensions, worktree path, and this exact line:
+
+`Deliberately excluded, do NOT re-derive: <manifest paths>. This is not truncation.`
+
+A dispatch whose assigned dimensions include `comments` additionally receives the
+manifest's `merge_base` and the absolute path to `scripts/comment_lint.py` **in the
+invoking checkout**, both of which that dimension needs to build its stale-candidate
+list. Pass the invoking checkout's copy rather than letting the reviewer resolve the
+path inside the worktree, for the same reason `prepare_review.py` is run from there: a
+reviewed branch may carry its own edited copy. No other dimension takes either value.
+
+Do not paste diff text into prompts. Reviewers never receive one another's output.
+While they run, do not switch, reset, or otherwise move the reviewed worktree; the
+agent file forbids reviewers from moving it for the same reason.
+
+## 3. Synthesize and iterate only when needed
+
+Deduplicate findings and keep evidence-backed Major/Minor issues. If a Major is
+fixed, regenerate the manifest and rerun only the reviewer group that owned that
+finding. Cap at two fix iterations. Do not repeat clean groups merely for “fresh
+eyes.”
+
+For a high-risk diff, after all Major findings are resolved, run one final integrated
+review over the cumulative diff. Use Opus for this final call when the Agent tool
+supports a model override; otherwise use the configured reviewer. A third full read
+is justified only when that final review itself caused a material code change.
+
+If a known PR number was supplied, fetch its review threads once. Suppress a finding
+only when the same location is already raised and the current code demonstrably fixes
+it; otherwise mark it as already raised and keep it active.
+
+## 4. Verify once
+
+- Check that new logic has a concrete matching test; use the manifest's `test_share`
+  only as a prompt to inspect, never as a finding by itself.
+- Remove dead code or misleading comments introduced by the diff.
+- Run the smallest relevant checks, followed by the repository-required final check.
+  Tests must use Postgres `:5544` and ClickHouse `:8124`, never the dev databases.
+- Capture verbose command output in the scratch directory. Report command, exit code,
+  and a short success summary; on failure, read only the useful tail and debug before
+  claiming completion.
+- Invoke `superpowers:verification-before-completion` if available. Invoke
+  `systematic-debugging` only after a check fails; load `postgres-perf` or
+  `maplibre-map` only when the diff touches their domains.
 
 ## Boundaries
-- Do NOT commit. Do NOT push.
-- If work is in a git worktree, all changes go to the worktree — run git via
-  `git -C <worktree-abs-path>` and confirm commits land on the feature branch, not
-  `main` (a subagent's default cwd is the main repo on `main`).
+
+- Do not commit or push.
+- In a worktree, run every Git command with `git -C <worktree-absolute-path>` and
+  confirm `HEAD` before and after reviewer calls.

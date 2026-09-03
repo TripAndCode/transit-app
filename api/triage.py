@@ -14,6 +14,18 @@ Bucket = Literal["anomaly", "watch", "normal", "no_baseline"]
 # promoted into `anomaly`; they cap at `watch` and carry low_confidence=True.
 LOW_CONFIDENCE_SAMPLES = 30
 
+# Cohort comparisons (route_stop_profile's per-stop cross-route average) pool
+# observations over a much shorter, narrower window than the route-level
+# baselines LOW_CONFIDENCE_SAMPLES was calibrated against (e.g. a 30-day,
+# single-stop cohort) — reusing that larger figure here would grey out most
+# cohort cells by default. Set independently rather than shared with
+# LOW_CONFIDENCE_SAMPLES. Map heatmap cells intentionally reuse the
+# route-level LOW_CONFIDENCE_SAMPLES instead, NOT this constant — a heatmap
+# cell pools the full requested date range, closer in density to a route
+# baseline than to a narrow single-stop cohort window (see
+# _heatmap_features's docstring in api/routers/map.py).
+COHORT_LOW_CONFIDENCE_SAMPLES = 10
+
 
 def classify_route(
     avg_delay_sec: Optional[int],

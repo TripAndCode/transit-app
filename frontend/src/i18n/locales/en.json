@@ -13,6 +13,7 @@
     "network_subtitle": "How you compare to others",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
+    "open_menu": "Open menu",
     "account_menu": "Account menu",
     "help": "Help",
     "prototype_section_label": "PROTOTYPE",
@@ -207,7 +208,7 @@
     "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
     "title_all": "All days {{hour}}:00 — delayed routes",
     "noData": "Not enough data for this time slot",
-    "avgMin": "+{{value}}min",
+    "avgMin": "{{sign}}{{value}}min",
     "routeCount_one": "{{count}} route",
     "routeCount_other": "{{count}} routes"
   },
@@ -265,7 +266,11 @@
     }
   },
   "help": {
-    "title": "User Manual"
+    "title": "User Manual",
+    "sections_nav": "Manual sections",
+    "hint_text": "New here? Check out the User Manual for a walkthrough.",
+    "hint_cta": "View Help",
+    "hint_dismiss_aria": "Dismiss help hint"
   },
   "account": {
     "admin_link": "Admin",
@@ -384,7 +389,8 @@
       "few_to_many": "delay: low → high",
       "color_explainer": "Color: average delay band",
       "bubble_explainer": "Bubble: a group of stops (number = how many stops)",
-      "size_explainer": "Dot size: bigger = longer delay"
+      "size_explainer": "Dot size: bigger = longer delay",
+      "low_confidence_explainer": "Faint dot: few observations, treat with caution"
     },
     "popup": {
       "platform_label": "Platform",
@@ -525,8 +531,10 @@
       "stop_name": "Stop",
       "hour": "Hour",
       "next_stop_sequence": "Next Stop #",
-      "avg_added_min": "Added (min)"
+      "avg_added_min": "Added (min)",
+      "low_confidence": "Confidence"
     },
+    "low_confidence_mark": "wide range",
     "more_rows": "…and {{count}} more",
     "chips": {
       "more": "More"
@@ -608,6 +616,7 @@
     },
     "sidebar": {
       "new_thread": "New conversation",
+      "open_threads": "Conversations",
       "pinned": "Pinned",
       "today": "Today",
       "yesterday": "Yesterday",
@@ -774,6 +783,7 @@
       "baseline_today": "normal {{baseline}} → today {{today}}",
       "no_baseline_note": "baseline pending",
       "low_confidence": "low confidence (few obs.)",
+      "low_confidence_baseline": "baseline low confidence (few obs.)",
       "samples": "{{count}} obs.",
       "late5_pct": ">5min {{value}}%"
     },
@@ -787,6 +797,7 @@
       "stop_label_no_name": "Stop #{{seq}}",
       "stop_outlier_one": "{{delta}}min more than {{count}} other route's avg",
       "stop_outlier_other": "{{delta}}min more than {{count}} other routes' avg",
+      "stop_outlier_low_confidence": "few observations",
       "close": "Close",
       "empty": "No trip data for this route"
     },
@@ -828,8 +839,10 @@
       "weekday": "Weekday",
       "weekend": "Weekend/Holiday",
       "diff": "Diff",
-      "direction": "Direction"
+      "direction": "Direction",
+      "confidence": "Confidence"
     },
+    "confidence_low_mark": "wide range",
     "direction": {
       "weekend_higher": "Weekend > Weekday",
       "weekday_higher": "Weekday > Weekend"
@@ -861,7 +874,9 @@
       "subtitle": "Y: hour (0–23) · X: date · click to filter",
       "legend_aria": "Show legend",
       "delay_label": "Delay:",
-      "lt_2": "<2 min",
+      "band_lt": "< {{min}} min",
+      "band_range": "{{min}}–{{max}} min",
+      "band_gt": "> {{min}} min",
       "legend_explainer": "· opacity = samples · rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
@@ -876,6 +891,8 @@
       "empty": "No data in this range.",
       "svg_aria": "Daily average delay chart",
       "tooltip_metrics": "avg {{min}} min / {{count}} obs.",
+      "smoothed_tooltip": "7-day avg {{min}} min",
+      "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
       "offender": "Route {{code}} ({{min}} min)"
     }
@@ -949,7 +966,8 @@
       "label": "Admin navigation",
       "agencies": "Agencies",
       "users": "Users",
-      "ops": "Ops"
+      "ops": "Ops",
+      "architecture": "Architecture"
     },
     "ops": {
       "title": "Ops",
@@ -1001,6 +1019,13 @@
       "form_submit_edit": "Update",
       "form_submitting": "Saving...",
       "form_error_feed_url": "Invalid feed URL"
+    },
+    "architecture": {
+      "title": "Architecture",
+      "diagram_title": "Data flow",
+      "docs_title": "Feature docs",
+      "docs_nav_label": "Feature doc list",
+      "docs_empty": "No feature docs found."
     }
   }
 }

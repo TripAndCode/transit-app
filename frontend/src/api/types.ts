@@ -18,6 +18,10 @@ export type RouteSummary = {
   last_seen_at: string | null;
   baseline_avg_sec: number | null;
   baseline_p90_sec: number | null;
+  // Sample count backing the baseline itself (agg_route_stats), independent
+  // of `samples` (today's count) and of `low_confidence` (which judges only
+  // today's count) — null when there is no baseline at all.
+  baseline_samples: number | null;
   deviation_sec: number | null;
   bucket: RouteBucket;
   low_confidence: boolean;
@@ -46,6 +50,15 @@ export type RouteStopProfileRow = {
   samples: number;
   cohort_avg_delay_sec?: number | null;
   cohort_route_count?: number;
+  /** Total observation count backing `cohort_avg_delay_sec` (pooled across
+   *  every route in the cohort) — distinct from `cohort_route_count`, which
+   *  only counts how many DISTINCT routes contributed. */
+  cohort_samples?: number;
+  /** True when `cohort_samples` is too thin to trust `cohort_avg_delay_sec`
+   *  (a lower floor than the route-level LOW_CONFIDENCE_SAMPLES — see
+   *  api.triage.COHORT_LOW_CONFIDENCE_SAMPLES). Independent of `is_outlier`,
+   *  which only gates on `cohort_route_count >= 2`. */
+  cohort_low_confidence?: boolean;
   is_outlier?: boolean;
 };
 
@@ -121,6 +134,11 @@ export type HeatmapProps = {
    *  Optional because clients with cached responses from before the
    *  field was added will still parse correctly. */
   route_codes?: string;
+  /** True when `samples` is too thin to trust `avg_delay_min`/`p90_delay_min`
+   *  at full visual weight (same LOW_CONFIDENCE_SAMPLES floor as the route
+   *  baselines elsewhere). Optional for the same cached-response reason as
+   *  `route_codes`. */
+  low_confidence?: boolean;
 };
 
 export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps> & {
@@ -173,6 +191,12 @@ export type Suggestion = {
 export type TrendDay = {
   date: string;
   avg_min: number;
+  /** Trailing sample-weighted mean over the last (up to 7) OBSERVED days
+   *  ending at this one — sits alongside `avg_min` (not a replacement) to
+   *  make a low-traffic route's noisy day-to-day figure easier to read.
+   *  `null` for week/month-bucketed series (already smoothed by width) and
+   *  for cached responses from before this field existed. */
+  avg_min_smoothed?: number | null;
   samples: number;
   top_offenders: { route_code: string; service_type: string; avg_min: number; samples: number }[];
 };
@@ -359,7 +383,9 @@ export type OverviewMover = {
   route_code: string;
   route_short_name: string | null;
   delta_min: number;
-  delta_pct: number;
+  /** Null when the previous-window average is too close to zero for a
+   *  percentage change to be a meaningful figure (see backend). */
+  delta_pct: number | null;
   /** Avg delay (min) in the current 7-day window. */
   current_avg_min: number;
   /** Avg delay (min) in the prior 7-day window. */

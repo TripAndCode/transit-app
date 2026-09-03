@@ -8,12 +8,7 @@ import type { TFunction } from "i18next";
 import { useRouteTrips, useRouteStopProfile } from "../../api/hooks";
 import { delayColor } from "../../styles/tokens";
 import { Spinner } from "../../components/Spinner";
-
-/** Signed whole-minute delay label via the shared i18n unit key. */
-function signedMin(sec: number, t: TFunction): string {
-  const m = Math.round(sec / 60);
-  return t("common.unit_min_signed", { sign: sec < 0 ? "-" : "+", value: Math.abs(m) });
-}
+import { signedMin } from "./signedMin";
 
 export function RouteDrilldown({
   agencyId,
@@ -102,6 +97,12 @@ export function RouteDrilldown({
                   count: (s.cohort_route_count ?? 1) - 1,
                   delta: Math.round((s.avg_delay_sec - s.cohort_avg_delay_sec) / 60),
                 })}
+                {s.cohort_low_confidence && (
+                  <>
+                    {" "}
+                    ({t("live.drill.stop_outlier_low_confidence")})
+                  </>
+                )}
               </small>
             )}
           </span>

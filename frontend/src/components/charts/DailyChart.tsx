@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
 import type { TrendDay } from "../../api/types";
@@ -21,14 +21,12 @@ export function DailyChart({ days, height = 240 }: Props) {
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  const stats = useMemo(() => {
-    const avgs = days.map((d) => d.avg_min ?? 0);
-    const samples = days.map((d) => d.samples ?? 0);
-    return {
-      maxAvg: Math.max(1, ...avgs),
-      maxSamples: Math.max(1, ...samples),
-    };
-  }, [days]);
+  const avgs = days.map((d) => d.avg_min ?? 0);
+  const samples = days.map((d) => d.samples ?? 0);
+  const stats = {
+    maxAvg: Math.max(1, ...avgs),
+    maxSamples: Math.max(1, ...samples),
+  };
 
   if (!days.length) {
     return (
@@ -44,6 +42,24 @@ export function DailyChart({ days, height = 240 }: Props) {
     const y = padT + innerH - ((d.avg_min ?? 0) / stats.maxAvg) * innerH * 0.65;
     return [x, y] as [number, number];
   });
+  // Trailing 7-day average sits ALONGSIDE the raw line (not a replacement) —
+  // a low-traffic day's noisy raw figure is easier to read against a smooth
+  // reference. Absent entirely for week/month-bucketed series and for
+  // cached responses from before this field existed, so only draw it when
+  // at least one day actually has a value; missing individual days (rare —
+  // see compute_trend_series's docstring) are simply skipped rather than
+  // breaking the line at 0.
+  const smoothedPts = days
+    .map((d, i) =>
+      d.avg_min_smoothed != null
+        ? ([padL + i * stepX, padT + innerH - (d.avg_min_smoothed / stats.maxAvg) * innerH * 0.65] as [
+            number,
+            number,
+          ])
+        : null,
+    )
+    .filter((p): p is [number, number] => p !== null);
+  const hasSmoothed = smoothedPts.length > 0;
 
   return (
     <div style={{ position: "relative", width: "100%", overflowX: "auto" }}>
@@ -78,6 +94,18 @@ export function DailyChart({ days, height = 240 }: Props) {
             />
           );
         })}
+        {/* Trailing 7-day average — drawn under the raw line so the raw
+            line + dots stay the primary, foreground signal. */}
+        {hasSmoothed && (
+          <polyline
+            points={smoothedPts.map((p) => p.join(",")).join(" ")}
+            fill="none"
+            stroke="var(--text-secondary)"
+            strokeWidth="1.5"
+            strokeDasharray="4 3"
+            opacity={0.8}
+          />
+        )}
         {/* Line */}
         <polyline
           points={linePts.map((p) => p.join(",")).join(" ")}
@@ -132,6 +160,23 @@ export function DailyChart({ days, height = 240 }: Props) {
           );
         })}
       </svg>
+      {hasSmoothed && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            color: "var(--text-tertiary)",
+            marginTop: 4,
+          }}
+        >
+          <svg width="16" height="2" aria-hidden="true">
+            <line x1="0" y1="1" x2="16" y2="1" stroke="var(--text-secondary)" strokeWidth="1.5" strokeDasharray="4 3" />
+          </svg>
+          <span>{t("reports.daily.smoothed_label")}</span>
+        </div>
+      )}
       {hover != null && hover < days.length && (
         <div
           style={{
@@ -153,6 +198,11 @@ export function DailyChart({ days, height = 240 }: Props) {
               count: (days[hover].samples ?? 0).toLocaleString(),
             })}
           </div>
+          {days[hover].avg_min_smoothed != null && (
+            <div style={{ color: "var(--text-secondary)" }}>
+              {t("reports.daily.smoothed_tooltip", { min: days[hover].avg_min_smoothed!.toFixed(2) })}
+            </div>
+          )}
           {days[hover].top_offenders?.length > 0 && (
             <div style={{ marginTop: 4, color: "var(--text-secondary)" }}>
               {t("reports.daily.worst_label")}{" "}

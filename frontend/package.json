@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:bundle": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
@@ -13,7 +14,9 @@
     "lint:fix": "eslint . --fix",
     "deadcode": "knip",
     "lint:i18n": "cd .. && node --test tests/frontend/i18n_keys.test.mjs tests/frontend/user_manual_parity.test.mjs",
-    "lint:i18n-strings": "python3 scripts/lint-i18n-strings.py"
+    "lint:i18n-strings": "python3 scripts/lint-i18n-strings.py",
+    "check:entry-chunk": "node scripts/check-entry-chunk.mjs",
+    "test:check-entry-chunk": "cd .. && node --test tests/frontend/check_entry_chunk.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.20",
@@ -21,6 +24,7 @@
     "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.468.0",
     "maplibre-gl": "^4.7.1",
+    "mermaid": "^11.4.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-i18next": "^17.0.8",

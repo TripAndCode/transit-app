@@ -1,7 +1,7 @@
 """Client-disconnect → asyncpg query cancellation, end to end.
 
 The SPA aborts in-flight GETs whenever a filter changes (react-query's
-AbortSignal, threaded through apiGet since PR #43). That only saves work
+AbortSignal, threaded through apiGet). That only saves work
 if the *server* also stops: uvicorn must cancel the request task on the
 TCP disconnect, and asyncpg must translate that CancelledError into a
 server-side query cancellation.

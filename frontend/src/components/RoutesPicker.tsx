@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { routeDisplayName } from "../api/routeDisplayName";
+import type { Route } from "../api/types";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[] };
 type RouteGroup = {
@@ -24,6 +26,35 @@ function variantLabel(v: RouteVariant): string {
   return v.code;
 }
 
+// Module-scope pure function rather than an in-render IIFE: an ordinary
+// CallExpression with an Identifier callee is unambiguously memoized by the
+// React Compiler the same way as any other function call in these
+// components, closing the "does the compiler memoize an inline IIFE the
+// same way" question this ban's residual-risk note used to leave open.
+function buildRouteGroups(data: Route[] | undefined): RouteGroup[] {
+  if (!data) return [];
+  const m = new Map<string, RouteVariant[]>();
+  for (const r of data) {
+    if (!r.route_code) continue;
+    const name = routeDisplayName(r) || r.route_code;
+    const arr = m.get(name) || [];
+    if (!arr.some((v) => v.code === r.route_code)) {
+      arr.push({
+        code: r.route_code,
+        long_name: r.route_long_name,
+        headsigns: r.trip_headsigns ?? [],
+      });
+    }
+    m.set(name, arr);
+  }
+  return Array.from(m, ([name, variants]) => {
+    variants.sort((a, b) => a.code.localeCompare(b.code));
+    const longs = new Set(variants.map((v) => v.long_name?.trim() || ""));
+    const shared = longs.size === 1 ? variants[0].long_name : null;
+    return { name, variants, shared_long_name: shared };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function RoutesPicker({
   selected,
   onChange,
@@ -40,43 +71,28 @@ export function RoutesPicker({
   // raises it instead of silently dropping the tail (search still scans all).
   const [visibleCap, setVisibleCap] = useState(200);
 
-  const groups = useMemo<RouteGroup[]>(() => {
-    if (!data) return [];
-    const m = new Map<string, RouteVariant[]>();
-    for (const r of data) {
-      if (!r.route_code) continue;
-      const name = r.route_short_name || r.route_long_name || r.route_id || r.route_code;
-      const arr = m.get(name) || [];
-      if (!arr.some((v) => v.code === r.route_code)) {
-        arr.push({
-          code: r.route_code,
-          long_name: r.route_long_name,
-          headsigns: r.trip_headsigns ?? [],
-        });
-      }
-      m.set(name, arr);
-    }
-    return Array.from(m, ([name, variants]) => {
-      variants.sort((a, b) => a.code.localeCompare(b.code));
-      const longs = new Set(variants.map((v) => v.long_name?.trim() || ""));
-      const shared = longs.size === 1 ? variants[0].long_name : null;
-      return { name, variants, shared_long_name: shared };
-    }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [data]);
+  const groups: RouteGroup[] = buildRouteGroups(data);
 
-  const filteredGroups = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return groups;
-    return groups
-      .map((g) => {
-        const variants = g.variants.filter((v) => {
-          const blob = (g.name + " " + (v.long_name || "") + " " + v.headsigns.join(" ") + " " + v.code).toLowerCase();
-          return blob.includes(q);
-        });
-        return { ...g, variants };
-      })
-      .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(q));
-  }, [groups, filter]);
+  const filterQuery = filter.trim().toLowerCase();
+  const filteredGroups = filterQuery
+    ? groups
+        .map((g) => {
+          const variants = g.variants.filter((v) => {
+            const blob = (
+              g.name +
+              " " +
+              (v.long_name || "") +
+              " " +
+              v.headsigns.join(" ") +
+              " " +
+              v.code
+            ).toLowerCase();
+            return blob.includes(filterQuery);
+          });
+          return { ...g, variants };
+        })
+        .filter((g) => g.variants.length > 0 || g.name.toLowerCase().includes(filterQuery))
+    : groups;
 
   function toggleCode(code: string) {
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);

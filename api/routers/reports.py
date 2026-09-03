@@ -33,6 +33,7 @@ from pipeline.reports.forecast import (
     summarize_expected_delay_heatmap,
 )
 from pipeline.reports.suggest import compute_suggestion
+from pipeline.stats import annotate_on_time_pct_confidence
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -175,8 +176,13 @@ async def forecast_heatmap(
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
     """
     rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population so a pre-backfill NULL row can't inflate the
+        # denominator without contributing to the numerator (see
+        # pipeline/reports/rankings.py's identical rationale).
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
@@ -242,8 +248,11 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
         "WITH latest AS ("
         "  SELECT MAX(date) AS d FROM agg_route_daily WHERE agency_id = $1"
         ") "
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see forecast_heatmap's identical rationale.
         "SELECT d.date, d.route_code, "
-        "  SUM(d.avg_delay_sec * d.samples) / NULLIF(SUM(d.samples), 0) / 60.0 AS avg_min "
+        "  (SUM(d.sum_delay_sec) FILTER (WHERE d.sum_delay_sec IS NOT NULL)::numeric "
+        "      / NULLIF(SUM(d.samples) FILTER (WHERE d.sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
         "FROM agg_route_daily d, latest "
         "WHERE d.agency_id = $1 AND d.date > latest.d - 7 AND d.date <= latest.d "
         "GROUP BY d.date, d.route_code "
@@ -266,8 +275,11 @@ async def forecast_overview(
     (no dedicated aggregate — the table is small enough to pool on read).
     """
     grid_rows = await conn.fetch(
+        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
+        # same row population — see forecast_heatmap's identical rationale.
         "SELECT dow, hour, "
-        "SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "SUM(samples)::int AS samples "
         "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
@@ -277,7 +289,8 @@ async def forecast_overview(
     route_rows = await conn.fetch(
         "WITH ra AS ("
         "  SELECT route_code, "
-        "    SUM(avg_min * samples) / NULLIF(SUM(samples), 0) AS avg_min, "
+        "    (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+        "        / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
         "    SUM(samples)::int AS samples "
         "  FROM agg_route_hour_dow "
         "  WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
@@ -303,17 +316,24 @@ async def forecast_overview(
     return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
 
 
+# Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
+# export, mirroring the caveat mark frontend/src/components/ReportTable.tsx's
+# fmtConfidence and frontend/src/tabs/ask/RichResult.tsx render for the same
+# signal (a short mark when true, blank when false) rather than the raw
+# Python bool's str() form.
+_LOW_CONFIDENCE_CSV_MARK = "幅あり"
+
 # Column headers used when emitting CSV. Japanese labels for operator-facing
 # downloads. Must match the row tuple shape produced by each compute_*.
 _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "ranking": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
     "ranking_best": ["系統コード", "種別", "平均遅延(分)", "中央値(分)", "p90(分)", "観測数"],
-    "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数"],
+    "on_time": ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "確信度低"],
     "worst_5min": ["系統コード", "種別", "5分超回数", "平均遅延(分)", "観測数"],
     "compare_ranking": ["系統コード", "平日(分)", "土日祝(分)", "差(絶対値)", "差(符号付き)"],
     "dow_weekend": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
     "dow_weekday": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
-    "trend": ["日付", "平均遅延(分)", "観測数", "悪化系統トップ3"],
+    "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
 }
 
 
@@ -327,7 +347,11 @@ def _csv_response(report_type: str, rows: list, ctx: RangeCtx) -> StreamingRespo
     if report_type == "trend":
         for d in rows:
             offenders = "; ".join(o.get("route_code", "") for o in (d.get("top_offenders") or []))
-            w.writerow([d.get("date"), d.get("avg_min"), d.get("samples"), offenders])
+            w.writerow([d.get("date"), d.get("avg_min"), d.get("avg_min_smoothed"), d.get("samples"), offenders])
+    elif report_type == "on_time":
+        for r in rows:
+            *lead, low_confidence = r
+            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else ""])
     else:
         for r in rows:
             w.writerow(list(r))
@@ -369,6 +393,11 @@ async def get_report(
         intent = {"query_type": "ranking", "limit": n, "sort_order": "asc"}
     elif report_type == "on_time":
         rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n)
+        # Appends a `low_confidence` bool (95% Wilson interval too wide to
+        # trust the percentage) as a display-layer annotation — doesn't
+        # change compute_on_time's own 5-tuple contract, so pooling callers
+        # (pipeline.reports.suggest) are unaffected. See pipeline/stats.py.
+        rows = annotate_on_time_pct_confidence(rows)
         intent = {"query_type": "on_time", "limit": n}
     elif report_type == "worst_5min":
         rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
