@@ -19,13 +19,11 @@ type MapLegendProps = {
  * Fixed, translucent-blurred legend badge in the map's top-left corner,
  * matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
  * Not draggable — that stays removed as chrome, not real functionality.
- * Collapsible (added back 2026-07-18: the legend takes up more noticeable
- * map space now the map fills the full viewport height) via a chevron
- * toggle in the header; starts expanded on every mount, no persistence,
- * except below the shared MOBILE_BREAKPOINT_QUERY (see useMediaQuery.ts)
- * where it starts collapsed — on a phone-width first paint the expanded
- * panel otherwise covers nearly the entire map, which is the whole point
- * of this tab (item 28, 2026-08-30).
+ * Collapsible via a chevron toggle in the header; starts expanded on every
+ * mount, no persistence, except below the shared MOBILE_BREAKPOINT_QUERY
+ * (see useMediaQuery.ts) where it starts collapsed, since the expanded
+ * panel would otherwise cover nearly the entire map on a phone-width first
+ * paint, defeating the point of a map-viewing tab.
  * Everything else (click-to-filter, per-band counts, the single-sample-stops
  * checkbox, the size/density key, the no-data key, and the explainer text)
  * stays exactly as before.

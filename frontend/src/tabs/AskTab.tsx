@@ -23,6 +23,7 @@ import {
   useFollowupEnabled,
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
@@ -355,7 +356,7 @@ export function AskTab() {
 
       {/* Responsive CSS for the two-column grid */}
       <style>{`
-        @media (max-width: 640px) {
+        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
           .ask-tab-grid {
             grid-template-columns: 1fr !important;
           }
