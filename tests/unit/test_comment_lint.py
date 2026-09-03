@@ -114,8 +114,31 @@ def test_ignores_a_violation_the_diff_did_not_touch():
 
 
 def test_ignores_a_pre_existing_block_edited_in_place():
+    """Rewriting a line reports it as added while leaving the block's length
+    alone, so the paired removal is what keeps the blame off the diff."""
+
     lines = ["# a", "# b", "# c", "# d", "x = 1"]
-    assert lint.find_violations("x.py", lines, max_block=3, only_lines={3}) == []
+    rewrite = [lint.Hunk(start=3, added=1, removed=1)]
+    found = lint.find_violations("x.py", lines, max_block=3, only_lines={3}, hunks=rewrite)
+    assert found == []
+
+
+def test_reports_a_block_an_insertion_pushed_over_the_limit():
+    """New lines in a block's middle lengthen it just as an append does."""
+
+    lines = ["# a", "# NEW1", "# NEW2", "# b", "# c", "x = 1"]
+    insertion = [lint.Hunk(start=2, added=2, removed=0)]
+    found = lint.find_violations("x.py", lines, max_block=3, only_lines={2, 3}, hunks=insertion)
+    assert rules(found) == [(1, "long-block")]
+
+
+def test_ignores_a_block_already_over_the_limit_before_the_diff():
+    """Appending to a block that was too long leaves it the code's problem."""
+
+    lines = ["# a", "# b", "# c", "# d", "# e", "x = 1"]
+    append = [lint.Hunk(start=5, added=1, removed=0)]
+    found = lint.find_violations("x.py", lines, max_block=3, only_lines={5}, hunks=append)
+    assert found == []
 
 
 def test_reports_a_block_the_diff_pushed_over_the_limit():
@@ -324,3 +347,31 @@ def test_cli_baseline_degrades_outside_a_repository(tmp_path):
     result = run_cli("--root", str(tmp_path), "--baseline")
     assert result.returncode == 0
     assert "skipped" in result.stderr
+
+
+def test_cli_diff_mode_flags_a_block_an_insertion_extended(repository):
+    """A real git diff of a mid-block insertion, end to end."""
+
+    (repository / "mid.py").write_text("# a\n# b\n# c\ncode = 1\n")
+    git(repository, "add", "mid.py")
+    git(repository, "commit", "-qm", "three-line block")
+    assert run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "3").returncode == 0
+
+    (repository / "mid.py").write_text("# a\n# NEW1\n# NEW2\n# b\n# c\ncode = 1\n")
+    git(repository, "commit", "-qam", "two lines inserted mid-block")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "3")
+    assert result.returncode == 2
+    assert "long-block" in result.stdout
+
+
+def test_cli_diff_mode_ignores_a_line_rewritten_in_a_long_block(repository):
+    """A real git diff of an in-place rewrite inside an oversized block."""
+
+    (repository / "long.py").write_text("# a\n# b\n# c\n# d\ncode = 1\n")
+    git(repository, "add", "long.py")
+    git(repository, "commit", "-qm", "block already over a limit of three")
+
+    (repository / "long.py").write_text("# a\n# b\n# changed\n# d\ncode = 1\n")
+    git(repository, "commit", "-qam", "rewrite one line in place")
+    result = run_cli("--root", str(repository), "--diff", "HEAD~1", "--max-block", "3")
+    assert result.returncode == 0, result.stdout

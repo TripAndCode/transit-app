@@ -32,13 +32,22 @@ _XREF = re.compile(
 _LINE_REF = re.compile(r"\blines?\s+\d+", re.IGNORECASE)
 
 _DIFF_FILE = re.compile(r"^\+\+\+ b/(.*)$")
-_DIFF_HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
+_DIFF_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 _LINE_RULES = (
     ("banner", _BANNER, "banner comment"),
     ("comment-xref", _XREF, "reference to another comment"),
     ("line-ref", _LINE_REF, "reference to a line number"),
 )
+
+
+@dataclass(frozen=True)
+class Hunk:
+    """One `git diff -U0` hunk: what it added, and how much it replaced."""
+
+    start: int
+    added: int
+    removed: int
 
 
 @dataclass(frozen=True)
@@ -66,27 +75,38 @@ def _comment_body(line, prefix):
     return None if _PRAGMA.match(body) else body
 
 
-def _diff_caused(pair, only_lines, max_block):
+def _diff_caused(pair, only_lines, max_block, hunks=()):
     """Whether the diff, not the code it landed in, produced this violation.
 
-    A per-line rule is the diff's doing when the diff wrote that line. A long
-    block is the diff's doing when the diff extended its tail and what came
-    before was within the limit: a block already over the limit stays the
-    surrounding code's problem, and a line rewritten in its middle does not
-    lengthen it. Both edits and appends read as added lines in a diff, so the
-    tail is what separates them.
+    A per-line rule is the diff's doing when the diff wrote that line.
+
+    A long block is the diff's doing when the block was within the limit
+    before this diff and is over it now — wherever the new lines landed, tail
+    or middle. A block already too long stays the surrounding code's problem,
+    even if the diff touched it.
+
+    Recovering the earlier length needs the removals, not just the additions:
+    a rewritten line is reported as added while leaving the block the same
+    length, so counting added lines alone understates what was already there
+    and blames the diff for a block it merely edited. Subtracting each
+    overlapping hunk's removals gives the net growth, which is what actually
+    lengthened the block.
     """
     violation, span = pair
     if violation.rule != "long-block":
         return violation.line in only_lines
     span = list(span)
-    if span[-1] not in only_lines:
+    added = sum(1 for number in span if number in only_lines)
+    if not added:
         return False
-    pre_existing = sum(1 for number in span if number not in only_lines)
-    return pre_existing <= max_block
+    removed = sum(
+        hunk.removed for hunk in hunks if hunk.added and hunk.start < span[-1] + 1 and span[0] < hunk.start + hunk.added
+    )
+    previously = len(span) - max(added - removed, 0)
+    return previously <= max_block
 
 
-def find_violations(path, lines, max_block=6, only_lines=None):
+def find_violations(path, lines, max_block=6, only_lines=None, hunks=()):
     """Return policy violations for `lines`, the contents of `path`.
 
     `only_lines`, when given, keeps just the violations anchored on one of
@@ -128,7 +148,7 @@ def find_violations(path, lines, max_block=6, only_lines=None):
                 found.append((Violation(number, rule, message), (number,)))
     close_block()
     if only_lines is not None:
-        found = [pair for pair in found if _diff_caused(pair, only_lines, max_block)]
+        found = [pair for pair in found if _diff_caused(pair, only_lines, max_block, hunks)]
     return sorted((v for v, _ in found), key=lambda v: (v.line, v.rule))
 
 
@@ -150,9 +170,15 @@ def stale_candidates(path, lines, changed, radius=3):
     ]
 
 
-def parse_added_lines(diff_text):
-    """Map each file in a `git diff -U0` to the line numbers it gained."""
-    added = {}
+def parse_hunks(diff_text):
+    """Map each file in a `git diff -U0` to its hunks.
+
+    Each hunk records the new-file lines it added and how many lines it
+    removed. The removals are what separate an insertion from a rewrite: both
+    show up as added lines, but only a rewrite pairs them with a deletion, and
+    only an insertion makes the surrounding block longer.
+    """
+    hunks = {}
     path = None
     for line in diff_text.splitlines():
         header = _DIFF_FILE.match(line)
@@ -161,11 +187,20 @@ def parse_added_lines(diff_text):
             continue
         hunk = _DIFF_HUNK.match(line)
         if hunk and path:
-            start = int(hunk.group(1))
-            count = int(hunk.group(2)) if hunk.group(2) is not None else 1
-            if count:
-                added.setdefault(path, set()).update(range(start, start + count))
-    return added
+            removed = int(hunk.group(2)) if hunk.group(2) is not None else 1
+            start = int(hunk.group(3))
+            count = int(hunk.group(4)) if hunk.group(4) is not None else 1
+            hunks.setdefault(path, []).append(Hunk(start, count, removed))
+    return hunks
+
+
+def parse_added_lines(diff_text):
+    """Map each file in a `git diff -U0` to the line numbers it gained."""
+    return {
+        path: {number for hunk in file_hunks for number in range(hunk.start, hunk.start + hunk.added)}
+        for path, file_hunks in parse_hunks(diff_text).items()
+        if any(hunk.added for hunk in file_hunks)
+    }
 
 
 _AUTO_BASES = ("origin/HEAD", "master", "main")
@@ -295,17 +330,22 @@ def main(argv=None):
             file=sys.stderr,
         )
         return 0
-    added = parse_added_lines(diff)
+    file_hunks = parse_hunks(diff)
 
     hits = []
-    for path, lines_added in sorted(added.items()):
+    for path, hunks in sorted(file_hunks.items()):
+        lines_added = {number for hunk in hunks for number in range(hunk.start, hunk.start + hunk.added)}
+        if not lines_added:
+            continue
         lines = _read(root, path)
         if lines is None:
             continue
         if args.stale:
             hits += [(path, c) for c in stale_candidates(path, lines, lines_added, args.radius)]
         else:
-            hits += [(path, v) for v in find_violations(path, lines, args.max_block, only_lines=lines_added)]
+            hits += [
+                (path, v) for v in find_violations(path, lines, args.max_block, only_lines=lines_added, hunks=hunks)
+            ]
     count = _report(
         hits,
         root,
