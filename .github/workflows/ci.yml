@@ -145,3 +145,4 @@ jobs:
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
         run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term
+
