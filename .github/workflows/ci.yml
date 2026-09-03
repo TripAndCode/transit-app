@@ -60,20 +60,6 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres:
-        image: postgis/postgis:14-3.2
-        env:
-          POSTGRES_USER: transit
-          POSTGRES_PASSWORD: transit
-          POSTGRES_DB: transit
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
       clickhouse:
         image: clickhouse/clickhouse-server:26.3
         env:
@@ -103,25 +89,9 @@ jobs:
 
       # This runner's root filesystem is small and shared with a lot of
       # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
-      # etc.) — reclaim it before anything else runs. Verified locally
-      # (2026-07-27): apt-installing any currently-available pgvector
-      # package for PG 14/pgdg11 (0.8.2, the one version that avoided
-      # forcing a postgresql-14 core upgrade, has since been pruned from
-      # the PGDG pool — only 0.8.3+ remain, and all of them still pull in a
-      # postgresql-14 upgrade as an ordinary `Depends:`, not merely the
-      # `Breaks: postgresql-14-jit-llvm` line the apt error reports; with
-      # apt-mark hold in place, apt refuses outright rather than silently
-      # upgrading) still upgrades postgresql-14 to a build the live-running
-      # PG 14.5 server wasn't compiled against, ABI-mismatching pg_trgm.so
-      # against the running server. So building from source stays the
-      # correct approach for a live-patched container — but it pulls in a
-      # ~1.2GB C toolchain (build-essential, clang-11, llvm-11, git) that,
-      # on top of hundreds of small Postgres data files written by ~750
-      # tests, has been tipping this already-tight disk over into
-      # intermittent `DiskFull` mid-suite. Freeing unused preinstalled
-      # tooling here, plus purging the toolchain right after the build
-      # below, closes that gap without touching the build/version logic
-      # that already works.
+      # etc.). Hundreds of small Postgres data files written by the suite have
+      # tipped this already-tight disk into intermittent `DiskFull` mid-run,
+      # so reclaim the unused tooling before the database starts.
       - name: Free disk space on the runner
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -129,43 +99,10 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
 
-      # postgis/postgis:14-3.2 doesn't ship pgvector; the schema's
-      # `CREATE EXTENSION vector` then errors with UndefinedFile. Build
-      # pgvector from source pinned to a tag known to work with PG 14
-      # contrib (avoids the apt dep cascade where current pgvector
-      # `Breaks: postgresql-14-jit-llvm (< 16)` would upgrade core PG
-      # packages and ABI-mismatch pg_trgm.so → `pg_mblen_unbounded`
-      # symbol errors on `CREATE EXTENSION pg_trgm` in migration 0012).
-      #
-      # The C toolchain needed to build it (build-essential, clang-11,
-      # llvm-11, git — ~1.2GB installed) is purged again immediately after
-      # `make install` copies vector.control/vector.so into place; only
-      # the compiled extension needs to remain for the rest of the job.
-      - name: Build pgvector from source in Postgres service
-        run: |
-          CID=$(docker ps -q --filter ancestor=postgis/postgis:14-3.2 | head -n1)
-          # The container's PG 14 was compiled with LLVM JIT, so PGXS
-          # always pulls a clang-11 bitcode rule even when --no-install
-          # avoided LLVM apt deps. Two-pronged fix: install clang-11 so
-          # the rule succeeds AND override BITCODE_FILES= to skip it
-          # entirely — whichever path the PGXS Makefile.global takes,
-          # the build now reaches `make install` and copies
-          # vector.control to /usr/share/postgresql/14/extension/.
-          docker exec "$CID" sh -c '
-            set -e
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              build-essential git ca-certificates postgresql-server-dev-14 clang-11 llvm-11
-            git clone --depth 1 --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
-            cd /tmp/pgvector
-            make BITCODE_FILES= MODULE_big_BITCODE_FILES=
-            make BITCODE_FILES= MODULE_big_BITCODE_FILES= install
-            test -f /usr/share/postgresql/14/extension/vector.control
-            rm -rf /tmp/pgvector
-            apt-get purge -y build-essential clang-11 llvm-11 git
-            apt-get autoremove -y
-            rm -rf /var/lib/apt/lists/*
-          '
+      - name: Start Postgres from db/Dockerfile
+        uses: ./.github/actions/start-test-postgres
+        with:
+          container-name: transit-ci-db
 
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
