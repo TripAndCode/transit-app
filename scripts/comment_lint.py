@@ -104,6 +104,12 @@ def _diff_caused(pair, only_lines, max_block, hunks=()):
     block and drops another leaves its length alone, so skipping the
     removal-only hunk would credit the diff with growth it did not cause.
 
+    Known limit: a removal is counted as if it had been inside the block, so a
+    diff that deletes or rewrites the line separating two compliant blocks —
+    merging them into one that is over the limit — reads as a block that was
+    already this long and goes unreported. Telling those apart needs the file
+    as it was before the diff, not the hunks' counts.
+
     Recovering the earlier length needs the removals, not just the additions:
     a rewritten line is reported as added while leaving the block the same
     length, so counting added lines alone understates what was already there

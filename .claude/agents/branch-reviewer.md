@@ -45,7 +45,9 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   Then run `python3 <linter> --root <worktree> --diff <merge-base> --warn` as a second
   invocation — the two modes are mutually exclusive — and report what it lists:
   over-long blocks, banners, pointers at other comments, and line-number references
-  the diff introduced. `--warn` keeps it reporting rather than gating. Nothing in this
+  the diff introduced. It does not catch a block the diff formed by deleting the line
+  that separated two shorter ones, so judge that shape yourself where the diff joins
+  neighbouring comments. `--warn` keeps it reporting rather than gating. Nothing in this
   repository runs the linter as a commit or push gate, so this dimension is where
   those four rules are applied; do not assume some other check caught them.
   Judge the rest by what a machine cannot: does each comment still describe what the
