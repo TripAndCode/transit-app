@@ -1,5 +1,5 @@
 import type { CityScene, VehiclePose } from "./cityMapScene";
-import { drawMakiPath, MAKI_VIEWBOX_SIZE, VEHICLE_ICON_PATHS, type VehicleMode } from "./vehicleIcons";
+import { drawVehicleIcon, MAKI_VIEWBOX_SIZE, type VehicleMode } from "./vehicleIcons";
 
 export type RouteColors = { onTime: string; delayed: string };
 export type VehicleDraw = {
@@ -75,13 +75,15 @@ export function drawScene(
     }
   }
 
-  // Badge radius sized so each marker reads as a distinct vehicle glyph (not
-  // a dot) at the hero's usual on-screen scale, targeting a several-dozen-
-  // pixel on-screen marker diameter -- re-tune this constant (not the glyph
-  // fill below it) if the marker ever needs to shrink, since a smaller
-  // glyph inside the same badge goes illegible before the badge itself
-  // looks wrong.
-  const vehicleRadius = strokeScale * 0.02;
+  // Badge radius targets a fixed ~26-32px on-screen diameter (13-16px
+  // radius) so each marker reads as a distinct vehicle glyph, not a dot --
+  // clamped to that CSS-pixel range rather than left as a bare fraction of
+  // `strokeScale`, since the hero canvas is full-bleed with no max-width and
+  // `strokeScale` (the canvas's own width/height) grows unbounded with the
+  // viewport. Re-tune this clamp (not the glyph fill below it) if the
+  // marker ever needs to resize, since a smaller glyph inside the same badge
+  // goes illegible before the badge itself looks wrong.
+  const vehicleRadius = Math.min(Math.max(strokeScale * 0.02, 13), 16);
   // The glyph fills most of the badge, leaving a thin ring of the badge's
   // own color visible around it (like a real map app's vehicle pin).
   const glyphSize = vehicleRadius * 1.7;
@@ -119,7 +121,7 @@ export function drawScene(
     ctx.translate(-MAKI_VIEWBOX_SIZE / 2, -MAKI_VIEWBOX_SIZE / 2);
     ctx.fillStyle = "#fff";
     ctx.beginPath();
-    drawMakiPath(ctx, VEHICLE_ICON_PATHS[mode]);
+    drawVehicleIcon(ctx, mode);
     ctx.fill();
 
     ctx.restore();

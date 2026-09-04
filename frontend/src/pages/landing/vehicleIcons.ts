@@ -58,6 +58,10 @@ function tokenizePath(d: string): PathCommand[] {
  *  and this repo's canvas tests run against a plain recording stub, not a
  *  real browser context. Caller owns `beginPath`/`fill`/`save`/`restore`. */
 export function drawMakiPath(ctx: CanvasRenderingContext2D, d: string): void {
+  replayPathCommands(ctx, tokenizePath(d));
+}
+
+function replayPathCommands(ctx: CanvasRenderingContext2D, commands: PathCommand[]): void {
   let x = 0;
   let y = 0;
   let startX = 0;
@@ -70,7 +74,7 @@ export function drawMakiPath(ctx: CanvasRenderingContext2D, d: string): void {
   let prevCtrlY = 0;
   let prevWasCubic = false;
 
-  for (const { type, args } of tokenizePath(d)) {
+  for (const { type, args } of commands) {
     switch (type) {
       case "M":
       case "m": {
@@ -170,4 +174,21 @@ export function drawMakiPath(ctx: CanvasRenderingContext2D, d: string): void {
         break;
     }
   }
+}
+
+// Each vendored icon's `d` string is fixed at build time -- the per-frame
+// vehicle-draw loop calls `drawVehicleIcon` for every vehicle on every
+// `requestAnimationFrame` tick, so tokenizing the same three strings once
+// here (instead of on every call) avoids re-parsing static path data on a
+// hot animation path.
+const PARSED_VEHICLE_ICON_PATHS: Record<VehicleMode, PathCommand[]> = Object.fromEntries(
+  (Object.entries(VEHICLE_ICON_PATHS) as [VehicleMode, string][]).map(([mode, d]) => [mode, tokenizePath(d)]),
+) as Record<VehicleMode, PathCommand[]>;
+
+/** Replays one of the three vendored vehicle-mode glyphs from its pre-parsed
+ *  command array -- the render loop's per-frame entry point, so it never
+ *  re-tokenizes the static `d` string on the hot path. Caller owns
+ *  `beginPath`/`fill`/`save`/`restore`, same as `drawMakiPath`. */
+export function drawVehicleIcon(ctx: CanvasRenderingContext2D, mode: VehicleMode): void {
+  replayPathCommands(ctx, PARSED_VEHICLE_ICON_PATHS[mode]);
 }
