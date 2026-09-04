@@ -18,6 +18,7 @@ a second, unrelated rate-limiting mechanism bolted on elsewhere.
 
 import os
 import secrets
+from typing import Callable
 
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from limits import parse as _parse_limit
@@ -125,6 +126,12 @@ def copilot_anon_ip_daily_limit() -> int:
     return int(os.environ.get("COPILOT_ANON_IP_DAILY_LIMIT", "80"))
 
 
+_SCOPE_DEFAULT_LIMITS: dict[str, tuple[Callable[[], int], Callable[[], int]]] = {
+    "ask": (ask_anon_daily_limit, ask_anon_ip_daily_limit),
+    "copilot": (copilot_anon_daily_limit, copilot_anon_ip_daily_limit),
+}
+
+
 def anon_quota_enabled() -> bool:
     """Kill switch: True unless ``ASK_ANON_QUOTA_ENABLED`` is falsy.
 
@@ -179,15 +186,17 @@ def check_and_consume_anon_quota(
     Always returns True when :func:`anon_quota_enabled` is False.
 
     ``scope`` namespaces the counted buckets (e.g. ``"ask"`` vs.
-    ``"copilot"``) so independent callers never share a counter. Defaults
-    reproduce today's `/ask` behavior exactly: ``scope="ask"`` and the
-    Ask-specific limits from :func:`ask_anon_daily_limit`/
-    :func:`ask_anon_ip_daily_limit` unless overridden.
+    ``"copilot"``) so independent callers never share a counter, and also
+    picks the scope-appropriate default limits via :data:`_SCOPE_DEFAULT_LIMITS`
+    when ``daily_limit``/``ip_daily_limit`` aren't given explicitly. The
+    default ``scope="ask"`` reproduces today's `/ask` behavior exactly, since
+    both existing callers invoke this positionally with no keyword args.
     """
     if not anon_quota_enabled():
         return True
-    limit = daily_limit if daily_limit is not None else ask_anon_daily_limit()
-    ip_limit = ip_daily_limit if ip_daily_limit is not None else ask_anon_ip_daily_limit()
+    default_limit, default_ip_limit = _SCOPE_DEFAULT_LIMITS[scope]
+    limit = daily_limit if daily_limit is not None else default_limit()
+    ip_limit = ip_daily_limit if ip_daily_limit is not None else default_ip_limit()
     session_item = _parse_limit(f"{limit}/day")
     ip_item = _parse_limit(f"{ip_limit}/day")
     session_id = f"{scope}:sess:{session_key}"
