@@ -967,7 +967,8 @@
     "followup_too_long": "質問が長すぎます。短くしてもう一度お試しください。",
     "followup_rate_limit": "アクセスが集中しています。少し待って再試行してください。",
     "followup_connection": "通信が一時的に途切れました。再試行してください。",
-    "followup_llm_generic": "質問への回答に失敗しました。もう一度お試しください。"
+    "followup_llm_generic": "質問への回答に失敗しました。もう一度お試しください。",
+    "ask_anon_quota_exceeded": "本日の無料AI質問の上限に達しました。ログインすると引き続き質問できます。"
   },
   "admin": {
     "users": {
