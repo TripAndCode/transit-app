@@ -36,6 +36,15 @@ describe("LandingPage", () => {
     expect(cta).toHaveAttribute("href", "/login");
   });
 
+  it("renders a secondary guest link to the real guest-accessible dashboard", () => {
+    renderLanding();
+    const guestLink = screen.getByRole("link", { name: "Continue as a guest" });
+    expect(guestLink).toHaveAttribute("href", "/");
+    // Still exactly one primary sign-in CTA -- the guest link is additive,
+    // not a replacement or a competing same-weight button.
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+  });
+
   it("renders the dashboard-preview shell below the hero", () => {
     renderLanding();
     expect(screen.getByRole("heading", { name: "See what's inside" })).toBeTruthy();

@@ -121,6 +121,23 @@
 .landing-hero__cta:hover { opacity: 0.9; }
 .landing-hero__cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
+/* Secondary, lower-emphasis alternative to the sign-in CTA above -- a plain
+   text link, not a second same-weight button, so there is still exactly one
+   visually dominant default action on the page. */
+.landing-hero__guest-cta {
+  align-self: flex-start;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.85;
+  transition: opacity var(--transition);
+}
+.landing-hero__guest-cta:hover { opacity: 1; }
+.landing-hero__guest-cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 /* Explorer section -- one list, one panel; no second interaction pattern. */
 .landing-explorer {
   max-width: 1040px;
