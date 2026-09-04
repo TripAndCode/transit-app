@@ -5,6 +5,7 @@ import pytest
 
 from api.middleware.ratelimit import (
     ASK_ANON_QUOTA_EXCEEDED_CODE,
+    COPILOT_ANON_QUOTA_EXCEEDED_CODE,
     FREE_LIMIT,
     PRO_LIMIT,
     AnonQuotaContext,
@@ -14,6 +15,9 @@ from api.middleware.ratelimit import (
     ask_anon_ip_daily_limit,
     ask_quota_exceeded_handler,
     check_and_consume_anon_quota,
+    copilot_anon_daily_limit,
+    copilot_anon_ip_daily_limit,
+    copilot_quota_exceeded_handler,
     get_or_issue_anon_session,
     reset_anon_quota_for_tests,
 )
@@ -136,6 +140,65 @@ def test_check_and_consume_kill_switch_disabled_never_blocks(monkeypatch):
     monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "1")
     for _ in range(5):
         assert check_and_consume_anon_quota("session-a", "1.1.1.1") is True
+
+
+def test_ask_and_copilot_scopes_have_independent_buckets(monkeypatch):
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+    monkeypatch.setenv("COPILOT_ANON_DAILY_LIMIT", "3")
+    monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
+    monkeypatch.setenv("COPILOT_ANON_IP_DAILY_LIMIT", "100")
+    reset_anon_quota_for_tests()
+
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="ask") is True
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="ask") is False
+    # exhausting "ask" for this session must not affect the independent "copilot"
+    # bucket, and — with no explicit daily_limit/ip_daily_limit override — the
+    # copilot scope must apply its OWN (looser) limit of 3, not ask's limit of 1.
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="copilot") is True
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="copilot") is True
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="copilot") is True
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="copilot") is False
+
+
+def test_copilot_anon_daily_limit_reads_own_env_var(monkeypatch):
+    monkeypatch.setenv("COPILOT_ANON_DAILY_LIMIT", "42")
+    assert copilot_anon_daily_limit() == 42
+
+
+def test_copilot_anon_daily_limit_default():
+    assert copilot_anon_daily_limit() == 20
+
+
+def test_copilot_anon_ip_daily_limit_default():
+    assert copilot_anon_ip_daily_limit() == 80
+
+
+def test_copilot_anon_ip_daily_limit_reads_own_env_var(monkeypatch):
+    monkeypatch.setenv("COPILOT_ANON_IP_DAILY_LIMIT", "99")
+    assert copilot_anon_ip_daily_limit() == 99
+
+
+@pytest.mark.asyncio
+async def test_copilot_quota_exceeded_handler_returns_429_with_machine_code():
+    resp = await copilot_quota_exceeded_handler(_fake_request("en"), Exception())
+    assert resp.status_code == 429
+    body = json.loads(resp.body)
+    assert body["code"] == COPILOT_ANON_QUOTA_EXCEEDED_CODE
+    assert body["detail"]  # non-empty, user-facing
+
+
+@pytest.mark.asyncio
+async def test_copilot_quota_exceeded_handler_localized_detail():
+    en = json.loads((await copilot_quota_exceeded_handler(_fake_request("en"), Exception())).body)["detail"]
+    ja = json.loads((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body)["detail"]
+    assert en != ja
+
+
+@pytest.mark.asyncio
+async def test_copilot_quota_exceeded_handler_unknown_locale_falls_back_to_ja():
+    body = json.loads((await copilot_quota_exceeded_handler(_fake_request("fr"), Exception())).body)
+    ja_body = json.loads((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body)
+    assert body["detail"] == ja_body["detail"]
 
 
 class _FakeRequest:
