@@ -7,10 +7,16 @@ See ``pipeline.query.copilot_templates`` for the actual interpolation.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
-from pipeline.query.copilot_templates import NO_SIGNAL_TEMPLATE_ID, render_template, templates_for_tab
+from pipeline.query.copilot_templates import (
+    NO_SIGNAL_TEMPLATE_ID,
+    TEMPLATES,
+    render_template,
+    templates_for_tab,
+)
 from pipeline.query.llm_client import get_client
 
 logger = logging.getLogger(__name__)
@@ -49,12 +55,13 @@ async def generate_proactive_insight(
 ) -> dict:
     if not view_payload:
         raise NoInsightAvailable(f"no view_payload for tab={tab!r}")
-    if not templates_for_tab(tab):
+    if not any(t.tab == tab for t in templates_for_tab(tab)):
         raise NoInsightAvailable(f"no templates registered for tab={tab!r}")
 
     tool = _pick_template_tool(tab)
     client = _get_client()
-    message, error = client.chat_completions(
+    message, _error = await asyncio.to_thread(
+        client.chat_completions,
         messages=[
             {
                 "role": "system",
@@ -77,14 +84,18 @@ async def generate_proactive_insight(
             args = json.loads(message.tool_calls[0].function.arguments)
             template_id = args.get("template_id", NO_SIGNAL_TEMPLATE_ID)
             params = args.get("params", {}) or {}
-        except (json.JSONDecodeError, AttributeError, IndexError):
+        except (json.JSONDecodeError, AttributeError, IndexError, TypeError):
             logger.warning("copilot: malformed tool_call, falling back to no_signal")
 
-    try:
-        rendered = render_template(template_id, params, view_payload)
-    except KeyError:
+    if template_id not in TEMPLATES:
         logger.warning("copilot: LLM picked unknown template_id=%r, falling back", template_id)
         rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
+    else:
+        try:
+            rendered = render_template(template_id, params, view_payload)
+        except KeyError:
+            logger.warning("copilot: template render failed for template_id=%r, falling back", template_id)
+            rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
 
     low_confidence = bool(view_payload.get("low_confidence", False))
     return {"text": rendered["text"], "cite": rendered["cite"], "low_confidence": low_confidence}
