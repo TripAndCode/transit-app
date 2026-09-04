@@ -31,6 +31,26 @@ export function isAggregateNotReady(err: unknown): boolean {
   }
 }
 
+/** Machine code the API returns (429) when an anonymous caller has exhausted
+ * their daily Stage-3 LLM-call quota on the Ask flow. Mirrors
+ * api/middleware/ratelimit.py::ASK_ANON_QUOTA_EXCEEDED_CODE. Logged-in callers
+ * are never subject to this quota, so this code can only ever come back for
+ * an unauthenticated request. */
+const ASK_ANON_QUOTA_EXCEEDED_CODE = "ask_anon_quota_exceeded";
+
+/** True when an error is the anonymous Ask daily-quota 429 — a caller-scoped,
+ * resets-tomorrow condition, so the UI should explain it calmly and invite
+ * sign-in rather than show a generic rate-limit banner or offer a retry. */
+export function isAnonAskQuotaExceeded(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 429) return false;
+  try {
+    const parsed = JSON.parse(err.body);
+    return parsed?.code === ASK_ANON_QUOTA_EXCEEDED_CODE;
+  } catch {
+    return false;
+  }
+}
+
 /** GET. Pass react-query's `signal` so in-flight requests are aborted when
  * the query key changes or the consuming component unmounts — without it,
  * rapid filter changes leave orphaned fetches racing each other. */
