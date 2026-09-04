@@ -65,6 +65,9 @@ export function DashboardPreview() {
   useEffect(() => {
     if (prefersReducedMotion) return;
     const intervalId = window.setInterval(() => {
+      // Skip work while the tab is backgrounded, mirroring
+      // useCityMapAnimation's own visibility guard.
+      if (document.hidden) return;
       if (hoveredRef.current) return;
       if (Date.now() - lastInteractionAtRef.current < AUTO_ADVANCE_RESUME_DELAY_MS) return;
       setActiveTab((current) => nextAutoAdvanceTab(current));

@@ -53,9 +53,13 @@ const NAV_LABELS = ["Overview", "Map", "Analysis", "Agencies", "Latest observati
 describe("DashboardPreview", () => {
   beforeEach(() => {
     localStorage.removeItem("transit.sidebarCollapsed");
+    // These tests don't exercise auto-advance; keep it disabled so a real,
+    // unfaked setInterval can't fire mid-test under slow CI.
+    mockMatchMedia(true);
   });
   afterEach(() => {
     localStorage.removeItem("transit.sidebarCollapsed");
+    vi.restoreAllMocks();
   });
 
   it("shows only the real 5 sidebar tabs as peer nav items, with Ask and Help visually distinct", () => {
