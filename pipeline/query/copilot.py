@@ -32,7 +32,21 @@ def _get_client():
 
 def _pick_template_tool(tab: str) -> dict:
     candidates = templates_for_tab(tab)
-    template_ids = [t.id for t in candidates] + [NO_SIGNAL_TEMPLATE_ID]
+    fallback = TEMPLATES[NO_SIGNAL_TEMPLATE_ID]
+    all_candidates = candidates if any(t.id == fallback.id for t in candidates) else [*candidates, fallback]
+    template_ids = [t.id for t in all_candidates]
+
+    # Union each candidate's own param_schema into the tool's params schema, so the
+    # model is bounded by every registered template's declared enum/const params —
+    # not left free to emit arbitrary fields, which would defeat the templates'
+    # own numeric-hallucination-safety contract (see module docstring).
+    params_properties: dict = {}
+    additional_properties_allowed = False
+    for t in all_candidates:
+        params_properties.update(t.param_schema.get("properties", {}))
+        if t.param_schema.get("additionalProperties", True):
+            additional_properties_allowed = True
+
     return {
         "type": "function",
         "function": {
@@ -42,7 +56,11 @@ def _pick_template_tool(tab: str) -> dict:
                 "type": "object",
                 "properties": {
                     "template_id": {"type": "string", "enum": sorted(set(template_ids))},
-                    "params": {"type": "object"},
+                    "params": {
+                        "type": "object",
+                        "properties": params_properties,
+                        "additionalProperties": additional_properties_allowed,
+                    },
                 },
                 "required": ["template_id", "params"],
             },
@@ -87,13 +105,13 @@ async def generate_proactive_insight(
         except (json.JSONDecodeError, AttributeError, IndexError, TypeError):
             logger.warning("copilot: malformed tool_call, falling back to no_signal")
 
-    if template_id not in TEMPLATES:
+    if not any(t.id == template_id for t in templates_for_tab(tab)):
         logger.warning("copilot: LLM picked unknown template_id=%r, falling back", template_id)
         rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
     else:
         try:
             rendered = render_template(template_id, params, view_payload)
-        except KeyError:
+        except (KeyError, TypeError, ValueError):
             logger.warning("copilot: template render failed for template_id=%r, falling back", template_id)
             rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
 
