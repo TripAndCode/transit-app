@@ -5,18 +5,15 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.conftest import TEST_ORIGIN
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture
 async def copilot_app(apply_schema):
-    """Boot the FastAPI app against a real pool with one seeded agency.
-
-    Mirrors ``tests/api/test_api_ask.py``'s ``ask_app`` fixture: the plan's
-    Task 4 test snippet posts straight to a hardcoded ``/api/1/copilot/insight``
-    with no DB wiring, but ``copilot_insight``'s ``agency_id: int =
-    Depends(get_agency)`` always resolves against ``app.state.pool`` and a
-    real row — there is no code path that skips it, mocked LLM call or not.
+    """Mirrors ``ask_app``: ``copilot_insight``'s ``agency_id: int =
+    Depends(get_agency)`` always needs a real pool/row, mocked LLM call or not.
     """
     from api.main import app
 
@@ -57,6 +54,7 @@ async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
         json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -74,9 +72,32 @@ async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
     resp = await client.post(
-        f"/api/{agency_id}/copilot/insight", json={"tab": "overview", "filters": {}, "view_payload": {}}
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {}},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch):
+    """Cross-origin POST to /copilot/insight returns 403 even before reaching the LLM."""
+    client, agency_id = copilot_client
+
+    async def must_not_be_called(tab, filters, view_payload, *, locale="ja"):
+        return {
+            "text": "csrf_guard FAILED — request reached generate_proactive_insight",
+            "cite": "x",
+            "low_confidence": False,
+        }
+
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", must_not_be_called)
+    resp = await client.post(
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {}},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text[:200]}"
 
 
 @pytest.mark.asyncio
@@ -94,6 +115,7 @@ async def test_copilot_insight_enforces_anon_quota(copilot_client, monkeypatch):
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
         json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 429
     assert resp.json()["code"] == "copilot_anon_quota_exceeded"

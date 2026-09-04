@@ -10,13 +10,17 @@ from pydantic import BaseModel
 
 from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import (
+    FREE_LIMIT,
+    PRO_LIMIT,
     AnonCopilotQuotaExceeded,
     anon_ip_key,
     check_and_consume_anon_quota,
     copilot_anon_daily_limit,
     copilot_anon_ip_daily_limit,
     get_or_issue_anon_session,
+    limiter,
 )
+from api.security import csrf_guard
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
@@ -35,6 +39,7 @@ class CopilotInsightResponse(BaseModel):
 
 
 @router.post("/copilot/insight", response_model=CopilotInsightResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def copilot_insight(
     request: Request,
     response: Response,
@@ -43,6 +48,7 @@ async def copilot_insight(
     locale: str = Depends(get_locale),
     user=Depends(get_current_user_optional),
 ):
+    csrf_guard(request)
     if user is None:
         session_key = get_or_issue_anon_session(request, response)
         ip_key = anon_ip_key(request)
