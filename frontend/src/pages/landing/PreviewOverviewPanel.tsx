@@ -46,8 +46,8 @@ export function PreviewOverviewPanel({ agencyKey }: { agencyKey: PreviewAgencyKe
   const onTimePct = routes.length > 0 ? Math.round((routes.filter((r) => r.onTime).length / routes.length) * 100) : 0;
 
   return (
-    <div style={{ padding: 20 }}>
-      <div role="group" aria-label={t("filters.title")} style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+    <div style={{ padding: 16 }}>
+      <div role="group" aria-label={t("filters.title")} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {(["all", "on_time", "delayed"] as const).map((f) => (
           <button
             key={f}
@@ -61,7 +61,7 @@ export function PreviewOverviewPanel({ agencyKey }: { agencyKey: PreviewAgencyKe
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div style={statTile}>
           <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_avg_delay")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>
