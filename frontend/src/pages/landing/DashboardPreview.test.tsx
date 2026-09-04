@@ -1,10 +1,40 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { DashboardPreview } from "./DashboardPreview";
+
+// Mirrors DashboardPreview.tsx's own constants -- kept in sync there rather
+// than imported, since the component doesn't export them (they're an
+// internal implementation detail, not part of its public API).
+const AUTO_ADVANCE_INTERVAL_MS = 4500;
+const AUTO_ADVANCE_RESUME_DELAY_MS = 6000;
+
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches,
+    media: "(prefers-reduced-motion: reduce)",
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList);
+}
+
+/** The flex row holding the sidebar and content column -- the element
+ *  `DashboardPreview` attaches its hover/click/keydown listeners to. Found
+ *  via a stable, always-rendered landmark (`<nav>`) rather than styling, so
+ *  the query survives unrelated markup/style changes. */
+function getPreviewShell(): HTMLElement {
+  const nav = screen.getByRole("navigation", { name: "See what's inside" });
+  const shell = nav.closest("div");
+  if (!shell) throw new Error("expected DashboardPreview's shell <div> ancestor");
+  return shell;
+}
 
 void i18n.changeLanguage("en");
 
@@ -142,5 +172,123 @@ describe("DashboardPreview", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     expect(screen.getByText("How about tomorrow?")).toBeTruthy();
     expect(input).toHaveValue("");
+  });
+});
+
+describe("DashboardPreview auto-advance", () => {
+  beforeEach(() => {
+    localStorage.removeItem("transit.sidebarCollapsed");
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    localStorage.removeItem("transit.sidebarCollapsed");
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("cycles Overview -> Map -> Analysis -> Agencies -> Live on its own when left untouched", () => {
+    mockMatchMedia(false);
+    renderPreview();
+    expect(screen.getByText("Route R1")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByText("On-time route")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByText("Avg delay (min)")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
+  });
+
+  it("pauses while the pointer hovers the preview, and resumes once it leaves", () => {
+    mockMatchMedia(false);
+    renderPreview();
+    const shell = getPreviewShell();
+
+    fireEvent.mouseEnter(shell);
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS * 3);
+    });
+    expect(screen.getByText("Route R1")).toBeTruthy();
+
+    fireEvent.mouseLeave(shell);
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByText("On-time route")).toBeTruthy();
+  });
+
+  it("pauses after a click interaction and resumes once the grace delay elapses", () => {
+    mockMatchMedia(false);
+    renderPreview();
+    const shell = getPreviewShell();
+
+    fireEvent.click(within(shell).getByRole("button", { name: "Collapse sidebar" }));
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    // Still Overview -- the tick right after the click falls inside the
+    // resume-delay grace period, not just inside the auto-advance interval.
+    expect(screen.getByText("Route R1")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_RESUME_DELAY_MS);
+    });
+    expect(screen.getByText("On-time route")).toBeTruthy();
+  });
+
+  it("pauses after a keyboard interaction the same way it does for a click", () => {
+    mockMatchMedia(false);
+    renderPreview();
+    const shell = getPreviewShell();
+
+    fireEvent.keyDown(within(shell).getByRole("button", { name: "Collapse sidebar" }), { key: "Tab" });
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
+    });
+    expect(screen.getByText("Route R1")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_RESUME_DELAY_MS);
+    });
+    expect(screen.getByText("On-time route")).toBeTruthy();
+  });
+
+  it("never auto-advances when the visitor prefers reduced motion", () => {
+    mockMatchMedia(true);
+    renderPreview();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS * 5);
+    });
+    expect(screen.getByText("Route R1")).toBeTruthy();
+  });
+
+  it("resumes the cycle from the top after the visitor opens the Ask CTA and leaves it idle", () => {
+    mockMatchMedia(false);
+    renderPreview();
+    const shell = getPreviewShell();
+
+    fireEvent.click(within(shell).getByRole("button", { name: "Ask" }));
+    expect(screen.getByLabelText("Ask a question")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS + AUTO_ADVANCE_RESUME_DELAY_MS);
+    });
+    expect(screen.getByText("Route R1")).toBeTruthy();
   });
 });
