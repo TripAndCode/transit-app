@@ -16,7 +16,7 @@ export function PreviewNetworkPanel({
   const { t } = useTranslation();
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 16 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11, textTransform: "uppercase" }}>

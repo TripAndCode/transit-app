@@ -36,8 +36,8 @@ export function PreviewAskPanel() {
   }
 
   return (
-    <div style={{ padding: 20, display: "flex", flexDirection: "column", height: "100%", boxSizing: "border-box" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 14 }}>
+    <div style={{ padding: 16, display: "flex", flexDirection: "column", height: "100%", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
         {PREVIEW_ASK_EXCHANGES.map((exchange, i) => (
           <button
             key={exchange.questionKey}
@@ -58,7 +58,7 @@ export function PreviewAskPanel() {
         ))}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
         {messages.length === 0 && (
           <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>{t("landing.preview.ask.empty_hint")}</div>
         )}

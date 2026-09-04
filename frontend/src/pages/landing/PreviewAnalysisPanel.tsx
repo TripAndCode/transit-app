@@ -18,7 +18,7 @@ export function PreviewAnalysisPanel() {
   const [mode, setMode] = useState<AnalysisMode>("trend");
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 16 }}>
       <div
         role="group"
         aria-label={t("map.route_mode.aria_label")}
@@ -28,7 +28,7 @@ export function PreviewAnalysisPanel() {
           border: "1px solid var(--border-soft)",
           borderRadius: 8,
           overflow: "hidden",
-          marginBottom: 20,
+          marginBottom: 14,
         }}
       >
         {(["trend", "hourly"] as const).map((m) => (

@@ -80,10 +80,10 @@ export function DashboardPreview() {
   }
 
   return (
-    <section aria-labelledby="dashboard-preview-heading" style={{ maxWidth: 1040, margin: "0 auto", padding: "56px 24px 80px" }}>
+    <section aria-labelledby="dashboard-preview-heading" style={{ maxWidth: 1040, margin: "0 auto", padding: "40px 24px 64px" }}>
       <h2
         id="dashboard-preview-heading"
-        style={{ margin: "0 0 24px", fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}
+        style={{ margin: "0 0 16px", fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}
       >
         {t("landing.preview.heading")}
       </h2>

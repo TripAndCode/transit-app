@@ -17,8 +17,8 @@ export function PreviewLivePanel() {
   );
 
   return (
-    <div style={{ padding: 20 }}>
-      <div role="group" aria-label={t("live.title")} style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+    <div style={{ padding: 16 }}>
+      <div role="group" aria-label={t("live.title")} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {(["latest", "delay"] as const).map((option) => (
           <button
             key={option}
