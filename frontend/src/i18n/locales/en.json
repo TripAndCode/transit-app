@@ -28,7 +28,8 @@
   "landing": {
     "hero": {
       "title": "What's happening right now — and where it's happening.",
-      "subtitle": "Live vehicle positions, delay analysis, and network comparisons for every agency you track."
+      "subtitle": "Live vehicle positions, delay analysis, and network comparisons for every agency you track.",
+      "guest_cta": "Continue as a guest"
     },
     "explorer": {
       "heading": "See what's inside",
