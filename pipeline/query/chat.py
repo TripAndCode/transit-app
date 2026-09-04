@@ -37,6 +37,7 @@ import asyncpg
 import clickhouse_connect
 from fastapi import HTTPException
 
+from api.middleware.ratelimit import AnonAskQuotaExceeded, AnonQuotaContext, check_and_consume_anon_quota
 from api.range import RangeCtx
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
@@ -181,6 +182,16 @@ def _get_client():
     return get_client()
 
 
+def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
+    """Consume one unit of the anon LLM-call quota, or raise if exhausted.
+
+    Shared by both real LLM-invocation sites in :func:`chat_with_tools` so
+    they can't drift apart from each other.
+    """
+    if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
+        raise AnonAskQuotaExceeded()
+
+
 async def _dispatch_and_respond(
     name: str,
     args: dict,
@@ -265,6 +276,7 @@ async def chat_with_tools(
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
+    anon_quota: AnonQuotaContext | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -302,6 +314,16 @@ async def chat_with_tools(
     it for a continuation phrase would return whichever answer was last
     cached for that exact text — ignoring this conversation's actual prior
     turn — instead of the history-aware answer this parameter exists to get.
+
+    ``anon_quota``, when set by the API layer for an unauthenticated caller,
+    is checked and consumed immediately around each of this function's two
+    actual LLM-invocation sites below (never at the build-mode short-circuit
+    or an intent-cache hit, both of which skip the LLM entirely, and never
+    when ``None`` — i.e. a logged-in caller). Exhaustion raises
+    :class:`~api.middleware.ratelimit.AnonAskQuotaExceeded`, which this
+    function does not catch — it propagates out to the API layer the same
+    way an ``asyncpg.exceptions.UndefinedTableError`` does, so a registered
+    FastAPI exception handler can turn it into a machine-readable response.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -582,6 +604,9 @@ async def chat_with_tools(
             )
 
         # Stage 2: question is new — call LLM to get the intent signature.
+        # The anon quota gates the actual LLM call, not the cache pre-hit
+        # above (which never reaches here) — see this function's docstring.
+        _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
@@ -714,8 +739,10 @@ async def chat_with_tools(
         )
 
     # -----------------------------------------------------------------------
-    # FLAG-OFF path: byte-identical to Phase ①. No cache reads or writes.
+    # FLAG-OFF path: same tool-calling flow as Phase ① (no cache reads/
+    # writes), gated by the anon-quota check above when one is set.
     # -----------------------------------------------------------------------
+    _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate

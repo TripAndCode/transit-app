@@ -27,7 +27,7 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.ratelimit import limiter
+from api.middleware.ratelimit import AnonAskQuotaExceeded, ask_quota_exceeded_handler, limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
@@ -198,6 +198,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
 # on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
+# An anonymous caller who exhausted today's free Stage-3 (LLM) Ask quota gets
+# a 429 with a machine-readable code distinct from both the generic
+# RateLimitExceeded response above and an opaque 500 — see
+# api/middleware/ratelimit.py's anon-quota section.
+app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
 #   StarletteSessionMiddleware  (Authlib needs request.session)

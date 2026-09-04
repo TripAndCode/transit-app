@@ -17,11 +17,18 @@ from datetime import timedelta
 from typing import Any, cast
 
 import clickhouse_connect
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
+from api.middleware.ratelimit import (
+    FREE_LIMIT,
+    PRO_LIMIT,
+    AnonQuotaContext,
+    anon_ip_key,
+    get_or_issue_anon_session,
+    limiter,
+)
 from api.range import (
     DEFAULT_RANGE_DAYS,
     MAX_RANGE_DAYS,
@@ -127,11 +134,13 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask(
     request: Request,
+    response: Response,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ch=Depends(get_ch),
     locale: str = Depends(get_locale),
+    user=Depends(get_current_user_optional),
 ):
     """Answer a natural-language question via tool-use.
 
@@ -147,6 +156,19 @@ async def ask(
     if not body.question or not body.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
+
+    # Anonymous callers (no session) get a signed httpOnly session cookie
+    # (issued here on their first request if not already present) plus the
+    # per-IP backstop key, threaded through to chat_with_tools so the daily
+    # LLM-call quota can be checked/consumed right at the Stage-3 LLM
+    # invocation — never here, so a Stage 1/2 (rules/embedding) resolution
+    # below never touches it. Logged-in users are never subject to it.
+    anon_quota = None
+    if user is None:
+        anon_quota = AnonQuotaContext(
+            session_key=get_or_issue_anon_session(request, response),
+            ip_key=anon_ip_key(request),
+        )
 
     ctx_dict = {
         "from": ctx.from_date.isoformat(),
@@ -287,6 +309,7 @@ async def ask(
             history=history,
             ch=ch,
             force_tool_call=force_tool_call,
+            anon_quota=anon_quota,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
