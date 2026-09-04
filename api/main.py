@@ -43,6 +43,7 @@ from api.routers.ask_dashboard import router as ask_dashboard_router
 from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
+from api.routers.copilot import router as copilot_router
 from api.routers.debug import router as debug_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
@@ -209,9 +210,8 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # RateLimitExceeded response above and an opaque 500 — see
 # api/middleware/ratelimit.py's anon-quota section.
 app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
-# Pre-registers the 429 mapping for the Copilot proactive-insight endpoint's
-# quota exception, added in a follow-up change; harmless no-op until that
-# endpoint exists and can raise it.
+# Maps the anon-quota exception raised by POST /copilot/insight
+# (api/routers/copilot.py) to a localized 429, mirroring the Ask mapping above.
 app.add_exception_handler(AnonCopilotQuotaExceeded, copilot_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
@@ -264,6 +264,7 @@ app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(copilot_router)
 app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(me_router)
