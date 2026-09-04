@@ -61,6 +61,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         return {
             "answer": "テスト回答",
@@ -247,6 +248,7 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["rag_examples"] = rag_examples
         captured["force_tool_call"] = force_tool_call
@@ -284,6 +286,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -341,6 +344,7 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -388,6 +392,7 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -437,6 +442,7 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -529,6 +535,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -583,6 +590,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
+        anon_quota=None,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
@@ -611,3 +619,227 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     assert row is not None
     assert row["question"] == "なにか珍しい質問XYZ"
     assert row["router_stage"] == "llm"
+
+
+# ---------------------------------------------------------------------------
+# Anonymous Ask LLM-call daily quota (item 67)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_anon_quota():
+    """Isolate the module-level in-memory anon-quota buckets between tests
+    in this file — several tests below deliberately exhaust a low limit."""
+    from api.middleware.ratelimit import reset_anon_quota_for_tests
+
+    reset_anon_quota_for_tests()
+    yield
+    reset_anon_quota_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_anon_session_cookie_issued_on_first_anonymous_request(ask_client, monkeypatch):
+    """An anonymous POST /ask gets a signed httpOnly anon-session cookie on
+    its first request, regardless of which stage answers it."""
+    from api.middleware.ratelimit import ASK_ANON_SESSION_COOKIE_NAME
+
+    client, agency_id = ask_client
+
+    async def fake_chat(question, ctx, conn, agency_id, **kwargs):
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "何か珍しい質問ですABC123"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert ASK_ANON_SESSION_COOKIE_NAME in set_cookie
+    assert "HttpOnly" in set_cookie
+
+
+@pytest.mark.asyncio
+async def test_anon_session_cookie_reused_across_requests(ask_client, monkeypatch):
+    """The anon-session cookie set on a first request is reused — same
+    session_key threaded into chat_with_tools, no fresh Set-Cookie — on a
+    second request from the same client."""
+    client, agency_id = ask_client
+    captured = []
+
+    async def fake_chat(question, ctx, conn, agency_id, **kwargs):
+        captured.append(kwargs.get("anon_quota"))
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp1 = await client.post(f"/api/{agency_id}/ask", json={"question": "質問その1"}, headers={"Origin": TEST_ORIGIN})
+    assert resp1.status_code == 200
+    assert "set-cookie" in resp1.headers
+
+    resp2 = await client.post(f"/api/{agency_id}/ask", json={"question": "質問その2"}, headers={"Origin": TEST_ORIGIN})
+    assert resp2.status_code == 200
+    # httpx's AsyncClient persists + resends cookies across requests made on
+    # the same client instance, so the cookie shouldn't need reissuing.
+    assert "set-cookie" not in resp2.headers
+
+    assert len(captured) == 2
+    assert captured[0] is not None and captured[1] is not None
+    assert captured[0].session_key == captured[1].session_key
+
+
+@pytest.mark.asyncio
+async def test_anon_quota_falls_back_sanely_with_no_cookie(ask_client, monkeypatch):
+    """A caller that never sends the anon-session cookie back (e.g. cookies
+    disabled) still gets served normally — a fresh session is minted for
+    that single request rather than the call failing."""
+    client, agency_id = ask_client
+    captured = []
+
+    async def fake_chat(question, ctx, conn, agency_id, **kwargs):
+        captured.append(kwargs.get("anon_quota"))
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    # A fresh client (per-test `ask_client` fixture) has never received an
+    # anon-session cookie — this simulates a client that drops cookies.
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "クッキーなしの質問"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured[0] is not None
+    assert isinstance(captured[0].session_key, str) and captured[0].session_key
+
+
+@pytest.mark.asyncio
+async def test_logged_in_caller_bypasses_anon_quota(ask_client, monkeypatch):
+    """A logged-in caller is never subject to the anon quota, and never
+    gets an anon-session cookie issued, even across many calls."""
+    from api.deps import get_current_user_optional
+    from api.main import app
+    from api.middleware.ratelimit import ASK_ANON_SESSION_COOKIE_NAME
+    from api.security import User
+
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+
+    client, agency_id = ask_client
+    fake_user = User(user_id=1, email="t@test", name="T", avatar_url=None, role="user", suspended_at=None)
+    app.dependency_overrides[get_current_user_optional] = lambda: fake_user
+
+    captured = []
+
+    async def fake_chat(question, ctx, conn, agency_id, **kwargs):
+        captured.append(kwargs.get("anon_quota"))
+        return {"answer": "stub", "tool_call": None, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    try:
+        for _ in range(3):  # more than ASK_ANON_DAILY_LIMIT=1
+            resp = await client.post(
+                f"/api/{agency_id}/ask", json={"question": "質問"}, headers={"Origin": TEST_ORIGIN}
+            )
+            assert resp.status_code == 200
+            assert ASK_ANON_SESSION_COOKIE_NAME not in resp.headers.get("set-cookie", "")
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+    assert captured and all(c is None for c in captured)
+
+
+@pytest.mark.asyncio
+async def test_stage1_rule_hit_never_touches_anon_quota(ask_client, monkeypatch):
+    """A deterministic rule-hit question never calls chat_with_tools — and
+    therefore never consumes the anon LLM-call quota — even when asked more
+    times than the configured daily limit."""
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+    client, agency_id = ask_client
+
+    async def must_not_be_called(*a, **kw):
+        raise AssertionError("chat_with_tools should not be called on rule-hit")
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", must_not_be_called)
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
+            "VALUES ($1, '国道線(1021)', 'A1 国道線')",
+            agency_id,
+        )
+    await pool.close()
+
+    for _ in range(3):  # more than ASK_ANON_DAILY_LIMIT=1
+        resp = await client.post(
+            f"/api/{agency_id}/ask",
+            json={"question": "どんな路線がある？"},
+            headers={"Origin": TEST_ORIGIN},
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("router_stage") == "rules"
+
+
+@pytest.mark.asyncio
+async def test_anonymous_caller_over_daily_limit_gets_429_with_code(ask_client, monkeypatch):
+    """End-to-end: once an anonymous caller's daily Stage-3 LLM quota is
+    exhausted, the NEXT call gets a distinct 429 + machine-readable code —
+    not the generic slowapi RateLimitExceeded body, not a 200 degrade.
+
+    Exercises the REAL chat_with_tools (not mocked), so the quota check
+    inside it actually runs; only the LLM provider call itself is faked —
+    mirrors tests/query/test_chat_null_args.py's ``_FakeClient`` pattern.
+    """
+    from types import SimpleNamespace
+
+    from pipeline.query import chat as chat_module
+
+    client, agency_id = ask_client
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+    monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
+
+    class _FakeClient:
+        def chat_completions(self, **kwargs):
+            func = SimpleNamespace(name="capabilities", arguments="{}")
+            call = SimpleNamespace(function=func, id="call_1", type="function")
+            return SimpleNamespace(content=None, tool_calls=[call]), None
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp1 = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "何ができますか？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp1.status_code == 200
+    assert resp1.json()["tool_call"]["name"] == "capabilities"
+
+    resp2 = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "他に何かできますか？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp2.status_code == 429, f"expected 429, got {resp2.status_code}: {resp2.text[:200]}"
+    data = resp2.json()
+    assert data["code"] == "ask_anon_quota_exceeded"
