@@ -26,6 +26,17 @@ def test_overview_top_delay_route_interpolates_only_payload_numbers():
         assert match in payload_numbers, f"unexplained number {match!r} in {rendered['text']!r}"
 
 
+def test_overview_top_delay_route_shows_down_when_delay_improved():
+    payload = {
+        **OVERVIEW_PAYLOAD,
+        "headline": {**OVERVIEW_PAYLOAD["headline"], "delta_pct": -12.3},
+    }
+    rendered = render_template("overview_top_delay_route", {}, payload)
+    assert "down 12.3%" in rendered["text"]
+    assert "up" not in rendered["text"]
+    assert "-12.3" not in rendered["text"]
+
+
 def test_no_signal_template_has_no_numbers():
     rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, OVERVIEW_PAYLOAD)
     import re
@@ -41,3 +52,12 @@ def test_unknown_template_id_raises():
 def test_overview_top_delay_route_requires_top_delayed_routes():
     with pytest.raises(KeyError):
         render_template("overview_top_delay_route", {}, {"headline": OVERVIEW_PAYLOAD["headline"]})
+
+
+def test_overview_top_delay_route_requires_nonempty_routes():
+    payload = {
+        "headline": OVERVIEW_PAYLOAD["headline"],
+        "top_delayed": {"routes": [], "delayed_count": 0},
+    }
+    with pytest.raises(KeyError):
+        render_template("overview_top_delay_route", {}, payload)

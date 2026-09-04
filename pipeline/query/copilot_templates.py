@@ -42,10 +42,11 @@ def _render_overview_top_delay_route(params: dict, payload: dict) -> RenderedIns
     top = routes[0]
     headline = payload["headline"]
     name = top["route_short_name"] or top["route_code"]
+    direction = "up" if headline["delta_pct"] >= 0 else "down"
     text = (
         f"Route {name} is running the longest average delay right now, "
         f"at {top['avg_min']:g} min. Across all routes the average is "
-        f"{headline['avg_min']:g} min this week, up {headline['delta_pct']:g}% "
+        f"{headline['avg_min']:g} min this week, {direction} {abs(headline['delta_pct']):g}% "
         f"from the {headline['baseline_avg_min']:g} min baseline "
         f"({payload['top_delayed']['delayed_count']} routes currently delayed)."
     )
