@@ -403,3 +403,24 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   the same command against the full `tests/api/` directory (240 passed, 98
   skipped, zero failures — confirms no regression), and `poetry run ruff
   check`/`poetry run mypy` (both full-repo) — all clean. (PR #pending)
+- 2026-09-05: Item 74 pass-1 targeted re-verification — both reviewer groups
+  confirmed their prior Majors (missing `csrf_guard`, missing
+  `@limiter.limit`) and the fixture-docstring Minor fully resolved with no
+  new edge case. The perf/practices/comments/alternatives group's fresh pass
+  over the current diff surfaced two new Minors, both stale comments made
+  stale by this diff itself: `api/main.py`'s comment above the
+  `AnonCopilotQuotaExceeded` handler registration still said the Copilot
+  endpoint didn't exist yet and the handler was a no-op, which stopped being
+  true the moment this diff registered the router — reworded to state the
+  handler now actually maps `POST /copilot/insight`'s anon-quota exception to
+  a 429. `api/routers/copilot.py`'s module docstring pointed at
+  `docs/superpowers/specs/2026-09-04-ai-copilot-side-panel-design.md`, which
+  `git ls-files` confirms is untracked (nothing under `docs/superpowers/` is
+  tracked) and doesn't even exist in this worktree — replaced with the
+  durable "why" (canned-template rendering needs no RAG grounding or answer
+  verification, unlike `/ask`) stated inline instead of via an external
+  pointer. Verified with `make test
+  DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
+  PYTEST_ADDOPTS="tests/api/test_api_copilot.py -v"` (4/4 passed), `poetry
+  run ruff check`, and `poetry run mypy` (both full-repo) — all clean. Pass 1
+  is now fully clean; proceeding to the mandatory pass 2. (PR #pending)

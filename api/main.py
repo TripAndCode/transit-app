@@ -210,9 +210,8 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # RateLimitExceeded response above and an opaque 500 — see
 # api/middleware/ratelimit.py's anon-quota section.
 app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
-# Pre-registers the 429 mapping for the Copilot proactive-insight endpoint's
-# quota exception, added in a follow-up change; harmless no-op until that
-# endpoint exists and can raise it.
+# Maps the anon-quota exception raised by POST /copilot/insight
+# (api/routers/copilot.py) to a localized 429, mirroring the Ask mapping above.
 app.add_exception_handler(AnonCopilotQuotaExceeded, copilot_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):

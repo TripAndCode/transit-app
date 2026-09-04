@@ -1,8 +1,9 @@
 """Copilot proactive-insight endpoint.
 
 See ``pipeline.query.copilot`` for the template-selection-only LLM call this
-wraps, and ``docs/superpowers/specs/2026-09-04-ai-copilot-side-panel-design.md``
-for the "why" behind the request/response shape.
+wraps: it renders a canned template filled with numbers pulled from the
+caller's own view payload, never free-form user text, which is why this
+route needs no RAG grounding or answer verification unlike ``/ask``.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
