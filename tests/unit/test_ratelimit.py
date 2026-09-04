@@ -14,6 +14,7 @@ from api.middleware.ratelimit import (
     ask_anon_ip_daily_limit,
     ask_quota_exceeded_handler,
     check_and_consume_anon_quota,
+    copilot_anon_daily_limit,
     get_or_issue_anon_session,
     reset_anon_quota_for_tests,
 )
@@ -136,6 +137,24 @@ def test_check_and_consume_kill_switch_disabled_never_blocks(monkeypatch):
     monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "1")
     for _ in range(5):
         assert check_and_consume_anon_quota("session-a", "1.1.1.1") is True
+
+
+def test_ask_and_copilot_scopes_have_independent_buckets(monkeypatch):
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+    monkeypatch.setenv("COPILOT_ANON_DAILY_LIMIT", "1")
+    monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
+    monkeypatch.setenv("COPILOT_ANON_IP_DAILY_LIMIT", "100")
+    reset_anon_quota_for_tests()
+
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="ask") is True
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="ask") is False
+    # exhausting "ask" for this session must not affect the independent "copilot" bucket
+    assert check_and_consume_anon_quota("sess-1", "1.2.3.4", scope="copilot") is True
+
+
+def test_copilot_anon_daily_limit_reads_own_env_var(monkeypatch):
+    monkeypatch.setenv("COPILOT_ANON_DAILY_LIMIT", "42")
+    assert copilot_anon_daily_limit() == 42
 
 
 class _FakeRequest:

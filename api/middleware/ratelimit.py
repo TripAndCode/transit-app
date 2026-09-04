@@ -112,6 +112,19 @@ def ask_anon_ip_daily_limit() -> int:
     return int(os.environ.get("ASK_ANON_IP_DAILY_LIMIT", "20"))
 
 
+def copilot_anon_daily_limit() -> int:
+    """Per-anon-session daily cap on proactive Copilot insight calls
+    (``COPILOT_ANON_DAILY_LIMIT``). Looser than the Ask default since each
+    call is a cheap template-selection call, not a full RAG answer.
+    """
+    return int(os.environ.get("COPILOT_ANON_DAILY_LIMIT", "20"))
+
+
+def copilot_anon_ip_daily_limit() -> int:
+    """Per-IP daily backstop for Copilot insight calls (``COPILOT_ANON_IP_DAILY_LIMIT``)."""
+    return int(os.environ.get("COPILOT_ANON_IP_DAILY_LIMIT", "80"))
+
+
 def anon_quota_enabled() -> bool:
     """Kill switch: True unless ``ASK_ANON_QUOTA_ENABLED`` is falsy.
 
@@ -143,7 +156,14 @@ def reset_anon_quota_for_tests() -> None:
     _anon_quota_strategy = FixedWindowRateLimiter(_anon_quota_storage)
 
 
-def check_and_consume_anon_quota(session_key: str, ip_key: str) -> bool:
+def check_and_consume_anon_quota(
+    session_key: str,
+    ip_key: str,
+    *,
+    scope: str = "ask",
+    daily_limit: int | None = None,
+    ip_daily_limit: int | None = None,
+) -> bool:
     """Atomically test-then-consume one unit from both the per-session and
     per-IP daily anon LLM-call quotas.
 
@@ -157,13 +177,21 @@ def check_and_consume_anon_quota(session_key: str, ip_key: str) -> bool:
     nothing else can run in between on a single-threaded event loop.
 
     Always returns True when :func:`anon_quota_enabled` is False.
+
+    ``scope`` namespaces the counted buckets (e.g. ``"ask"`` vs.
+    ``"copilot"``) so independent callers never share a counter. Defaults
+    reproduce today's `/ask` behavior exactly: ``scope="ask"`` and the
+    Ask-specific limits from :func:`ask_anon_daily_limit`/
+    :func:`ask_anon_ip_daily_limit` unless overridden.
     """
     if not anon_quota_enabled():
         return True
-    session_item = _parse_limit(f"{ask_anon_daily_limit()}/day")
-    ip_item = _parse_limit(f"{ask_anon_ip_daily_limit()}/day")
-    session_id = f"sess:{session_key}"
-    ip_id = f"ip:{ip_key}"
+    limit = daily_limit if daily_limit is not None else ask_anon_daily_limit()
+    ip_limit = ip_daily_limit if ip_daily_limit is not None else ask_anon_ip_daily_limit()
+    session_item = _parse_limit(f"{limit}/day")
+    ip_item = _parse_limit(f"{ip_limit}/day")
+    session_id = f"{scope}:sess:{session_key}"
+    ip_id = f"{scope}:ip:{ip_key}"
     if not _anon_quota_strategy.test(session_item, session_id):
         return False
     if not _anon_quota_strategy.test(ip_item, ip_id):
@@ -257,3 +285,24 @@ async def ask_quota_exceeded_handler(request: Request, exc: Exception) -> JSONRe
     locale = get_locale(request)
     detail = _ANON_QUOTA_MESSAGE.get(locale, _ANON_QUOTA_MESSAGE["ja"])
     return JSONResponse(status_code=429, content={"detail": detail, "code": ASK_ANON_QUOTA_EXCEEDED_CODE})
+
+
+COPILOT_ANON_QUOTA_EXCEEDED_CODE = "copilot_anon_quota_exceeded"
+
+_COPILOT_ANON_QUOTA_MESSAGE = {
+    "ja": "本日の無料AIコパイロットの上限に達しました。時間をおいて再度お試しください。",
+    "en": "Today's free AI Copilot limit has been reached. Please try again later.",
+}
+
+
+class AnonCopilotQuotaExceeded(Exception):
+    """Raised when an anonymous caller's daily Copilot-insight quota is exhausted."""
+
+
+async def copilot_quota_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Map :class:`AnonCopilotQuotaExceeded` to a localized 429 (mirrors ``ask_quota_exceeded_handler`` exactly)."""
+    from api.deps import get_locale
+
+    locale = get_locale(request)
+    detail = _COPILOT_ANON_QUOTA_MESSAGE.get(locale, _COPILOT_ANON_QUOTA_MESSAGE["ja"])
+    return JSONResponse(status_code=429, content={"detail": detail, "code": COPILOT_ANON_QUOTA_EXCEEDED_CODE})
