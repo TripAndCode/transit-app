@@ -424,3 +424,20 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   PYTEST_ADDOPTS="tests/api/test_api_copilot.py -v"` (4/4 passed), `poetry
   run ruff check`, and `poetry run mypy` (both full-repo) — all clean. Pass 1
   is now fully clean; proceeding to the mandatory pass 2. (PR #pending)
+- 2026-09-05: Item 74 pass 2 (fresh independent manifest/dispatch, same
+  head) — zero Major findings from either reviewer group. The
+  bugs/logic/consistency/security group re-confirmed both pass-1 Majors
+  (csrf_guard, rate limiter) remain correctly in place with no regression.
+  The perf/practices/comments/alternatives group found the two pass-1
+  comment fixes now read correctly, and raised one Minor: the anonymous-quota
+  check block (mint session, get IP key, check-and-consume, raise-on-exceeded)
+  is now hand-copied a third time across `ask.py`, `conversations.py`, and
+  this diff's `copilot.py` — the same copy-pasted sequence whose omissions
+  already caused two independent Majors earlier in this feature arc (item
+  73's scope-blind default-limit bug, item 74's own missing rate-limiter/CSRF
+  guard this pass). Deferred rather than fixed here: extracting a shared
+  `enforce_anon_quota(...)` helper in `api/middleware/ratelimit.py` would
+  touch `ask.py`/`conversations.py` too, both out of this item's Task-4 scope
+  and already merged/reviewed independently — a good candidate for its own
+  future backlog item, not a blocking fix for this one. Both required
+  `/review-branch` passes are now complete. (PR #pending)
