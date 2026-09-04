@@ -1,13 +1,19 @@
 import type { CityScene, VehiclePose } from "./cityMapScene";
+import { drawVehicleIcon, MAKI_VIEWBOX_SIZE, type VehicleMode } from "./vehicleIcons";
 
 export type RouteColors = { onTime: string; delayed: string };
-export type VehicleDraw = { pose: VehiclePose; colorVar: "--accent" | "--color-warning" };
+export type VehicleDraw = {
+  pose: VehiclePose;
+  colorVar: "--accent" | "--color-warning";
+  mode: VehicleMode;
+};
 
 /** Paints one frame of the schematic city scene: blocks, park, river, the
  *  two metro-style routes with their station dots, then every vehicle
- *  marker on top, oriented along its direction of travel. Takes plain
- *  pixel `width`/`height` (already dpr-scaled by the caller via
- *  `ctx.setTransform`) and multiplies the scene's normalized [0,1]
+ *  marker on top as an upright, mode-specific Maki glyph badge (never
+ *  rotated to face its direction of travel -- see the per-vehicle comment
+ *  below). Takes plain pixel `width`/`height` (already dpr-scaled by the
+ *  caller via `ctx.setTransform`) and multiplies the scene's normalized [0,1]
  *  coordinates by them, so this function has no dependency on the actual
  *  canvas element -- callable against any 2D-context-shaped object, which
  *  is what makes it unit-testable with a plain recording stub. */
@@ -69,37 +75,54 @@ export function drawScene(
     }
   }
 
-  const vehicleRadius = strokeScale * 0.011;
-  for (const { pose, colorVar } of vehicles) {
+  // Badge radius targets a fixed ~26-32px on-screen diameter (13-16px
+  // radius) so each marker reads as a distinct vehicle glyph, not a dot --
+  // clamped to that CSS-pixel range rather than left as a bare fraction of
+  // `strokeScale`, since the hero canvas is full-bleed with no max-width and
+  // `strokeScale` (the canvas's own width/height) grows unbounded with the
+  // viewport. Re-tune this clamp (not the glyph fill below it) if the
+  // marker ever needs to resize, since a smaller glyph inside the same badge
+  // goes illegible before the badge itself looks wrong.
+  const vehicleRadius = Math.min(Math.max(strokeScale * 0.02, 13), 16);
+  // The glyph fills most of the badge, leaving a thin ring of the badge's
+  // own color visible around it (like a real map app's vehicle pin).
+  const glyphSize = vehicleRadius * 1.7;
+  const glyphScale = glyphSize / MAKI_VIEWBOX_SIZE;
+
+  for (const { pose, colorVar, mode } of vehicles) {
     const color = colorVar === "--accent" ? colors.onTime : colors.delayed;
     ctx.save();
     ctx.translate(pose.x * width, pose.y * height);
-    ctx.rotate(pose.angleRad);
+    // Deliberately no ctx.rotate(pose.angleRad) here: the glyph stays
+    // upright regardless of travel direction, matching how real map apps
+    // (Google Maps, Citymapper) render vehicle markers -- a rotated glyph
+    // reads as broken, not "in motion."
 
-    // Soft glow halo behind the body -- a larger, low-alpha fill rather than
-    // ctx.shadowBlur, which is both slower to paint every frame and harder
-    // to fake in a unit test.
+    // Soft glow halo behind the badge -- a larger, low-alpha fill rather
+    // than ctx.shadowBlur, which is both slower to paint every frame and
+    // harder to fake in a unit test.
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.22;
     ctx.beginPath();
-    ctx.arc(0, 0, vehicleRadius * 2.4, 0, Math.PI * 2);
+    ctx.arc(0, 0, vehicleRadius * 1.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // Rounded body, elongated along the direction of travel (already
-    // rotated into place above).
+    // Solid circular badge in the route's real status color.
+    ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.ellipse(0, 0, vehicleRadius * 1.5, vehicleRadius, 0, 0, Math.PI * 2);
+    ctx.arc(0, 0, vehicleRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Window pattern: deliberately mode-agnostic (not a literal bus/train
-    // shape) -- just enough detail to read as "a vehicle" at hero scale.
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    for (const dx of [-0.5, 0, 0.5]) {
-      ctx.beginPath();
-      ctx.arc(dx * vehicleRadius, 0, vehicleRadius * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // Bold white Maki glyph centered on the badge. A bold silhouette (full
+    // white fill) stays legible at marker scale; the thin colored-line
+    // details of an earlier attempt disappeared at this size.
+    ctx.scale(glyphScale, glyphScale);
+    ctx.translate(-MAKI_VIEWBOX_SIZE / 2, -MAKI_VIEWBOX_SIZE / 2);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    drawVehicleIcon(ctx, mode);
+    ctx.fill();
 
     ctx.restore();
   }

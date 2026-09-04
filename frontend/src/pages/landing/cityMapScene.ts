@@ -4,6 +4,8 @@
 // the live width/height at draw time) and fully unit-testable without a
 // canvas context.
 
+import type { VehicleMode } from "./vehicleIcons";
+
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Point = { x: number; y: number };
 
@@ -11,8 +13,15 @@ export type Point = { x: number; y: number };
  *  points. `colorVar` names the real theme token this route's color carries
  *  semantic meaning for -- `--accent` (on-time) or `--color-warning`
  *  (elevated delay) -- resolved to an actual color string at draw time, not
- *  baked in here. */
-export type RouteLine = { id: string; colorVar: "--accent" | "--color-warning"; points: Point[] };
+ *  baked in here. `vehicleMode` is fixed per route (never mixed across the
+ *  vehicles running on the same line), mirroring how a real transit route is
+ *  consistently "the bus line" or "the train line." */
+export type RouteLine = {
+  id: string;
+  colorVar: "--accent" | "--color-warning";
+  vehicleMode: VehicleMode;
+  points: Point[];
+};
 
 export type CityScene = { blocks: Rect[]; park: Rect; river: Point[]; routes: RouteLine[] };
 
@@ -85,6 +94,7 @@ export function buildCityScene(): CityScene {
     {
       id: "on-time",
       colorVar: "--accent",
+      vehicleMode: "bus",
       points: [
         { x: 0.08, y: 0.82 },
         { x: 0.08, y: 0.55 },
@@ -98,6 +108,7 @@ export function buildCityScene(): CityScene {
     {
       id: "delayed",
       colorVar: "--color-warning",
+      vehicleMode: "train",
       points: [
         { x: 0.14, y: 0.92 },
         { x: 0.46, y: 0.92 },

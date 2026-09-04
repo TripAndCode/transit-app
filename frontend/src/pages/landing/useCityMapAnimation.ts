@@ -93,7 +93,7 @@ export function useCityMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
       vehiclesRef.current = vehiclesRef.current.map((v) => advanceVehicle(v, dtMs));
       const vehicleDraws: VehicleDraw[] = vehiclesRef.current.map((v) => {
         const route = routesById.get(v.routeId)!;
-        return { pose: poseAtT(route, v.t), colorVar: route.colorVar };
+        return { pose: poseAtT(route, v.t), colorVar: route.colorVar, mode: route.vehicleMode };
       });
       drawScene(ctx, width, height, scene, vehicleDraws, colors);
     }

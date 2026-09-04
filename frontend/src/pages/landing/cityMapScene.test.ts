@@ -42,12 +42,22 @@ describe("buildCityScene", () => {
       expect(route.points.length).toBeGreaterThanOrEqual(2);
     }
   });
+
+  it("assigns one vehicle mode per route, never mixed across routes", () => {
+    const scene = buildCityScene();
+    for (const route of scene.routes) {
+      expect(["bus", "train", "tram"]).toContain(route.vehicleMode);
+    }
+    const modes = scene.routes.map((r) => r.vehicleMode);
+    expect(new Set(modes).size).toBe(modes.length);
+  });
 });
 
 describe("routeLength / poseAtT", () => {
   const route: RouteLine = {
     id: "test",
     colorVar: "--accent",
+    vehicleMode: "bus",
     points: [
       { x: 0, y: 0 },
       { x: 1, y: 0 },

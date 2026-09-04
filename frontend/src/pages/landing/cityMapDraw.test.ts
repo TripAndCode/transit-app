@@ -25,10 +25,13 @@ function makeFakeCtx() {
     fill: vi.fn(() => calls.push("fill")),
     arc: vi.fn(() => calls.push("arc")),
     ellipse: vi.fn(() => calls.push("ellipse")),
+    bezierCurveTo: vi.fn(() => calls.push("bezierCurveTo")),
+    closePath: vi.fn(() => calls.push("closePath")),
     save: vi.fn(() => calls.push("save")),
     restore: vi.fn(() => calls.push("restore")),
     translate: vi.fn(() => calls.push("translate")),
     rotate: vi.fn(() => calls.push("rotate")),
+    scale: vi.fn(() => calls.push("scale")),
   };
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
 }
@@ -38,10 +41,10 @@ describe("drawScene", () => {
     const scene = buildCityScene();
     const vehicles = buildVehicles(scene.routes);
     const routesById = new Map(scene.routes.map((r) => [r.id, r]));
-    const vehicleDraws = vehicles.map((v) => ({
-      pose: poseAtT(routesById.get(v.routeId)!, v.t),
-      colorVar: routesById.get(v.routeId)!.colorVar,
-    }));
+    const vehicleDraws = vehicles.map((v) => {
+      const route = routesById.get(v.routeId)!;
+      return { pose: poseAtT(route, v.t), colorVar: route.colorVar, mode: route.vehicleMode };
+    });
     const { ctx, calls } = makeFakeCtx();
 
     expect(() =>
@@ -51,10 +54,11 @@ describe("drawScene", () => {
     expect(calls).toContain("clearRect");
     expect(calls).toContain("fillRect"); // blocks + park
     expect(calls).toContain("stroke"); // river + routes
-    expect(calls.filter((c) => c === "arc").length).toBeGreaterThan(0); // stations + vehicle glow/windows
-    expect(calls).toContain("ellipse"); // vehicle bodies
+    expect(calls.filter((c) => c === "arc").length).toBeGreaterThan(0); // stations + vehicle glow/badges
+    expect(calls).toContain("bezierCurveTo"); // Maki glyph curves
+    expect(calls).toContain("closePath"); // Maki glyph subpath closes
     // Every vehicle is drawn inside a save/restore pair, isolating its
-    // translate/rotate from the next vehicle's.
+    // translate/scale from the next vehicle's.
     expect(calls.filter((c) => c === "save").length).toBe(vehicleDraws.length);
     expect(calls.filter((c) => c === "restore").length).toBe(vehicleDraws.length);
   });
