@@ -1,5 +1,6 @@
 import pytest
-from pipeline.query.copilot_templates import TEMPLATES, NO_SIGNAL_TEMPLATE_ID, render_template
+
+from pipeline.query.copilot_templates import NO_SIGNAL_TEMPLATE_ID, render_template
 
 OVERVIEW_PAYLOAD = {
     "headline": {"avg_min": 6.4, "baseline_avg_min": 4.1, "delta_min": 2.3, "delta_pct": 56.1, "samples": 812},

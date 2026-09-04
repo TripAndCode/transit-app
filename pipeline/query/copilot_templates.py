@@ -20,7 +20,7 @@ class RenderedInsight(TypedDict):
 
 
 class Template:
-    __slots__ = ("id", "tab", "param_schema", "render")
+    __slots__ = ("id", "param_schema", "render", "tab")
 
     def __init__(
         self,
