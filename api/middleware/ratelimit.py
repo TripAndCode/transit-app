@@ -118,6 +118,11 @@ def anon_quota_enabled() -> bool:
     Read live (not import-frozen) so ops can disable the quota without a
     redeploy if it ever misbehaves — e.g. blocks legitimate anonymous
     traffic — while the rest of the Ask flow keeps working unchanged.
+
+    Scope: this flag only gates quota enforcement. :func:`get_or_issue_anon_session`
+    still issues/reads the tracking cookie for anonymous callers regardless
+    of this flag, since the cookie itself is otherwise harmless and other
+    code shouldn't have to guess whether it's present.
     """
     return os.environ.get("ASK_ANON_QUOTA_ENABLED", "true").strip().lower() not in ("0", "false", "no")
 
@@ -177,7 +182,7 @@ class AnonQuotaContext:
     than at the endpoint level.
     """
 
-    __slots__ = ("session_key", "ip_key")
+    __slots__ = ("ip_key", "session_key")
 
     def __init__(self, session_key: str, ip_key: str) -> None:
         self.session_key = session_key

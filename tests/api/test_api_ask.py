@@ -622,7 +622,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Anonymous Ask LLM-call daily quota (item 67)
+# Anonymous Ask LLM-call daily quota
 # ---------------------------------------------------------------------------
 
 

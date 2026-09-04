@@ -9,11 +9,20 @@ from typing import Any
 
 import asyncpg
 import clickhouse_connect
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import (
+    FREE_LIMIT,
+    PRO_LIMIT,
+    AnonAskQuotaExceeded,
+    AnonQuotaContext,
+    anon_ip_key,
+    check_and_consume_anon_quota,
+    get_or_issue_anon_session,
+    limiter,
+)
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
 from api.security import csrf_guard
 from pipeline.query import conversations as _conv
@@ -440,6 +449,7 @@ class FollowupBody(BaseModel):
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def followup_endpoint(
     request: Request,
+    response: Response,
     conversation_id: str,
     body: FollowupBody,
     agency_id: int = Depends(get_agency),  # implicit auth scope
@@ -470,6 +480,17 @@ async def followup_endpoint(
                 status_code=400,
                 detail="anon followup requires inline context (context_result)",
             )
+
+        # Same daily LLM-call quota as chat_with_tools's two call sites
+        # (pipeline.query.chat) — without this, an anonymous caller could
+        # establish free context via a zero-cost dispatch and then submit
+        # unlimited follow-up questions through this endpoint instead.
+        anon_quota = AnonQuotaContext(
+            session_key=get_or_issue_anon_session(request, response),
+            ip_key=anon_ip_key(request),
+        )
+        if not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
+            raise AnonAskQuotaExceeded()
 
         answer, err = await _followup.answer_followup(
             question=body.question,

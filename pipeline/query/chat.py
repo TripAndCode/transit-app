@@ -182,6 +182,16 @@ def _get_client():
     return get_client()
 
 
+def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
+    """Consume one unit of the anon LLM-call quota, or raise if exhausted.
+
+    Shared by both real LLM-invocation sites in :func:`chat_with_tools` so
+    they can't drift apart from each other.
+    """
+    if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
+        raise AnonAskQuotaExceeded()
+
+
 async def _dispatch_and_respond(
     name: str,
     args: dict,
@@ -596,8 +606,7 @@ async def chat_with_tools(
         # Stage 2: question is new — call LLM to get the intent signature.
         # The anon quota gates the actual LLM call, not the cache pre-hit
         # above (which never reaches here) — see this function's docstring.
-        if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
-            raise AnonAskQuotaExceeded()
+        _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
@@ -730,10 +739,10 @@ async def chat_with_tools(
         )
 
     # -----------------------------------------------------------------------
-    # FLAG-OFF path: byte-identical to Phase ①. No cache reads or writes.
+    # FLAG-OFF path: same tool-calling flow as Phase ① (no cache reads/
+    # writes), gated by the anon-quota check above when one is set.
     # -----------------------------------------------------------------------
-    if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
-        raise AnonAskQuotaExceeded()
+    _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate
