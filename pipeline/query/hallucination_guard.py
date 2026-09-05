@@ -12,10 +12,26 @@ from __future__ import annotations
 import math
 import re
 
-_NUMBER_RE = re.compile(r"-?\d+\.?\d*")
+# A lookbehind excluding any word character (not just a digit) before a
+# leading "-" keeps a hyphen-glued token like "route-14" from being misread
+# as the negative number -14.
+_NUMBER_RE = re.compile(r"(?<!\w)-?\d+\.?\d*")
+# Stripped before number extraction so an ISO date's own hyphens (e.g. the
+# "09"/"05" in "2026-09-05") never leak into the allowed/claimed number sets
+# as arbitrary negative-number parsing artifacts.
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# Stripped so a comma-grouped number ("1,234") extracts as one value instead
+# of two unmatched fragments.
+_THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
 
 
-def _flatten_numbers(value) -> set[float]:
+def _extract_numbers(text: str) -> list[float]:
+    text = _DATE_RE.sub(" ", text)
+    text = _THOUSANDS_SEP_RE.sub("", text)
+    return [float(m) for m in _NUMBER_RE.findall(text)]
+
+
+def _flatten_numbers(value: object) -> set[float]:
     out: set[float] = set()
     if isinstance(value, bool):
         return out
@@ -28,16 +44,12 @@ def _flatten_numbers(value) -> set[float]:
         for v in value:
             out |= _flatten_numbers(v)
     elif isinstance(value, str):
-        for match in _NUMBER_RE.findall(value):
-            try:
-                out.add(float(match))
-            except ValueError:
-                pass
+        out.update(_extract_numbers(value))
     return out
 
 
 def verify_numeric_claims(answer: str, grounding: dict) -> bool:
-    claimed = [float(m) for m in _NUMBER_RE.findall(answer)]
+    claimed = _extract_numbers(answer)
     if not claimed:
         return True
     allowed = _flatten_numbers(grounding)
