@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
 import { ActivityStrip } from "./components/ActivityStrip";
+import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
@@ -59,6 +60,7 @@ export default function App() {
           <Outlet key={agencyId ?? "root"} />
         </div>
       </main>
+      <CopilotPanel />
     </div>
   );
 }

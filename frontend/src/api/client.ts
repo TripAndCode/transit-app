@@ -51,6 +51,27 @@ export function isAnonAskQuotaExceeded(err: unknown): boolean {
   }
 }
 
+/** Machine code the API returns (429) when an anonymous caller has exhausted
+ * their daily Copilot proactive-insight quota. Mirrors
+ * api/middleware/ratelimit.py::COPILOT_ANON_QUOTA_EXCEEDED_CODE. Logged-in
+ * callers are never subject to this quota, so this code can only ever come
+ * back for an unauthenticated request. */
+const COPILOT_ANON_QUOTA_EXCEEDED_CODE = "copilot_anon_quota_exceeded";
+
+/** True when an error is the anonymous Copilot daily-quota 429 — same
+ * caller-scoped, resets-tomorrow condition as `isAnonAskQuotaExceeded`, so the
+ * UI should explain it calmly and invite sign-in rather than show a generic
+ * error. */
+export function isAnonCopilotQuotaExceeded(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 429) return false;
+  try {
+    const parsed = JSON.parse(err.body);
+    return parsed?.code === COPILOT_ANON_QUOTA_EXCEEDED_CODE;
+  } catch {
+    return false;
+  }
+}
+
 /** GET. Pass react-query's `signal` so in-flight requests are aborted when
  * the query key changes or the consuming component unmounts — without it,
  * rapid filter changes leave orphaned fetches racing each other. */
@@ -72,9 +93,16 @@ export async function apiGetOrNull<T>(path: string): Promise<T | null> {
  * intentionally has no JSON body, e.g. logout). The signature stays
  * `Promise<T>` so JSON-returning callers (`/ask`, `/agencies`,
  * `/admin/users/:uid` PATCH) don't have to narrow — callers of
- * 204-only endpoints should type T as `void`. */
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return requestMaybeEmpty<T>(path, { method: "POST", body: JSON.stringify(body) }) as Promise<T>;
+ * 204-only endpoints should type T as `void`. Accepts an optional `signal`
+ * (mirroring `apiGet`) so a react-query `queryFn` can abort a superseded,
+ * still-in-flight POST instead of letting it run to completion unseen — this
+ * matters for side-effecting/quota-consuming POSTs like Copilot insight. */
+export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
+  return requestMaybeEmpty<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  }) as Promise<T>;
 }
 
 /** PATCH — same JSON-or-204 contract as apiPost. */

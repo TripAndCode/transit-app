@@ -1079,5 +1079,13 @@
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"
     }
+  },
+  "copilot": {
+    "title": "コパイロット",
+    "loading": "考え中…",
+    "error": "現在インサイトを生成できませんでした。",
+    "anon_quota_exceeded": "本日の無料Copilotインサイトの上限に達しました。ログインすると引き続き利用できます。",
+    "low_confidence": "データが限定的です。",
+    "ask_step_back": "こちらで会話が続いています。"
   }
 }
