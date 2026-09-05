@@ -39,6 +39,7 @@ from fastapi import HTTPException
 
 from api.middleware.ratelimit import AnonAskQuotaExceeded, AnonQuotaContext, check_and_consume_anon_quota
 from api.range import RangeCtx
+from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
@@ -192,6 +193,27 @@ def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
         raise AnonAskQuotaExceeded()
 
 
+def _numeric_guard(answer: str | None, grounding: dict | None, locale: str) -> tuple[str | None, bool]:
+    """Replace ``answer`` with the localized fallback if it makes a numeric
+    claim not traceable to ``grounding``.
+
+    Only ever called at a site where ``answer`` is LLM-authored free text —
+    ``_dispatch_and_respond``'s ``render_tool_result`` output is already
+    grounded by construction (a formatted SQL aggregate) and is never routed
+    through this helper. ``grounding={}`` means a turn with no dispatched
+    data at all (e.g. an out-of-scope refusal): every claimed number is then
+    unverifiable by construction, so any digit in the reply is treated as a
+    fabrication and replaced. ``grounding=None`` is reserved for a future
+    call site with no notion of "grounding" to check at all, and skips the
+    check entirely rather than rejecting on every digit.
+    """
+    if not answer or grounding is None:
+        return answer, False
+    if verify_numeric_claims(answer, grounding):
+        return answer, False
+    return _summary("numeric_guard_fallback", lang=locale), True
+
+
 async def _dispatch_and_respond(
     name: str,
     args: dict,
@@ -234,6 +256,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": False,
             **extra,
         }
     except clickhouse_connect.driver.exceptions.Error:
@@ -243,6 +266,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": False,
             **extra,
         }
     except asyncpg.exceptions.UndefinedTableError:
@@ -254,13 +278,18 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": False,
             **extra,
         }
+    # render_tool_result formats `result` (a dispatched ToolResult) deterministically
+    # from grounded data — it never contains LLM-authored prose, so it is not
+    # routed through _numeric_guard (see that helper's docstring).
     return {
         "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
         "success": result.kind != "empty",
+        "numeric_guard_triggered": False,
         **extra,
     }
 
@@ -381,6 +410,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": False,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -393,6 +423,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": False,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -412,16 +443,20 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": False,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
                     "cache_outcome": "bypass",
                 }
+            # render_tool_result formats a dispatched ToolResult deterministically —
+            # never LLM-authored prose — so it is not routed through _numeric_guard.
             return {
                 "answer": render_tool_result(result, locale=locale),
                 "tool_call": {"name": build_tool, "arguments": can_args},
                 "result": _result_to_dict(result),
                 "success": result.kind != "empty",
+                "numeric_guard_triggered": False,
                 "signature_hash": sig_hash,
                 "confidence": 1.0,
                 "canonical_args": can_args,
@@ -618,6 +653,7 @@ async def chat_with_tools(
                 "tool_call": None,
                 "result": None,
                 "success": False,
+                "numeric_guard_triggered": False,
                 "signature_hash": None,
                 "confidence": None,
                 "canonical_args": None,
@@ -656,6 +692,7 @@ async def chat_with_tools(
                     "tool_call": None,
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": False,
                     "signature_hash": None,
                     "confidence": None,
                     "canonical_args": None,
@@ -759,6 +796,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
+            "numeric_guard_triggered": False,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
@@ -767,14 +805,27 @@ async def chat_with_tools(
         # deliberate, helpful refusal/suggestion (the system worked → True).
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
+        # This is the one LLM-authored-free-text site in this function — no
+        # tool was dispatched, so there is no data to trace a number back to;
+        # _numeric_guard is called with grounding={} so any digit the model
+        # includes here (e.g. an invented statistic in an otherwise-helpful
+        # suggestion) is treated as unverifiable and replaced.
         body = (msg.content or "").strip()
         if body:
-            return {"answer": body, "tool_call": None, "result": None, "success": True}
+            guarded_body, triggered = _numeric_guard(body, {}, locale)
+            return {
+                "answer": guarded_body,
+                "tool_call": None,
+                "result": None,
+                "success": True,
+                "numeric_guard_triggered": triggered,
+            }
         return {
             "answer": _chat_str("refusal_fallback", locale),
             "tool_call": None,
             "result": None,
             "success": False,
+            "numeric_guard_triggered": False,
         }
 
     if len(tool_calls) > 1:
