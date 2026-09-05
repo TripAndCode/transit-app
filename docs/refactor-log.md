@@ -460,4 +460,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   match this repo's actual un-pinned-locale rendering and to mock
   `apiGet` (not just `apiPost`) so the Overview tab's real
   `useOverviewSummary` query resolves before the debounced insight call
-  fires. (PR #pending)
+  fires. (PR #329)
