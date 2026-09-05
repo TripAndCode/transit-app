@@ -1,6 +1,7 @@
 import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useCopilotInsight } from "../api/copilot";
+import { isAnonCopilotQuotaExceeded } from "../api/client";
 import { useRangeContext } from "../api/rangeContext";
 import { useOverviewSummary } from "../api/hooks";
 
@@ -32,11 +33,23 @@ export function CopilotPanel() {
     );
   }
 
+  // Every other route (Map, Live, Analysis, Network, Forecast, Account,
+  // Admin, root redirect, ...) has nothing for this panel to show — it only
+  // ever has content on Overview (the proactive insight) or Ask (handled
+  // above). Placed after every hook call above so the hook count stays
+  // identical across renders of this always-mounted instance.
+  if (!overviewMatch) return null;
+
   return (
     <aside className="copilot-panel" aria-label={t("copilot.title")}>
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
-      {error != null && <p>{t("copilot.error")}</p>}
+      {error != null &&
+        (isAnonCopilotQuotaExceeded(error) ? (
+          <p>{t("copilot.anon_quota_exceeded")}</p>
+        ) : (
+          <p>{t("copilot.error")}</p>
+        ))}
       {insight && (
         <div>
           <p>{insight.text}</p>

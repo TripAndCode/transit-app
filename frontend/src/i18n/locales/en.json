@@ -1084,6 +1084,7 @@
     "title": "Copilot",
     "loading": "Thinking…",
     "error": "Couldn't generate an insight right now.",
+    "anon_quota_exceeded": "You've reached today's free Copilot insight limit. Sign in to keep going.",
     "low_confidence": "This is based on limited data.",
     "ask_step_back": "You're already in the full conversation here."
   }
