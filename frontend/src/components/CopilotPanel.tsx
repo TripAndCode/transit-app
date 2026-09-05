@@ -57,7 +57,7 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
-      {agencyId != null && <FollowupForm key={agencyId} agencyId={agencyId} />}
+      {agencyId != null && tab != null && <FollowupForm key={agencyId} agencyId={agencyId} tab={tab} />}
     </aside>
   );
 }
@@ -66,7 +66,7 @@ export function CopilotPanel() {
 // this component from scratch — otherwise the question/answer/error state
 // below would persist across an agency switch, since CopilotPanel itself is
 // mounted once outside <Outlet /> and never remounts on its own.
-function FollowupForm({ agencyId }: { agencyId: number }) {
+function FollowupForm({ agencyId, tab }: { agencyId: number; tab: string }) {
   const { t } = useTranslation();
   const [question, setQuestion] = useState("");
   // Reuses the existing /ask pipeline unchanged (rules → embedding → RAG),
@@ -75,7 +75,7 @@ function FollowupForm({ agencyId }: { agencyId: number }) {
   // scope" constraint.
   const followup = useMutation({
     mutationFn: (q: string) =>
-      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question: q, panel_ctx: { tab: "overview" } }),
+      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question: q, panel_ctx: { tab } }),
   });
 
   function submitFollowup(e: FormEvent<HTMLFormElement>) {

@@ -629,9 +629,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     assert row["router_stage"] == "llm"
 
 
-# ---------------------------------------------------------------------------
-# Anonymous Ask LLM-call daily quota
-# ---------------------------------------------------------------------------
+# Anonymous Ask LLM-call daily quota.
 
 
 @pytest.fixture(autouse=True)

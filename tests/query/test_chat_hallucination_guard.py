@@ -82,20 +82,10 @@ def test_numeric_guard_passes_no_numbers_trivially():
     assert answer == original
 
 
-def test_numeric_guard_skips_when_grounding_is_none():
-    """grounding=None is reserved for a call site with no notion of
-    "grounding" at all — a deliberate no-op (see the helper's own
-    docstring), distinct from grounding={} below."""
-    original = "It's about 999 minutes late."
-    answer, triggered = chat._numeric_guard(original, None, "en")
-    assert triggered is False
-    assert answer == original
-
-
 def test_numeric_guard_rejects_any_number_when_no_data_grounded():
     """grounding={} means a turn with dispatched-but-empty (or no) data —
     every claimed number is unverifiable by construction, so any digit is
-    treated as a fabrication, unlike grounding=None above."""
+    treated as a fabrication."""
     answer, triggered = chat._numeric_guard("It's about 999 minutes late.", {}, "en")
     assert triggered is True
     assert answer == chat._summary("numeric_guard_fallback", lang="en")

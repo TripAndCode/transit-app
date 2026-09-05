@@ -50,28 +50,14 @@ def _key_func(request: Request) -> str:
 limiter = Limiter(key_func=_key_func)
 
 
-# ---------------------------------------------------------------------------
-# Anonymous Ask LLM-call daily quota
-# ---------------------------------------------------------------------------
-# POST /ask has no auth dependency — anonymous callers reach it today, and
-# the per-minute FREE_LIMIT above is sized for generic abuse, not for the
-# real per-call cost of the Stage-3 LLM path (rules -> embedding nearest-
-# neighbour -> RAG LLM; only the third stage calls an LLM). This section adds
-# a small per-day budget on top, for that one stage only.
-#
-# Keyed primarily by a signed, httpOnly anon-session cookie (issued below on
-# a caller's first anonymous request if one isn't already present), with a
-# coarser per-IP ceiling as a backstop against a single source presenting
-# many separate anon-session cookies to launder around the per-session
-# limit. This is a deliberate trade-off sized for this product's abuse
-# model, not a bulletproof anti-bot system — logged-in users are never
-# subject to either bucket.
-#
-# Both buckets are in-memory (process-local, reset on restart/redeploy) —
-# the same trade-off FREE_LIMIT/PRO_LIMIT above already accept for this
-# app's single-uvicorn-process deployment (see Dockerfile: no --workers). A
-# multi-instance deployment would need a shared backend (e.g. Redis, which
-# slowapi/``limits`` already support via a storage_uri) instead.
+# Anonymous Ask LLM-call daily quota: a per-day budget on the Stage-3 LLM path
+# only, on top of the per-minute FREE_LIMIT above (which is sized for generic
+# abuse, not per-call LLM cost). Keyed primarily by a signed httpOnly
+# anon-session cookie, with a coarser per-IP ceiling as the backstop against
+# one source cycling cookies to launder around the per-session limit.
+# Logged-in users are subject to neither bucket. Both buckets are process-local
+# like FREE_LIMIT/PRO_LIMIT above, so a multi-instance deployment needs a
+# shared storage backend instead. See docs/features/ask-tab.md.
 
 ASK_ANON_SESSION_COOKIE_NAME = os.environ.get("ASK_ANON_SESSION_COOKIE_NAME", "ask_anon_sid")
 ASK_ANON_SESSION_TTL_DAYS = int(os.environ.get("ASK_ANON_SESSION_TTL_DAYS", "30"))
