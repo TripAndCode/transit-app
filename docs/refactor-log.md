@@ -472,4 +472,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `role="status"` + sign-in link) with a new `errors.copilot_anon_quota_exceeded`
   i18n key in both locales, removing the now-unused `copilot.anon_quota_exceeded`
   key. Updated `CopilotPanel.test.tsx` and added a matching case to
-  `ErrorBanner.test.tsx`. (PR #pending)
+  `ErrorBanner.test.tsx`. (PR #330)
