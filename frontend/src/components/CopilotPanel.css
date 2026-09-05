@@ -51,7 +51,7 @@
   padding: 6px 8px;
   font: inherit;
   color: var(--text-primary);
-  background: var(--bg-page);
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
 }

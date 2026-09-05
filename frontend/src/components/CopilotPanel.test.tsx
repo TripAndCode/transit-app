@@ -279,10 +279,41 @@ describe("CopilotPanel", () => {
     expect(postSpy).not.toHaveBeenCalled();
   });
 
-  it("makes no insight request while the flag check is still unresolved", () => {
-    vi.spyOn(client, "apiGet").mockImplementation(() => new Promise(() => {}));
+  it("stays off and makes no insight request when the flag check fails", async () => {
+    const getSpy = vi.spyOn(client, "apiGet").mockRejectedValue(new Error("flag check down"));
     const postSpy = vi.spyOn(client, "apiPost");
-    renderPanel("/agencies/1/overview");
+    const { container } = renderPanel("/agencies/1/overview");
+    await waitFor(() => expect(getSpy).toHaveBeenCalled());
+    expect(container.querySelector(".copilot-panel")).toBeNull();
     expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not re-bill the insight when Overview is left and re-entered", async () => {
+    mockApiGet();
+    const postSpy = vi.spyOn(client, "apiPost").mockResolvedValue({
+      text: "Route 12 is delayed.",
+      cite: "Overview · 1 sample",
+      low_confidence: false,
+    } as never);
+    renderPanelWithNav("/agencies/1/overview");
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
+      timeout: 3000,
+    });
+    expect(postSpy).toHaveBeenCalledTimes(1);
+
+    // Off Overview the query key goes null; coming back re-subscribes to the
+    // *same* key. Without a staleTime that re-subscription refetches, spending
+    // another LLM call and quota unit for a view state that has not changed.
+    fireEvent.click(screen.getByText("go-map"));
+    await waitFor(() => expect(screen.queryByText("Route 12 is delayed.")).toBeNull());
+    // The key is debounced, so it only actually goes null DEBOUNCE_MS after
+    // the route change. Returning before that leaves the key untouched and
+    // the scenario unexercised, so wait the window out rather than racing it.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    fireEvent.click(screen.getByText("go-overview"));
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
+      timeout: 3000,
+    });
+    expect(postSpy).toHaveBeenCalledTimes(1);
   });
 });
