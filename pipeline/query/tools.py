@@ -261,6 +261,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("suggest_reason_on_time_fallback", "ja"): "路線{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
     ("suggest_reason_on_time_fallback", "en"): "Route {route} has the worst on-time rate this week ({pct}% on time).",
+    # Shown in place of an LLM-authored free-text answer whose numeric claims
+    # don't trace back to the grounding data it was given (see
+    # pipeline.query.hallucination_guard.verify_numeric_claims).
+    ("numeric_guard_fallback", "ja"): "現在のデータでその数値を確認できませんでした。",
+    ("numeric_guard_fallback", "en"): "I can't confirm that number from the current data.",
 }
 
 

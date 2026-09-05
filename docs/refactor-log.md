@@ -516,3 +516,29 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   this worktree's file paths (the dispatched worker's own sandbox denies
   `poetry`, a documented `transit-app-gotchas` limitation) — all clean. (PR
   #331)
+- 2026-09-05: Wired `pipeline.query.hallucination_guard.verify_numeric_claims`
+  into `chat_with_tools` (`pipeline/query/chat.py`). Enumerated every return
+  site in the function (and its `_dispatch_and_respond` helper and the
+  build-mode/intent-cache branches) and found exactly one where `answer` is
+  genuinely LLM-authored free text — the out-of-scope refusal/suggestion path
+  (no tool called, `tool_calls` empty, non-empty `msg.content`); every other
+  site either returns a canned locale string or `render_tool_result`'s
+  deterministic formatting of an already-dispatched, already-grounded
+  `ToolResult`, so those are correctly left unguarded. Added a
+  `_numeric_guard(answer, grounding, locale)` helper that treats
+  `grounding=None` (no tool dispatched this turn) as a no-op pass-through —
+  there is nothing to hallucinate a number away from in a purely
+  conversational reply with no data attached — and otherwise replaces a
+  rejected answer with the new `numeric_guard_fallback` locale string (added
+  to `pipeline/query/tools.py`'s `_LOCALES`, read via its existing `_summary`
+  accessor rather than adding a second lookup mechanism). Added a
+  `numeric_guard_triggered: bool` key to all thirteen of the function's return
+  dicts. Created `tests/query/test_chat_hallucination_guard.py` (11 tests):
+  direct accept/reject/skip coverage of `_numeric_guard`, plus wiring checks
+  that every real `chat_with_tools` return path now carries the new key with
+  the expected value and zero change to existing answer text. Verification:
+  `poetry run pytest tests/query/test_chat_hallucination_guard.py -v` (11/11
+  passed), `poetry run pytest tests/query/ tests/api/test_api_ask.py
+  tests/api/test_ask_endpoints.py -v` (301 passed, 22 skipped — ClickHouse-
+  gated, expected without `RUN_CH_INTEGRATION=1` — 0 failed), `poetry run
+  ruff check`, and `poetry run mypy`, all clean. (PR #pending)
