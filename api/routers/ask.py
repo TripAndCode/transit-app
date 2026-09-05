@@ -14,7 +14,7 @@ import asyncio
 import logging
 import os as _os
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -73,11 +73,26 @@ class Turn(BaseModel):
     args: dict | None = None
 
 
+# Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
+# — an enum, not a free-form string, so an arbitrary/oversized value can never
+# reach the system prompt that chat_with_tools builds from this hint.
+PanelTab = Literal["overview", "map", "ask", "live", "analysis", "network"]
+
+
+class PanelCtx(BaseModel):
+    """Grounding hint from the Copilot side panel (e.g. {"tab": "overview"})."""
+
+    tab: PanelTab | None = None
+
+
 class AskRequest(BaseModel):
     question: str
     model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = []
+    # Threaded through to chat_with_tools's system-prompt addendum only — never
+    # consulted by the rules/embedding routing stage above.
+    panel_ctx: PanelCtx | None = None
 
 
 class AskResponse(BaseModel):
@@ -310,6 +325,7 @@ async def ask(
             ch=ch,
             force_tool_call=force_tool_call,
             anon_quota=anon_quota,
+            panel_ctx=body.panel_ctx.model_dump() if body.panel_ctx else None,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
