@@ -1,4 +1,5 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,6 +50,31 @@ function renderPanelWithNav(initialPath: string) {
       <>
         <button onClick={() => navigate("/agencies/1/overview")}>go-overview</button>
         <button onClick={() => navigate("/agencies/1/map")}>go-map</button>
+        <CopilotPanel />
+      </>
+    );
+  }
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Nav />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** Same panel, but with in-app navigation buttons switching between two
+ * different agencies' Overview tabs (not just tabs within one agency, unlike
+ * `renderPanelWithNav`) — needed to exercise stale follow-up state cleanup
+ * across an agency switch. */
+function renderPanelWithAgencySwitch(initialPath: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Nav() {
+    const navigate = useNavigate();
+    return (
+      <>
+        <button onClick={() => navigate("/agencies/1/overview")}>go-agency-1</button>
+        <button onClick={() => navigate("/agencies/2/overview")}>go-agency-2</button>
         <CopilotPanel />
       </>
     );
@@ -154,5 +180,67 @@ describe("CopilotPanel", () => {
 
     const [, , opts] = postSpy.mock.calls[0];
     expect((opts as { signal?: AbortSignal } | undefined)?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("submits a follow-up question to /ask with panel_ctx", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    // The first apiPost call is the on-mount proactive-insight fetch (insight
+    // shape), the second is the user-submitted follow-up (AskResponse shape)
+    // — mocked per-call so the insight render is exercised with its real
+    // shape instead of silently rendering undefined fields.
+    const spy = vi
+      .spyOn(client, "apiPost")
+      .mockResolvedValueOnce({
+        text: "Route 12 is delayed.",
+        cite: "Overview · 1 sample",
+        low_confidence: false,
+      })
+      .mockResolvedValueOnce({
+        answer: "It's on time.",
+        tool_call: null,
+        result: null,
+        ctx: {},
+      });
+    renderPanel("/agencies/1/overview");
+    await screen.findByText("Route 12 is delayed.");
+    const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
+    await userEvent.type(input, "how is route 12 doing{enter}");
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        "/api/1/ask",
+        expect.objectContaining({ question: "how is route 12 doing", panel_ctx: { tab: "overview" } }),
+      ),
+    );
+    expect(await screen.findByText("It's on time.")).toBeTruthy();
+  });
+
+  it("clears a stale follow-up answer when switching agencies", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    vi.spyOn(client, "apiPost").mockResolvedValue({
+      text: "Route 12 is delayed.",
+      cite: "Overview · 1 sample",
+      low_confidence: false,
+    });
+    renderPanelWithAgencySwitch("/agencies/1/overview");
+    await screen.findByText("Route 12 is delayed.");
+
+    vi.spyOn(client, "apiPost").mockResolvedValueOnce({
+      answer: "Agency 1 answer.",
+      tool_call: null,
+      result: null,
+      ctx: {},
+    });
+    const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
+    await userEvent.type(input, "how is route 12 doing{enter}");
+    expect(await screen.findByText("Agency 1 answer.")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("go-agency-2"));
+
+    // Switching agencies must remount the follow-up form, discarding the
+    // stale question/answer from the previous agency instead of leaking it
+    // under the new agency's panel.
+    expect(screen.queryByText("Agency 1 answer.")).toBeNull();
+    const newInput = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
+    expect((newInput as HTMLInputElement).value).toBe("");
   });
 });

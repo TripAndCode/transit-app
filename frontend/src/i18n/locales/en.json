@@ -1086,6 +1086,8 @@
     "loading": "Thinking…",
     "error": "Couldn't generate an insight right now.",
     "low_confidence": "This is based on limited data.",
-    "ask_step_back": "You're already in the full conversation here."
+    "ask_step_back": "You're already in the full conversation here.",
+    "followup_placeholder": "Ask a follow-up…",
+    "followup_submit": "Ask"
   }
 }
