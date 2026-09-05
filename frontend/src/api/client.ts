@@ -93,9 +93,16 @@ export async function apiGetOrNull<T>(path: string): Promise<T | null> {
  * intentionally has no JSON body, e.g. logout). The signature stays
  * `Promise<T>` so JSON-returning callers (`/ask`, `/agencies`,
  * `/admin/users/:uid` PATCH) don't have to narrow — callers of
- * 204-only endpoints should type T as `void`. */
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return requestMaybeEmpty<T>(path, { method: "POST", body: JSON.stringify(body) }) as Promise<T>;
+ * 204-only endpoints should type T as `void`. Accepts an optional `signal`
+ * (mirroring `apiGet`) so a react-query `queryFn` can abort a superseded,
+ * still-in-flight POST instead of letting it run to completion unseen — this
+ * matters for side-effecting/quota-consuming POSTs like Copilot insight. */
+export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
+  return requestMaybeEmpty<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  }) as Promise<T>;
 }
 
 /** PATCH — same JSON-or-204 contract as apiPost. */

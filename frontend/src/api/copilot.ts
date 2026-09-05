@@ -33,15 +33,12 @@ export function useCopilotInsight(
 ): { insight: CopilotInsight | null; loading: boolean; error: unknown } {
   const key = buildKey(agencyId, tab, filters, viewPayload);
 
-  // Only the request *key* (and the params it was built from) are debounced
-  // here — the actual fetch, loading/error state, and stale-response discard
-  // are owned by useQuery (queryKey ["copilot-insight", debouncedKey]), same
-  // split as AdminUsersPage's search box (debounce the value, let useQuery
-  // own the request lifecycle). That's what makes a superseded in-flight
-  // request's response get thrown away automatically instead of racing a
-  // newer one into `state`, and what makes `loading`/`error` reset to
-  // false/null the instant the query is disabled (key null) rather than
-  // sticking around across tab navigation.
+  // Only the request *key* is debounced here; useQuery (queryKey
+  // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,
+  // and stale-response discard — same split as AdminUsersPage's search box.
+  // `[key]` alone as the effect dep is enough: `params` is derived from the
+  // same inputs that produce `key`, so a `key` change always means fresh
+  // `params` too.
   const [debounced, setDebounced] = useState<{ key: string | null; params: CopilotParams | null }>({
     key,
     params: key == null ? null : { agencyId: agencyId!, tab: tab!, filters, viewPayload },
@@ -61,14 +58,20 @@ export function useCopilotInsight(
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["copilot-insight", debounced.key],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = debounced.params!;
       return apiPost<{ text: string; cite: string; low_confidence: boolean }>(
         `/api/${params.agencyId}/copilot/insight`,
         { tab: params.tab, filters: params.filters, view_payload: params.viewPayload },
+        { signal },
       );
     },
     enabled: debounced.params != null,
+    // This POST consumes one anonymous-quota unit per attempt with no
+    // server-side refund on failure, so react-query's default retry would
+    // silently burn a second unit for what the user experiences as one
+    // request. Never retry it, regardless of the global QueryClient default.
+    retry: false,
   });
 
   const insight = data ? { text: data.text, cite: data.cite, lowConfidence: data.low_confidence } : null;
