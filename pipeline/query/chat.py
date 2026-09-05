@@ -200,11 +200,12 @@ def _numeric_guard(answer: str | None, grounding: dict | None, locale: str) -> t
     Only ever called at a site where ``answer`` is LLM-authored free text —
     ``_dispatch_and_respond``'s ``render_tool_result`` output is already
     grounded by construction (a formatted SQL aggregate) and is never routed
-    through this helper. ``grounding=None`` means no tool was dispatched this
-    turn (e.g. an out-of-scope refusal): there is nothing to hallucinate a
-    number away from in a purely conversational reply with no data attached,
-    so the check is skipped rather than failing every such reply that
-    happens to contain a digit.
+    through this helper. ``grounding={}`` means a turn with no dispatched
+    data at all (e.g. an out-of-scope refusal): every claimed number is then
+    unverifiable by construction, so any digit in the reply is treated as a
+    fabrication and replaced. ``grounding=None`` is reserved for a future
+    call site with no notion of "grounding" to check at all, and skips the
+    check entirely rather than rejecting on every digit.
     """
     if not answer or grounding is None:
         return answer, False
@@ -805,13 +806,13 @@ async def chat_with_tools(
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
         # This is the one LLM-authored-free-text site in this function — no
-        # tool was dispatched, so _numeric_guard is called with grounding=None
-        # (a structural no-op here; see its docstring) rather than skipped
-        # outright, so the guard stays correctly wired if a future change
-        # ever attaches grounding to this path.
+        # tool was dispatched, so there is no data to trace a number back to;
+        # _numeric_guard is called with grounding={} so any digit the model
+        # includes here (e.g. an invented statistic in an otherwise-helpful
+        # suggestion) is treated as unverifiable and replaced.
         body = (msg.content or "").strip()
         if body:
-            guarded_body, triggered = _numeric_guard(body, None, locale)
+            guarded_body, triggered = _numeric_guard(body, {}, locale)
             return {
                 "answer": guarded_body,
                 "tool_call": None,

@@ -2,21 +2,17 @@
 (:func:`pipeline.query.hallucination_guard.verify_numeric_claims`) into
 ``chat_with_tools``'s LLM-authored-free-text return sites.
 
-Reading ``chat_with_tools`` end to end (required before writing this test —
-see item 78's own instruction) shows every tool-call result is rendered by
+Every tool-call result in ``chat_with_tools`` is rendered by
 ``render_tool_result`` from the dispatched :class:`~pipeline.query.results.ToolResult`
 — deterministic formatting of already-grounded data, never LLM-authored
-prose, so those return sites are correctly excluded from the guard (mirrors
-the plan's own "not `_dispatch_and_respond`'s already-grounded tool-formatted
-output" instruction). The one return site where ``answer`` really is raw LLM
-free text is the out-of-scope refusal/suggestion path (``tool_calls`` empty,
-non-empty ``msg.content``) — and that site has no dispatched tool result to
-ground against, so :func:`chat._numeric_guard` is written to treat
-``grounding=None`` as "nothing to hallucinate a number away from" and pass
-the text through unchanged (see that helper's docstring); the plan's own
-sketch assumed a tool result would be available there, which the real control
-flow doesn't provide, hence testing the helper's accept/reject logic directly
-here in addition to the one live call site.
+prose — so those return sites are correctly excluded from the guard. The one
+return site where ``answer`` really is raw LLM free text is the out-of-scope
+refusal/suggestion path (``tool_calls`` empty, non-empty ``msg.content``) —
+and that site has no dispatched tool result to ground against, so
+:func:`chat._numeric_guard` is called there with ``grounding={}``: any digit
+the model includes is by definition unverifiable and gets replaced (see that
+helper's docstring). Direct accept/reject/skip coverage of the helper is
+tested here in addition to the one live call site.
 """
 
 import os
@@ -86,14 +82,23 @@ def test_numeric_guard_passes_no_numbers_trivially():
     assert answer == original
 
 
-def test_numeric_guard_skips_when_no_grounding_available():
-    """No tool was dispatched this turn — nothing to hallucinate a number
-    away from — so the guard is a deliberate no-op (see the helper's own
-    docstring), not a rejection."""
+def test_numeric_guard_skips_when_grounding_is_none():
+    """grounding=None is reserved for a call site with no notion of
+    "grounding" at all — a deliberate no-op (see the helper's own
+    docstring), distinct from grounding={} below."""
     original = "It's about 999 minutes late."
     answer, triggered = chat._numeric_guard(original, None, "en")
     assert triggered is False
     assert answer == original
+
+
+def test_numeric_guard_rejects_any_number_when_no_data_grounded():
+    """grounding={} means a turn with dispatched-but-empty (or no) data —
+    every claimed number is unverifiable by construction, so any digit is
+    treated as a fabrication, unlike grounding=None above."""
+    answer, triggered = chat._numeric_guard("It's about 999 minutes late.", {}, "en")
+    assert triggered is True
+    assert answer == chat._summary("numeric_guard_fallback", lang="en")
 
 
 def test_numeric_guard_passes_through_empty_answer():
@@ -113,17 +118,32 @@ def test_numeric_guard_uses_localized_fallback_for_japanese():
 
 
 @pytest.mark.asyncio
-async def test_out_of_scope_reply_with_number_is_not_rejected(monkeypatch):
+async def test_out_of_scope_reply_with_number_is_replaced_with_fallback(monkeypatch):
     """The out-of-scope free-text path is the sole LLM-authored-answer site in
-    chat_with_tools. Since no tool is dispatched there, grounding is None and
-    the guard structurally never rejects — this pins the existing Ask tab's
-    out-of-scope refusal/suggestion behaviour as unchanged by this wiring."""
+    chat_with_tools. No tool is dispatched there, so grounding is {} and any
+    digit in the reply is unverifiable — it must be replaced with the
+    fallback, not shown to the user."""
     monkeypatch.setattr(
         chat, "_get_client", lambda: _FakeClient(_fake_text_message("Buses run about every 999 minutes off-peak."))
     )
     out = await chat.chat_with_tools("weather today?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is True
-    assert out["answer"] == "Buses run about every 999 minutes off-peak."
+    assert out["answer"] == chat._summary("numeric_guard_fallback", lang="en")
+    assert out["numeric_guard_triggered"] is True
+
+
+@pytest.mark.asyncio
+async def test_out_of_scope_reply_without_number_passes_through(monkeypatch):
+    """A benign out-of-scope reply with no numeric claims has nothing to
+    verify and must pass through unchanged."""
+    monkeypatch.setattr(
+        chat,
+        "_get_client",
+        lambda: _FakeClient(_fake_text_message("I can only help with transit questions for this agency.")),
+    )
+    out = await chat.chat_with_tools("weather today?", _ctx(), conn=None, agency_id=1, locale="en")
+    assert out["success"] is True
+    assert out["answer"] == "I can only help with transit questions for this agency."
     assert out["numeric_guard_triggered"] is False
 
 

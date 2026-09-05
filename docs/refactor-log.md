@@ -525,20 +525,27 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   site either returns a canned locale string or `render_tool_result`'s
   deterministic formatting of an already-dispatched, already-grounded
   `ToolResult`, so those are correctly left unguarded. Added a
-  `_numeric_guard(answer, grounding, locale)` helper that treats
-  `grounding=None` (no tool dispatched this turn) as a no-op pass-through —
-  there is nothing to hallucinate a number away from in a purely
-  conversational reply with no data attached — and otherwise replaces a
-  rejected answer with the new `numeric_guard_fallback` locale string (added
-  to `pipeline/query/tools.py`'s `_LOCALES`, read via its existing `_summary`
-  accessor rather than adding a second lookup mechanism). Added a
-  `numeric_guard_triggered: bool` key to all thirteen of the function's return
-  dicts. Created `tests/query/test_chat_hallucination_guard.py` (11 tests):
-  direct accept/reject/skip coverage of `_numeric_guard`, plus wiring checks
-  that every real `chat_with_tools` return path now carries the new key with
-  the expected value and zero change to existing answer text. Verification:
-  `poetry run pytest tests/query/test_chat_hallucination_guard.py -v` (11/11
-  passed), `poetry run pytest tests/query/ tests/api/test_api_ask.py
+  `_numeric_guard(answer, grounding, locale)` helper called at that one site
+  with `grounding={}`: since no tool was dispatched, there is no data to
+  trace a number back to, so any digit in the reply is treated as
+  unverifiable and replaced with the new `numeric_guard_fallback` locale
+  string (added to `pipeline/query/tools.py`'s `_LOCALES`, read via its
+  existing `_summary` accessor rather than adding a second lookup
+  mechanism); `grounding=None` is kept as a separate, reserved sentinel that
+  skips the check entirely, for a future call site with no grounding concept
+  at all. (Fixed from the worker's initial cut, which called this site with
+  `grounding=None` and so never actually exercised `verify_numeric_claims`
+  in production — caught in review as a structural no-op.) Added a
+  `numeric_guard_triggered: bool` key to all thirteen of the function's
+  return dicts. Created `tests/query/test_chat_hallucination_guard.py` (13
+  tests): direct accept/reject/skip coverage of `_numeric_guard` for both
+  the `None` and `{}` grounding sentinels, plus wiring checks that every
+  real `chat_with_tools` return path carries the new key with the expected
+  value, that a fabricated number in an out-of-scope reply is replaced, and
+  that a benign out-of-scope reply with no numbers passes through
+  unchanged. Verification: `poetry run pytest
+  tests/query/test_chat_hallucination_guard.py -v` (13/13 passed), `poetry
+  run pytest tests/query/ tests/api/test_api_ask.py
   tests/api/test_ask_endpoints.py -v` (301 passed, 22 skipped — ClickHouse-
   gated, expected without `RUN_CH_INTEGRATION=1` — 0 failed), `poetry run
   ruff check`, and `poetry run mypy`, all clean. (PR #pending)
