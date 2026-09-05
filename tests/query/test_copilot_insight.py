@@ -52,3 +52,26 @@ async def test_generate_proactive_insight_falls_back_when_llm_picks_bad_id(monke
     monkeypatch.setattr(copilot, "_get_client", lambda: _FakeClient("not_a_real_template"))
     result = await copilot.generate_proactive_insight("overview", {}, OVERVIEW_PAYLOAD, locale="en")
     assert result["text"]  # falls back to the no-signal template, never crashes
+
+
+@pytest.mark.asyncio
+async def test_generate_proactive_insight_renders_in_requested_locale(monkeypatch):
+    """locale must reach the template, not stop at the function signature."""
+    monkeypatch.setattr(copilot, "_get_client", lambda: _FakeClient("overview_top_delay_route"))
+    ja = await copilot.generate_proactive_insight("overview", {}, OVERVIEW_PAYLOAD, locale="ja")
+    en = await copilot.generate_proactive_insight("overview", {}, OVERVIEW_PAYLOAD, locale="en")
+    assert "路線" in ja["text"]
+    assert "Route" not in ja["text"]
+    assert "Route" in en["text"]
+    assert ja["cite"] != en["cite"]
+    # The numbers are identical regardless of locale — they come from the payload.
+    assert "14.2" in ja["text"] and "14.2" in en["text"]
+
+
+@pytest.mark.asyncio
+async def test_no_signal_fallback_is_localized(monkeypatch):
+    monkeypatch.setattr(copilot, "_get_client", lambda: _FakeClient("not_a_real_template"))
+    ja = await copilot.generate_proactive_insight("overview", {}, OVERVIEW_PAYLOAD, locale="ja")
+    en = await copilot.generate_proactive_insight("overview", {}, OVERVIEW_PAYLOAD, locale="en")
+    assert "目立った" in ja["text"]
+    assert en["text"].startswith("Nothing stands out")

@@ -266,6 +266,32 @@ _LOCALES: dict[tuple[str, str], str] = {
     # pipeline.query.hallucination_guard.verify_numeric_claims).
     ("numeric_guard_fallback", "ja"): "現在のデータでその数値を確認できませんでした。",
     ("numeric_guard_fallback", "en"): "I can't confirm that number from the current data.",
+    # Copilot proactive-insight templates. Every number is interpolated here
+    # from the caller's already-fetched view payload, never authored by the
+    # model, so these templates must not introduce a placeholder the payload
+    # cannot fill (see pipeline.query.copilot_templates).
+    ("copilot_overview_top_delay", "ja"): (
+        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です。"
+        "全路線の今週の平均は {avg} 分、基準の {baseline} 分から {delta}% {direction}しています"
+        "（現在 {delayed_count} 路線が遅延）。"
+    ),
+    ("copilot_overview_top_delay", "en"): (
+        "Route {name} is running the longest average delay right now, at {top_avg} min. "
+        "Across all routes the average is {avg} min this week, {direction} {delta}% "
+        "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
+    ),
+    ("copilot_overview_top_delay_cite", "ja"): "概況 · サンプル {samples} 件 · top_delayed[0]",
+    ("copilot_overview_top_delay_cite", "en"): "Overview · {samples} samples · top_delayed[0]",
+    ("copilot_delta_up", "ja"): "増加",
+    ("copilot_delta_up", "en"): "up",
+    ("copilot_delta_down", "ja"): "減少",
+    ("copilot_delta_down", "en"): "down",
+    ("copilot_no_signal", "ja"): "現在のビューに目立った傾向はありません。この期間の遅延はおおむね平常どおりです。",
+    ("copilot_no_signal", "en"): (
+        "Nothing stands out from the current view — delays look broadly typical for this range."
+    ),
+    ("copilot_no_signal_cite", "ja"): "目立った傾向なし",
+    ("copilot_no_signal_cite", "en"): "no notable pattern",
 }
 
 

@@ -119,3 +119,25 @@ async def test_copilot_insight_enforces_anon_quota(copilot_client, monkeypatch):
     )
     assert resp.status_code == 429
     assert resp.json()["code"] == "copilot_anon_quota_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_copilot_insight_threads_accept_language_locale(copilot_client, monkeypatch):
+    """The resolved request locale reaches generate_proactive_insight."""
+    client, agency_id = copilot_client
+    seen: list[str] = []
+
+    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+        seen.append(locale)
+        return {"text": "ok", "cite": "c", "low_confidence": False}
+
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
+    body = {"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}}
+    for header, expected in (("en", "en"), ("ja", "ja")):
+        resp = await client.post(
+            f"/api/{agency_id}/copilot/insight",
+            json=body,
+            headers={"Origin": TEST_ORIGIN, "Accept-Language": header},
+        )
+        assert resp.status_code == 200
+        assert seen[-1] == expected

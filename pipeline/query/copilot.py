@@ -107,13 +107,13 @@ async def generate_proactive_insight(
 
     if not any(t.id == template_id for t in templates_for_tab(tab)):
         logger.warning("copilot: LLM picked unknown template_id=%r, falling back", template_id)
-        rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
+        rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload, locale)
     else:
         try:
-            rendered = render_template(template_id, params, view_payload)
+            rendered = render_template(template_id, params, view_payload, locale)
         except (KeyError, TypeError, ValueError):
             logger.warning("copilot: template render failed for template_id=%r, falling back", template_id)
-            rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload)
+            rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, view_payload, locale)
 
     low_confidence = bool(view_payload.get("low_confidence", False))
     return {"text": rendered["text"], "cite": rendered["cite"], "low_confidence": low_confidence}
