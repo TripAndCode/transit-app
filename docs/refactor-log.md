@@ -473,3 +473,25 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   i18n key in both locales, removing the now-unused `copilot.anon_quota_exceeded`
   key. Updated `CopilotPanel.test.tsx` and added a matching case to
   `ErrorBanner.test.tsx`. (PR #330)
+- 2026-09-05: Item 77 (Copilot Phase B Task 7 — numeric verifier module).
+  Added `pipeline/query/hallucination_guard.py`'s `verify_numeric_claims(answer,
+  grounding)`, which regex-extracts every number in a free-form LLM answer and
+  checks each against a flattened set of numeric leaves from the grounding
+  dict (exact match, or a match after rounding to the nearest int/0.1, so a
+  model paraphrasing "14.2" as "about 14" isn't treated as a fabrication). An
+  answer with no numbers passes trivially; any unmatched number fails the
+  whole answer, since this is a structural defense-in-depth check (not a
+  system-prompt instruction) ahead of Task 8's wiring into `chat_with_tools`.
+  Added `tests/unit/test_hallucination_guard.py` exactly per the plan's Task
+  7 code block. Implemented verbatim from
+  `docs/superpowers/plans/2026-09-05-ai-copilot-side-panel.md`'s Task 7 (this
+  file and its Task 9 spec companion are gitignored `docs/*` content, copied
+  into this worktree from the persistent checkout per item 71's sync note).
+  Verification: `poetry run pytest tests/unit/test_hallucination_guard.py -v`,
+  `poetry run ruff check`, and `poetry run mypy` could **not** be run in this
+  session — the dispatched worker sandbox denies the `poetry` command
+  entirely (a documented `transit-app-gotchas` limitation: no provisioned
+  virtualenv/install permission), so this needs to be run by whichever
+  environment picks up verification next before being treated as fully
+  checked; the new module and test were written as an exact, unmodified copy
+  of the plan's already-specified code. (PR #pending)
