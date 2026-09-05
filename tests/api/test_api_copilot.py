@@ -188,16 +188,15 @@ async def test_copilot_enabled_endpoint_reports_the_flag(copilot_client, monkeyp
 @pytest.mark.asyncio
 async def test_disabled_copilot_does_not_consume_anon_quota(copilot_client, monkeypatch):
     """A disabled feature must not bill the caller's daily budget."""
-    from api.middleware import ratelimit
-
     client, agency_id = copilot_client
     monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)
 
     consumed: list[str] = []
+    # Patched where it is looked up, not on the defining module: the router
+    # imported the name directly, so its own binding is what runs.
     monkeypatch.setattr(
-        ratelimit,
-        "check_and_consume_anon_quota",
+        "api.routers.copilot.check_and_consume_anon_quota",
         lambda *a, **k: consumed.append("hit") or True,
     )
 

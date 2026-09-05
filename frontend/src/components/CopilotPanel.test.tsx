@@ -307,13 +307,8 @@ describe("CopilotPanel", () => {
     // another LLM call and quota unit for a view state that has not changed.
     fireEvent.click(screen.getByText("go-map"));
     await waitFor(() => expect(screen.queryByText("Route 12 is delayed.")).toBeNull());
-    // The key is debounced, so it only actually goes null DEBOUNCE_MS after
-    // the route change. Returning before that leaves the key untouched and
+    // Returning before the key debounce elapses leaves the key untouched and
     // the scenario unexercised, so wait the window out rather than racing it.
-    // Derived from the real constant, not a copy of it: a duplicated literal
-    // would stop covering this path the moment DEBOUNCE_MS grew past it.
-    // A real timer rather than vi.useFakeTimers() because the assertion has
-    // to observe react-query resolving a fetch across the same boundary.
     await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 300));
     fireEvent.click(screen.getByText("go-overview"));
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
