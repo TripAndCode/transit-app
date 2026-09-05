@@ -40,4 +40,18 @@ describe("ErrorBanner", () => {
     // Invites sign-in rather than a futile immediate retry.
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
+
+  it("renders a calm sign-in nudge (not a generic rate-limit banner) for the anon Copilot quota 429", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <ErrorBanner
+          error={new ApiError(429, JSON.stringify({ detail: "x", code: "copilot_anon_quota_exceeded" }))}
+          onRetry={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/free Copilot insight limit/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+  });
 });

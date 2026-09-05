@@ -1,7 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { TFunction } from "i18next";
-import { ApiError, apiErrorDetail, isAggregateNotReady, isAnonAskQuotaExceeded } from "../api/client";
+import {
+  ApiError,
+  apiErrorDetail,
+  isAggregateNotReady,
+  isAnonAskQuotaExceeded,
+  isCopilotQuotaExceeded,
+} from "../api/client";
 
 type Props = {
   error: unknown;
@@ -63,6 +69,45 @@ export function ErrorBanner({ error, onRetry }: Props) {
         }}
       >
         <span style={{ flex: 1 }}>{t("errors.ask_anon_quota_exceeded")}</span>
+        <Link
+          to="/login"
+          style={{
+            color: "inherit",
+            padding: "4px 12px",
+            background: "var(--surface-1)",
+            borderRadius: 4,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {t("common.login")}
+        </Link>
+      </div>
+    );
+  }
+
+  // Anonymous Copilot daily-quota exhaustion (429) — same caller-scoped,
+  // resets-tomorrow condition as the Ask quota above, so it gets the same
+  // calm banner + sign-in nudge instead of a generic rate-limit message.
+  if (isCopilotQuotaExceeded(error)) {
+    return (
+      <div
+        role="status"
+        style={{
+          background: "var(--bg-soft)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border-soft)",
+          padding: "10px 14px",
+          borderRadius: "var(--radius)",
+          margin: "0 0 16px",
+          lineHeight: 1.5,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ flex: 1 }}>{t("errors.copilot_anon_quota_exceeded")}</span>
         <Link
           to="/login"
           style={{

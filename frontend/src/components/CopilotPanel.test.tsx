@@ -93,20 +93,16 @@ describe("CopilotPanel", () => {
     expect(container.querySelector(".copilot-panel")).toBeNull();
   });
 
-  it("shows a calmer message instead of a generic error when the anon Copilot quota is exceeded", async () => {
+  it("shows the calm quota-exceeded banner instead of the generic error message", async () => {
     vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
     vi.spyOn(client, "apiPost").mockRejectedValue(
-      new client.ApiError(429, JSON.stringify({ code: "copilot_anon_quota_exceeded" })),
+      new client.ApiError(429, JSON.stringify({ detail: "limit reached", code: "copilot_anon_quota_exceeded" })),
     );
     renderPanel("/agencies/1/overview");
-    await waitFor(
-      () =>
-        expect(
-          screen.getByText(/free Copilot insight limit|無料Copilotインサイトの上限/i),
-        ).toBeTruthy(),
-      { timeout: 2000 },
-    );
-    expect(screen.queryByText("Couldn't generate an insight right now.")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy(), { timeout: 2000 });
+    expect(
+      screen.queryByText(/couldn't generate an insight|インサイトを生成できません/i),
+    ).toBeNull();
   });
 
   it("clears a stale error instead of leaking it onto an unrelated tab", async () => {
