@@ -243,6 +243,9 @@ async def ask(
     # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
     sig_hash: str | None = None
     cache_outcome: str | None = None
+    # Numeric-hallucination-guard verdict. Stays None on the deterministic
+    # router paths, where no free-text answer is generated for it to check.
+    numeric_guard_triggered: bool | None = None
 
     if decision is not None:
         stage = decision.stage
@@ -332,6 +335,7 @@ async def ask(
         success = payload["success"]
         sig_hash = payload.get("signature_hash")
         cache_outcome = payload.get("cache_outcome")
+        numeric_guard_triggered = payload.get("numeric_guard_triggered")
         resp = AskResponse(
             answer=payload["answer"],
             tool_call=payload["tool_call"],
@@ -358,6 +362,7 @@ async def ask(
                 success,
                 signature_hash=sig_hash,
                 cache_outcome=cache_outcome,
+                numeric_guard_triggered=numeric_guard_triggered,
             )
 
     return resp

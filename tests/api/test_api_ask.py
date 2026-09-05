@@ -629,6 +629,60 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     assert row["router_stage"] == "llm"
 
 
+@pytest.mark.asyncio
+async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
+    """chat_with_tools' guard verdict reaches ask_query_log, not just its own tests."""
+    client, agency_id = ask_client
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+        anon_quota=None,
+        panel_ctx=None,
+    ):
+        return {
+            "answer": "ok",
+            "tool_call": None,
+            "result": None,
+            "success": True,
+            "numeric_guard_triggered": True,
+        }
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "平均遅延はどれくらい？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+
+    import asyncpg
+
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT numeric_guard_triggered FROM ask_query_log "
+            "WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
+            agency_id,
+        )
+    await pool.close()
+    assert row is not None
+    assert row["numeric_guard_triggered"] is True
+
+
 # ---------------------------------------------------------------------------
 # Anonymous Ask LLM-call daily quota
 # ---------------------------------------------------------------------------
