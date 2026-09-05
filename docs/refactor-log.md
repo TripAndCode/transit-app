@@ -461,3 +461,15 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `apiGet` (not just `apiPost`) so the Overview tab's real
   `useOverviewSummary` query resolves before the debounced insight call
   fires. (PR #329)
+- 2026-09-05: Item 76 (Copilot Task 6 — frontend quota-exceeded handling). Item
+  75's PR had already added equivalent anon-quota detection under the name
+  `isAnonCopilotQuotaExceeded`, rendered as a plain paragraph rather than the
+  shared `ErrorBanner` pattern used for the Ask tab's anon-quota 429. Renamed
+  it to the plan's `isCopilotQuotaExceeded` (one canonical function, no
+  duplicate), wired `CopilotPanel.tsx`'s quota-exceeded branch to render
+  `<ErrorBanner />`, and added an `isCopilotQuotaExceeded` branch to
+  `ErrorBanner.tsx` mirroring the existing Ask-quota banner (calm
+  `role="status"` + sign-in link) with a new `errors.copilot_anon_quota_exceeded`
+  i18n key in both locales, removing the now-unused `copilot.anon_quota_exceeded`
+  key. Updated `CopilotPanel.test.tsx` and added a matching case to
+  `ErrorBanner.test.tsx`. (PR #pending)

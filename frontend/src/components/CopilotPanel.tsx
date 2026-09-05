@@ -1,7 +1,8 @@
 import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useCopilotInsight } from "../api/copilot";
-import { isAnonCopilotQuotaExceeded } from "../api/client";
+import { isCopilotQuotaExceeded } from "../api/client";
+import { ErrorBanner } from "./ErrorBanner";
 import { useRangeContext } from "../api/rangeContext";
 import { useOverviewSummary } from "../api/hooks";
 
@@ -45,11 +46,7 @@ export function CopilotPanel() {
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
       {error != null &&
-        (isAnonCopilotQuotaExceeded(error) ? (
-          <p>{t("copilot.anon_quota_exceeded")}</p>
-        ) : (
-          <p>{t("copilot.error")}</p>
-        ))}
+        (isCopilotQuotaExceeded(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
       {insight && (
         <div>
           <p>{insight.text}</p>

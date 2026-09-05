@@ -969,7 +969,8 @@
     "followup_rate_limit": "アクセスが集中しています。少し待って再試行してください。",
     "followup_connection": "通信が一時的に途切れました。再試行してください。",
     "followup_llm_generic": "質問への回答に失敗しました。もう一度お試しください。",
-    "ask_anon_quota_exceeded": "本日の無料AI質問の上限に達しました。ログインすると引き続き質問できます。"
+    "ask_anon_quota_exceeded": "本日の無料AI質問の上限に達しました。ログインすると引き続き質問できます。",
+    "copilot_anon_quota_exceeded": "本日の無料Copilotインサイトの上限に達しました。ログインすると引き続き利用できます。"
   },
   "admin": {
     "users": {
@@ -1084,7 +1085,6 @@
     "title": "コパイロット",
     "loading": "考え中…",
     "error": "現在インサイトを生成できませんでした。",
-    "anon_quota_exceeded": "本日の無料Copilotインサイトの上限に達しました。ログインすると引き続き利用できます。",
     "low_confidence": "データが限定的です。",
     "ask_step_back": "こちらで会話が続いています。"
   }

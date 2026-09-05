@@ -62,7 +62,7 @@ const COPILOT_ANON_QUOTA_EXCEEDED_CODE = "copilot_anon_quota_exceeded";
  * caller-scoped, resets-tomorrow condition as `isAnonAskQuotaExceeded`, so the
  * UI should explain it calmly and invite sign-in rather than show a generic
  * error. */
-export function isAnonCopilotQuotaExceeded(err: unknown): boolean {
+export function isCopilotQuotaExceeded(err: unknown): boolean {
   if (!(err instanceof ApiError) || err.status !== 429) return false;
   try {
     const parsed = JSON.parse(err.body);
