@@ -200,11 +200,9 @@ def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[st
     Only ever called at a site where ``answer`` is LLM-authored free text —
     ``_dispatch_and_respond``'s ``render_tool_result`` output is already
     grounded by construction (a formatted SQL aggregate) and is never routed
-    through this helper. ``grounding={}`` means a turn with no dispatched
-    data at all (e.g. an out-of-scope refusal). Nothing can be traced there, so
-    only a number carrying a metric unit counts as a claim — the bare digits
-    that path legitimately contains are route codes and periods the system
-    prompt asks the model to name. See
+    through this helper. ``grounding={}`` means a turn with no dispatched data
+    at all (e.g. an out-of-scope refusal); the answer passes through unchanged
+    there, because there is nothing to trace a number back to. See
     :func:`pipeline.query.hallucination_guard.verify_numeric_claims`.
     """
     if not answer:
@@ -824,10 +822,11 @@ async def chat_with_tools(
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
         # This is the one LLM-authored-free-text site in this function — no
-        # tool was dispatched, so there is no data to trace a number back to.
-        # _numeric_guard is called with grounding={}, which rejects a
-        # unit-bearing statistic the model invented here while letting through
-        # the route codes and periods a helpful refusal is supposed to name.
+        # tool was dispatched, so there is no data to trace a number back to
+        # and _numeric_guard passes the reply through. The guard covers the
+        # paths where an answer can actually be checked; constraining this one
+        # means constraining what the model may return here, not verifying it
+        # afterwards.
         body = (msg.content or "").strip()
         if body:
             guarded_body, triggered = _numeric_guard(body, {}, locale)

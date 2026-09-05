@@ -9,11 +9,10 @@ prose — so those return sites are correctly excluded from the guard. The one
 return site where ``answer`` really is raw LLM free text is the out-of-scope
 refusal/suggestion path (``tool_calls`` empty, non-empty ``msg.content``) —
 and that site has no dispatched tool result to ground against, so
-:func:`chat._numeric_guard` is called there with ``grounding={}``, which
-rejects a unit-bearing statistic the model invented while letting through the
-route codes and periods a helpful refusal is supposed to name. Direct
-accept/reject/skip coverage of the helper is tested here in addition to the
-one live call site.
+:func:`chat._numeric_guard` is called there with ``grounding={}`` and passes
+the reply through: with nothing dispatched there is nothing to trace a number
+back to. Direct accept/reject/skip coverage of the helper is tested here in
+addition to the one live call site.
 """
 
 import os
@@ -83,13 +82,13 @@ def test_numeric_guard_passes_no_numbers_trivially():
     assert answer == original
 
 
-def test_numeric_guard_rejects_metric_claim_when_no_data_grounded():
-    """grounding={} means a turn with dispatched-but-empty (or no) data, so a
-    figure carrying a metric unit cannot be traced to anything and is treated
-    as a fabrication."""
-    answer, triggered = chat._numeric_guard("It's about 999 minutes late.", {}, "en")
-    assert triggered is True
-    assert answer == chat._summary("numeric_guard_fallback", lang="en")
+def test_numeric_guard_passes_through_when_no_data_grounded():
+    """grounding={} carries no data to verify against, so the guard abstains
+    rather than replacing an answer it cannot assess."""
+    original = "It's about 999 minutes late."
+    answer, triggered = chat._numeric_guard(original, {}, "en")
+    assert triggered is False
+    assert answer == original
 
 
 def test_numeric_guard_passes_through_empty_answer():
@@ -109,18 +108,17 @@ def test_numeric_guard_uses_localized_fallback_for_japanese():
 
 
 @pytest.mark.asyncio
-async def test_out_of_scope_reply_with_number_is_replaced_with_fallback(monkeypatch):
-    """The out-of-scope free-text path is the sole LLM-authored-answer site in
-    chat_with_tools. No tool is dispatched there, so grounding is {} and an
-    invented statistic cannot be traced to anything — it must be replaced with
-    the fallback, not shown to the user."""
-    monkeypatch.setattr(
-        chat, "_get_client", lambda: _FakeClient(_fake_text_message("Buses run about every 999 minutes off-peak."))
-    )
+async def test_out_of_scope_reply_with_number_passes_through(monkeypatch):
+    """The out-of-scope free-text path dispatches no tool, so the guard has no
+    grounding and abstains. Rejecting on digits there replaced the reply
+    SYSTEM_PROMPT asks for — a refusal naming concrete route_codes and periods
+    — with a message about numbers."""
+    reply = "Buses run about every 999 minutes off-peak."
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message(reply)))
     out = await chat.chat_with_tools("weather today?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is True
-    assert out["answer"] == chat._summary("numeric_guard_fallback", lang="en")
-    assert out["numeric_guard_triggered"] is True
+    assert out["answer"] == reply
+    assert out["numeric_guard_triggered"] is False
 
 
 @pytest.mark.asyncio
