@@ -595,3 +595,20 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`tests/db/test_item81_scratch.py`); the coordinator later stashed it
   (`git stash push -u`) before resuming and shipping this branch, so it no
   longer sits in the worktree as of this PR. (PR #335)
+- 2026-09-05: Added the encrypted-at-rest BYOK LLM key store (item 82,
+  Copilot plan Phase D Task 12): `pipeline/query/user_llm_keys.py`
+  (`encrypt_key`/`decrypt_key`/`key_suffix` via Fernet, keyed by
+  `LLM_KEY_ENCRYPTION_KEY` -- losing that env var makes every stored key
+  permanently unrecoverable -- plus `save_user_llm_key`/`get_user_llm_key`/
+  `delete_user_llm_key` against the `user_llm_keys` table from item 81) and
+  `tests/unit/test_user_llm_keys.py`. `poetry run pytest
+  tests/unit/test_user_llm_keys.py -v` (3 passed), `poetry run ruff check`,
+  and `poetry run mypy` all clean; `cryptography` resolved importable
+  transitively (48.0.0 per `poetry.lock`) without any `pyproject.toml`
+  change. This worker's sandbox denied both `Edit` and `Write` on
+  `pyproject.toml` (unlike `pipeline/**`/`tests/**`, it has no allowlist
+  entry in `.claude/settings.local.json`), so the plan's Step 3 direct
+  dependency pin (`cryptography = "^48.0"` under
+  `[tool.poetry.dependencies]`, then `poetry lock --no-update`) is not yet
+  applied -- left for the coordinator/a session with that permission before
+  this is fully done. (PR #pending)
