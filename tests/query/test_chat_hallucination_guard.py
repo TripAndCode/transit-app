@@ -9,10 +9,11 @@ prose — so those return sites are correctly excluded from the guard. The one
 return site where ``answer`` really is raw LLM free text is the out-of-scope
 refusal/suggestion path (``tool_calls`` empty, non-empty ``msg.content``) —
 and that site has no dispatched tool result to ground against, so
-:func:`chat._numeric_guard` is called there with ``grounding={}``: any digit
-the model includes is by definition unverifiable and gets replaced (see that
-helper's docstring). Direct accept/reject/skip coverage of the helper is
-tested here in addition to the one live call site.
+:func:`chat._numeric_guard` is called there with ``grounding={}``, which
+rejects a unit-bearing statistic the model invented while letting through the
+route codes and periods a helpful refusal is supposed to name. Direct
+accept/reject/skip coverage of the helper is tested here in addition to the
+one live call site.
 """
 
 import os
@@ -82,10 +83,10 @@ def test_numeric_guard_passes_no_numbers_trivially():
     assert answer == original
 
 
-def test_numeric_guard_rejects_any_number_when_no_data_grounded():
-    """grounding={} means a turn with dispatched-but-empty (or no) data —
-    every claimed number is unverifiable by construction, so any digit is
-    treated as a fabrication."""
+def test_numeric_guard_rejects_metric_claim_when_no_data_grounded():
+    """grounding={} means a turn with dispatched-but-empty (or no) data, so a
+    figure carrying a metric unit cannot be traced to anything and is treated
+    as a fabrication."""
     answer, triggered = chat._numeric_guard("It's about 999 minutes late.", {}, "en")
     assert triggered is True
     assert answer == chat._summary("numeric_guard_fallback", lang="en")
@@ -110,9 +111,9 @@ def test_numeric_guard_uses_localized_fallback_for_japanese():
 @pytest.mark.asyncio
 async def test_out_of_scope_reply_with_number_is_replaced_with_fallback(monkeypatch):
     """The out-of-scope free-text path is the sole LLM-authored-answer site in
-    chat_with_tools. No tool is dispatched there, so grounding is {} and any
-    digit in the reply is unverifiable — it must be replaced with the
-    fallback, not shown to the user."""
+    chat_with_tools. No tool is dispatched there, so grounding is {} and an
+    invented statistic cannot be traced to anything — it must be replaced with
+    the fallback, not shown to the user."""
     monkeypatch.setattr(
         chat, "_get_client", lambda: _FakeClient(_fake_text_message("Buses run about every 999 minutes off-peak."))
     )

@@ -201,9 +201,11 @@ def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[st
     ``_dispatch_and_respond``'s ``render_tool_result`` output is already
     grounded by construction (a formatted SQL aggregate) and is never routed
     through this helper. ``grounding={}`` means a turn with no dispatched
-    data at all (e.g. an out-of-scope refusal): every claimed number is then
-    unverifiable by construction, so any digit in the reply is treated as a
-    fabrication and replaced.
+    data at all (e.g. an out-of-scope refusal). Nothing can be traced there, so
+    only a number carrying a metric unit counts as a claim — the bare digits
+    that path legitimately contains are route codes and periods the system
+    prompt asks the model to name. See
+    :func:`pipeline.query.hallucination_guard.verify_numeric_claims`.
     """
     if not answer:
         return answer, False
@@ -822,10 +824,10 @@ async def chat_with_tools(
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
         # This is the one LLM-authored-free-text site in this function — no
-        # tool was dispatched, so there is no data to trace a number back to;
-        # _numeric_guard is called with grounding={} so any digit the model
-        # includes here (e.g. an invented statistic in an otherwise-helpful
-        # suggestion) is treated as unverifiable and replaced.
+        # tool was dispatched, so there is no data to trace a number back to.
+        # _numeric_guard is called with grounding={}, which rejects a
+        # unit-bearing statistic the model invented here while letting through
+        # the route codes and periods a helpful refusal is supposed to name.
         body = (msg.content or "").strip()
         if body:
             guarded_body, triggered = _numeric_guard(body, {}, locale)

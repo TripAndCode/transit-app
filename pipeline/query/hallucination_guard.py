@@ -35,8 +35,13 @@ _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
 # Deliberately excludes 日/週/月 and 件: SYSTEM_PROMPT tells the model to name
 # route_codes (4-5 bare digits) and to offer periods and a count of suggested
 # questions, so those digits are the prompt working as designed, not claims.
+# ``割`` excludes 割引/割合 so a fare discount or the word "proportion" is not
+# read as "N tenths". Units are matched as words, not glyphs only: パーセント is
+# the ordinary prose form of % in Japanese, and a claim spelled that way is the
+# same claim.
 _METRIC_CLAIM_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:%|％|分|秒)|\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|sec(?:ond)?s?)\b",
+    r"\d+(?:\.\d+)?\s*(?:%|％|パーセンテージ|パーセント|分|秒|割(?![引合]))"
+    r"|\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|sec(?:ond)?s?|per\s?cent)\b",
     re.IGNORECASE,
 )
 

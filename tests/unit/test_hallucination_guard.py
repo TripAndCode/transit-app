@@ -92,3 +92,15 @@ def test_grounded_path_still_checks_every_number():
     an unexplained bare number is still a fabrication."""
     assert verify_numeric_claims("Route 99999 is the worst.", {"route_code": "22171"}) is False
     assert verify_numeric_claims("Route 22171 is the worst.", {"route_code": "22171"}) is True
+
+
+def test_ungrounded_spelled_out_percentage_is_rejected():
+    """パーセント is the ordinary prose form of %, so it is the same claim."""
+    assert verify_numeric_claims("定時率は56パーセントです。", {}) is False
+    assert verify_numeric_claims("On-time rate is 56 per cent.", {}) is False
+
+
+def test_ungrounded_wari_is_rejected_but_not_a_discount():
+    assert verify_numeric_claims("定時率は8割です。", {}) is False
+    # 割引/割合 are a fare discount and the word "proportion", not "N tenths".
+    assert verify_numeric_claims("運賃は3割引です。", {}) is True
