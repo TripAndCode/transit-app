@@ -104,3 +104,10 @@ def test_ungrounded_wari_is_rejected_but_not_a_discount():
     assert verify_numeric_claims("定時率は8割です。", {}) is False
     # 割引/割合 are a fare discount and the word "proportion", not "N tenths".
     assert verify_numeric_claims("運賃は3割引です。", {}) is True
+
+
+def test_ungrounded_hyphenated_unit_is_rejected():
+    """"an 8-minute delay" is as idiomatic as "8 minutes" and the same claim."""
+    assert verify_numeric_claims("Expect an 8-minute delay.", {}) is False
+    assert verify_numeric_claims("A 56-percent on-time rate.", {}) is False
+    assert verify_numeric_claims("A 14-min average wait.", {}) is False

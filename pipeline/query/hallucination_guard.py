@@ -30,18 +30,14 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
 _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
-# A number carrying one of this app's metric units — the only shape that is a
-# quantified claim about the data rather than an identifier or a date span.
-# Deliberately excludes 日/週/月 and 件: SYSTEM_PROMPT tells the model to name
-# route_codes (4-5 bare digits) and to offer periods and a count of suggested
-# questions, so those digits are the prompt working as designed, not claims.
-# ``割`` excludes 割引/割合 so a fare discount or the word "proportion" is not
-# read as "N tenths". Units are matched as words, not glyphs only: パーセント is
-# the ordinary prose form of % in Japanese, and a claim spelled that way is the
-# same claim.
+# The only shape that is a quantified claim about the data rather than an
+# identifier or a date span: a number carrying a metric unit. 日/週/月/件 are
+# excluded because SYSTEM_PROMPT tells the model to name route_codes and to
+# offer periods and a count of suggestions.
+# tests/unit/test_hallucination_guard.py pins the accepted spellings.
 _METRIC_CLAIM_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:%|％|パーセンテージ|パーセント|分|秒|割(?![引合]))"
-    r"|\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|sec(?:ond)?s?|per\s?cent)\b",
+    r"\d+(?:\.\d+)?[\s-]*(?:%|％|パーセンテージ|パーセント|分|秒|割(?![引合]))"
+    r"|\d+(?:\.\d+)?[\s-]*(?:min(?:ute)?s?|sec(?:ond)?s?|per\s?cent)\b",
     re.IGNORECASE,
 )
 
