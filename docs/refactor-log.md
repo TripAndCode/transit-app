@@ -441,3 +441,23 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   and already merged/reviewed independently — a good candidate for its own
   future backlog item, not a blocking fix for this one. Both required
   `/review-branch` passes are now complete. (PR #328)
+- 2026-09-05: Mounted the `CopilotPanel` frontend component (item 75, Phase A
+  Task 5 of the AI Copilot plan): `frontend/src/api/copilot.ts` adds the
+  `useCopilotInsight` debounced-fetch hook, `frontend/src/components/
+  CopilotPanel.tsx` renders it (with an Ask-tab step-back message instead of
+  calling the insight endpoint), `App.tsx` mounts it alongside `Sidebar`/
+  `Outlet` so it persists across tab navigation, and both locale files gain
+  the new `copilot.*` keys. Two corrections to the plan's literal Task 5
+  sketch were needed to satisfy this repo's enforced lint/test conventions
+  rather than the plan's own assumptions: `useCopilotInsight` derives the
+  displayed insight from a request-key comparison instead of calling
+  `setState` synchronously inside the effect to clear it (avoids the
+  `react-hooks/set-state-in-effect` error CLAUDE.md mandates), and
+  `CopilotPanel` calls all its hooks before the Ask-tab early return (the
+  original ask-tab branch sat before a later hook call, violating rules-of-
+  hooks now that the panel persists across tab switches instead of
+  remounting). `CopilotPanel.test.tsx`'s two assertions were adjusted to
+  match this repo's actual un-pinned-locale rendering and to mock
+  `apiGet` (not just `apiPost`) so the Overview tab's real
+  `useOverviewSummary` query resolves before the debounced insight call
+  fires. (PR #pending)
