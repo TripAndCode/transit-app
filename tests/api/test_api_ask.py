@@ -932,3 +932,19 @@ async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
     )
     assert resp.status_code == 200
     assert captured["panel_ctx"] is None
+
+
+@pytest.mark.asyncio
+async def test_ask_rejects_unknown_panel_ctx_tab(ask_client):
+    """panel_ctx.tab is a closed enum (the frontend's known tab routes) — an
+    arbitrary/oversized string must be rejected before it can ever reach the
+    system prompt chat_with_tools builds from this hint.
+    """
+    client, agency_id = ask_client
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "遅延状況は？", "panel_ctx": {"tab": "not-a-real-tab"}},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 422

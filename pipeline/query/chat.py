@@ -356,10 +356,14 @@ async def chat_with_tools(
     FastAPI exception handler can turn it into a machine-readable response.
 
     ``panel_ctx``, when supplied by the Copilot side panel, carries the
-    frontend's active-tab hint (e.g. ``{"tab": "overview"}``). It is appended
-    to the system prompt as a one-line grounding hint only — it never reaches
-    the rules/embedding routing stage (``api/routers/ask.py`` resolves that
-    stage before calling this function) or the tool-dispatch args.
+    frontend's active-tab hint (e.g. ``{"tab": "overview"}``). The API layer
+    (``api/routers/ask.py``'s ``PanelCtx`` model) restricts ``tab`` to a
+    known enum of tab names before it ever reaches this function, so this
+    dict-typed parameter is safe to interpolate into the system prompt
+    without its own length/type check. It is appended to the system prompt
+    as a one-line grounding hint only — it never reaches the rules/embedding
+    routing stage (resolved before calling this function) or the
+    tool-dispatch args.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
