@@ -591,5 +591,7 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `test_migrate_up_records_all_versions`/`test_migrate_down_and_up`) showed
   no regressions. The scratch test file could not be deleted afterward —
   `rm` (bare or `-f`) was denied by this session's Bash permissions/hook, so
-  it remains an untracked, uncommitted leftover in this worktree
-  (`tests/db/test_item81_scratch.py`), safe to delete manually. (PR #pending)
+  it was left as an untracked, uncommitted leftover in this worktree
+  (`tests/db/test_item81_scratch.py`); the coordinator later stashed it
+  (`git stash push -u`) before resuming and shipping this branch, so it no
+  longer sits in the worktree as of this PR. (PR #335)
