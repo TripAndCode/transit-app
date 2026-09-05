@@ -548,4 +548,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   run pytest tests/query/ tests/api/test_api_ask.py
   tests/api/test_ask_endpoints.py -v` (301 passed, 22 skipped — ClickHouse-
   gated, expected without `RUN_CH_INTEGRATION=1` — 0 failed), `poetry run
-  ruff check`, and `poetry run mypy`, all clean. (PR #pending)
+  ruff check`, and `poetry run mypy`, all clean. (PR #332)
