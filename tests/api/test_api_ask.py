@@ -683,9 +683,7 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
     assert row["numeric_guard_triggered"] is True
 
 
-# ---------------------------------------------------------------------------
-# Anonymous Ask LLM-call daily quota
-# ---------------------------------------------------------------------------
+# Anonymous Ask LLM-call daily quota.
 
 
 @pytest.fixture(autouse=True)

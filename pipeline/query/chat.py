@@ -193,7 +193,7 @@ def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
         raise AnonAskQuotaExceeded()
 
 
-def _numeric_guard(answer: str | None, grounding: dict | None, locale: str) -> tuple[str | None, bool]:
+def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[str | None, bool]:
     """Replace ``answer`` with the localized fallback if it makes a numeric
     claim not traceable to ``grounding``.
 
@@ -203,11 +203,9 @@ def _numeric_guard(answer: str | None, grounding: dict | None, locale: str) -> t
     through this helper. ``grounding={}`` means a turn with no dispatched
     data at all (e.g. an out-of-scope refusal): every claimed number is then
     unverifiable by construction, so any digit in the reply is treated as a
-    fabrication and replaced. ``grounding=None`` is reserved for a future
-    call site with no notion of "grounding" to check at all, and skips the
-    check entirely rather than rejecting on every digit.
+    fabrication and replaced.
     """
-    if not answer or grounding is None:
+    if not answer:
         return answer, False
     if verify_numeric_claims(answer, grounding):
         return answer, False

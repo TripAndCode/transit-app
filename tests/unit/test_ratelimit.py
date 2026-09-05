@@ -54,9 +54,7 @@ def test_key_func_pro_tier_uses_api_key():
     assert key == "pro:my-api-key"
 
 
-# ---------------------------------------------------------------------------
-# Anonymous Ask LLM-call daily quota
-# ---------------------------------------------------------------------------
+# Anonymous Ask LLM-call daily quota.
 
 
 def setup_function(_):
