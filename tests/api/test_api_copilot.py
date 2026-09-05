@@ -169,12 +169,16 @@ async def test_copilot_insight_returns_503_when_disabled(copilot_client, monkeyp
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 503
+    # Pin the body too: without this the test's own assertion never separates
+    # "the gate returned 503" from "something downstream happened to raise".
+    assert resp.json()["detail"] == "copilot_disabled"
 
 
 @pytest.mark.asyncio
 async def test_copilot_enabled_endpoint_reports_the_flag(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
+    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "true")
     resp = await client.get(f"/api/{agency_id}/copilot/enabled")
     assert resp.status_code == 200
     assert resp.json() == {"enabled": True}

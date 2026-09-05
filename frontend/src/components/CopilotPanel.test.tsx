@@ -274,9 +274,13 @@ describe("CopilotPanel", () => {
     mockApiGet({ enabled: false });
     const postSpy = vi.spyOn(client, "apiPost");
     const off = renderPanel("/agencies/1/overview");
-    // Give the flag query the same number of ticks the enabled case needed.
     await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(off.container.querySelector(".copilot-panel")).toBeNull();
+    // Wait past the key debounce before asserting no POST. Rendering nothing
+    // and issuing nothing are two separate gates — the early return covers the
+    // first, `tab` covers the second — and the POST only fires DEBOUNCE_MS
+    // later, so asserting immediately would pass with the `tab` gate removed.
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 300));
     expect(postSpy).not.toHaveBeenCalled();
   });
 
