@@ -9,16 +9,23 @@ answer is discarded (never shown) if any number doesn't trace back.
 
 from __future__ import annotations
 
+import decimal
 import math
 import re
 
-# A lookbehind excluding any word character (not just a digit) before a
-# leading "-" keeps a hyphen-glued token like "route-14" from being misread
-# as the negative number -14.
-_NUMBER_RE = re.compile(r"(?<!\w)-?\d+\.?\d*")
-# Stripped before number extraction so an ISO date's own hyphens (e.g. the
-# "09"/"05" in "2026-09-05") never leak into the allowed/claimed number sets
-# as arbitrary negative-number parsing artifacts.
+# Two alternatives so a leading "-" is only ever read as a sign when it isn't
+# glued to a preceding word character: the first alternative requires that
+# non-word lookbehind before matching a negative number, the second matches a
+# plain digit run unconditionally. Without the split, a single lookbehind in
+# front of the whole pattern would also suppress a *positive* number glued to
+# a preceding letter (e.g. "route14" or the "14" in "route-14"), since the
+# lookbehind sits before the optional sign either way.
+_NUMBER_RE = re.compile(r"(?<!\w)-\d+\.?\d*|\d+\.?\d*")
+# Stripped before number extraction so an ISO date's own day/month/year
+# components (e.g. the "2026"/"09"/"05" in "2026-09-05") never leak into the
+# allowed number set as spurious grounded values — a small date component
+# coinciding with a genuinely fabricated number in the answer would otherwise
+# let that fabrication pass verification.
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
@@ -35,7 +42,7 @@ def _flatten_numbers(value: object) -> set[float]:
     out: set[float] = set()
     if isinstance(value, bool):
         return out
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, decimal.Decimal)):
         out.add(float(value))
     elif isinstance(value, dict):
         for v in value.values():

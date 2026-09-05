@@ -482,16 +482,37 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   answer with no numbers passes trivially; any unmatched number fails the
   whole answer, since this is a structural defense-in-depth check (not a
   system-prompt instruction) ahead of Task 8's wiring into `chat_with_tools`.
-  Added `tests/unit/test_hallucination_guard.py` exactly per the plan's Task
-  7 code block. Implemented verbatim from
-  `docs/superpowers/plans/2026-09-05-ai-copilot-side-panel.md`'s Task 7 (this
-  file and its Task 9 spec companion are gitignored `docs/*` content, copied
-  into this worktree from the persistent checkout per item 71's sync note).
-  Verification: `poetry run pytest tests/unit/test_hallucination_guard.py -v`,
-  `poetry run ruff check`, and `poetry run mypy` could **not** be run in this
-  session — the dispatched worker sandbox denies the `poetry` command
-  entirely (a documented `transit-app-gotchas` limitation: no provisioned
-  virtualenv/install permission), so this needs to be run by whichever
-  environment picks up verification next before being treated as fully
-  checked; the new module and test were written as an exact, unmodified copy
-  of the plan's already-specified code. (PR #pending)
+  Initial worker commit added `tests/unit/test_hallucination_guard.py` and
+  the module as an unmodified copy of the plan's Task 7 code block, from
+  `docs/superpowers/plans/2026-09-05-ai-copilot-side-panel.md` (this file and
+  its Task 9 spec companion are gitignored `docs/*` content, copied into this
+  worktree from the persistent checkout per item 71's sync note). The
+  coordinator's own two-pass `/review-branch` then found and fixed two Major
+  gaps beyond the plan's minimal code, extending it rather than leaving it
+  verbatim: (1) the plan's bare `_NUMBER_RE = r"-?\d+\.?\d*"` read a bare
+  hyphen as a minus sign with no word-boundary check, so an ISO date string
+  in `grounding` (e.g. `from_date`/`to_date`, which `chat.py` does add to
+  context dicts) leaked spurious negative numbers into the allowed set, and a
+  hyphen-glued token like "route-14" in an answer was misread as -14; fixed
+  via a split-alternative `_NUMBER_RE`, a new `_DATE_RE` stripping
+  `\d{4}-\d{2}-\d{2}` substrings before extraction, and a new
+  `_THOUSANDS_SEP_RE` for comma-grouped numbers, folded into a shared
+  `_extract_numbers` helper. (2) `_flatten_numbers` didn't recognize
+  `decimal.Decimal`, which is exactly what asyncpg hands back for a Postgres
+  `NUMERIC` column (e.g. `agg_hour_daily.avg_min`) — a real tool-result value
+  this guard will see once Task 8 wires it in — so a correct answer quoting
+  such a value would have been wrongly rejected as a hallucination; fixed by
+  adding `decimal.Decimal` to the numeric-leaf check. 5 new tests were added
+  covering these cases (dates, hyphen-glued and letter-glued tokens, comma
+  thousands-separators, `Decimal` values), for 9 total. `_flatten_numbers`
+  also gained a `value: object` type annotation and had its dead
+  `try/except ValueError` around `float()` removed. A documented,
+  non-blocking residual from review: `verify_numeric_claims`'s match loop is
+  O(len(claimed) × len(allowed)), recomputing `round()` per claimed number
+  instead of once total — left as-is since the module isn't wired into any
+  live caller yet. Verification: `poetry run pytest
+  tests/unit/test_hallucination_guard.py -v` (9/9 passed), `poetry run ruff
+  check`, and `poetry run mypy`, all run from the main checkout pointed at
+  this worktree's file paths (the dispatched worker's own sandbox denies
+  `poetry`, a documented `transit-app-gotchas` limitation) — all clean. (PR
+  #pending)

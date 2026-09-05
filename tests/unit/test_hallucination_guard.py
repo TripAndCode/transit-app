@@ -1,3 +1,5 @@
+import decimal
+
 from pipeline.query.hallucination_guard import verify_numeric_claims
 
 GROUNDING = {"route": "12", "avg_delay_min": 14.2, "delayed_count": 6, "delta_pct": 56.1}
@@ -37,4 +39,16 @@ def test_hyphen_glued_route_number_still_passes():
 def test_comma_thousands_separator_still_matches():
     grounding = {"count": 1234}
     answer = "1,234 riders were affected."
+    assert verify_numeric_claims(answer, grounding) is True
+
+
+def test_number_glued_to_preceding_letter_still_extracted():
+    grounding = {"platform": 14}
+    answer = "Track A14 is affected."
+    assert verify_numeric_claims(answer, grounding) is True
+
+
+def test_decimal_grounding_value_matches():
+    grounding = {"avg_min": decimal.Decimal("14.20")}
+    answer = "Averaging 14.2 minutes."
     assert verify_numeric_claims(answer, grounding) is True
