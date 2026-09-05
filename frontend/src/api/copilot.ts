@@ -5,7 +5,7 @@ import type { RangeCtx } from "./rangeContext";
 
 export type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
-const DEBOUNCE_MS = 800;
+export const DEBOUNCE_MS = 800;
 
 type CopilotParams = {
   agencyId: number;

@@ -5,6 +5,7 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CopilotPanel } from "./CopilotPanel";
 import * as client from "../api/client";
+import { DEBOUNCE_MS } from "../api/copilot";
 
 // Matches the rest of the suite's convention (e.g. GuestPrompt.test.tsx,
 // ReportTable.test.tsx): without this, vi.spyOn(client, ...) across tests
@@ -309,7 +310,11 @@ describe("CopilotPanel", () => {
     // The key is debounced, so it only actually goes null DEBOUNCE_MS after
     // the route change. Returning before that leaves the key untouched and
     // the scenario unexercised, so wait the window out rather than racing it.
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Derived from the real constant, not a copy of it: a duplicated literal
+    // would stop covering this path the moment DEBOUNCE_MS grew past it.
+    // A real timer rather than vi.useFakeTimers() because the assertion has
+    // to observe react-query resolving a fetch across the same boundary.
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 300));
     fireEvent.click(screen.getByText("go-overview"));
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
       timeout: 3000,

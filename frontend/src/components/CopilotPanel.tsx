@@ -23,7 +23,11 @@ export function CopilotPanel() {
   // Anything but an explicit true is treated as off, so an unresolved or
   // failed flag check never reaches the billed insight POST.
   const enabled = useCopilotEnabled(agencyId).data?.enabled === true;
-  const overviewQuery = useOverviewSummary(overviewMatch && enabled ? agencyId : null, filters);
+  // Deliberately NOT gated on `enabled`: this is a free aggregate read that
+  // OverviewTab already issues under the same query key, and the billed
+  // insight is withheld by `tab` below. Gating it here would only stall the
+  // insight behind the flag round trip on the enabled path.
+  const overviewQuery = useOverviewSummary(overviewMatch ? agencyId : null, filters);
   // Every hook below must run on every render regardless of which tab is
   // active — react-hooks/rules-of-hooks forbids branching before a hook
   // call, and this panel persists across tab navigation (it's mounted
