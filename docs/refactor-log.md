@@ -515,4 +515,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   check`, and `poetry run mypy`, all run from the main checkout pointed at
   this worktree's file paths (the dispatched worker's own sandbox denies
   `poetry`, a documented `transit-app-gotchas` limitation) — all clean. (PR
-  #pending)
+  #331)
