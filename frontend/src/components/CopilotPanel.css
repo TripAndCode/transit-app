@@ -1,0 +1,82 @@
+/* Imported by CopilotPanel.tsx itself, not by a tab's stylesheet: the panel is
+   mounted once in App outside <Outlet />, so it renders on routes that never
+   load any tab's CSS chunk. */
+
+.copilot-panel {
+  flex: 0 0 300px;
+  align-self: stretch;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 20px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.copilot-panel h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.copilot-panel p {
+  margin: 0 0 10px;
+}
+
+.copilot-cite {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.copilot-low-confidence {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.copilot-panel form {
+  display: flex;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.copilot-panel input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+}
+
+.copilot-panel button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.copilot-panel button:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* Narrow viewports have no room for a third column beside the sidebar and
+   main content; the panel is supplementary, so it yields rather than
+   compressing the tab it sits next to. */
+@media (max-width: 1100px) {
+  .copilot-panel {
+    display: none;
+  }
+}

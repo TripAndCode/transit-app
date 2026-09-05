@@ -43,6 +43,15 @@ async def copilot_client(copilot_app):
         yield client, agency_id
 
 
+@pytest.fixture(autouse=True)
+def _copilot_enabled(monkeypatch):
+    """The feature ships off by default, so every behaviour test turns it on.
+
+    The disabled-path tests below override this back to a falsy value.
+    """
+    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "true")
+
+
 @pytest.mark.asyncio
 async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch):
     client, agency_id = copilot_client
@@ -141,3 +150,61 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
         )
         assert resp.status_code == 200
         assert seen[-1] == expected
+
+
+async def _must_not_run(tab, filters, view_payload, *, locale="ja"):
+    raise AssertionError("generate_proactive_insight must not be reached while the feature is off")
+
+
+@pytest.mark.asyncio
+async def test_copilot_insight_returns_503_when_disabled(copilot_client, monkeypatch):
+    """The kill switch short-circuits before any quota or LLM work."""
+    client, agency_id = copilot_client
+    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)
+
+    resp = await client.post(
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_copilot_enabled_endpoint_reports_the_flag(copilot_client, monkeypatch):
+    client, agency_id = copilot_client
+
+    resp = await client.get(f"/api/{agency_id}/copilot/enabled")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": True}
+
+    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
+    resp = await client.get(f"/api/{agency_id}/copilot/enabled")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_disabled_copilot_does_not_consume_anon_quota(copilot_client, monkeypatch):
+    """A disabled feature must not bill the caller's daily budget."""
+    from api.middleware import ratelimit
+
+    client, agency_id = copilot_client
+    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)
+
+    consumed: list[str] = []
+    monkeypatch.setattr(
+        ratelimit,
+        "check_and_consume_anon_quota",
+        lambda *a, **k: consumed.append("hit") or True,
+    )
+
+    resp = await client.post(
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 503
+    assert consumed == []

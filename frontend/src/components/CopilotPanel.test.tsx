@@ -88,10 +88,24 @@ function renderPanelWithAgencySwitch(initialPath: string) {
   );
 }
 
+
+/** The panel makes two GETs: the `/copilot/enabled` flag check and
+ * `useOverviewSummary`. A blanket `mockResolvedValue` would answer the flag
+ * check with an overview payload, so route by path instead. */
+function mockApiGet(opts: { enabled?: boolean } = {}) {
+  return vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+    path.includes("/copilot/enabled")
+      ? Promise.resolve({ enabled: opts.enabled ?? true })
+      : Promise.resolve({ headline: { avg_min: 6.4, samples: 812 } }),
+  ) as unknown as ReturnType<typeof vi.spyOn>;
+}
+
 describe("CopilotPanel", () => {
-  it("shows a step-back note on the Ask tab instead of calling the insight endpoint", () => {
+  it("shows a step-back note on the Ask tab instead of calling the insight endpoint", async () => {
+    mockApiGet();
     const spy = vi.spyOn(client, "apiPost");
     renderPanel("/agencies/1/ask");
+    await waitFor(() => expect(screen.getByRole("complementary")).toBeTruthy());
     // Bilingual match — jsdom's detected language isn't pinned here (unlike
     // renderWithProviders, which forces "en"), so this must tolerate either
     // resource bundle resolving, matching the existing ErrorBanner.test.tsx
@@ -104,7 +118,7 @@ describe("CopilotPanel", () => {
     // The panel only calls the insight endpoint once it has a view_payload,
     // which here comes from the real useOverviewSummary hook — so its
     // underlying apiGet must resolve too, not just apiPost.
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     vi.spyOn(client, "apiPost").mockResolvedValue({
       text: "Route 12 is delayed.",
       cite: "Overview · 1 sample",
@@ -120,7 +134,7 @@ describe("CopilotPanel", () => {
   });
 
   it("shows the calm quota-exceeded banner instead of the generic error message", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     vi.spyOn(client, "apiPost").mockRejectedValue(
       new client.ApiError(429, JSON.stringify({ detail: "limit reached", code: "copilot_anon_quota_exceeded" })),
     );
@@ -132,7 +146,7 @@ describe("CopilotPanel", () => {
   });
 
   it("clears a stale error instead of leaking it onto an unrelated tab", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
     const { container } = renderPanelWithNav("/agencies/1/overview");
 
@@ -155,7 +169,7 @@ describe("CopilotPanel", () => {
     // per attempt with no refund on failure) — so this must hold regardless
     // of the ambient QueryClient default, not just under the test suite's
     // own retry:false QueryClients.
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
     renderPanelWithProductionRetryDefault("/agencies/1/overview");
 
@@ -169,7 +183,7 @@ describe("CopilotPanel", () => {
   });
 
   it("forwards an AbortSignal to apiPost so a superseded in-flight POST can be cancelled", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockResolvedValue({
       text: "Route 12 is delayed.",
       cite: "Overview · 1 sample",
@@ -183,7 +197,7 @@ describe("CopilotPanel", () => {
   });
 
   it("submits a follow-up question to /ask with panel_ctx", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     // The first apiPost call is the on-mount proactive-insight fetch (insight
     // shape), the second is the user-submitted follow-up (AskResponse shape)
     // — mocked per-call so the insight render is exercised with its real
@@ -215,7 +229,7 @@ describe("CopilotPanel", () => {
   });
 
   it("clears a stale follow-up answer when switching agencies", async () => {
-    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    mockApiGet();
     vi.spyOn(client, "apiPost").mockResolvedValue({
       text: "Route 12 is delayed.",
       cite: "Overview · 1 sample",
@@ -242,5 +256,33 @@ describe("CopilotPanel", () => {
     expect(screen.queryByText("Agency 1 answer.")).toBeNull();
     const newInput = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
     expect((newInput as HTMLInputElement).value).toBe("");
+  });
+
+  it("renders the panel when enabled and nothing at all when disabled", async () => {
+    mockApiGet({ enabled: true });
+    vi.spyOn(client, "apiPost").mockResolvedValue({
+      text: "insight",
+      cite: "c",
+      low_confidence: false,
+    } as never);
+    const on = renderPanel("/agencies/1/overview");
+    await waitFor(() => expect(on.container.querySelector(".copilot-panel")).not.toBeNull());
+    on.unmount();
+
+    vi.restoreAllMocks();
+    mockApiGet({ enabled: false });
+    const postSpy = vi.spyOn(client, "apiPost");
+    const off = renderPanel("/agencies/1/overview");
+    // Give the flag query the same number of ticks the enabled case needed.
+    await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
+    expect(off.container.querySelector(".copilot-panel")).toBeNull();
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("makes no insight request while the flag check is still unresolved", () => {
+    vi.spyOn(client, "apiGet").mockImplementation(() => new Promise(() => {}));
+    const postSpy = vi.spyOn(client, "apiPost");
+    renderPanel("/agencies/1/overview");
+    expect(postSpy).not.toHaveBeenCalled();
   });
 });

@@ -22,7 +22,7 @@ from api.middleware.ratelimit import (
     limiter,
 )
 from api.security import csrf_guard
-from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight
+from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
@@ -50,6 +50,11 @@ async def copilot_insight(
     user=Depends(get_current_user_optional),
 ):
     csrf_guard(request)
+    if not is_enabled():
+        # Short-circuit ahead of the quota check: a disabled feature must not
+        # spend the caller's daily budget, and the panel hides itself off the
+        # ``/copilot/enabled`` flag rather than relying on this response.
+        raise HTTPException(status_code=503, detail="copilot_disabled")
     if user is None:
         session_key = get_or_issue_anon_session(request, response)
         ip_key = anon_ip_key(request)
@@ -67,3 +72,11 @@ async def copilot_insight(
     except NoInsightAvailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CopilotInsightResponse(**result)
+
+
+@router.get("/copilot/enabled")
+async def copilot_enabled_endpoint(
+    agency_id: int = Depends(get_agency),  # implicit auth scope
+):
+    """Public flag check so the panel knows whether to render at all."""
+    return {"enabled": is_enabled()}

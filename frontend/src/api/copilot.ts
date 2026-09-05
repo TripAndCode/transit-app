@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiPost } from "./client";
+import { apiGet, apiPost } from "./client";
 import type { RangeCtx } from "./rangeContext";
 
 export type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
@@ -23,6 +23,23 @@ function buildKey(
   return agencyId == null || tab == null || !viewPayload
     ? null
     : `${agencyId}:${tab}:${JSON.stringify(filters)}:${JSON.stringify(viewPayload)}`;
+}
+
+/** The Copilot kill switch (`COPILOT_INSIGHT_ENABLED` server-side).
+ *
+ * Cached for an hour like `useFollowupEnabled`: it is deployment
+ * configuration, not per-request state. Callers must treat anything other
+ * than an explicit `true` as off, so an unresolved or failed check never
+ * fires the billed insight POST.
+ */
+export function useCopilotEnabled(agencyId: number | null) {
+  return useQuery({
+    queryKey: ["copilot-enabled", agencyId],
+    queryFn: ({ signal }) =>
+      apiGet<{ enabled: boolean }>(`/api/${agencyId}/copilot/enabled`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 60 * 60 * 1000,
+  });
 }
 
 export function useCopilotInsight(
@@ -72,6 +89,11 @@ export function useCopilotInsight(
     // silently burn a second unit for what the user experiences as one
     // request. Never retry it, regardless of the global QueryClient default.
     retry: false,
+    // One insight per view state, not per subscription. Without this, leaving
+    // Overview and coming back re-runs the query for an unchanged key and
+    // bills another LLM call — the debounce above only coalesces key changes,
+    // it does not stop a refetch for a key that is already cached.
+    staleTime: 10 * 60 * 1000,
   });
 
   const insight = data ? { text: data.text, cite: data.cite, lowConfidence: data.low_confidence } : null;

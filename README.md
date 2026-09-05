@@ -97,6 +97,7 @@ The stage internals, provider ladder, intent cache, and the anonymized
 | `ASK_INTENT_CACHE_ENABLED` | `false` | Enables the canonical-intent cache + guided builder UX. |
 | `ASK_HISTORY_ENABLED` | `true` | Off → the LLM stage gets no conversation memory. |
 | `ASK_QUERY_LOG_ENABLED` | `true` | Off → no rows written to `ask_query_log`. |
+| `COPILOT_INSIGHT_ENABLED` | `false` | Off → Copilot panel renders nothing, `POST /copilot/insight` returns 503. The only no-user-action LLM call, so it ships off. |
 | `ASK_ROUTER_ENABLED` | `true` | Off → skip stages 1–2 (every question goes to the LLM). |
 
 ¹ Code-level fallback when unset. `.env.example` ships it `true` as the
