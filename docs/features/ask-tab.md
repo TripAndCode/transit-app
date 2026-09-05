@@ -166,8 +166,17 @@ mechanism via `check_and_consume_anon_quota(..., scope=...)`):
 The session bucket is the primary limit; the IP ceiling is deliberately looser
 and exists only as a backstop, because `get_or_issue_anon_session` mints a
 fresh session for any request arriving without the cookie — a caller can always
-cycle cookies, and the IP bucket is what bounds that. This is a trade-off sized
-for this product's abuse model, not a bulletproof anti-bot control.
+cycle cookies.
+
+Neither bucket bounds a determined caller. The IP key comes from
+`get_remote_address`, and the container runs uvicorn with
+`--forwarded-allow-ips='*'` so that a platform proxy's `X-Forwarded-For` is
+honoured — which also means the value is whatever the caller sends. Both keys
+are therefore client-supplied. These buckets exist to stop accidental and
+casual repeat traffic from running up an LLM bill; they are not an anti-abuse
+control, and nothing here should be relied on as one. Pinning
+`--forwarded-allow-ips` to the deployment's actual proxy range is what would
+make the IP ceiling meaningful.
 
 Both buckets are in-memory and process-local (reset on restart/redeploy), the
 same trade-off `FREE_LIMIT`/`PRO_LIMIT` already accept for this app's

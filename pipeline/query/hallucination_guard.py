@@ -30,12 +30,24 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Stripped so a comma-grouped number ("1,234") extracts as one value instead
 # of two unmatched fragments.
 _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
+# A number carrying one of this app's metric units — the only shape that is a
+# quantified claim about the data rather than an identifier or a date span.
+# Deliberately excludes 日/週/月 and 件: SYSTEM_PROMPT tells the model to name
+# route_codes (4-5 bare digits) and to offer periods and a count of suggested
+# questions, so those digits are the prompt working as designed, not claims.
+_METRIC_CLAIM_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|％|分|秒)|\d+(?:\.\d+)?\s*(?:min(?:ute)?s?|sec(?:ond)?s?)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize(text: str) -> str:
+    text = _DATE_RE.sub(" ", text)
+    return _THOUSANDS_SEP_RE.sub("", text)
 
 
 def _extract_numbers(text: str) -> list[float]:
-    text = _DATE_RE.sub(" ", text)
-    text = _THOUSANDS_SEP_RE.sub("", text)
-    return [float(m) for m in _NUMBER_RE.findall(text)]
+    return [float(m) for m in _NUMBER_RE.findall(_normalize(text))]
 
 
 def _flatten_numbers(value: object) -> set[float]:
@@ -61,7 +73,13 @@ def verify_numeric_claims(answer: str, grounding: dict) -> bool:
         return True
     allowed = _flatten_numbers(grounding)
     if not allowed:
-        return False
+        # Nothing to verify against — the turn dispatched no data (e.g. an
+        # out-of-scope refusal). Every digit is unverifiable here by
+        # definition, so rejecting on any digit rejects the reply the system
+        # prompt asks for: a refusal that names concrete route_codes and
+        # periods the user *could* ask about. Only a unit-bearing metric claim
+        # is treated as a fabrication on this path.
+        return _METRIC_CLAIM_RE.search(_normalize(answer)) is None
     for number in claimed:
         # Exact match, or a rounded display of an allowed value (nearest int,
         # or nearest 0.1) — a model paraphrasing "14.2" as "about 14" is not

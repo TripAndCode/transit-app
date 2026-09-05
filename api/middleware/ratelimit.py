@@ -53,8 +53,10 @@ limiter = Limiter(key_func=_key_func)
 # Anonymous Ask LLM-call daily quota: a per-day budget on the Stage-3 LLM path
 # only, on top of the per-minute FREE_LIMIT above (which is sized for generic
 # abuse, not per-call LLM cost). Keyed primarily by a signed httpOnly
-# anon-session cookie, with a coarser per-IP ceiling as the backstop against
-# one source cycling cookies to launder around the per-session limit.
+# anon-session cookie, with a coarser per-IP ceiling behind it. Both keys are
+# client-supplied — a caller can drop the cookie, and the IP comes from
+# X-Forwarded-For, which the container trusts from any peer — so these bound
+# accidental and casual repeat traffic, not a determined caller.
 # Logged-in users are subject to neither bucket. Both buckets are process-local
 # like FREE_LIMIT/PRO_LIMIT above, so a multi-instance deployment needs a
 # shared storage backend instead.

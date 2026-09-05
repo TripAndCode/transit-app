@@ -254,7 +254,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except clickhouse_connect.driver.exceptions.Error:
@@ -264,7 +264,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except asyncpg.exceptions.UndefinedTableError:
@@ -276,7 +276,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     # render_tool_result formats `result` (a dispatched ToolResult) deterministically
@@ -287,7 +287,7 @@ async def _dispatch_and_respond(
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
         "success": result.kind != "empty",
-        "numeric_guard_triggered": False,
+        "numeric_guard_triggered": None,
         **extra,
     }
 
@@ -419,7 +419,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -432,7 +432,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -452,7 +452,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -465,7 +465,7 @@ async def chat_with_tools(
                 "tool_call": {"name": build_tool, "arguments": can_args},
                 "result": _result_to_dict(result),
                 "success": result.kind != "empty",
-                "numeric_guard_triggered": False,
+                "numeric_guard_triggered": None,
                 "signature_hash": sig_hash,
                 "confidence": 1.0,
                 "canonical_args": can_args,
@@ -669,7 +669,7 @@ async def chat_with_tools(
                 "tool_call": None,
                 "result": None,
                 "success": False,
-                "numeric_guard_triggered": False,
+                "numeric_guard_triggered": None,
                 "signature_hash": None,
                 "confidence": None,
                 "canonical_args": None,
@@ -708,7 +708,7 @@ async def chat_with_tools(
                     "tool_call": None,
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": None,
                     "confidence": None,
                     "canonical_args": None,
@@ -812,7 +812,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
@@ -841,7 +841,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
         }
 
     if len(tool_calls) > 1:

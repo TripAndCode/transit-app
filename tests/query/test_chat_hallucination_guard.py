@@ -142,11 +142,11 @@ async def test_empty_out_of_scope_reply_carries_guard_key(monkeypatch):
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message("")))
     out = await chat.chat_with_tools("質問", _ctx(), conn=None, agency_id=1, locale="ja")
     assert out["success"] is False
-    assert out["numeric_guard_triggered"] is False
+    assert out["numeric_guard_triggered"] is None
 
 
 @pytest.mark.asyncio
-async def test_tool_dispatch_success_carries_guard_key_false(monkeypatch):
+async def test_tool_dispatch_success_carries_guard_key_none(monkeypatch):
     """A tool-call result is rendered by render_tool_result — deterministic
     formatting of already-grounded data — and must never be routed through
     the numeric guard even though it contains a real number."""
@@ -159,12 +159,15 @@ async def test_tool_dispatch_success_carries_guard_key_false(monkeypatch):
 
     out = await chat.chat_with_tools("route 12 delay?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is True
-    assert out["numeric_guard_triggered"] is False
+    # None, not False: the guard never ran here. FALSE would assert it ran and
+    # found nothing wrong, a distinction ask_query_log's column relies on to
+    # tell a dormant guard from one that simply never fires.
+    assert out["numeric_guard_triggered"] is None
     assert out["answer"] == "Route 12 delay: 14.2 min"
 
 
 @pytest.mark.asyncio
-async def test_tool_unavailable_error_carries_guard_key_false(monkeypatch):
+async def test_tool_unavailable_error_carries_guard_key_none(monkeypatch):
     async def _raise_503(*a, **k):
         raise HTTPException(status_code=503, detail="unavailable")
 
@@ -173,11 +176,11 @@ async def test_tool_unavailable_error_carries_guard_key_false(monkeypatch):
 
     out = await chat.chat_with_tools("route 12 delay?", _ctx(), conn=None, agency_id=1, locale="en")
     assert out["success"] is False
-    assert out["numeric_guard_triggered"] is False
+    assert out["numeric_guard_triggered"] is None
 
 
 @pytest.mark.asyncio
-async def test_llm_unreachable_carries_guard_key_false(monkeypatch):
+async def test_llm_unreachable_carries_guard_key_none(monkeypatch):
     class _DeadClient:
         def chat_completions(self, **kwargs):
             return None, "connection"
@@ -185,4 +188,17 @@ async def test_llm_unreachable_carries_guard_key_false(monkeypatch):
     monkeypatch.setattr(chat, "_get_client", lambda: _DeadClient())
     out = await chat.chat_with_tools("質問", _ctx(), conn=None, agency_id=1, locale="ja")
     assert out["success"] is False
+    assert out["numeric_guard_triggered"] is None
+
+
+@pytest.mark.asyncio
+async def test_out_of_scope_reply_naming_a_route_code_passes_through(monkeypatch):
+    """SYSTEM_PROMPT rule 2 requires route arguments as 4-5 digit route_codes,
+    and its own worked example for an out-of-scope question suggests one.
+    Treating every digit on this ungrounded path as a fabrication replaced
+    that reply with the numeric fallback, which answers nothing."""
+    reply = "天気データはありません。代わりに『22171の平日と土日祝の比較』が答えられます"
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message(reply)))
+    out = await chat.chat_with_tools("雨天時の比較", _ctx(), conn=None, agency_id=1, locale="ja")
+    assert out["answer"] == reply
     assert out["numeric_guard_triggered"] is False
