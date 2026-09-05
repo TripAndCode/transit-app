@@ -57,7 +57,7 @@ limiter = Limiter(key_func=_key_func)
 # one source cycling cookies to launder around the per-session limit.
 # Logged-in users are subject to neither bucket. Both buckets are process-local
 # like FREE_LIMIT/PRO_LIMIT above, so a multi-instance deployment needs a
-# shared storage backend instead. See docs/features/ask-tab.md.
+# shared storage backend instead.
 
 ASK_ANON_SESSION_COOKIE_NAME = os.environ.get("ASK_ANON_SESSION_COOKIE_NAME", "ask_anon_sid")
 ASK_ANON_SESSION_TTL_DAYS = int(os.environ.get("ASK_ANON_SESSION_TTL_DAYS", "30"))
