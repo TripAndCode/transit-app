@@ -1,4 +1,5 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -154,5 +155,25 @@ describe("CopilotPanel", () => {
 
     const [, , opts] = postSpy.mock.calls[0];
     expect((opts as { signal?: AbortSignal } | undefined)?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("submits a follow-up question to /ask with panel_ctx", async () => {
+    vi.spyOn(client, "apiGet").mockResolvedValue({ headline: { avg_min: 6.4, samples: 812 } });
+    const spy = vi.spyOn(client, "apiPost").mockResolvedValue({
+      answer: "It's on time.",
+      tool_call: null,
+      result: null,
+      ctx: {},
+    });
+    renderPanel("/agencies/1/overview");
+    const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
+    await userEvent.type(input, "how is route 12 doing{enter}");
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        "/api/1/ask",
+        expect.objectContaining({ question: "how is route 12 doing", panel_ctx: { tab: "overview" } }),
+      ),
+    );
+    expect(await screen.findByText("It's on time.")).toBeTruthy();
   });
 });

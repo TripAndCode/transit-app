@@ -1,10 +1,13 @@
+import { useState, type FormEvent } from "react";
 import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useMutation } from "@tanstack/react-query";
 import { useCopilotInsight } from "../api/copilot";
-import { isCopilotQuotaExceeded } from "../api/client";
+import { apiPost, isCopilotQuotaExceeded } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
 import { useRangeContext } from "../api/rangeContext";
 import { useOverviewSummary } from "../api/hooks";
+import type { AskResponse } from "../api/types";
 
 export function CopilotPanel() {
   const { t } = useTranslation();
@@ -25,6 +28,23 @@ export function CopilotPanel() {
   // instance.
   const tab = overviewMatch ? "overview" : null;
   const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
+  const [question, setQuestion] = useState("");
+  // Reuses the existing /ask pipeline unchanged (rules → embedding → RAG),
+  // just with the panel's current tab passed as a grounding hint — no new
+  // routing/dispatch logic, per the Copilot spec's "explicitly out of
+  // scope" constraint.
+  const followup = useMutation({
+    mutationFn: (q: string) =>
+      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question: q, panel_ctx: { tab } }),
+  });
+
+  function submitFollowup(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed || agencyId == null) return;
+    followup.mutate(trimmed);
+    setQuestion("");
+  }
 
   if (askMatch) {
     return (
@@ -54,6 +74,18 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
+      <form onSubmit={submitFollowup}>
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder={t("copilot.followup_placeholder")}
+        />
+        <button type="submit" disabled={followup.isPending}>
+          {t("copilot.followup_submit")}
+        </button>
+      </form>
+      {followup.error != null && <ErrorBanner error={followup.error} />}
+      {followup.data && <p>{followup.data.answer}</p>}
     </aside>
   );
 }

@@ -1086,6 +1086,8 @@
     "loading": "考え中…",
     "error": "現在インサイトを生成できませんでした。",
     "low_confidence": "データが限定的です。",
-    "ask_step_back": "こちらで会話が続いています。"
+    "ask_step_back": "こちらで会話が続いています。",
+    "followup_placeholder": "続けて質問…",
+    "followup_submit": "質問する"
   }
 }
