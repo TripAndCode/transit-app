@@ -78,6 +78,10 @@ class AskRequest(BaseModel):
     model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = []
+    # Optional grounding hint from the Copilot side panel (e.g. {"tab": "overview"}).
+    # Threaded through to chat_with_tools's system-prompt addendum only — never
+    # consulted by the rules/embedding routing stage above.
+    panel_ctx: dict | None = None
 
 
 class AskResponse(BaseModel):
@@ -310,6 +314,7 @@ async def ask(
             ch=ch,
             force_tool_call=force_tool_call,
             anon_quota=anon_quota,
+            panel_ctx=body.panel_ctx,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")

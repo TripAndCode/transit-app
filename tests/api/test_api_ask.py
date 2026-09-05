@@ -62,6 +62,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         return {
             "answer": "テスト回答",
@@ -249,6 +250,7 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["rag_examples"] = rag_examples
         captured["force_tool_call"] = force_tool_call
@@ -287,6 +289,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -345,6 +348,7 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -393,6 +397,7 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -443,6 +448,7 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -536,6 +542,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -591,6 +598,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         ch=None,
         force_tool_call=False,
         anon_quota=None,
+        panel_ctx=None,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
@@ -843,3 +851,84 @@ async def test_anonymous_caller_over_daily_limit_gets_429_with_code(ask_client, 
     assert resp2.status_code == 429, f"expected 429, got {resp2.status_code}: {resp2.text[:200]}"
     data = resp2.json()
     assert data["code"] == "ask_anon_quota_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch):
+    """The Copilot side panel's optional panel_ctx hint reaches chat_with_tools
+    untouched — it is a system-prompt grounding hint only, never consulted by
+    the rules/embedding routing stage above it.
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+        anon_quota=None,
+        panel_ctx=None,
+    ):
+        captured["panel_ctx"] = panel_ctx
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "遅延状況は？", "panel_ctx": {"tab": "overview"}},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["panel_ctx"] == {"tab": "overview"}
+
+
+@pytest.mark.asyncio
+async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
+    """A request with no panel_ctx field forwards None — the pre-existing,
+    Ask-tab (non-Copilot) call shape is unaffected.
+    """
+    client, agency_id = ask_client
+    captured = {}
+
+    async def fake_chat(
+        question,
+        ctx,
+        conn,
+        agency_id,
+        model=None,
+        locale="ja",
+        rag_examples=None,
+        history=None,
+        ch=None,
+        force_tool_call=False,
+        anon_quota=None,
+        panel_ctx=None,
+    ):
+        captured["panel_ctx"] = panel_ctx
+        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "遅延状況は？"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200
+    assert captured["panel_ctx"] is None
