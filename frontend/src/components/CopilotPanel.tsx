@@ -28,23 +28,6 @@ export function CopilotPanel() {
   // instance.
   const tab = overviewMatch ? "overview" : null;
   const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
-  const [question, setQuestion] = useState("");
-  // Reuses the existing /ask pipeline unchanged (rules → embedding → RAG),
-  // just with the panel's current tab passed as a grounding hint — no new
-  // routing/dispatch logic, per the Copilot spec's "explicitly out of
-  // scope" constraint.
-  const followup = useMutation({
-    mutationFn: (q: string) =>
-      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question: q, panel_ctx: { tab } }),
-  });
-
-  function submitFollowup(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const trimmed = question.trim();
-    if (!trimmed || agencyId == null) return;
-    followup.mutate(trimmed);
-    setQuestion("");
-  }
 
   if (askMatch) {
     return (
@@ -74,6 +57,37 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
+      {agencyId != null && <FollowupForm key={agencyId} agencyId={agencyId} />}
+    </aside>
+  );
+}
+
+// Keyed by agencyId at the call site above so switching agencies remounts
+// this component from scratch — otherwise the question/answer/error state
+// below would persist across an agency switch, since CopilotPanel itself is
+// mounted once outside <Outlet /> and never remounts on its own.
+function FollowupForm({ agencyId }: { agencyId: number }) {
+  const { t } = useTranslation();
+  const [question, setQuestion] = useState("");
+  // Reuses the existing /ask pipeline unchanged (rules → embedding → RAG),
+  // just with the panel's current tab passed as a grounding hint — no new
+  // routing/dispatch logic, per the Copilot spec's "explicitly out of
+  // scope" constraint.
+  const followup = useMutation({
+    mutationFn: (q: string) =>
+      apiPost<AskResponse>(`/api/${agencyId}/ask`, { question: q, panel_ctx: { tab: "overview" } }),
+  });
+
+  function submitFollowup(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    followup.mutate(trimmed);
+    setQuestion("");
+  }
+
+  return (
+    <>
       <form onSubmit={submitFollowup}>
         <input
           value={question}
@@ -86,6 +100,6 @@ export function CopilotPanel() {
       </form>
       {followup.error != null && <ErrorBanner error={followup.error} />}
       {followup.data && <p>{followup.data.answer}</p>}
-    </aside>
+    </>
   );
 }
