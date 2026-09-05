@@ -2,12 +2,13 @@ import { useState, type FormEvent } from "react";
 import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
-import { useCopilotInsight } from "../api/copilot";
+import { useCopilotEnabled, useCopilotInsight } from "../api/copilot";
 import { apiPost, isCopilotQuotaExceeded } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
 import { useRangeContext } from "../api/rangeContext";
 import { useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
+import "./CopilotPanel.css";
 
 export function CopilotPanel() {
   const { t } = useTranslation();
@@ -19,6 +20,13 @@ export function CopilotPanel() {
       ? Number(askMatch.params.agencyId)
       : null;
   const [filters] = useRangeContext();
+  // Anything but an explicit true is treated as off, so an unresolved or
+  // failed flag check never reaches the billed insight POST.
+  const enabled = useCopilotEnabled(agencyId).data?.enabled === true;
+  // Deliberately NOT gated on `enabled`: this is a free aggregate read that
+  // OverviewTab already issues under the same query key, and the billed
+  // insight is withheld by `tab` below. Gating it here would only stall the
+  // insight behind the flag round trip on the enabled path.
   const overviewQuery = useOverviewSummary(overviewMatch ? agencyId : null, filters);
   // Every hook below must run on every render regardless of which tab is
   // active — react-hooks/rules-of-hooks forbids branching before a hook
@@ -26,8 +34,12 @@ export function CopilotPanel() {
   // outside <Outlet />) rather than remounting, so an early return above
   // this point would change the hook count between renders of the same
   // instance.
-  const tab = overviewMatch ? "overview" : null;
+  const tab = overviewMatch && enabled ? "overview" : null;
   const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
+
+  // The kill switch removes the panel outright rather than showing an empty
+  // shell — a disabled feature should be invisible, not broken-looking.
+  if (!enabled) return null;
 
   if (askMatch) {
     return (
