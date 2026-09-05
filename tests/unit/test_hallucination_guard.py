@@ -100,12 +100,31 @@ def test_ungrounded_spelled_out_percentage_is_rejected():
     assert verify_numeric_claims("On-time rate is 56 per cent.", {}) is False
 
 
-def test_ungrounded_wari_is_rejected_but_not_a_discount():
+def test_ungrounded_wari_forms_are_all_rejected():
+    """割 in any spelling is rejected, including 割引 and 割り当て.
+
+    Not a carve-out oversight: this app holds no fare or allocation data, so a
+    model asserting either on the ungrounded path is making a claim it cannot
+    support just as surely as 「8割」 is.
+    """
     assert verify_numeric_claims("定時率は8割です。", {}) is False
-    # 割引/割合/割り当て are a fare discount, "proportion" and "allocate" —
-    # none of them is "N tenths".
-    assert verify_numeric_claims("運賃は3割引です。", {}) is True
-    assert verify_numeric_claims("5割り当てられました。", {}) is True
+    assert verify_numeric_claims("定時率は3割りです。", {}) is False
+    assert verify_numeric_claims("8割引かれます。", {}) is False
+    assert verify_numeric_claims("運賃は3割引です。", {}) is False
+    assert verify_numeric_claims("5割り当てられました。", {}) is False
+
+
+def test_ungrounded_number_outside_the_safe_set_is_a_claim():
+    """The safe set is what SYSTEM_PROMPT asks this reply to contain. A unit
+    the metric list never enumerated is still caught, because the default for
+    an unexplained number is "claim" rather than "allow"."""
+    assert verify_numeric_claims("平均は8時間の遅れです。", {}) is False
+    assert verify_numeric_claims("56 percentage points better.", {}) is False
+    assert verify_numeric_claims("定時率は56٪です。", {}) is False
+
+
+def test_ungrounded_suggestion_count_range_is_not_a_claim():
+    assert verify_numeric_claims("例えば以下の2〜3件です。", {}) is True
 
 
 def test_ungrounded_fraction_idiom_is_not_a_claim():
