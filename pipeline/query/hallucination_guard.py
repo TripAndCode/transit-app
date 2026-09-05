@@ -35,9 +35,13 @@ _THOUSANDS_SEP_RE = re.compile(r"(?<=\d),(?=\d)")
 # excluded because SYSTEM_PROMPT tells the model to name route_codes and to
 # offer periods and a count of suggestions.
 # tests/unit/test_hallucination_guard.py pins the accepted spellings.
+_SEP = r"[\s,、，-]*"
+# ``分`` skips the fraction idiom "N分のM" — の followed by a digit — while
+# still matching the genitive "14.2分の遅れ", which is a real claim. ``割``
+# skips 割引/割合/割り当て.
 _METRIC_CLAIM_RE = re.compile(
-    r"\d+(?:\.\d+)?[\s-]*(?:%|％|パーセンテージ|パーセント|分|秒|割(?![引合]))"
-    r"|\d+(?:\.\d+)?[\s-]*(?:min(?:ute)?s?|sec(?:ond)?s?|per\s?cent)\b",
+    r"\d+(?:\.\d+)?" + _SEP + r"(?:%|％|パーセンテージ|パーセント|分(?!の\s*\d)|秒|割(?![引合り]))"
+    r"|\d+(?:\.\d+)?" + _SEP + r"(?:min(?:ute)?s?|sec(?:ond)?s?|per\s?cent)\b",
     re.IGNORECASE,
 )
 

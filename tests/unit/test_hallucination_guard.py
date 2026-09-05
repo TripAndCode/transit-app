@@ -102,8 +102,28 @@ def test_ungrounded_spelled_out_percentage_is_rejected():
 
 def test_ungrounded_wari_is_rejected_but_not_a_discount():
     assert verify_numeric_claims("定時率は8割です。", {}) is False
-    # 割引/割合 are a fare discount and the word "proportion", not "N tenths".
+    # 割引/割合/割り当て are a fare discount, "proportion" and "allocate" —
+    # none of them is "N tenths".
     assert verify_numeric_claims("運賃は3割引です。", {}) is True
+    assert verify_numeric_claims("5割り当てられました。", {}) is True
+
+
+def test_ungrounded_fraction_idiom_is_not_a_claim():
+    """N分のM is a fraction, not a minute count."""
+    assert verify_numeric_claims("対象路線は全体の4分の3です。", {}) is True
+    assert verify_numeric_claims("3分の1に相当します。", {}) is True
+
+
+def test_genitive_minutes_is_still_a_claim():
+    """分の followed by a word, not a digit, is the ordinary genitive — this
+    distinction is why the fraction carve-out tests for a following digit
+    rather than for の alone."""
+    assert verify_numeric_claims("平均は14.2分の遅れです。", {}) is False
+
+
+def test_ungrounded_comma_between_number_and_unit_is_still_a_claim():
+    assert verify_numeric_claims("delay is 56, minutes", {}) is False
+    assert verify_numeric_claims("遅延は56、分ほどです。", {}) is False
 
 
 def test_ungrounded_hyphenated_unit_is_rejected():
