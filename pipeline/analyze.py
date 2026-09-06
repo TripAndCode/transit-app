@@ -256,6 +256,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # pipeline.histogram.count_in_range /
         # pipeline.reports.rankings.compute_on_time), rather than needing a
         # re-aggregation for every tolerance someone might ask for.
+        on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
+        late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
         sql = f"""
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
             grouped AS (
@@ -278,9 +280,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     -- PERCENTILE_DISC calls) keeps this to a single per-group
                     -- sort of dep_delay.
                     PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
-                    SUM(CASE WHEN dep_delay>{LEGACY_SEVERE_LATE_TOLERANCE_SEC} THEN 1 ELSE 0 END) AS late_5min_plus,
-                    SUM(CASE WHEN dep_delay<={LEGACY_ON_TIME_LATE_TOLERANCE_SEC} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
-                    SUM(CASE WHEN dep_delay>{LEGACY_SEVERE_LATE_TOLERANCE_SEC} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1 ELSE 0 END) AS late_5min_plus,
+                    SUM(CASE WHEN dep_delay<={on_time_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
                     COUNT(*) AS samples,
                     SUM(dep_delay) AS sum_delay_sec
                 FROM deduped
