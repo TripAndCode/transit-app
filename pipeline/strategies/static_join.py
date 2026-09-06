@@ -13,7 +13,7 @@ import logging
 from psycopg2 import sql
 
 from pipeline.strategies._pb import _dec, _fields
-from pipeline.strategies._time import normalize_departure_time
+from pipeline.strategies._time import parse_departure_time
 
 _log = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def parse_feed(
     """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
-                route_code, stop_sequence, dep_delay).
+                route_code, stop_sequence, dep_delay, scheduled_sec).
     """
     raw_rows = list(_decode_rows(pb_bytes))
     if not raw_rows:
@@ -117,38 +117,40 @@ def parse_feed(
 
     rows = []
     miss = 0
-    skipped_extended = 0
+    extended = 0
     bad_sched = 0
     for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             miss += 1
-        # Single parse drives both the extended-hour drop and the zero-pad
-        # (see pipeline/strategies/_time.py's module docstring for why: two
-        # independent parses of the same field -- this used to check
-        # sched[:2] for the >=24 decision and hour_str.isdigit() for padding
-        # separately -- can disagree on malformed multi-digit input, e.g. a
-        # 3-digit hour like "125:30:00" had a fine 2-char prefix but a
-        # broken zero-pad, storing an uncastable value). GTFS's
-        # departure_time is raw, unpadded, unvalidated text -- "7:05:00" is
-        # as valid as "07:05:00" per spec, and nothing guarantees the rest
-        # is even numeric. Postgres's old TIME column validated and
-        # normalized this for free; ClickHouse's plain String does not, so
-        # analyze()'s `_analyze_deduped.scheduled_time time` column is now
-        # the only place format errors surface -- and once a bad value is
-        # durably stored in ClickHouse, it fails analyze() for this ENTIRE
-        # agency on every subsequent run, not just drops one row. NULL is
-        # already a first-class value on this column (every downstream read
-        # site handles it -- WHERE scheduled_time IS NOT NULL / toUInt8OrNull).
-        sched, status = normalize_departure_time(sched)
+        # Single parse drives the extended-hour handling, the zero-pad, AND
+        # the raw scheduled_sec value (see pipeline/strategies/_time.py's
+        # module docstring for why: two independent parses of the same
+        # field -- this used to check sched[:2] for the >=24 decision and
+        # hour_str.isdigit() for padding separately -- can disagree on
+        # malformed multi-digit input, e.g. a 3-digit hour like "125:30:00"
+        # had a fine 2-char prefix but a broken zero-pad, storing an
+        # uncastable value). GTFS's departure_time is raw, unpadded,
+        # unvalidated text -- "7:05:00" is as valid as "07:05:00" per spec,
+        # and nothing guarantees the rest is even numeric. Postgres's old
+        # TIME column validated and normalized this for free; ClickHouse's
+        # plain String does not, so analyze()'s `_analyze_deduped.
+        # scheduled_time time` column is now the only place format errors
+        # surface -- and once a bad value is durably stored in ClickHouse,
+        # it fails analyze() for this ENTIRE agency on every subsequent
+        # run, not just drops one row. NULL is already a first-class value
+        # on this column (every downstream read site handles it -- WHERE
+        # scheduled_time IS NOT NULL / toUInt8OrNull).
+        sched, status, scheduled_sec = parse_departure_time(sched)
         if status == "extended":
             # GTFS allows departure_time like "25:30:00" for trips spanning
-            # midnight as continuation of the previous service day, with no
-            # representation this column (Nullable(String), but read
-            # everywhere as a same-day HH:MM[:SS]) can hold; drop the row + log.
-            _log.warning("static_join: skipping trip_id=%r seq=%s extended departure_time", trip_id, stop_seq)
-            skipped_extended += 1
-            continue
+            # midnight as continuation of the previous service day.
+            # scheduled_time (Nullable(String), read everywhere as a
+            # same-day HH:MM[:SS]) still can't represent it, so that column
+            # stays NULL here -- but scheduled_sec (Nullable(Int32)) holds
+            # the raw seconds-since-service-day-start value (e.g. 91800 for
+            # "25:30:00"), so the row is kept instead of dropped.
+            extended += 1
         if status == "bad":
             bad_sched += 1
         rows.append(
@@ -161,13 +163,14 @@ def parse_feed(
                 rt_route_id,
                 stop_seq,
                 dep_delay,
+                scheduled_sec,
             )
         )
 
     if miss:
-        _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows) + skipped_extended} rows missed JOIN (logged)")
-    if skipped_extended:
-        _log.warning(f"[static_join] agency={agency_id} {skipped_extended} rows dropped (hour >= 24)")
+        _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows)} rows missed JOIN (logged)")
+    if extended:
+        _log.info(f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time (kept, scheduled_sec set)")
     if bad_sched:
         _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
     return rows

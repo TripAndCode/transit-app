@@ -69,6 +69,29 @@ def test_insert_updates_dedups_within_batch_first_occurrence_wins(ch_client):
     assert result.result_rows == [(30,)]  # first occurrence wins
 
 
+def test_insert_updates_pads_legacy_8_tuple_rows_with_null_scheduled_sec(ch_client):
+    """A strategy (or test fixture) built before scheduled_sec existed still
+    passes an 8-tuple with no scheduled_sec value -- insert_updates must pad
+    it with NULL rather than raising a column-count mismatch against the
+    now-10-entry UPDATE_COLUMNS."""
+    rows = [("a/000001.pb", "2026-01-01T10:00:00Z", "T1", "weekday", "10:00", "R1", 1, 30)]
+    n = insert_updates(ch_client, agency_id=7, rows=rows)
+    assert n == 1
+    result = ch_client.query("SELECT scheduled_sec FROM updates")
+    assert result.result_rows == [(None,)]
+
+
+def test_insert_updates_stores_scheduled_sec_when_provided(ch_client):
+    """A 9-tuple row (static_join.py's shape) carries its own scheduled_sec
+    straight through, e.g. for a post-midnight "25:30:00" departure_time
+    that has no representation in scheduled_time."""
+    rows = [("a/000001.pb", "2026-01-01T10:00:00Z", "T1", "weekday", None, "R1", 1, 30, 91800)]
+    n = insert_updates(ch_client, agency_id=7, rows=rows)
+    assert n == 1
+    result = ch_client.query("SELECT scheduled_time, scheduled_sec FROM updates")
+    assert result.result_rows == [(None, 91800)]
+
+
 def test_recent_file_name_exists_true_when_present(ch_client):
     insert_updates(
         ch_client, agency_id=1, rows=[("live_20260101T100000Z", "2026-01-01T10:00:00Z", "T1", None, None, "R1", 1, 30)]

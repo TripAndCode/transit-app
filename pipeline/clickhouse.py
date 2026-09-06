@@ -15,6 +15,12 @@ import clickhouse_connect
 # column order (it doesn't: schema.sql declares captured_at before
 # file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
 # explicitly, so clickhouse-connect maps by name, not position.
+#
+# scheduled_sec is trailing and optional per-strategy: only static_join.py
+# derives it today (aomori_regex.py's rows, and every existing test fixture
+# built before this column existed, still pass 8-tuples) -- insert_updates
+# pads a short row with None rather than requiring every caller to grow its
+# tuple in lockstep with this list.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -25,6 +31,7 @@ UPDATE_COLUMNS = [
     "route_code",
     "stop_sequence",
     "dep_delay",
+    "scheduled_sec",
 ]
 
 
@@ -81,14 +88,24 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     for argMax-based dedup reads, it silently double-counts every raw
     COUNT(*) consumer (agg_feed_health.raw_samples, describe_data's
     total_rows/observations) that Postgres never had to guard against.
+
+    A row shorter than `len(UPDATE_COLUMNS) - 1` (i.e. missing agency_id) is
+    padded with None for the trailing columns it doesn't supply -- lets a
+    strategy that predates a newly-added trailing column (and every
+    fixture/test row tuple built before it existed) keep working unchanged
+    instead of every call site having to grow its tuple in lockstep with
+    UPDATE_COLUMNS.
     """
     seen: set[tuple] = set()
     ch_rows = []
+    n_row_cols = len(UPDATE_COLUMNS) - 1  # excludes agency_id, prepended below
     for r in rows:
         key = (r[0], r[2], r[6])  # (file_name, trip_id, stop_sequence)
         if key in seen:
             continue
         seen.add(key)
+        if len(r) < n_row_cols:
+            r = (*r, *([None] * (n_row_cols - len(r))))
         ch_rows.append((agency_id, *r))
     if not ch_rows:
         return 0

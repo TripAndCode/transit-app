@@ -243,6 +243,39 @@ def test_static_join_nulls_scheduled_time_on_non_numeric_departure_time_hour(pg_
     assert rows[0][7] == 0  # dep_delay observation is still kept
 
 
+def test_static_join_keeps_extended_hour_row_with_scheduled_sec(pg_conn):
+    """GTFS allows departure_time like "25:30:00" for a trip continuing past
+    midnight as the previous service day's schedule. scheduled_time
+    (Nullable(String), read everywhere as same-day HH:MM[:SS]) still can't
+    represent it, so that column stays NULL -- but the row itself must no
+    longer be dropped: scheduled_sec holds the raw seconds-since-service-
+    day-start value instead."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            ("static_join_extended_hour_test", "http://extended-hour-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+            (aid, "uuid-A", "R1", "平日"),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (aid, "uuid-A", 1, "S1", "25:30:00"),
+        )
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-A")
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert len(rows) == 1  # kept, not dropped
+    assert rows[0][4] is None  # scheduled_time still NULL (no same-day representation)
+    assert rows[0][8] == 25 * 3600 + 30 * 60  # scheduled_sec == 91800
+
+
 def test_static_join_nulls_scheduled_time_on_empty_departure_time(pg_conn):
     """An empty departure_time is legal GTFS for a non-timepoint stop -- must
     null scheduled_time (not pass the empty string through, which fails the

@@ -2,7 +2,10 @@
 -- predates the trip_id/scheduled_time LowCardinality change below and still
 -- has the old String/Nullable(String) types — see db/clickhouse/bootstrap.py
 -- for the one-time ALTER TABLE needed to migrate it (a separate, deliberate
--- action, not something apply_schema does automatically).
+-- action, not something apply_schema does automatically). The same applies
+-- to scheduled_sec below: it needs a one-time ADD COLUMN on that live table
+-- (also documented in bootstrap.py) since `CREATE TABLE IF NOT EXISTS` is a
+-- no-op for a table that already exists.
 CREATE TABLE IF NOT EXISTS updates (
     agency_id      UInt16,
     captured_at    DateTime64(0, 'UTC'),
@@ -12,7 +15,14 @@ CREATE TABLE IF NOT EXISTS updates (
     scheduled_time LowCardinality(Nullable(String)),
     route_code     LowCardinality(Nullable(String)),
     stop_sequence  UInt16,
-    dep_delay      Nullable(Int32)
+    dep_delay      Nullable(Int32),
+    -- Raw seconds-since-service-day-start, e.g. 91800 for a GTFS
+    -- "25:30:00" post-midnight-continuation departure_time. Unlike
+    -- scheduled_time (a same-day "HH:MM[:SS]" string that has no way to
+    -- represent an hour >= 24), scheduled_sec holds a value for those rows
+    -- too instead of the ingest strategy having to drop them. NULL when
+    -- departure_time itself didn't parse as a time at all (empty/malformed).
+    scheduled_sec  Nullable(Int32)
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(captured_at)
 ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)

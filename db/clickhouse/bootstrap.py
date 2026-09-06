@@ -24,6 +24,13 @@ route_code is Nullable because Postgres's `updates.route_code` was nullable
 ingest strategies can produce a row with no resolvable route. A non-nullable
 column here would reject those rows outright (DataError on insert), silently
 losing whole files instead of the row-level gap Postgres tolerated.
+
+The live table also predates the `scheduled_sec Nullable(Int32)` column
+added later to schema.sql. Unlike the trip_id/scheduled_time type change
+above, this one is a pure addition, so it only needs:
+    ALTER TABLE updates ADD COLUMN IF NOT EXISTS scheduled_sec Nullable(Int32);
+(no `MODIFY SETTING` needed — scheduled_sec isn't part of the sort key) —
+also a separate, deliberate one-time run, not automated here.
 """
 
 import pathlib

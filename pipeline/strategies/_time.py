@@ -22,6 +22,37 @@ _GTFS_TIME_RE = re.compile(r"^([0-9]{1,2}):([0-5][0-9])(?::([0-5][0-9]))?$")
 Status = Literal["ok", "empty", "extended", "bad"]
 
 
+def parse_departure_time(raw: str | None) -> tuple[str | None, Status, int | None]:
+    """Normalize a GTFS departure_time and also return its raw
+    seconds-since-service-day-start value.
+
+    Returns ``(normalized, status, scheduled_sec)``. ``normalized`` /
+    ``status`` follow ``normalize_departure_time``'s contract exactly (see
+    below). ``scheduled_sec`` is populated for both ``"ok"`` and
+    ``"extended"`` -- GTFS's post-midnight-continuation hours (e.g.
+    "25:30:00") are well-defined arithmetic (25*3600 + 30*60 = 91800) even
+    though there's no same-day "HH:MM[:SS]" string that can hold them --
+    and is ``None`` only for ``"empty"``/``"bad"`` input that didn't parse
+    as a time at all.
+
+    This is the ONE regex match (see module docstring): every caller that
+    needs the formatted string, the extended-hour decision, and/or the raw
+    seconds value must go through this single parse, not repeat it, so the
+    three can never disagree with each other.
+    """
+    if not raw or not raw.strip():
+        return None, "empty", None
+    m = _GTFS_TIME_RE.match(raw.strip())
+    if m is None:
+        return None, "bad", None
+    hh, mm, ss = m.groups()
+    hour = int(hh)
+    scheduled_sec = hour * 3600 + int(mm) * 60 + (int(ss) if ss else 0)
+    if hour >= 24:
+        return None, "extended", scheduled_sec
+    return (f"{hour:02d}:{mm}:{ss}" if ss else f"{hour:02d}:{mm}"), "ok", scheduled_sec
+
+
 def normalize_departure_time(raw: str | None) -> tuple[str | None, Status]:
     """Normalize a GTFS departure_time to zero-padded "HH:MM[:SS]".
 
@@ -31,13 +62,13 @@ def normalize_departure_time(raw: str | None) -> tuple[str | None, Status]:
     midnight), ``(None, "bad")`` for anything else that doesn't parse as
     "H:MM[:SS]", and ``(normalized, "ok")`` otherwise. The caller decides
     what to do with each status; this function only classifies.
+
+    Thin wrapper around ``parse_departure_time`` that drops the raw
+    ``scheduled_sec`` value -- callers that need seconds-since-service-day-
+    start too (e.g. static_join.py, which stores extended-hour trips
+    instead of dropping them) should call ``parse_departure_time`` directly
+    rather than re-deriving seconds from this function's already-lossy
+    (NULL for "extended") output.
     """
-    if not raw or not raw.strip():
-        return None, "empty"
-    m = _GTFS_TIME_RE.match(raw.strip())
-    if m is None:
-        return None, "bad"
-    hh, mm, ss = m.groups()
-    if int(hh) >= 24:
-        return None, "extended"
-    return (f"{int(hh):02d}:{mm}:{ss}" if ss else f"{int(hh):02d}:{mm}"), "ok"
+    sched, status, _ = parse_departure_time(raw)
+    return sched, status
