@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { FollowupChipsRow } from "./FollowupChipsRow";
 import { useTranslation } from "react-i18next";
@@ -157,6 +158,23 @@ describe("FollowupChipsRow free-text input", () => {
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("High traffic");
+  });
+
+  it("shows a calm sign-in nudge for an anonymous Ask quota-exceeded 429, not a raw rate-limit error", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper
+          messages={messagesWithResult}
+          onFollowup={vi.fn()}
+          draftValue=""
+          onDraftChange={vi.fn()}
+          error={new ApiError(429, JSON.stringify({ detail: "x", code: "ask_anon_quota_exceeded" }))}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/free AI question limit/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
   it("caps the input at the server-supplied maxChars", () => {

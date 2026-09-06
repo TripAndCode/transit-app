@@ -912,6 +912,48 @@ async def test_followup_anon_success_returns_synthetic_messages(conv_app, monkey
 
 
 @pytest.mark.asyncio
+async def test_followup_anon_over_daily_limit_gets_429_with_code(conv_app, monkeypatch):
+    """The anon LLM-call daily quota (pipeline.query.chat's two call sites)
+    also applies to this endpoint's anon path — otherwise a caller could
+    establish free context via a zero-cost dispatch and then submit
+    unlimited follow-up questions here without ever touching the quota."""
+    import api.routers.conversations as conv_router
+    from api.middleware.ratelimit import reset_anon_quota_for_tests
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
+    monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
+    reset_anon_quota_for_tests()
+    app, agency, uid, _pool = conv_app
+
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+        return "anon answer", None
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+
+    payload = {
+        "question": "anon q",
+        "context_tool": "describe_data",
+        "context_args": {"kind": "stops"},
+        "context_result": {"ok": True},
+    }
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r1 = await c.post(f"/api/{agency}/conversations/{conv_id}/followup", json=payload, headers=_CSRF)
+            assert r1.status_code == 200, r1.text
+
+            r2 = await c.post(f"/api/{agency}/conversations/{conv_id}/followup", json=payload, headers=_CSRF)
+        assert r2.status_code == 429, f"expected 429, got {r2.status_code}: {r2.text[:200]}"
+        assert r2.json()["code"] == "ask_anon_quota_exceeded"
+    finally:
+        reset_anon_quota_for_tests()
+
+
+@pytest.mark.asyncio
 async def test_followup_enabled_endpoint_reports_flag_and_max_chars(conv_app, monkeypatch):
     """The frontend's input maxLength is sourced from this endpoint (not
     hand-mirrored) so it can never drift from MAX_QUESTION_CHARS."""

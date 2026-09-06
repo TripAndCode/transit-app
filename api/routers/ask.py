@@ -14,14 +14,21 @@ import asyncio
 import logging
 import os as _os
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import clickhouse_connect
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
+from api.middleware.ratelimit import (
+    FREE_LIMIT,
+    PRO_LIMIT,
+    AnonQuotaContext,
+    anon_ip_key,
+    get_or_issue_anon_session,
+    limiter,
+)
 from api.range import (
     DEFAULT_RANGE_DAYS,
     MAX_RANGE_DAYS,
@@ -66,11 +73,26 @@ class Turn(BaseModel):
     args: dict | None = None
 
 
+# Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
+# — an enum, not a free-form string, so an arbitrary/oversized value can never
+# reach the system prompt that chat_with_tools builds from this hint.
+PanelTab = Literal["overview", "map", "ask", "live", "analysis", "network"]
+
+
+class PanelCtx(BaseModel):
+    """Grounding hint from the Copilot side panel (e.g. {"tab": "overview"})."""
+
+    tab: PanelTab | None = None
+
+
 class AskRequest(BaseModel):
     question: str
     model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = []
+    # Threaded through to chat_with_tools's system-prompt addendum only — never
+    # consulted by the rules/embedding routing stage above.
+    panel_ctx: PanelCtx | None = None
 
 
 class AskResponse(BaseModel):
@@ -127,11 +149,13 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask(
     request: Request,
+    response: Response,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ch=Depends(get_ch),
     locale: str = Depends(get_locale),
+    user=Depends(get_current_user_optional),
 ):
     """Answer a natural-language question via tool-use.
 
@@ -147,6 +171,19 @@ async def ask(
     if not body.question or not body.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
+
+    # Anonymous callers (no session) get a signed httpOnly session cookie
+    # (issued here on their first request if not already present) plus the
+    # per-IP backstop key, threaded through to chat_with_tools so the daily
+    # LLM-call quota can be checked/consumed right at the Stage-3 LLM
+    # invocation — never here, so a Stage 1/2 (rules/embedding) resolution
+    # below never touches it. Logged-in users are never subject to it.
+    anon_quota = None
+    if user is None:
+        anon_quota = AnonQuotaContext(
+            session_key=get_or_issue_anon_session(request, response),
+            ip_key=anon_ip_key(request),
+        )
 
     ctx_dict = {
         "from": ctx.from_date.isoformat(),
@@ -206,6 +243,9 @@ async def ask(
     # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
     sig_hash: str | None = None
     cache_outcome: str | None = None
+    # Numeric-hallucination-guard verdict. Stays None on the deterministic
+    # router paths, where no free-text answer is generated for it to check.
+    numeric_guard_triggered: bool | None = None
 
     if decision is not None:
         stage = decision.stage
@@ -287,12 +327,15 @@ async def ask(
             history=history,
             ch=ch,
             force_tool_call=force_tool_call,
+            anon_quota=anon_quota,
+            panel_ctx=body.panel_ctx.model_dump() if body.panel_ctx else None,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
         success = payload["success"]
         sig_hash = payload.get("signature_hash")
         cache_outcome = payload.get("cache_outcome")
+        numeric_guard_triggered = payload.get("numeric_guard_triggered")
         resp = AskResponse(
             answer=payload["answer"],
             tool_call=payload["tool_call"],
@@ -319,6 +362,7 @@ async def ask(
                 success,
                 signature_hash=sig_hash,
                 cache_outcome=cache_outcome,
+                numeric_guard_triggered=numeric_guard_triggered,
             )
 
     return resp

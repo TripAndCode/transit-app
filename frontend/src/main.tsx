@@ -25,6 +25,7 @@ const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskT
 const LiveTab = lazy(() => import("./tabs/LiveTab").then((m) => ({ default: m.LiveTab })));
 const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
+const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
@@ -57,8 +58,12 @@ const queryClient = new QueryClient({
 });
 
 const router = createBrowserRouter([
-  // /login renders outside <App /> so it owns the full viewport (no Header,
-  // sidebar, or guest-prompt strip wrapping the centered auth card).
+  // /welcome and /login both render outside <App /> so they own the full
+  // viewport (no Header, sidebar, or guest-prompt strip). /welcome is the
+  // pre-authentication marketing entry point -- strictly separate from "/"
+  // below, which stays the existing post-login/guest dashboard landing
+  // (OnboardingGate) and is deliberately untouched by this route.
+  { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   {
     path: "/",

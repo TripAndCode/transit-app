@@ -37,7 +37,9 @@ import asyncpg
 import clickhouse_connect
 from fastapi import HTTPException
 
+from api.middleware.ratelimit import AnonAskQuotaExceeded, AnonQuotaContext, check_and_consume_anon_quota
 from api.range import RangeCtx
+from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
@@ -181,6 +183,35 @@ def _get_client():
     return get_client()
 
 
+def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
+    """Consume one unit of the anon LLM-call quota, or raise if exhausted.
+
+    Shared by both real LLM-invocation sites in :func:`chat_with_tools` so
+    they can't drift apart from each other.
+    """
+    if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
+        raise AnonAskQuotaExceeded()
+
+
+def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[str | None, bool]:
+    """Replace ``answer`` with the localized fallback if it makes a numeric
+    claim not traceable to ``grounding``.
+
+    Only ever called at a site where ``answer`` is LLM-authored free text —
+    ``_dispatch_and_respond``'s ``render_tool_result`` output is already
+    grounded by construction (a formatted SQL aggregate) and is never routed
+    through this helper. ``grounding={}`` means a turn with no dispatched data
+    at all (e.g. an out-of-scope refusal); the answer passes through unchanged
+    there, because there is nothing to trace a number back to. See
+    :func:`pipeline.query.hallucination_guard.verify_numeric_claims`.
+    """
+    if not answer:
+        return answer, False
+    if verify_numeric_claims(answer, grounding):
+        return answer, False
+    return _summary("numeric_guard_fallback", lang=locale), True
+
+
 async def _dispatch_and_respond(
     name: str,
     args: dict,
@@ -223,6 +254,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except clickhouse_connect.driver.exceptions.Error:
@@ -232,6 +264,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except asyncpg.exceptions.UndefinedTableError:
@@ -243,13 +276,18 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
+    # render_tool_result formats `result` (a dispatched ToolResult) deterministically
+    # from grounded data — it never contains LLM-authored prose, so it is not
+    # routed through _numeric_guard (see that helper's docstring).
     return {
         "answer": render_tool_result(result, locale=locale),
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
         "success": result.kind != "empty",
+        "numeric_guard_triggered": None,
         **extra,
     }
 
@@ -265,6 +303,8 @@ async def chat_with_tools(
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
+    anon_quota: AnonQuotaContext | None = None,
+    panel_ctx: dict | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -302,6 +342,26 @@ async def chat_with_tools(
     it for a continuation phrase would return whichever answer was last
     cached for that exact text — ignoring this conversation's actual prior
     turn — instead of the history-aware answer this parameter exists to get.
+
+    ``anon_quota``, when set by the API layer for an unauthenticated caller,
+    is checked and consumed immediately around each of this function's two
+    actual LLM-invocation sites below (never at the build-mode short-circuit
+    or an intent-cache hit, both of which skip the LLM entirely, and never
+    when ``None`` — i.e. a logged-in caller). Exhaustion raises
+    :class:`~api.middleware.ratelimit.AnonAskQuotaExceeded`, which this
+    function does not catch — it propagates out to the API layer the same
+    way an ``asyncpg.exceptions.UndefinedTableError`` does, so a registered
+    FastAPI exception handler can turn it into a machine-readable response.
+
+    ``panel_ctx``, when supplied by the Copilot side panel, carries the
+    frontend's active-tab hint (e.g. ``{"tab": "overview"}``). The API layer
+    (``api/routers/ask.py``'s ``PanelCtx`` model) restricts ``tab`` to a
+    known enum of tab names before it ever reaches this function, so this
+    dict-typed parameter is safe to interpolate into the system prompt
+    without its own length/type check. It is appended to the system prompt
+    as a one-line grounding hint only — it never reaches the rules/embedding
+    routing stage (resolved before calling this function) or the
+    tool-dispatch args.
 
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
@@ -359,6 +419,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -371,6 +432,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -390,16 +452,20 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
                     "cache_outcome": "bypass",
                 }
+            # render_tool_result formats a dispatched ToolResult deterministically —
+            # never LLM-authored prose — so it is not routed through _numeric_guard.
             return {
                 "answer": render_tool_result(result, locale=locale),
                 "tool_call": {"name": build_tool, "arguments": can_args},
                 "result": _result_to_dict(result),
                 "success": result.kind != "empty",
+                "numeric_guard_triggered": None,
                 "signature_hash": sig_hash,
                 "confidence": 1.0,
                 "canonical_args": can_args,
@@ -428,6 +494,13 @@ async def chat_with_tools(
             args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
             lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
         system_prompt = system_prompt + "\n" + "\n".join(lines)
+
+    # Copilot side-panel hint: a one-line grounding addendum naming the
+    # active tab, appended (never replacing the block above) so the
+    # rules/embedding routing stage — already resolved by the caller before
+    # this function runs — and tool-dispatch args stay untouched.
+    if panel_ctx and panel_ctx.get("tab"):
+        system_prompt += f"\nThe user is currently viewing the {panel_ctx['tab']} tab."
 
     # Bounded conversation memory: when the API layer threads prior turns,
     # fold the last few (question → tool(args)) into a dedicated system
@@ -582,6 +655,9 @@ async def chat_with_tools(
             )
 
         # Stage 2: question is new — call LLM to get the intent signature.
+        # The anon quota gates the actual LLM call, not the cache pre-hit
+        # above (which never reaches here) — see this function's docstring.
+        _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
@@ -593,6 +669,7 @@ async def chat_with_tools(
                 "tool_call": None,
                 "result": None,
                 "success": False,
+                "numeric_guard_triggered": None,
                 "signature_hash": None,
                 "confidence": None,
                 "canonical_args": None,
@@ -631,6 +708,7 @@ async def chat_with_tools(
                     "tool_call": None,
                     "result": None,
                     "success": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": None,
                     "confidence": None,
                     "canonical_args": None,
@@ -714,8 +792,10 @@ async def chat_with_tools(
         )
 
     # -----------------------------------------------------------------------
-    # FLAG-OFF path: byte-identical to Phase ①. No cache reads or writes.
+    # FLAG-OFF path: same tool-calling flow as Phase ① (no cache reads/
+    # writes), gated by the anon-quota check above when one is set.
     # -----------------------------------------------------------------------
+    _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate
@@ -732,6 +812,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
+            "numeric_guard_triggered": None,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
@@ -740,14 +821,28 @@ async def chat_with_tools(
         # deliberate, helpful refusal/suggestion (the system worked → True).
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
+        # This is the one LLM-authored-free-text site in this function — no
+        # tool was dispatched, so there is no data to trace a number back to
+        # and _numeric_guard passes the reply through. The guard covers the
+        # paths where an answer can actually be checked; constraining this one
+        # means constraining what the model may return here, not verifying it
+        # afterwards.
         body = (msg.content or "").strip()
         if body:
-            return {"answer": body, "tool_call": None, "result": None, "success": True}
+            guarded_body, triggered = _numeric_guard(body, {}, locale)
+            return {
+                "answer": guarded_body,
+                "tool_call": None,
+                "result": None,
+                "success": True,
+                "numeric_guard_triggered": triggered,
+            }
         return {
             "answer": _chat_str("refusal_fallback", locale),
             "tool_call": None,
             "result": None,
             "success": False,
+            "numeric_guard_triggered": None,
         }
 
     if len(tool_calls) > 1:

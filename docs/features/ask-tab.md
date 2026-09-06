@@ -145,6 +145,52 @@ Ask-tab analysis previews, but no current file under
 `frontend/src/tabs/ask/` or `AskTab.tsx` calls it — treat as
 unwired/consumed elsewhere rather than assuming it's live in this UI.
 
+## Anonymous LLM-call daily quota
+
+`POST /ask` has no auth dependency, so anonymous callers reach the Stage-3 LLM
+path directly. The per-minute `FREE_LIMIT`/`PRO_LIMIT` buckets in
+`api/middleware/ratelimit.py` are sized for generic request abuse, not for the
+per-call cost of an LLM invocation, so a separate per-day budget covers that
+one stage. Logged-in users are subject to neither anonymous bucket.
+
+Two buckets are consumed together, per scope (`ask` and `copilot` share the
+mechanism via `check_and_consume_anon_quota(..., scope=...)`):
+
+| Bucket | Key | Env knob | Default |
+| --- | --- | --- | --- |
+| Per anon session | signed httpOnly `ask_anon_sid` cookie | `ASK_ANON_DAILY_LIMIT` | 5 |
+| Per source IP | client IP | `ASK_ANON_IP_DAILY_LIMIT` | 20 |
+| Per anon session (Copilot) | same cookie | `COPILOT_ANON_DAILY_LIMIT` | 20 |
+| Per source IP (Copilot) | client IP | `COPILOT_ANON_IP_DAILY_LIMIT` | 80 |
+
+The session bucket is the primary limit; the IP ceiling is deliberately looser
+and exists only as a backstop, because `get_or_issue_anon_session` mints a
+fresh session for any request arriving without the cookie — a caller can always
+cycle cookies.
+
+Do not rely on either bucket to bound a determined caller. The session key is
+plainly client-supplied — dropping the cookie mints a new session. Whether the
+IP key is too depends on an open question: it comes from `get_remote_address`,
+and the container runs uvicorn with `--forwarded-allow-ips='*'`, so uvicorn
+trusts the leftmost `X-Forwarded-For` entry unconditionally. Whether an
+external client can set that entry depends on whether the platform edge
+replaces the header or appends to it, which is **unverified** — the
+`Dockerfile`'s own `CAVEAT` comment is the single source of truth on this and
+should be consulted (and settled) before anything security-load-bearing rests
+on the IP bucket. Until then, treat these buckets as protection against
+accidental and casual repeat traffic running up an LLM bill, not as an
+anti-abuse control.
+
+Both buckets are in-memory and process-local (reset on restart/redeploy), the
+same trade-off `FREE_LIMIT`/`PRO_LIMIT` already accept for this app's
+single-uvicorn-process deployment (see `Dockerfile`: no `--workers`). A
+multi-instance deployment needs a shared storage backend instead — slowapi and
+`limits` both support one via a `storage_uri`.
+
+`ASK_ANON_QUOTA_ENABLED=false` disables both scopes entirely. Exhaustion raises
+`AnonAskQuotaExceeded`/`AnonCopilotQuotaExceeded`, surfaced to the SPA as a
+calm sign-in nudge rather than an error state.
+
 ## Key files
 
 **Frontend**

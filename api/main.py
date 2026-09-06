@@ -27,7 +27,13 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.ratelimit import limiter
+from api.middleware.ratelimit import (
+    AnonAskQuotaExceeded,
+    AnonCopilotQuotaExceeded,
+    ask_quota_exceeded_handler,
+    copilot_quota_exceeded_handler,
+    limiter,
+)
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
@@ -37,6 +43,7 @@ from api.routers.ask_dashboard import router as ask_dashboard_router
 from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
+from api.routers.copilot import router as copilot_router
 from api.routers.debug import router as debug_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
@@ -198,6 +205,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
 # on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
+# An anonymous caller who exhausted today's free Stage-3 (LLM) Ask quota gets
+# a 429 with a machine-readable code distinct from both the generic
+# RateLimitExceeded response above and an opaque 500 — see
+# api/middleware/ratelimit.py's anon-quota section.
+app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
+# Maps the anon-quota exception raised by POST /copilot/insight
+# (api/routers/copilot.py) to a localized 429, mirroring the Ask mapping above.
+app.add_exception_handler(AnonCopilotQuotaExceeded, copilot_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
 #   StarletteSessionMiddleware  (Authlib needs request.session)
@@ -249,6 +264,7 @@ app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(copilot_router)
 app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(me_router)

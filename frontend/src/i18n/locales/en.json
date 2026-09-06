@@ -25,6 +25,57 @@
     "subtitle": "Select your transit agency",
     "no_agencies": "No agencies are configured yet."
   },
+  "landing": {
+    "hero": {
+      "title": "What's happening right now — and where it's happening.",
+      "subtitle": "Live vehicle positions, delay analysis, and network comparisons for every agency you track.",
+      "guest_cta": "Continue as a guest"
+    },
+    "explorer": {
+      "heading": "See what's inside",
+      "ask_preview": "Ask freely in natural language and get an answer right away.",
+      "excerpt_unavailable": "Manual preview unavailable."
+    },
+    "preview": {
+      "heading": "See what's inside",
+      "route_label": "Route {{code}}",
+      "agency": {
+        "riverside": "Riverside Transit",
+        "harborline": "Harborline",
+        "hillcrest": "Hillcrest Connect"
+      },
+      "overview": {
+        "filter_all": "All routes",
+        "filter_on_time": "On-time",
+        "filter_delayed": "Delayed"
+      },
+      "live": {
+        "sort_latest": "Latest",
+        "sort_delay": "Most delayed",
+        "stop_label": "Stop {{n}}",
+        "minutes_ago": "{{n}} min ago"
+      },
+      "ask": {
+        "q1": "Which route is running late right now?",
+        "a1": "Route H9 is currently averaging a 4.4 min delay, the most of any route today.",
+        "q2": "How does this agency compare to others?",
+        "a2": "This agency's on-time rate is 92%, ahead of the network average.",
+        "q3": "When does this route usually run late?",
+        "a3": "Delays tend to peak in the evening commute, around 18:00.",
+        "generic_reply": "Here's a quick look based on your question — sign in to ask about your own agency's real data.",
+        "empty_hint": "Try a suggestion below, or ask your own question.",
+        "input_label": "Ask a question",
+        "input_placeholder": "Ask about delays, routes, or on-time performance…",
+        "send": "Send"
+      },
+      "map": {
+        "style_standard": "Standard",
+        "style_muted": "Muted",
+        "legend_on_time": "On-time route",
+        "legend_delayed": "Delayed route"
+      }
+    }
+  },
   "forecast": {
     "overview_worst_label": "When to watch out",
     "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg +{{min}} min)",
@@ -917,7 +968,9 @@
     "followup_too_long": "That question is too long. Please shorten it and try again.",
     "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
     "followup_connection": "Connection dropped for a moment. Please retry.",
-    "followup_llm_generic": "Couldn't answer that question. Please try again."
+    "followup_llm_generic": "Couldn't answer that question. Please try again.",
+    "ask_anon_quota_exceeded": "You've reached today's free AI question limit. Sign in to keep asking.",
+    "copilot_anon_quota_exceeded": "You've reached today's free Copilot insight limit. Sign in to keep going."
   },
   "admin": {
     "users": {
@@ -1027,5 +1080,14 @@
       "docs_nav_label": "Feature doc list",
       "docs_empty": "No feature docs found."
     }
+  },
+  "copilot": {
+    "title": "Copilot",
+    "loading": "Thinking…",
+    "error": "Couldn't generate an insight right now.",
+    "low_confidence": "This is based on limited data.",
+    "ask_step_back": "You're already in the full conversation here.",
+    "followup_placeholder": "Ask a follow-up…",
+    "followup_submit": "Ask"
   }
 }

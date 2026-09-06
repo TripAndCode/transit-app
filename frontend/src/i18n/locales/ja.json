@@ -25,6 +25,57 @@
     "subtitle": "あなたの事業者を選んでください",
     "no_agencies": "事業者がまだ登録されていません。"
   },
+  "landing": {
+    "hero": {
+      "title": "今すぐ何が起きているか。どこで起きているか。",
+      "subtitle": "各事業者のリアルタイムな車両位置、遅延分析、事業者間の比較をまとめて確認できます。",
+      "guest_cta": "ゲストとして利用する"
+    },
+    "explorer": {
+      "heading": "中身をのぞいてみる",
+      "ask_preview": "自然な言葉で自由に質問して、すぐに答えを得られます。",
+      "excerpt_unavailable": "マニュアルのプレビューは利用できません。"
+    },
+    "preview": {
+      "heading": "中身をのぞいてみる",
+      "route_label": "{{code}}系統",
+      "agency": {
+        "riverside": "リバーサイド交通",
+        "harborline": "ハーバーライン",
+        "hillcrest": "ヒルクレスト交通"
+      },
+      "overview": {
+        "filter_all": "すべての路線",
+        "filter_on_time": "定刻",
+        "filter_delayed": "遅延"
+      },
+      "live": {
+        "sort_latest": "最新順",
+        "sort_delay": "遅延順",
+        "stop_label": "停留所{{n}}",
+        "minutes_ago": "{{n}}分前"
+      },
+      "ask": {
+        "q1": "今、遅れている路線はどれ?",
+        "a1": "H9系統は現在平均4.4分の遅延で、本日最も遅れています。",
+        "q2": "この事業者は他と比べてどう?",
+        "a2": "この事業者の定時運行率は92%で、ネットワーク平均を上回っています。",
+        "q3": "この路線はいつ遅れやすい?",
+        "a3": "遅延は夕方の通勤時間帯、18時前後にピークを迎える傾向があります。",
+        "generic_reply": "質問に基づいた簡単な回答です — ご自身の事業者の実データについて質問するにはログインしてください。",
+        "empty_hint": "下の候補を試すか、自由に質問してください。",
+        "input_label": "質問を入力",
+        "input_placeholder": "遅延、路線、定時運行率について質問…",
+        "send": "送信"
+      },
+      "map": {
+        "style_standard": "標準",
+        "style_muted": "ミュート",
+        "legend_on_time": "定刻運行の路線",
+        "legend_delayed": "遅延中の路線"
+      }
+    }
+  },
   "forecast": {
     "overview_worst_label": "いま見るべき時間帯",
     "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均 +{{min}}分）",
@@ -917,7 +968,9 @@
     "followup_too_long": "質問が長すぎます。短くしてもう一度お試しください。",
     "followup_rate_limit": "アクセスが集中しています。少し待って再試行してください。",
     "followup_connection": "通信が一時的に途切れました。再試行してください。",
-    "followup_llm_generic": "質問への回答に失敗しました。もう一度お試しください。"
+    "followup_llm_generic": "質問への回答に失敗しました。もう一度お試しください。",
+    "ask_anon_quota_exceeded": "本日の無料AI質問の上限に達しました。ログインすると引き続き質問できます。",
+    "copilot_anon_quota_exceeded": "本日の無料Copilotインサイトの上限に達しました。ログインすると引き続き利用できます。"
   },
   "admin": {
     "users": {
@@ -1027,5 +1080,14 @@
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"
     }
+  },
+  "copilot": {
+    "title": "コパイロット",
+    "loading": "考え中…",
+    "error": "現在インサイトを生成できませんでした。",
+    "low_confidence": "データが限定的です。",
+    "ask_step_back": "こちらで会話が続いています。",
+    "followup_placeholder": "続けて質問…",
+    "followup_submit": "質問する"
   }
 }

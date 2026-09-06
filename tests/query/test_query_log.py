@@ -46,3 +46,37 @@ async def test_log_query_swallows_db_error():
             raise RuntimeError("db down")
 
     await log_query(_BadConn(), 1, "q", "llm", None, False)  # must complete without raising
+
+
+@pytest.mark.asyncio
+async def test_log_query_records_numeric_guard_triggered(conn_agency):
+    """The hallucination guard's outcome is persisted for operator visibility."""
+    pool, agency_id = conn_agency
+    async with pool.acquire() as conn:
+        await log_query(
+            conn,
+            agency_id,
+            "平均遅延は？",
+            "llm",
+            None,
+            True,
+            numeric_guard_triggered=True,
+        )
+        row = await conn.fetchrow(
+            "SELECT numeric_guard_triggered FROM ask_query_log WHERE agency_id=$1",
+            agency_id,
+        )
+    assert row["numeric_guard_triggered"] is True
+
+
+@pytest.mark.asyncio
+async def test_log_query_numeric_guard_defaults_to_null(conn_agency):
+    """Callers with no guard verdict leave the column NULL rather than False."""
+    pool, agency_id = conn_agency
+    async with pool.acquire() as conn:
+        await log_query(conn, agency_id, "どんな路線がある？", "rules", "describe_data", True)
+        row = await conn.fetchrow(
+            "SELECT numeric_guard_triggered FROM ask_query_log WHERE agency_id=$1",
+            agency_id,
+        )
+    assert row["numeric_guard_triggered"] is None

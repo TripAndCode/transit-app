@@ -142,6 +142,76 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_panel_ctx_tab_appended_to_system_prompt(monkeypatch):
+    """panel_ctx={"tab": ...} appends a one-line grounding hint, never replacing
+    the rest of the system prompt built above it."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    await chat.chat_with_tools(
+        "遅延はどう？",
+        ctx,
+        conn=None,
+        agency_id=1,
+        model=None,
+        locale="ja",
+        panel_ctx={"tab": "overview"},
+    )
+
+    system = captured["messages"][0]["content"]
+    assert system.startswith(chat.SYSTEM_PROMPT)
+    assert "The user is currently viewing the overview tab." in system
+
+
+@pytest.mark.asyncio
+async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
+    """No panel_ctx (the default) must not append the tab-hint line at all."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(
+            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
+        ):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    await chat.chat_with_tools(
+        "遅延はどう？", ctx, conn=None, agency_id=1, model=None, locale="ja"
+    )
+
+    system = captured["messages"][0]["content"]
+    assert "currently viewing" not in system
+
+
+@pytest.mark.asyncio
 async def test_history_injected_into_prompt(monkeypatch):
     """When history is supplied, prior turns appear in the prompt messages."""
     from types import SimpleNamespace
