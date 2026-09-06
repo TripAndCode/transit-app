@@ -9,7 +9,7 @@ route needs no RAG grounding or answer verification unlike ``/ask``.
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_conn, get_current_user_optional, get_locale
+from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import (
     FREE_LIMIT,
     PRO_LIMIT,
@@ -23,6 +23,7 @@ from api.middleware.ratelimit import (
 )
 from api.security import csrf_guard
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
+from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
@@ -46,7 +47,6 @@ async def copilot_insight(
     response: Response,
     body: CopilotInsightRequest,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
     locale: str = Depends(get_locale),
     user=Depends(get_current_user_optional),
 ):
@@ -68,14 +68,25 @@ async def copilot_insight(
         ):
             raise AnonCopilotQuotaExceeded()
 
+    # Resolve the caller's BYOK key (if any) with a pool connection acquired
+    # and released *before* the LLM call below — never held across it, which
+    # can run for several seconds. This route otherwise has no reason to
+    # touch Postgres at all (unlike ``/ask``, which already threads ``conn``
+    # through for tool dispatch regardless of BYOK), so avoid declaring
+    # ``conn=Depends(get_conn)`` for the whole handler, matching
+    # ``api/routers/me.py``'s ``put_llm_key`` lazy-acquire pattern.
+    user_key = None
+    if user is not None:
+        async with request.app.state.pool.acquire() as conn:
+            user_key = await get_user_llm_key(conn, user.user_id)
+
     try:
         result = await generate_proactive_insight(
             body.tab,
             body.filters,
             body.view_payload,
             locale=locale,
-            conn=conn,
-            user_id=user.user_id if user is not None else None,
+            user_key=user_key,
         )
     except NoInsightAvailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

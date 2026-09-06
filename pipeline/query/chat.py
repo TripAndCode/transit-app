@@ -45,7 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _recover_tool_call, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -209,13 +209,22 @@ def _completion_with_key(
     classifies it into the same ``error_kind`` vocabulary the shared-client
     ladder uses. Never logs ``api_key`` — callers must only ever log whether
     a per-user key was used, not its value.
+
+    ``base_url``/``model`` honor the same per-provider env overrides
+    (``{PROVIDER}_BASE_URL``/``{PROVIDER}_MODEL``) as the shared ladder's
+    :func:`~pipeline.query.llm_client._load_provider` — an operator's
+    ``GROQ_MODEL`` override, say, must apply on the BYOK path too, not just
+    the shared client.
     """
     import openai
 
     defaults = _PROVIDER_DEFAULTS[provider]
-    one_off = openai.OpenAI(api_key=api_key, base_url=defaults["base_url"], max_retries=0)
+    upper = provider.upper()
+    base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
+    model = os.environ.get(f"{upper}_MODEL", defaults["model"])
+    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
     create_kwargs: dict[str, Any] = dict(
-        model=model_override or defaults["model"],
+        model=model_override or model,
         messages=messages,
         tools=tools,
         tool_choice=tool_choice if tools else "none",
@@ -459,7 +468,15 @@ async def chat_with_tools(
             return None, "connection"
         except RateLimitError:
             return None, "rate_limit"
-        except BadRequestError:
+        except BadRequestError as exc:
+            # Groq/llama models are documented to leak a failed tool call as a
+            # malformed string in a tool_use_failed 400 rather than raising
+            # cleanly (see _recover_tool_call's own docstring) — Groq is one
+            # of the allowed BYOK providers, so salvage it here exactly like
+            # the shared ladder does before giving up on this call.
+            recovered = _recover_tool_call(exc)
+            if recovered is not None:
+                return recovered, None
             return None, "bad_request"
         except Exception:
             return None, "unexpected"

@@ -13,7 +13,6 @@ matching this module's "never log the raw key" rule.
 """
 
 import json
-import os
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -23,8 +22,6 @@ import pytest
 from api.middleware.ratelimit import AnonQuotaContext
 from api.range import RangeCtx
 from pipeline.query import chat
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def _ctx() -> RangeCtx:
@@ -149,10 +146,15 @@ async def test_byok_rate_limit_error_degrades_to_the_shared_rate_limited_message
 
 @pytest.mark.asyncio
 async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
-    """The Copilot proactive-insight path shares the same BYOK seam."""
+    """The Copilot proactive-insight path shares the same BYOK seam.
+
+    ``generate_proactive_insight`` takes an already-resolved ``user_key``
+    rather than a ``conn``/``user_id`` pair: the caller (the API router)
+    resolves the key with its own short-lived pooled connection, released
+    before this (multi-second) LLM call — never held across it.
+    """
     from pipeline.query import copilot
 
-    monkeypatch.setattr(copilot, "get_user_llm_key", AsyncMock(return_value=_fake_user_key()))
     used_key = {}
 
     def fake_completion_with_key(provider, api_key, **kwargs):
@@ -170,8 +172,7 @@ async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
         {},
         {"headline": {"samples": 1}},
         locale="en",
-        conn=object(),
-        user_id=42,
+        user_key=_fake_user_key(),
     )
     assert used_key["provider"] == "groq"
     assert used_key["api_key"] == "gsk_user_key"

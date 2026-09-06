@@ -20,7 +20,7 @@ from pipeline.query.copilot_templates import (
     templates_for_tab,
 )
 from pipeline.query.llm_client import get_client
-from pipeline.query.user_llm_keys import get_user_llm_key
+from pipeline.query.user_llm_keys import UserLLMKey
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +82,27 @@ def _pick_template_tool(tab: str) -> dict:
 
 
 async def generate_proactive_insight(
-    tab: str, filters: dict, view_payload: dict, *, locale: str = "ja", conn=None, user_id: int | None = None
+    tab: str, filters: dict, view_payload: dict, *, locale: str = "ja", user_key: UserLLMKey | None = None
 ) -> dict:
     """Generate a proactive insight for ``tab``.
 
-    ``user_id``, when set (a signed-in caller) alongside ``conn``, is looked
-    up against :func:`~pipeline.query.user_llm_keys.get_user_llm_key`. When a
-    key is found, the template-selection call routes through a one-off
+    ``user_key``, when supplied by the caller (already resolved via
+    :func:`~pipeline.query.user_llm_keys.get_user_llm_key` for a signed-in
+    caller), routes the template-selection call through a one-off
     :func:`~pipeline.query.chat._completion_with_key` call scoped to that
     caller's own provider/key instead of the shared LLM client — the same
-    BYOK seam :func:`~pipeline.query.chat.chat_with_tools` uses. The raw key
-    is never logged.
+    BYOK seam :func:`~pipeline.query.chat.chat_with_tools` uses. This function
+    intentionally takes the already-resolved key rather than a ``conn``: the
+    lookup itself needs a pooled Postgres connection, but the LLM call below
+    is a multi-second network round-trip, so the caller must resolve the key
+    (acquiring and releasing its own connection) *before* calling this
+    function, never hold a pooled connection open across the LLM call. The
+    raw key is never logged.
     """
     if not view_payload:
         raise NoInsightAvailable(f"no view_payload for tab={tab!r}")
     if not any(t.tab == tab for t in templates_for_tab(tab)):
         raise NoInsightAvailable(f"no templates registered for tab={tab!r}")
-
-    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and conn is not None else None
 
     tool = _pick_template_tool(tab)
     call_messages = [
