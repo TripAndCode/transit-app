@@ -9,6 +9,13 @@ from pydantic import BaseModel
 
 from api.deps import get_conn
 from api.security import User, csrf_guard, require_user
+from pipeline.query.llm_key_validation import validate_provider_key
+from pipeline.query.user_llm_keys import (
+    ALLOWED_PROVIDERS,
+    delete_user_llm_key,
+    get_user_llm_key,
+    save_user_llm_key,
+)
 
 router = APIRouter(prefix="/api", tags=["me"])
 
@@ -199,4 +206,61 @@ async def delete_preset(
     )
     if result.endswith(" 0"):
         raise HTTPException(404, "preset not found")
+    return Response(status_code=204)
+
+
+class LLMKeyStatus(BaseModel):
+    """Status of the caller's stored BYOK LLM key — never the raw key itself."""
+
+    configured: bool
+    provider: str | None = None
+    key_suffix: str | None = None
+
+
+class LLMKeyPut(BaseModel):
+    """Body for storing (or replacing) the caller's BYOK LLM key."""
+
+    provider: str
+    api_key: str
+
+
+@router.get("/me/llm-key", response_model=LLMKeyStatus)
+async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)):
+    """Return whether the caller has a BYOK LLM key configured, and its masked suffix."""
+    key = await get_user_llm_key(conn, user.user_id)
+    if key is None:
+        return LLMKeyStatus(configured=False)
+    return LLMKeyStatus(configured=True, provider=key.provider, key_suffix=key.key_suffix)
+
+
+@router.put("/me/llm-key", response_model=LLMKeyStatus)
+async def put_llm_key(
+    body: LLMKeyPut,
+    request: Request,
+    user: User = Depends(require_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Validate then store the caller's BYOK LLM key.
+
+    Validation runs before ``save_user_llm_key`` is ever called, so a bad key
+    is rejected with 400 and never persisted.
+    """
+    csrf_guard(request)
+    if body.provider not in ALLOWED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"unsupported provider: {body.provider}")
+    if not await validate_provider_key(body.provider, body.api_key):
+        raise HTTPException(status_code=400, detail="key_rejected")
+    await save_user_llm_key(conn, user.user_id, body.provider, body.api_key)
+    return LLMKeyStatus(configured=True, provider=body.provider, key_suffix=body.api_key[-4:])
+
+
+@router.delete("/me/llm-key", status_code=204)
+async def delete_llm_key(
+    request: Request,
+    user: User = Depends(require_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Delete the caller's stored BYOK LLM key, if any."""
+    csrf_guard(request)
+    await delete_user_llm_key(conn, user.user_id)
     return Response(status_code=204)
