@@ -14,6 +14,14 @@ from pipeline.query.user_llm_keys import ALLOWED_PROVIDERS
 
 
 async def validate_provider_key(provider: str, api_key: str) -> bool:
+    """Return whether api_key authenticates against provider.
+
+    Raises:
+        openai.APIConnectionError, openai.APITimeoutError: a network or
+            timeout failure proves nothing about the key itself, so it
+            propagates instead of being reported as a valid or invalid key.
+            Callers must handle this alongside the boolean result.
+    """
     if provider not in ALLOWED_PROVIDERS:
         return False
     defaults = _PROVIDER_DEFAULTS[provider]  # plain dict: {"key_env", "base_url", "model"}
