@@ -9,7 +9,7 @@ route needs no RAG grounding or answer verification unlike ``/ask``.
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_current_user_optional, get_locale
+from api.deps import get_agency, get_conn, get_current_user_optional, get_locale
 from api.middleware.ratelimit import (
     FREE_LIMIT,
     PRO_LIMIT,
@@ -46,6 +46,7 @@ async def copilot_insight(
     response: Response,
     body: CopilotInsightRequest,
     agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
     locale: str = Depends(get_locale),
     user=Depends(get_current_user_optional),
 ):
@@ -68,7 +69,14 @@ async def copilot_insight(
             raise AnonCopilotQuotaExceeded()
 
     try:
-        result = await generate_proactive_insight(body.tab, body.filters, body.view_payload, locale=locale)
+        result = await generate_proactive_insight(
+            body.tab,
+            body.filters,
+            body.view_payload,
+            locale=locale,
+            conn=conn,
+            user_id=user.user_id if user is not None else None,
+        )
     except NoInsightAvailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CopilotInsightResponse(**result)

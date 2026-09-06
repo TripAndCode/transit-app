@@ -56,7 +56,7 @@ def _copilot_enabled(monkeypatch):
 async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
         return {"text": "Route 12 is delayed.", "cite": "Overview · 1 sample", "low_confidence": False}
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
@@ -74,7 +74,7 @@ async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch
 async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
         from pipeline.query.copilot import NoInsightAvailable
 
         raise NoInsightAvailable("empty")
@@ -93,7 +93,7 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
     """Cross-origin POST to /copilot/insight returns 403 even before reaching the LLM."""
     client, agency_id = copilot_client
 
-    async def must_not_be_called(tab, filters, view_payload, *, locale="ja"):
+    async def must_not_be_called(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
         return {
             "text": "csrf_guard FAILED — request reached generate_proactive_insight",
             "cite": "x",
@@ -113,7 +113,7 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
 async def test_copilot_insight_enforces_anon_quota(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
         return {"text": "x", "cite": "y", "low_confidence": False}
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
@@ -136,7 +136,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
     client, agency_id = copilot_client
     seen: list[str] = []
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
         seen.append(locale)
         return {"text": "ok", "cite": "c", "low_confidence": False}
 
@@ -152,7 +152,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
         assert seen[-1] == expected
 
 
-async def _must_not_run(tab, filters, view_payload, *, locale="ja"):
+async def _must_not_run(tab, filters, view_payload, *, locale="ja", conn=None, user_id=None):
     raise AssertionError("generate_proactive_insight must not be reached while the feature is off")
 
 

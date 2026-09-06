@@ -12,6 +12,7 @@ import json
 import logging
 import os
 
+from pipeline.query.chat import _completion_with_key
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
     TEMPLATES,
@@ -19,6 +20,7 @@ from pipeline.query.copilot_templates import (
     templates_for_tab,
 )
 from pipeline.query.llm_client import get_client
+from pipeline.query.user_llm_keys import get_user_llm_key
 
 logger = logging.getLogger(__name__)
 
@@ -80,31 +82,59 @@ def _pick_template_tool(tab: str) -> dict:
 
 
 async def generate_proactive_insight(
-    tab: str, filters: dict, view_payload: dict, *, locale: str = "ja"
+    tab: str, filters: dict, view_payload: dict, *, locale: str = "ja", conn=None, user_id: int | None = None
 ) -> dict:
+    """Generate a proactive insight for ``tab``.
+
+    ``user_id``, when set (a signed-in caller) alongside ``conn``, is looked
+    up against :func:`~pipeline.query.user_llm_keys.get_user_llm_key`. When a
+    key is found, the template-selection call routes through a one-off
+    :func:`~pipeline.query.chat._completion_with_key` call scoped to that
+    caller's own provider/key instead of the shared LLM client — the same
+    BYOK seam :func:`~pipeline.query.chat.chat_with_tools` uses. The raw key
+    is never logged.
+    """
     if not view_payload:
         raise NoInsightAvailable(f"no view_payload for tab={tab!r}")
     if not any(t.tab == tab for t in templates_for_tab(tab)):
         raise NoInsightAvailable(f"no templates registered for tab={tab!r}")
 
+    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and conn is not None else None
+
     tool = _pick_template_tool(tab)
-    client = _get_client()
-    message, _error = await asyncio.to_thread(
-        client.chat_completions,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You select which pre-verified insight template best matches the "
-                    "given data summary. Call pick_template exactly once. Never invent numbers."
-                ),
-            },
-            {"role": "user", "content": json.dumps({"tab": tab, "filters": filters, "data": view_payload})},
-        ],
-        tools=[tool],
-        tool_choice="required",
-        temperature=0.0,
-    )
+    call_messages = [
+        {
+            "role": "system",
+            "content": (
+                "You select which pre-verified insight template best matches the "
+                "given data summary. Call pick_template exactly once. Never invent numbers."
+            ),
+        },
+        {"role": "user", "content": json.dumps({"tab": tab, "filters": filters, "data": view_payload})},
+    ]
+    if user_key is not None:
+        try:
+            message = await asyncio.to_thread(
+                _completion_with_key,
+                user_key.provider,
+                user_key.raw_key,
+                messages=call_messages,
+                tools=[tool],
+                tool_choice="required",
+                temperature=0.0,
+            )
+        except Exception:
+            logger.warning("copilot: BYOK completion failed; falling back to no_signal")
+            message = None
+    else:
+        client = _get_client()
+        message, _error = await asyncio.to_thread(
+            client.chat_completions,
+            messages=call_messages,
+            tools=[tool],
+            tool_choice="required",
+            temperature=0.0,
+        )
 
     template_id = NO_SIGNAL_TEMPLATE_ID
     params: dict = {}

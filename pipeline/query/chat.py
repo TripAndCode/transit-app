@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
 import asyncpg
 import clickhouse_connect
@@ -44,7 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -56,6 +57,7 @@ from pipeline.query.tools import (
     dispatch,
     render_tool_result,
 )
+from pipeline.query.user_llm_keys import get_user_llm_key
 
 _log = logging.getLogger(__name__)
 
@@ -183,6 +185,48 @@ def _get_client():
     return get_client()
 
 
+def _completion_with_key(
+    provider: str,
+    api_key: str,
+    *,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    tool_choice: str = "auto",
+    temperature: float = 0.0,
+    model_override: str | None = None,
+    response_format: dict | None = None,
+) -> Any:
+    """Make one completion call against a signed-in user's own stored BYOK key.
+
+    Bypasses :class:`~pipeline.query.llm_client.LLMClient`'s shared provider
+    ladder entirely — a BYOK caller already supplies both the provider and
+    the key, so there is no ladder to fall back through and nothing shared
+    to meter. Returns the response message directly (mirroring
+    ``LLMClient.chat_completions``'s success shape, i.e.
+    ``resp.choices[0].message``) so the rest of this module's
+    ``msg.content``/``msg.tool_calls`` handling doesn't need a second code
+    path. Raises the underlying OpenAI SDK exception on failure; the caller
+    classifies it into the same ``error_kind`` vocabulary the shared-client
+    ladder uses. Never logs ``api_key`` — callers must only ever log whether
+    a per-user key was used, not its value.
+    """
+    import openai
+
+    defaults = _PROVIDER_DEFAULTS[provider]
+    one_off = openai.OpenAI(api_key=api_key, base_url=defaults["base_url"], max_retries=0)
+    create_kwargs: dict[str, Any] = dict(
+        model=model_override or defaults["model"],
+        messages=messages,
+        tools=tools,
+        tool_choice=tool_choice if tools else "none",
+        temperature=temperature,
+    )
+    if response_format is not None:
+        create_kwargs["response_format"] = response_format
+    resp = one_off.chat.completions.create(**create_kwargs)
+    return resp.choices[0].message
+
+
 def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
     """Consume one unit of the anon LLM-call quota, or raise if exhausted.
 
@@ -305,6 +349,7 @@ async def chat_with_tools(
     force_tool_call: bool = False,
     anon_quota: AnonQuotaContext | None = None,
     panel_ctx: dict | None = None,
+    user_id: int | None = None,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -363,6 +408,17 @@ async def chat_with_tools(
     routing stage (resolved before calling this function) or the
     tool-dispatch args.
 
+    ``user_id``, when set by the API layer for a signed-in caller, is looked
+    up against :func:`~pipeline.query.user_llm_keys.get_user_llm_key`. When a
+    key is found, both real LLM-invocation sites below route through a
+    one-off :func:`_completion_with_key` call scoped to that caller's own
+    provider/key instead of the shared :class:`~pipeline.query.llm_client.LLMClient`
+    ladder, and skip :func:`_consume_anon_quota_or_raise` entirely — a
+    defense-in-depth skip, not the primary mechanism, since ``anon_quota`` is
+    only ever constructed for an unauthenticated caller in the first place
+    (see ``anon_quota`` above). The raw key is never logged anywhere in this
+    path.
+
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
     structured payload the frontend can use for richer rendering (charts,
@@ -379,6 +435,35 @@ async def chat_with_tools(
     works if every provider in the fallback ladder accepts it.
     """
     client = _get_client()
+    user_key = await get_user_llm_key(conn, user_id) if user_id is not None else None
+
+    def _call_llm(**kwargs: Any) -> tuple[Any | None, str | None]:
+        """Dispatch one completion call, normalized to ``(message, error_kind)``.
+
+        Routes through the caller's own BYOK key (bypassing the shared
+        provider ladder) when ``user_key`` is set, else through the shared
+        :class:`~pipeline.query.llm_client.LLMClient` ladder. Both of
+        ``_sync``'s call sites go through here so they can't drift apart on
+        how a BYOK caller is handled.
+        """
+        if user_key is None:
+            return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
+        from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
+
+        try:
+            message = _completion_with_key(user_key.provider, user_key.raw_key, **kwargs)
+            return message, None
+        except APITimeoutError:
+            return None, "connection"
+        except APIConnectionError:
+            return None, "connection"
+        except RateLimitError:
+            return None, "rate_limit"
+        except BadRequestError:
+            return None, "bad_request"
+        except Exception:
+            return None, "unexpected"
+
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
     locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
     # Normalize once so leading/trailing whitespace doesn't cause cache misses
@@ -591,20 +676,18 @@ async def chat_with_tools(
             # JSON-mode emits the signature in message.content directly.
             # Don't send tools+tool_choice with response_format=json_object —
             # OpenAI rejects that combo (400) and providers behave inconsistently.
-            return client.chat_completions(
+            return _call_llm(
                 messages=messages,
                 temperature=0.0,
                 model_override=model,
                 response_format={"type": "json_object"},
-                allowed_providers=_allowed_providers(),
             )
-        return client.chat_completions(
+        return _call_llm(
             messages=messages,
             tools=TOOLS,
             tool_choice="required" if force_tool_call else "auto",
             temperature=0.0,
             model_override=model,
-            allowed_providers=_allowed_providers(),
         )
 
     # -----------------------------------------------------------------------
@@ -657,7 +740,11 @@ async def chat_with_tools(
         # Stage 2: question is new — call LLM to get the intent signature.
         # The anon quota gates the actual LLM call, not the cache pre-hit
         # above (which never reaches here) — see this function's docstring.
-        _consume_anon_quota_or_raise(anon_quota)
+        # A BYOK caller (user_key set) skips this: defense-in-depth, since
+        # anon_quota is never constructed for a signed-in caller in the
+        # first place (see the docstring's ``user_id`` section).
+        if user_key is None:
+            _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
@@ -793,9 +880,11 @@ async def chat_with_tools(
 
     # -----------------------------------------------------------------------
     # FLAG-OFF path: same tool-calling flow as Phase ① (no cache reads/
-    # writes), gated by the anon-quota check above when one is set.
+    # writes), gated by the anon-quota check above when one is set. A BYOK
+    # caller (user_key set) skips it — see the docstring's ``user_id`` section.
     # -----------------------------------------------------------------------
-    _consume_anon_quota_or_raise(anon_quota)
+    if user_key is None:
+        _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate
