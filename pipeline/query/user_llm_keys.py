@@ -27,8 +27,7 @@ class UserLLMKey(NamedTuple):
 
 @lru_cache(maxsize=1)
 def _fernet() -> Fernet:
-    key = os.environ["LLM_KEY_ENCRYPTION_KEY"]
-    return Fernet(key.encode() if isinstance(key, str) else key)
+    return Fernet(os.environ["LLM_KEY_ENCRYPTION_KEY"].encode())
 
 
 def encrypt_key(raw: str) -> bytes:
