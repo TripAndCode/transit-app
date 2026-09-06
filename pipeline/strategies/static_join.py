@@ -12,14 +12,23 @@ import logging
 
 from psycopg2 import sql
 
-from pipeline.strategies._pb import _dec, _fields
+from pipeline.strategies._pb import _dec, _fields, decode_feed_timestamp
 from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
 
 def _decode_rows(pb_bytes: bytes):
-    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay) per stop_time_update."""
+    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
+    schedule_relationship_trip, schedule_relationship_stop) per stop_time_update.
+
+    stop_id (StopTimeUpdate field 4), arr_delay (StopTimeUpdate.arrival's delay,
+    field 2 -> field 1), schedule_relationship_trip (TripDescriptor field 4),
+    and schedule_relationship_stop (StopTimeUpdate field 5) are populated by
+    Hiroshima-style feeds (this strategy's agencies); confirmed absent from
+    Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
+    decoding for it is needed here.
+    """
     try:
         top = _fields(pb_bytes)
     except Exception:
@@ -29,23 +38,31 @@ def _decode_rows(pb_bytes: bytes):
         if 3 not in ent:
             continue
         tu = _fields(ent[3][0])
-        trip_id = rt_route_id = None
+        trip_id = rt_route_id = sched_rel_trip = None
         if 1 in tu:
             trip = _fields(tu[1][0])
             if 1 in trip:
                 trip_id = _dec(trip[1][0])
             if 5 in trip:
                 rt_route_id = _dec(trip[5][0])
+            if 4 in trip:
+                sched_rel_trip = trip[4][0]
         if not trip_id:
             continue
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
             stop_seq = stu.get(1, [None])[0]
+            stop_id = _dec(stu[4][0]) if 4 in stu else None
+            arr_delay = None
+            if 2 in stu:
+                arr = _fields(stu[2][0])
+                arr_delay = arr.get(1, [None])[0]
             dep_delay = None
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = dep.get(1, [None])[0]
-            yield (trip_id, rt_route_id, stop_seq, dep_delay)
+            sched_rel_stop = stu.get(5, [None])[0]
+            yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
 
 
 def parse_feed(
@@ -58,11 +75,15 @@ def parse_feed(
     """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
-                route_code, stop_sequence, dep_delay).
+                route_code, stop_sequence, dep_delay, stop_id, arr_delay,
+                schedule_relationship_trip, schedule_relationship_stop,
+                feed_timestamp).
     """
     raw_rows = list(_decode_rows(pb_bytes))
     if not raw_rows:
         return []
+
+    feed_timestamp = decode_feed_timestamp(pb_bytes)
 
     keys = list({(r[0], r[2]) for r in raw_rows if r[2] is not None})
     if not keys:
@@ -119,7 +140,7 @@ def parse_feed(
     miss = 0
     skipped_extended = 0
     bad_sched = 0
-    for trip_id, rt_route_id, stop_seq, dep_delay in raw_rows:
+    for trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop in raw_rows:
         svc, sched = joined.get((trip_id, stop_seq), (None, None))
         if svc is None and sched is None:
             miss += 1
@@ -161,6 +182,11 @@ def parse_feed(
                 rt_route_id,
                 stop_seq,
                 dep_delay,
+                stop_id,
+                arr_delay,
+                sched_rel_trip,
+                sched_rel_stop,
+                feed_timestamp,
             )
         )
 

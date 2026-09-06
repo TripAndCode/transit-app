@@ -2,9 +2,12 @@
 
 Each ingest strategy module exposes:
     parse_feed(pb_bytes: bytes, agency_id: int, conn) -> list[tuple]
-        Returns rows ready for pipeline.clickhouse.insert_updates (8-tuple,
+        Returns rows ready for pipeline.clickhouse.insert_updates (13-tuple,
         see pipeline.clickhouse.UPDATE_COLUMNS — agency_id is prepended by
-        insert_updates, not part of this tuple).
+        insert_updates, not part of this tuple). A strategy whose source
+        feed doesn't populate one of the trailing fields (stop_id, arr_delay,
+        schedule_relationship_trip, schedule_relationship_stop,
+        feed_timestamp) passes NULL for it rather than guessing.
 
 Each static strategy module exposes:
     fetch(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]
