@@ -31,9 +31,11 @@ function LlmKeySection() {
     queryKey: ["myLlmKey"],
     queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
   });
-  const [provider, setProvider] = useState("groq");
+  const [providerOverride, setProviderOverride] = useState<string | null>(null);
+  const provider = providerOverride ?? status?.provider ?? "groq";
   const [apiKey, setApiKey] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () => apiPut<LlmKeyStatus>("/api/me/llm-key", { provider, api_key: apiKey }),
@@ -46,12 +48,19 @@ function LlmKeySection() {
       // immediately without waiting on a second round-trip refetch.
       qc.setQueryData(["myLlmKey"], data);
     },
-    onError: () => setSaveError(t("account.llm_key.rejected")),
+    onError: () => {
+      setApiKey("");
+      setSaveError(t("account.llm_key.rejected"));
+    },
   });
 
   const remove = useMutation({
     mutationFn: () => apiDelete("/api/me/llm-key"),
-    onSuccess: () => qc.setQueryData(["myLlmKey"], { configured: false }),
+    onSuccess: () => {
+      setRemoveError(null);
+      qc.setQueryData(["myLlmKey"], { configured: false });
+    },
+    onError: () => setRemoveError(t("account.llm_key.remove_error")),
   });
 
   return (
@@ -62,7 +71,7 @@ function LlmKeySection() {
           ? t("account.llm_key.status_own", { provider: status.provider, suffix: status.key_suffix })
           : t("account.llm_key.status_shared")}
       </p>
-      <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+      <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
         <option value="groq">Groq</option>
         <option value="openai">OpenAI</option>
         <option value="cerebras">Cerebras</option>
@@ -80,6 +89,7 @@ function LlmKeySection() {
         </button>
       )}
       {saveError && <p role="alert">{saveError}</p>}
+      {removeError && <p role="alert">{removeError}</p>}
     </section>
   );
 }

@@ -340,7 +340,8 @@
       "input_label": "API key",
       "save": "Save",
       "remove": "Remove",
-      "rejected": "Key rejected — check it and try again."
+      "rejected": "Key rejected — check it and try again.",
+      "remove_error": "Couldn't remove the key. Please check your connection and try again."
     },
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",

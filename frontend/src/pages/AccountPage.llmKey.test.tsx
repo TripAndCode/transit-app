@@ -66,4 +66,24 @@ describe("AccountPage BYOK section", () => {
     expect(await screen.findByText(/ab12/)).toBeTruthy();
     expect(screen.queryByText("gsk_realsecretvalueab12")).toBeNull();
   });
+
+  it("defaults the provider selector to the already-configured provider, not groq", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation(async (path: string) =>
+      path === "/api/me/llm-key" ? { configured: true, provider: "openai", key_suffix: "cd34" } : [],
+    );
+    const putSpy = vi
+      .spyOn(client, "apiPut")
+      .mockResolvedValue({ configured: true, provider: "openai", key_suffix: "ef56" });
+    renderPage();
+    await screen.findByText(/cd34/);
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(select.value).toBe("openai");
+    await userEvent.type(
+      await screen.findByLabelText(/api key|apiキー/i),
+      "sk-newkeyvalue",
+    );
+    await userEvent.click(screen.getByText(/^save$|^保存$/i));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy).toHaveBeenCalledWith("/api/me/llm-key", { provider: "openai", api_key: "sk-newkeyvalue" });
+  });
 });

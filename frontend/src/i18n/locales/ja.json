@@ -340,7 +340,8 @@
       "input_label": "APIキー",
       "save": "保存",
       "remove": "削除",
-      "rejected": "キーが拒否されました。確認して再度お試しください。"
+      "rejected": "キーが拒否されました。確認して再度お試しください。",
+      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
     },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
