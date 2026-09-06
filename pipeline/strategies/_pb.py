@@ -85,11 +85,12 @@ def _dec(b):
 
 def decode_feed_timestamp(pb_bytes: bytes):
     """Return the top-level FeedMessage's FeedHeader.timestamp (field 1 ->
-    field 2), or None if the message/header/field is absent or undecodable.
+    field 3), or None if the message/header/field is absent or undecodable.
 
-    One value per feed message -- every ingest strategy shares this same
-    decode rather than each re-implementing it, so a future field-number
-    fix only needs to happen once.
+    Field 2 on FeedHeader is `incrementality` (an enum, usually 0/1) --
+    `timestamp` is field 3. One value per feed message -- every ingest
+    strategy shares this same decode rather than each re-implementing it,
+    so a future field-number fix only needs to happen once.
     """
     try:
         top = _fields(pb_bytes)
@@ -98,7 +99,7 @@ def decode_feed_timestamp(pb_bytes: bytes):
     if 1 not in top:
         return None
     header = _fields(top[1][0])
-    return header.get(2, [None])[0]
+    return header.get(3, [None])[0]
 
 
 # ── captured_at derivation ────────────────────────────────────────────────────

@@ -318,6 +318,13 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     assert cov_sched_rel_trip >= 0.99, f"schedule_relationship_trip coverage {cov_sched_rel_trip:.2%}"
     assert cov_sched_rel_stop >= 0.99, f"schedule_relationship_stop coverage {cov_sched_rel_stop:.2%}"
     assert cov_feed_ts == 1.0, f"feed_timestamp coverage {cov_feed_ts:.2%}"
+    # Non-NULL alone doesn't prove the right protobuf field was read -- a
+    # neighboring field (e.g. a small enum like FeedHeader.incrementality)
+    # would also satisfy a bare not-None check. A real GTFS-RT feed's
+    # FeedHeader.timestamp is a Unix epoch in seconds, so it must be a large
+    # value; assert magnitude, not just presence.
+    feed_ts_values = {r[12] for r in rows if r[12] is not None}
+    assert all(v > 1_600_000_000 for v in feed_ts_values), f"feed_timestamp implausible: {feed_ts_values}"
 
     # arr_delay is only sent when the StopTimeUpdate carries an `arrival`
     # submessage (sparse by design, not a bug) -- assert it's genuinely
