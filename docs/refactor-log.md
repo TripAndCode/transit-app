@@ -595,3 +595,38 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`tests/db/test_item81_scratch.py`); the coordinator later stashed it
   (`git stash push -u`) before resuming and shipping this branch, so it no
   longer sits in the worktree as of this PR. (PR #335)
+- 2026-09-05: Added the encrypted-at-rest BYOK LLM key store (item 82,
+  Copilot plan Phase D Task 12): `pipeline/query/user_llm_keys.py`
+  (`encrypt_key`/`decrypt_key`/`key_suffix` via Fernet, keyed by
+  `LLM_KEY_ENCRYPTION_KEY` -- losing that env var makes every stored key
+  permanently unrecoverable -- plus `save_user_llm_key`/`get_user_llm_key`/
+  `delete_user_llm_key` against the `user_llm_keys` table from item 81) and
+  `tests/unit/test_user_llm_keys.py`. `poetry run pytest
+  tests/unit/test_user_llm_keys.py -v` (3 passed), `poetry run ruff check`,
+  and `poetry run mypy` all clean; `cryptography` resolved importable
+  transitively (48.0.0 per `poetry.lock`) without any `pyproject.toml`
+  change. This worker's sandbox denied both `Edit` and `Write` on
+  `pyproject.toml` (unlike `pipeline/**`/`tests/**`, it has no allowlist
+  entry in `.claude/settings.local.json`), so the plan's Step 3 direct
+  dependency pin was left for a session with that permission. The
+  coordinator applied it directly: `cryptography = "^48.0"` added under
+  `[tool.poetry.dependencies]` (commit `d407730`). That session's default
+  Poetry (2.4.1) bumped `poetry.lock`'s schema to `lock-version = "2.1"`
+  when relocking, which the `poetry==1.8.5` pinned in
+  `.github/workflows/ci.yml` and `Dockerfile` cannot read; regenerated the
+  lock with an isolated Poetry 1.8.5 install and `poetry lock --no-update`
+  instead (commit `39aea39`), restoring `lock-version = "2.0"` with zero
+  package version changes -- confirmed via `poetry check`, `poetry
+  install`, an import smoke-test, `ruff check`, and `mypy`, all clean.
+  Step 5 Pass 1 review (3-call overlay given the credential-handling
+  surface) then found: the stale claim above about the pin being unapplied
+  (superseded by this update); `get_user_llm_key` propagating a raw
+  `InvalidToken` from `decrypt_key` instead of degrading gracefully on a
+  rotated/corrupted key; and `key_suffix()` returning the full raw secret
+  unmasked for inputs of 4 characters or fewer. Fixed all three and added
+  DB-fixture-backed coverage (`tests/db/test_user_llm_keys_db.py`, reusing
+  the `aconn` fixture) for save/get/delete/upsert round-trips and the new
+  graceful-degradation path -- applied directly by the coordinator after a
+  dispatched fix agent hit a structural `Edit`/`Write` denial on paths
+  under `.claude/worktrees/**` (allowlist glob patterns match against the
+  main checkout's relative paths, not a worktree's). (PR #pending)
