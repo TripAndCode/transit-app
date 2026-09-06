@@ -333,6 +333,15 @@
       "user": "User"
     },
     "linked_providers": "Linked providers",
+    "llm_key": {
+      "title": "AI Copilot key",
+      "status_shared": "Using the shared free tier",
+      "status_own": "Using your own {{provider}} key · ****{{suffix}}",
+      "input_label": "API key",
+      "save": "Save",
+      "remove": "Remove",
+      "rejected": "Key rejected — check it and try again."
+    },
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",
     "logout": "Sign out",

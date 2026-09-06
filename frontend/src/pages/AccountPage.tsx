@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
-import { apiGet } from "../api/client";
+import { apiDelete, apiGet, apiPut } from "../api/client";
 
 type SessionRow = {
   sid_prefix: string;
@@ -11,6 +12,77 @@ type SessionRow = {
   created_at: string;
   last_seen_at: string;
 };
+
+type LlmKeyStatus = {
+  configured: boolean;
+  provider?: string;
+  key_suffix?: string;
+};
+
+/** BYOK LLM key settings — lets a signed-in user store their own provider key
+ * so Copilot/Ask calls use it instead of the shared operator key + quota. The
+ * raw key is write-only: the backend never echoes it back, only the masked
+ * `key_suffix`, and this component never holds it in state past the mutation
+ * call that sends it. */
+function LlmKeySection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data: status } = useQuery({
+    queryKey: ["myLlmKey"],
+    queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
+  });
+  const [provider, setProvider] = useState("groq");
+  const [apiKey, setApiKey] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => apiPut<LlmKeyStatus>("/api/me/llm-key", { provider, api_key: apiKey }),
+    onSuccess: (data) => {
+      setApiKey("");
+      setSaveError(null);
+      // Seed the cache directly from the mutation response rather than just
+      // invalidating: the response already carries the fresh masked
+      // `key_suffix` (never the raw key), so this shows the new status
+      // immediately without waiting on a second round-trip refetch.
+      qc.setQueryData(["myLlmKey"], data);
+    },
+    onError: () => setSaveError(t("account.llm_key.rejected")),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => apiDelete("/api/me/llm-key"),
+    onSuccess: () => qc.setQueryData(["myLlmKey"], { configured: false }),
+  });
+
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.llm_key.title")}</h2>
+      <p>
+        {status?.configured
+          ? t("account.llm_key.status_own", { provider: status.provider, suffix: status.key_suffix })
+          : t("account.llm_key.status_shared")}
+      </p>
+      <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <option value="groq">Groq</option>
+        <option value="openai">OpenAI</option>
+        <option value="cerebras">Cerebras</option>
+      </select>
+      <label>
+        {t("account.llm_key.input_label")}
+        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+      </label>
+      <button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
+        {t("account.llm_key.save")}
+      </button>
+      {status?.configured && (
+        <button onClick={() => remove.mutate()} disabled={remove.isPending}>
+          {t("account.llm_key.remove")}
+        </button>
+      )}
+      {saveError && <p role="alert">{saveError}</p>}
+    </section>
+  );
+}
 
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
@@ -39,6 +111,7 @@ export function AccountPage() {
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.linked_providers")}</h2>
         <ul>{session.identities.map((i) => <li key={i.provider}>{i.provider}</li>)}</ul>
       </section>
+      <LlmKeySection />
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.active_sessions")}</h2>
         {sessions?.map((s) => (
