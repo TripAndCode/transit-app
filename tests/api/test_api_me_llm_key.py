@@ -7,6 +7,7 @@ os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h
 
 import asyncpg
 import httpx
+import openai
 import pytest
 from httpx import ASGITransport
 
@@ -159,3 +160,49 @@ async def test_put_llm_key_requires_same_origin(me_client, aconn):
         headers={"Origin": "http://evil.example"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_llm_key_returns_503_when_validation_unavailable(monkeypatch, me_client, aconn):
+    """A provider-side network/timeout failure is a distinct 503, not a raw 500."""
+
+    class _FakeAPIConnectionError(openai.APIConnectionError):
+        def __init__(self):
+            pass
+
+    async def fake_validate(provider, key):
+        raise _FakeAPIConnectionError()
+
+    monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
+    sid, _uid = await _seed_user_and_session(aconn)
+    resp = await me_client.put(
+        "/api/me/llm-key",
+        json={"provider": "groq", "api_key": "gsk_realkey1234"},
+        cookies={"sid": sid},
+        headers={"Origin": "http://test"},
+    )
+    assert resp.status_code == 503
+
+    get_resp = await me_client.get("/api/me/llm-key", cookies={"sid": sid})
+    assert get_resp.json()["configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_put_llm_key_masks_short_key_suffix(monkeypatch, me_client, aconn):
+    """A raw key of 4 chars or fewer must never be echoed back verbatim."""
+
+    async def fake_validate(provider, key):
+        return True
+
+    monkeypatch.setattr("api.routers.me.validate_provider_key", fake_validate)
+    sid, _uid = await _seed_user_and_session(aconn)
+    put_resp = await me_client.put(
+        "/api/me/llm-key",
+        json={"provider": "groq", "api_key": "abcd"},
+        cookies={"sid": sid},
+        headers={"Origin": "http://test"},
+    )
+    assert put_resp.status_code == 200
+    body = put_resp.json()
+    assert body["key_suffix"] == "****"
+    assert "abcd" not in put_resp.text

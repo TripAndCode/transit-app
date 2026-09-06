@@ -2,7 +2,9 @@
 
 Meant to run before the key is ever persisted, so an invalid key is rejected
 immediately instead of silently stored and discovered broken only when the
-Copilot later fails. No caller wires this in yet.
+Copilot later fails. ``api.routers.me``'s ``PUT /api/me/llm-key`` handler is
+the sole caller: it wraps this in a ``try/except`` for the network-failure
+case documented below and only persists the key once this returns ``True``.
 """
 
 from __future__ import annotations

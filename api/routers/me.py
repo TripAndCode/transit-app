@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import asyncpg
+import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -14,6 +15,7 @@ from pipeline.query.user_llm_keys import (
     ALLOWED_PROVIDERS,
     delete_user_llm_key,
     get_user_llm_key,
+    key_suffix,
     save_user_llm_key,
 )
 
@@ -238,20 +240,31 @@ async def put_llm_key(
     body: LLMKeyPut,
     request: Request,
     user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
 ):
     """Validate then store the caller's BYOK LLM key.
 
     Validation runs before ``save_user_llm_key`` is ever called, so a bad key
-    is rejected with 400 and never persisted.
+    is rejected with 400 and never persisted. Unlike the other routes in this
+    file, this does not take ``conn: Depends(get_conn)`` — the pooled
+    connection is acquired only after ``validate_provider_key``'s external
+    HTTPS round-trip (up to a 10s timeout) succeeds, so it never sits idle in
+    the pool for that call's duration.
     """
     csrf_guard(request)
     if body.provider not in ALLOWED_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"unsupported provider: {body.provider}")
-    if not await validate_provider_key(body.provider, body.api_key):
+    try:
+        valid = await validate_provider_key(body.provider, body.api_key)
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        # A network/timeout failure proves nothing about the key itself —
+        # tell the caller we couldn't check right now (503), distinct from
+        # the key actually being rejected (400).
+        raise HTTPException(status_code=503, detail="validation_unavailable") from None
+    if not valid:
         raise HTTPException(status_code=400, detail="key_rejected")
-    await save_user_llm_key(conn, user.user_id, body.provider, body.api_key)
-    return LLMKeyStatus(configured=True, provider=body.provider, key_suffix=body.api_key[-4:])
+    async with request.app.state.pool.acquire() as conn:
+        await save_user_llm_key(conn, user.user_id, body.provider, body.api_key)
+    return LLMKeyStatus(configured=True, provider=body.provider, key_suffix=key_suffix(body.api_key))
 
 
 @router.delete("/me/llm-key", status_code=204)
