@@ -12,7 +12,17 @@ CREATE TABLE IF NOT EXISTS updates (
     scheduled_time LowCardinality(Nullable(String)),
     route_code     LowCardinality(Nullable(String)),
     stop_sequence  UInt16,
-    dep_delay      Nullable(Int32)
+    dep_delay      Nullable(Int32),
+    -- RT-sourced fields confirmed present in at least one currently-configured
+    -- agency's feed (see pipeline/strategies/*.py's parse_feed docstrings for
+    -- which agencies populate which of these) -- absent for any agency whose
+    -- feed doesn't send the underlying protobuf field, and unread by any
+    -- agg_*/dashboard consumer today.
+    stop_id                    LowCardinality(Nullable(String)),
+    arr_delay                  Nullable(Int32),
+    schedule_relationship_trip Nullable(UInt8),
+    schedule_relationship_stop Nullable(UInt8),
+    feed_timestamp             Nullable(UInt64)
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(captured_at)
 ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)

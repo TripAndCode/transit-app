@@ -11,7 +11,7 @@ dropped (preserving today's Aomori ingest behaviour).
 import logging
 import re
 
-from pipeline.strategies._pb import _dec, _fields
+from pipeline.strategies._pb import _dec, _fields, decode_feed_timestamp
 from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
@@ -48,8 +48,16 @@ def parse_feed(
     """Return rows shaped for pipeline.clickhouse.insert_updates.
 
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
-                route_code, stop_sequence, dep_delay).
-    The 9-tuple consumed by INSERT prepends agency_id at insert time.
+                route_code, stop_sequence, dep_delay, stop_id, arr_delay,
+                schedule_relationship_trip, schedule_relationship_stop,
+                feed_timestamp).
+    The 14-tuple consumed by INSERT prepends agency_id at insert time.
+
+    Aomori's feed does not populate stop_id, arrival, or either
+    schedule_relationship field (confirmed absent, not merely unread), so
+    those stay NULL here rather than guessing at values the source never
+    sends. feed_timestamp (FeedHeader.timestamp) IS populated, so it's
+    decoded like every other strategy.
     """
     pattern = _resolve_pattern(agency_id, conn)
     rows: list[tuple] = []
@@ -57,6 +65,7 @@ def parse_feed(
         top = _fields(pb_bytes)
     except Exception:
         return rows
+    feed_timestamp = decode_feed_timestamp(pb_bytes)
     for ent_bytes in top.get(2, []):
         ent = _fields(ent_bytes)
         if 3 not in ent:
@@ -102,5 +111,21 @@ def parse_feed(
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = dep.get(1, [None])[0]
-            rows.append((file_name, captured_at, trip_id, service, sched, route, stop_seq, dep_delay))
+            rows.append(
+                (
+                    file_name,
+                    captured_at,
+                    trip_id,
+                    service,
+                    sched,
+                    route,
+                    stop_seq,
+                    dep_delay,
+                    None,  # stop_id: confirmed absent from this feed
+                    None,  # arr_delay: confirmed absent from this feed
+                    None,  # schedule_relationship_trip: confirmed absent from this feed
+                    None,  # schedule_relationship_stop: confirmed absent from this feed
+                    feed_timestamp,
+                )
+            )
     return rows

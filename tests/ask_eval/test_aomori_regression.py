@@ -41,6 +41,7 @@ def test_aomori_strategy_matches_golden():
     import psycopg2
 
     from pipeline.strategies import aomori_regex
+    from pipeline.strategies._pb import decode_feed_timestamp
 
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
@@ -62,8 +63,18 @@ def test_aomori_strategy_matches_golden():
         conn.close()
 
     expected_full = json.loads((FIX_DIR / "aomori_golden.json").read_text())
-    # Project legacy 12-tuple to the 8-tuple the strategy emits
-    # (file_name, captured_at, trip_id, service, sched, route, stop_seq, dep_delay)
-    expected = [[r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10]] for r in expected_full]
+    feed_timestamp = decode_feed_timestamp(raw)
+    # Project legacy 12-tuple to the 13-tuple the strategy emits
+    # (file_name, captured_at, trip_id, service, sched, route, stop_seq, dep_delay,
+    #  stop_id, arr_delay, schedule_relationship_trip, schedule_relationship_stop,
+    #  feed_timestamp) -- Aomori's feed is confirmed to leave stop_id, arr_delay,
+    # and both schedule_relationship fields NULL (see item 87's findings), so the
+    # legacy golden's r[7]/r[8] (already null) cover stop_id/arr_delay and the two
+    # schedule_relationship fields are always None here; feed_timestamp comes from
+    # the same feed message's header, decoded independently of the golden fixture.
+    expected = [
+        [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10], r[7], r[8], None, None, feed_timestamp]
+        for r in expected_full
+    ]
     actual = [list(r) for r in rows]
     assert actual == expected

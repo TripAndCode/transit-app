@@ -306,6 +306,25 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     assert cov_svc >= 0.99, f"service_type JOIN coverage {cov_svc:.2%}"
     assert cov_sched >= 0.99, f"scheduled_time JOIN coverage {cov_sched:.2%}"
 
+    # Hiroshima-style feeds (this parametrization's 3 agencies) populate
+    # stop_id and both schedule_relationship fields on essentially every
+    # stop_time_update, and FeedHeader.timestamp once per feed message --
+    # round-trip coverage should match, near-universally.
+    cov_stop_id = sum(1 for r in rows if r[8] is not None) / len(rows)
+    cov_sched_rel_trip = sum(1 for r in rows if r[10] is not None) / len(rows)
+    cov_sched_rel_stop = sum(1 for r in rows if r[11] is not None) / len(rows)
+    cov_feed_ts = sum(1 for r in rows if r[12] is not None) / len(rows)
+    assert cov_stop_id >= 0.99, f"stop_id coverage {cov_stop_id:.2%}"
+    assert cov_sched_rel_trip >= 0.99, f"schedule_relationship_trip coverage {cov_sched_rel_trip:.2%}"
+    assert cov_sched_rel_stop >= 0.99, f"schedule_relationship_stop coverage {cov_sched_rel_stop:.2%}"
+    assert cov_feed_ts == 1.0, f"feed_timestamp coverage {cov_feed_ts:.2%}"
+
+    # arr_delay is only sent when the StopTimeUpdate carries an `arrival`
+    # submessage (sparse by design, not a bug) -- assert it's genuinely
+    # present some of the time without demanding near-universal coverage.
+    cov_arr_delay = sum(1 for r in rows if r[9] is not None) / len(rows)
+    assert 0.0 < cov_arr_delay < 0.5, f"arr_delay coverage {cov_arr_delay:.2%} (expected sparse, nonzero)"
+
 
 @pytest.mark.parametrize(
     "feed_url, pb_name, zip_name, agency_label",

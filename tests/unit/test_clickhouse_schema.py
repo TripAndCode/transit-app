@@ -33,6 +33,11 @@ def test_apply_schema_creates_updates_table():
         "route_code",
         "stop_sequence",
         "dep_delay",
+        "stop_id",
+        "arr_delay",
+        "schedule_relationship_trip",
+        "schedule_relationship_stop",
+        "feed_timestamp",
     ]
     # idempotent re-apply must not raise
     apply_schema(client)

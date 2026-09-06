@@ -24,6 +24,15 @@ route_code is Nullable because Postgres's `updates.route_code` was nullable
 ingest strategies can produce a row with no resolvable route. A non-nullable
 column here would reject those rows outright (DataError on insert), silently
 losing whole files instead of the row-level gap Postgres tolerated.
+
+Backfilling the live table with a schema.sql column added after it was
+created (e.g. stop_id, arr_delay, schedule_relationship_trip,
+schedule_relationship_stop, feed_timestamp) is a separate, deliberate
+`ALTER TABLE updates ADD COLUMN IF NOT EXISTS <name> <type>` per column —
+lighter than the trip_id/scheduled_time MODIFY COLUMN migration above (a
+metadata-only change defaulting existing parts' rows to NULL, not a
+whole-table rewrite) but still not automated here, for the same reason:
+apply_schema only ever creates a table that doesn't exist yet.
 """
 
 import pathlib
