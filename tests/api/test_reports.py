@@ -185,6 +185,95 @@ async def test_on_time_and_worst_5min_exact_from_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_on_time_no_params_is_byte_identical_to_legacy(reports_client, ch_client):
+    """Passing no tolerance params -- and passing preset=legacy_60s, an
+    explicit opt-in spelling of the same thing -- must both still read the
+    exact on_time_count column and match the pre-existing percentage,
+    unaffected by the new histogram-based tolerance path."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-15"
+    await _seed_route(pool, agency_id, "RLEGACY", "平日", day, [-200] * 8 + [30] * 12 + [90] * 5)
+    _run_analyze(agency_id, ch_client)
+
+    baseline = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
+    preset = (
+        await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&preset=legacy_60s")
+    ).json()["rows"]
+    r_base = next(x for x in baseline if x[0] == "RLEGACY")
+    r_preset = next(x for x in preset if x[0] == "RLEGACY")
+    assert r_base == r_preset
+    assert float(r_base[2]) == 80.0  # (8 + 12) / 25 on-time at the legacy <=60s cutoff
+
+
+@pytest.mark.asyncio
+async def test_on_time_custom_tolerance_matches_hand_computed_window(reports_client, ch_client):
+    """An explicit (early_tolerance_sec, late_tolerance_sec) window reads
+    agg_route_daily_dist's histogram instead of the exact on_time_count
+    column. Both bounds here (-60s, 60s) land exactly on a histogram bucket
+    edge (60 seconds away from LO=-300), so the estimate is exact and
+    hand-countable: the -200s group falls outside the tighter early
+    tolerance and no longer counts as on-time, unlike the legacy unbounded-
+    early default."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-16"
+    await _seed_route(pool, agency_id, "RTOL", "平日", day, [-200] * 8 + [30] * 12 + [90] * 5)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/on_time?from={day}&to={day}&early_tolerance_sec=60&late_tolerance_sec=60"
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "RTOL")
+    assert float(r[2]) == 48.0  # only the 30s group (12/25) is within [-60, 60]
+
+
+@pytest.mark.asyncio
+async def test_worst_5min_custom_late_tolerance_reads_histogram(reports_client, ch_client):
+    """An explicit late_tolerance_sec (even the legacy value, 300) opts into
+    the histogram-based estimate instead of the exact late5_count column.
+    300 lands on a bucket edge here, so the estimate is exact."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-17"
+    await _seed_route(pool, agency_id, "RSEV", "平日", day, [30] * 8 + [200] * 2 + [400] * 3)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?from={day}&to={day}&late_tolerance_sec=300")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    r = next(x for x in rows if x[0] == "RSEV")
+    assert r[2] == 3  # only the 400s group is later than the 300s cutoff
+
+
+@pytest.mark.asyncio
+async def test_reports_unknown_preset_is_rejected(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=nope")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reports_preset_combined_with_explicit_tolerance_is_rejected(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=legacy_60s&late_tolerance_sec=90")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reports_early_tolerance_sec_rejected_for_worst_5min(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?early_tolerance_sec=60")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reports_late_tolerance_sec_rejected_for_ranking(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?late_tolerance_sec=90")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_on_time_appends_pct_low_confidence_flag(reports_client, ch_client):
     """The on_time report appends a trailing `low_confidence` bool (index 5)
     per row — True when the on-time percentage's 95% Wilson interval is

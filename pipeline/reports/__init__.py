@@ -10,6 +10,7 @@ Public API is re-exported here so ``from pipeline.reports import compute_X``
 
 from pipeline.reports.overview import compute_overview_summary
 from pipeline.reports.rankings import (
+    ON_TIME_PRESETS,
     compute_compare_ranking,
     compute_dow_ranking,
     compute_hourly_heatmap,
@@ -20,6 +21,7 @@ from pipeline.reports.rankings import (
 )
 
 __all__ = [
+    "ON_TIME_PRESETS",
     "compute_compare_ranking",
     "compute_dow_ranking",
     "compute_hourly_heatmap",
