@@ -1,4 +1,7 @@
 import os
+from datetime import datetime, timedelta, timezone
+
+os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
 import asyncpg
 import httpx
@@ -8,6 +11,26 @@ from httpx import ASGITransport
 from tests.conftest import TEST_ORIGIN
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+
+
+async def _seed_user_and_session(conn, *, role="user"):
+    uid = (
+        await conn.fetchrow(
+            "INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING user_id",
+            f"u{datetime.now().timestamp()}@x",
+            "Yo",
+            role,
+        )
+    )["user_id"]
+    sid = f"sid-{uid:0>30}"
+    await conn.execute(
+        "INSERT INTO sessions (sid, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+        sid,
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=30),
+        "test-ua",
+    )
+    return sid, uid
 
 
 @pytest.fixture
@@ -56,7 +79,7 @@ def _copilot_enabled(monkeypatch):
 async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         return {"text": "Route 12 is delayed.", "cite": "Overview · 1 sample", "low_confidence": False}
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
@@ -71,10 +94,40 @@ async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client, aconn, monkeypatch):
+    """A signed-in caller's stored BYOK key must reach generate_proactive_insight
+    as an already-resolved user_key — the router acquires/releases its own pooled
+    connection around the lookup, never holding one across the LLM call."""
+    from pipeline.query.user_llm_keys import save_user_llm_key
+
+    client, agency_id = copilot_client
+    sid, uid = await _seed_user_and_session(aconn)
+    await save_user_llm_key(aconn, uid, "groq", "gsk_stored_key")
+
+    captured = {}
+
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
+        captured["user_key"] = user_key
+        return {"text": "ok", "cite": "c", "low_confidence": False}
+
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
+    resp = await client.post(
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert captured["user_key"] is not None
+    assert captured["user_key"].provider == "groq"
+    assert captured["user_key"].raw_key == "gsk_stored_key"
+
+
+@pytest.mark.asyncio
 async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         from pipeline.query.copilot import NoInsightAvailable
 
         raise NoInsightAvailable("empty")
@@ -93,7 +146,7 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
     """Cross-origin POST to /copilot/insight returns 403 even before reaching the LLM."""
     client, agency_id = copilot_client
 
-    async def must_not_be_called(tab, filters, view_payload, *, locale="ja"):
+    async def must_not_be_called(tab, filters, view_payload, *, locale="ja", user_key=None):
         return {
             "text": "csrf_guard FAILED — request reached generate_proactive_insight",
             "cite": "x",
@@ -113,7 +166,7 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
 async def test_copilot_insight_enforces_anon_quota(copilot_client, monkeypatch):
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         return {"text": "x", "cite": "y", "low_confidence": False}
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
@@ -136,7 +189,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
     client, agency_id = copilot_client
     seen: list[str] = []
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja"):
+    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         seen.append(locale)
         return {"text": "ok", "cite": "c", "low_confidence": False}
 
@@ -152,7 +205,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
         assert seen[-1] == expected
 
 
-async def _must_not_run(tab, filters, view_payload, *, locale="ja"):
+async def _must_not_run(tab, filters, view_payload, *, locale="ja", user_key=None):
     raise AssertionError("generate_proactive_insight must not be reached while the feature is off")
 
 

@@ -63,6 +63,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         return {
             "answer": "テスト回答",
@@ -251,6 +252,7 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["rag_examples"] = rag_examples
         captured["force_tool_call"] = force_tool_call
@@ -290,6 +292,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -349,6 +352,7 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -398,6 +402,7 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -449,6 +454,7 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -543,6 +549,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -599,6 +606,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
@@ -647,6 +655,7 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         return {
             "answer": "ok",
@@ -927,6 +936,7 @@ async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["panel_ctx"] = panel_ctx
         return {"answer": "ok", "tool_call": None, "result": None, "success": True}
@@ -967,6 +977,7 @@ async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
         force_tool_call=False,
         anon_quota=None,
         panel_ctx=None,
+        user_id=None,
     ):
         captured["panel_ctx"] = panel_ctx
         return {"answer": "ok", "tool_call": None, "result": None, "success": True}

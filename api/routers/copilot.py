@@ -23,6 +23,7 @@ from api.middleware.ratelimit import (
 )
 from api.security import csrf_guard
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
+from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
@@ -67,8 +68,26 @@ async def copilot_insight(
         ):
             raise AnonCopilotQuotaExceeded()
 
+    # Resolve the caller's BYOK key (if any) with a pool connection acquired
+    # and released *before* the LLM call below — never held across it, which
+    # can run for several seconds. This route otherwise has no reason to
+    # touch Postgres at all (unlike ``/ask``, which already threads ``conn``
+    # through for tool dispatch regardless of BYOK), so avoid declaring
+    # ``conn=Depends(get_conn)`` for the whole handler, matching
+    # ``api/routers/me.py``'s ``put_llm_key`` lazy-acquire pattern.
+    user_key = None
+    if user is not None:
+        async with request.app.state.pool.acquire() as conn:
+            user_key = await get_user_llm_key(conn, user.user_id)
+
     try:
-        result = await generate_proactive_insight(body.tab, body.filters, body.view_payload, locale=locale)
+        result = await generate_proactive_insight(
+            body.tab,
+            body.filters,
+            body.view_payload,
+            locale=locale,
+            user_key=user_key,
+        )
     except NoInsightAvailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CopilotInsightResponse(**result)
