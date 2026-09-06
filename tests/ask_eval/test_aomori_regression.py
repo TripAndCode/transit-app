@@ -73,8 +73,7 @@ def test_aomori_strategy_matches_golden():
     # schedule_relationship fields are always None here; feed_timestamp comes from
     # the same feed message's header, decoded independently of the golden fixture.
     expected = [
-        [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10], r[7], r[8], None, None, feed_timestamp]
-        for r in expected_full
+        [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[10], r[7], r[8], None, None, feed_timestamp] for r in expected_full
     ]
     actual = [list(r) for r in rows]
     assert actual == expected
