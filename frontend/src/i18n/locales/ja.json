@@ -333,6 +333,16 @@
       "user": "ユーザー"
     },
     "linked_providers": "連携プロバイダ",
+    "llm_key": {
+      "title": "AIコパイロットのキー",
+      "status_shared": "無料の共有枠を使用中",
+      "status_own": "ご自身の{{provider}}キーを使用中・****{{suffix}}",
+      "input_label": "APIキー",
+      "save": "保存",
+      "remove": "削除",
+      "rejected": "キーが拒否されました。確認して再度お試しください。",
+      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
+    },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
     "logout": "ログアウト",
