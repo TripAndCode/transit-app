@@ -61,7 +61,12 @@ def verify_numeric_claims(answer: str, grounding: dict) -> bool:
         return True
     allowed = _flatten_numbers(grounding)
     if not allowed:
-        return False
+        # No grounding means no basis for a verdict, so report no violation
+        # rather than invent one. Numbers legitimately appear in an ungrounded
+        # reply as route codes, periods and counts (SYSTEM_PROMPT rules 2 and
+        # 3); deciding that case belongs in a mechanism that constrains what
+        # the model may return, not in a verifier.
+        return True
     for number in claimed:
         # Exact match, or a rounded display of an allowed value (nearest int,
         # or nearest 0.1) — a model paraphrasing "14.2" as "about 14" is not

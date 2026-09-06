@@ -200,10 +200,10 @@ def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[st
     Only ever called at a site where ``answer`` is LLM-authored free text —
     ``_dispatch_and_respond``'s ``render_tool_result`` output is already
     grounded by construction (a formatted SQL aggregate) and is never routed
-    through this helper. ``grounding={}`` means a turn with no dispatched
-    data at all (e.g. an out-of-scope refusal): every claimed number is then
-    unverifiable by construction, so any digit in the reply is treated as a
-    fabrication and replaced.
+    through this helper. ``grounding={}`` means a turn with no dispatched data
+    at all (e.g. an out-of-scope refusal); the answer passes through unchanged
+    there, because there is nothing to trace a number back to. See
+    :func:`pipeline.query.hallucination_guard.verify_numeric_claims`.
     """
     if not answer:
         return answer, False
@@ -254,7 +254,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except clickhouse_connect.driver.exceptions.Error:
@@ -264,7 +264,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     except asyncpg.exceptions.UndefinedTableError:
@@ -276,7 +276,7 @@ async def _dispatch_and_respond(
             "tool_call": {"name": name, "arguments": args},
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
             **extra,
         }
     # render_tool_result formats `result` (a dispatched ToolResult) deterministically
@@ -287,7 +287,7 @@ async def _dispatch_and_respond(
         "tool_call": {"name": name, "arguments": args},
         "result": _result_to_dict(result),
         "success": result.kind != "empty",
-        "numeric_guard_triggered": False,
+        "numeric_guard_triggered": None,
         **extra,
     }
 
@@ -419,7 +419,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -432,7 +432,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -452,7 +452,7 @@ async def chat_with_tools(
                     "tool_call": {"name": build_tool, "arguments": can_args},
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": sig_hash,
                     "confidence": 1.0,
                     "canonical_args": can_args,
@@ -465,7 +465,7 @@ async def chat_with_tools(
                 "tool_call": {"name": build_tool, "arguments": can_args},
                 "result": _result_to_dict(result),
                 "success": result.kind != "empty",
-                "numeric_guard_triggered": False,
+                "numeric_guard_triggered": None,
                 "signature_hash": sig_hash,
                 "confidence": 1.0,
                 "canonical_args": can_args,
@@ -669,7 +669,7 @@ async def chat_with_tools(
                 "tool_call": None,
                 "result": None,
                 "success": False,
-                "numeric_guard_triggered": False,
+                "numeric_guard_triggered": None,
                 "signature_hash": None,
                 "confidence": None,
                 "canonical_args": None,
@@ -708,7 +708,7 @@ async def chat_with_tools(
                     "tool_call": None,
                     "result": None,
                     "success": False,
-                    "numeric_guard_triggered": False,
+                    "numeric_guard_triggered": None,
                     "signature_hash": None,
                     "confidence": None,
                     "canonical_args": None,
@@ -812,7 +812,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
         }
 
     tool_calls = getattr(msg, "tool_calls", None)
@@ -822,10 +822,11 @@ async def chat_with_tools(
         # An empty body falls back to the generic "couldn't understand"
         # string, which is a genuine failure to parse the question → False.
         # This is the one LLM-authored-free-text site in this function — no
-        # tool was dispatched, so there is no data to trace a number back to;
-        # _numeric_guard is called with grounding={} so any digit the model
-        # includes here (e.g. an invented statistic in an otherwise-helpful
-        # suggestion) is treated as unverifiable and replaced.
+        # tool was dispatched, so there is no data to trace a number back to
+        # and _numeric_guard passes the reply through. The guard covers the
+        # paths where an answer can actually be checked; constraining this one
+        # means constraining what the model may return here, not verifying it
+        # afterwards.
         body = (msg.content or "").strip()
         if body:
             guarded_body, triggered = _numeric_guard(body, {}, locale)
@@ -841,7 +842,7 @@ async def chat_with_tools(
             "tool_call": None,
             "result": None,
             "success": False,
-            "numeric_guard_triggered": False,
+            "numeric_guard_triggered": None,
         }
 
     if len(tool_calls) > 1:
