@@ -14,7 +14,7 @@ import os
 from functools import lru_cache
 from typing import NamedTuple
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 ALLOWED_PROVIDERS = ("groq", "openai", "cerebras")
 
@@ -40,7 +40,9 @@ def decrypt_key(blob: bytes) -> str:
 
 
 def key_suffix(raw: str) -> str:
-    return raw[-4:] if len(raw) >= 4 else raw
+    # Anything at or under the suffix length has nothing left to hide once
+    # the suffix is shown, so mask it entirely rather than echo the raw key.
+    return raw[-4:] if len(raw) > 4 else "*" * len(raw)
 
 
 async def save_user_llm_key(conn, user_id: int, provider: str, raw_key: str) -> None:
@@ -69,7 +71,14 @@ async def get_user_llm_key(conn, user_id: int) -> UserLLMKey | None:
     )
     if row is None:
         return None
-    return UserLLMKey(provider=row["provider"], raw_key=decrypt_key(row["encrypted_key"]), key_suffix=row["key_suffix"])
+    try:
+        raw_key = decrypt_key(row["encrypted_key"])
+    except InvalidToken:
+        # Encryption key rotated or ciphertext corrupted: degrade to "no key
+        # configured" instead of crashing the caller, consistent with this
+        # repo's graceful-disabled-path rule for LLM-adjacent features.
+        return None
+    return UserLLMKey(provider=row["provider"], raw_key=raw_key, key_suffix=row["key_suffix"])
 
 
 async def delete_user_llm_key(conn, user_id: int) -> None:

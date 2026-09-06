@@ -16,6 +16,11 @@ def test_key_suffix_is_last_four_chars():
     assert key_suffix("gsk_test_abcd1234") == "1234"
 
 
+def test_key_suffix_masks_inputs_at_or_under_four_chars():
+    assert key_suffix("abcd") == "****"
+    assert key_suffix("ab") == "**"
+
+
 def test_encrypted_blob_never_contains_plaintext_key():
     raw = "gsk_super_secret_value"
     blob = encrypt_key(raw)
