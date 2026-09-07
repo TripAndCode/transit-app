@@ -23,7 +23,7 @@ and contributes nothing.
 from __future__ import annotations
 
 from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
@@ -205,5 +205,13 @@ def rows_to_lead_bucket_stats(rows: list[tuple]) -> list[dict]:
     for row in rows:
         scheduled_time, trip_date, observations = row[2], row[4], row[7]
         scheduled_departure = scheduled_departure_at(trip_date, scheduled_time)
-        all_errors.extend(compute_stop_event_errors(scheduled_departure, list(observations)))
+        # ClickHouse's client returns a naive `captured_at` (see
+        # pipeline.clickhouse's own tzinfo-patch idiom for the same column) --
+        # `scheduled_departure` above is always tz-aware, so every
+        # `captured_at` diffed against it must be too.
+        normalized_observations = [
+            (captured_at if captured_at.tzinfo is not None else captured_at.replace(tzinfo=timezone.utc), dep_delay)
+            for captured_at, dep_delay in observations
+        ]
+        all_errors.extend(compute_stop_event_errors(scheduled_departure, normalized_observations))
     return aggregate_by_lead_bucket(all_errors)
