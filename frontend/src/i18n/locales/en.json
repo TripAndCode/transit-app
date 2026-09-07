@@ -142,7 +142,11 @@
     "no_data_in_range": "no data in range",
     "view_agency": "View {{name}} overview",
     "delay_unit": "min",
-    "you_badge": "YOU"
+    "you_badge": "YOU",
+    "ridership_weighted_toggle": "Weight by ridership",
+    "col_on_time_weighted": "On-time % (ridership-weighted)",
+    "on_time_weighted_suffix": " (weighted)",
+    "help_ridership_weighted": "When a manually-configured ridership weight exists for this agency, pools each route's on-time contribution by that weight instead of counting every route equally."
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",

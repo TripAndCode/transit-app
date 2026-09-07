@@ -14,6 +14,13 @@ different populations. ``clamp_pct`` is the implausible-reading ratio
 see that module for the executed/planned definition and why the latter two
 read `None` ("not available") for an agency whose feed doesn't populate
 `schedule_relationship_trip`.
+
+``has_ridership_weights``/``weighted_on_time_pct`` come from
+`pipeline.reports.ridership.compute_ridership_weighted_on_time_by_agency` —
+see that module for the manually-populated `ridership_weights` table and why
+an agency with no rows there reads `has_ridership_weights=False` and
+`weighted_on_time_pct=None`, never a value computed with an implicit uniform
+weight.
 """
 
 import logging
@@ -24,6 +31,7 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 
 _log = logging.getLogger(__name__)
@@ -95,6 +103,14 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         conn, [a["agency_id"] for a in agencies], from_date, to_date
     )
 
+    # weighted_on_time_pct keyed by agency_id; an agency absent from this dict
+    # (per compute_ridership_weighted_on_time_by_agency) has no
+    # ridership_weights rows configured at all. Read via a sentinel default so
+    # "absent" (not configured) and "present but None" (configured, but zero
+    # samples in range) stay distinguishable below.
+    weighted_on_time = await compute_ridership_weighted_on_time_by_agency(conn, from_date, to_date)
+    _NOT_CONFIGURED = object()
+
     rows: list[dict[str, Any]] = []
     for a in agencies:
         aid = a["agency_id"]
@@ -109,6 +125,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         d = delivered.get(aid, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
+        agency_weighted = weighted_on_time.get(aid, _NOT_CONFIGURED)
         rows.append(
             {
                 "agency_id": aid,
@@ -125,6 +142,13 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "planned_trips": d["planned_trips"],
                 "executed_trips": d["executed_trips"],
                 "service_delivered_pct": d["service_delivered_pct"],
+                # has_ridership_weights distinguishes "not configured for
+                # this agency" (weighted_on_time_pct is meaningless, hide any
+                # toggle) from "configured, but None because there were no
+                # samples in range" (weighted_on_time_pct itself already
+                # says that).
+                "has_ridership_weights": agency_weighted is not _NOT_CONFIGURED,
+                "weighted_on_time_pct": None if agency_weighted is _NOT_CONFIGURED else agency_weighted,
             }
         )
     # None (no data yet) sorts last; among real values, worst delay first.

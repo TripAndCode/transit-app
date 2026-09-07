@@ -32,6 +32,13 @@ class NetworkAgencyRow(BaseModel):
     planned_trips: int
     executed_trips: int | None
     service_delivered_pct: float | None
+    # pipeline.reports.ridership: has_ridership_weights is False (and
+    # weighted_on_time_pct None) whenever this agency has no ridership_weights
+    # rows at all -- the frontend toggle must key off has_ridership_weights,
+    # never treat a None weighted_on_time_pct alone as "not configured" (a
+    # configured agency with zero samples in range is also None here).
+    has_ridership_weights: bool
+    weighted_on_time_pct: float | None
 
 
 class NetworkSummary(BaseModel):

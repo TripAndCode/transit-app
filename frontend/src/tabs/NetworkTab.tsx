@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
@@ -52,6 +53,12 @@ export function NetworkTab() {
   const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
+  const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);
+
+  // Absent (not just unchecked) whenever NO agency in the current list has a
+  // manually-configured ridership weight -- a toggle that flips to a view
+  // identical to the unweighted one would be a no-op, not a real feature.
+  const ridershipWeightingAvailable = data?.agencies.some((a) => a.has_ridership_weights) ?? false;
 
   // Carry the full current range into each agency's Overview, matching how
   // Sidebar/ReportsTab build agency links (proper encoding; "all" dims omitted).
@@ -67,6 +74,11 @@ export function NetworkTab() {
     const showFeedFlag = a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT;
     const showFreshnessFlag = a.is_stale;
     const isCurrent = currentAgencyId != null && a.agency_id === currentAgencyId;
+    // Falls back to this agency's own unweighted on_time_pct when the
+    // toggle is on but THIS agency has no configured weight -- never blocks
+    // rendering, just can't show a weighted figure that doesn't exist.
+    const isWeightedView = showRidershipWeighted && a.has_ridership_weights;
+    const displayedOnTimePct = isWeightedView ? a.weighted_on_time_pct : a.on_time_pct;
     return (
       <div
         className="network-card"
@@ -99,8 +111,13 @@ export function NetworkTab() {
                 </span>
               )}
             </div>
-            <div style={onTimeStyle} aria-label={t("network.col_on_time")}>
-              {a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}
+            <div
+              style={onTimeStyle}
+              aria-label={isWeightedView ? t("network.col_on_time_weighted") : t("network.col_on_time")}
+            >
+              {displayedOnTimePct == null
+                ? "—"
+                : `${displayedOnTimePct.toFixed(1)}%${isWeightedView ? t("network.on_time_weighted_suffix") : ""}`}
             </div>
             <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
               {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
@@ -162,6 +179,9 @@ export function NetworkTab() {
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
+          {ridershipWeightingAvailable && (
+            <li><strong>{t("network.ridership_weighted_toggle")}</strong> — {t("network.help_ridership_weighted")}</li>
+          )}
           <li><strong>{t("network.col_delivered")}</strong> — {t("network.help_delivered")}</li>
           <li><strong>{t("network.col_samples")}</strong> — {t("network.help_samples")}</li>
           <li><strong>{t("network.col_feed")}</strong> — {t("network.help_feed")}</li>
@@ -179,6 +199,17 @@ export function NetworkTab() {
           {t("network.to")}{" "}
           <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
         </label>
+        {ridershipWeightingAvailable && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              data-testid="ridership-weighted-toggle"
+              checked={showRidershipWeighted}
+              onChange={(e) => setShowRidershipWeighted(e.target.checked)}
+            />
+            {t("network.ridership_weighted_toggle")}
+          </label>
+        )}
       </div>
 
       {data && <DefinitionMetaBlock definition={data.definition} />}

@@ -507,6 +507,12 @@ export type NetworkAgencyRow = {
   planned_trips: number;
   executed_trips: number | null;
   service_delivered_pct: number | null;
+  /** False whenever this agency has no manually-configured ridership weights
+   * at all -- the weighted-view toggle must key off this, not off
+   * weighted_on_time_pct being null (a configured agency with zero samples
+   * in range is also null there, but is still configured). */
+  has_ridership_weights: boolean;
+  weighted_on_time_pct: number | null;
 };
 
 export type NetworkSummary = {
