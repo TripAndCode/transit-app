@@ -11,7 +11,7 @@
 -- (neither a default nor any route-specific row) has no ridership weighting
 -- configured -- callers must read that as "not available", never fall back
 -- to a silent uniform weight of 1 dressed up as "weighted" (see
--- pipeline.reports.ridership.agency_has_ridership_weights).
+-- pipeline.reports.ridership.compute_ridership_weighted_on_time_by_agency).
 --
 -- No stop_id column: no per-stop on-time aggregate exists in this pipeline
 -- (agg_route_daily_dist's own grain stops at route/service/date), so a

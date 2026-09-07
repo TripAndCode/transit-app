@@ -724,3 +724,25 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   function has a live caller yet. Both passes are now genuinely complete,
   `poetry run ruff check`/`poetry run mypy` clean, and `make test` passes
   except the two confirmed-unrelated migrate failures. Mergeable. (PR #353)
+- 2026-09-08: Item 99 (PR #355) resync — after opening the PR and marking it
+  ready, GitHub reported `mergeable: CONFLICTING`/`mergeStateStatus: DIRTY`
+  even though `main`'s tip hadn't moved during this branch's own review
+  window: the branch had originally forked from an older `main` (merge-base
+  `cb9096f`, before items 93-96 landed), so it needed syncing regardless.
+  Merged `main` into the branch (`git pull origin main --no-rebase`; one
+  real conflict in `docs/refactor-log.md`'s append point, resolved by
+  keeping both sets of entries in log order; amended the default merge
+  commit message to add the `[skip ci]` trailer, since `git merge`/`git
+  pull` never add it automatically). Re-ran the full backend/frontend
+  verification suite against the merged result (unchanged: 19/19 backend
+  tests, ruff/mypy clean) before re-reviewing. Re-ran the full two-pass
+  `/review-branch` from scratch (fresh `prepare_review.py` manifest each
+  time, merge-base now equal to `main`'s tip) per the mandatory resync-review
+  rule: resync Pass 1 (3 dispatches, high-risk overlay for the schema
+  migration) found zero Majors; two independently-corroborated Minors
+  (`db/migrations/0035_ridership_weights.up.sql`'s docstring and
+  `docs/features/network-tab.md`'s Key Files table both still pointed at
+  `pipeline.reports.ridership.agency_has_ridership_weights`, deleted as dead
+  code by this same branch's own earlier fix-and-reverify cycle) — fixed by
+  repointing both references to `compute_ridership_weighted_on_time_by_agency`,
+  the function that now actually implements the contract. (PR #355)

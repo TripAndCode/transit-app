@@ -82,7 +82,7 @@ What the user sees/does:
 | `api/routers/network.py` | `GET /api/network/summary` |
 | `pipeline/reports/network.py` | `compute_network_summary()` |
 | `pipeline/reports/service_delivered.py` | `compute_service_delivered_by_agency()` — planned-vs-executed trip counts |
-| `pipeline/reports/ridership.py` | `compute_ridership_weighted_on_time_by_agency()` / `agency_has_ridership_weights()` — the manually-populated `ridership_weights` table and the weighted on-time metric it powers |
+| `pipeline/reports/ridership.py` | `compute_ridership_weighted_on_time_by_agency()` — the manually-populated `ridership_weights` table and the weighted on-time metric it powers |
 | `api/clickhouse.py` | `max_captured_at_before_by_agency` — the per-agency live-freshness probe |
 | `pipeline/analyze.py` | Builds `agg_route_daily_dist`, `agg_feed_health`, and `agg_service_delivered_daily` — the aggregates this tab reads |
 | `db/migrations/0035_ridership_weights.up.sql` | The `ridership_weights` table (agency-level default and/or per-route weight rows) |
