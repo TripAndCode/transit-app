@@ -17,12 +17,13 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
-from pipeline.query.formatter import format_result, format_trend_text
+from pipeline.query.formatter import format_dwell_run_text, format_result, format_trend_text
 from pipeline.reports import (
     ON_TIME_PRESETS,
     DefinitionMeta,
     compute_compare_ranking,
     compute_dow_ranking,
+    compute_dwell_run_decomposition,
     compute_hourly_heatmap,
     compute_on_time,
     compute_ranking,
@@ -51,6 +52,7 @@ _REPORT_TYPES = (
     "compare_ranking",
     "dow_weekend",
     "dow_weekday",
+    "dwell_run",
 )
 
 
@@ -344,10 +346,18 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "dow_weekend": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
     "dow_weekday": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
     "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
+    "dwell_run": ["系統コード", "種別", "滞留観測数", "滞留平均(秒)", "走行観測数", "走行平均(秒)"],
 }
 
 
-def _csv_response(report_type: str, rows: list, ctx: RangeCtx, definition: DefinitionMeta) -> StreamingResponse:
+def _csv_response(
+    report_type: str,
+    rows: list,
+    ctx: RangeCtx,
+    definition: DefinitionMeta,
+    *,
+    unavailable_message: str | None = None,
+) -> StreamingResponse:
     """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding).
 
     The first data row (before the column header) is a single-cell
@@ -355,6 +365,14 @@ def _csv_response(report_type: str, rows: list, ctx: RangeCtx, definition: Defin
     ``pipeline.reports.definition.format_definition_csv_line``) so a CSV
     exported with non-default tolerances shows those exact values instead of
     silently reading as the legacy_60s default.
+
+    `unavailable_message`, when given, replaces the (otherwise empty) data
+    rows with a single explanatory row instead -- for a report type whose
+    JSON/text rendering already distinguishes "genuinely zero observations"
+    from "this agency/filter can't produce this report at all"
+    (`dwell_run`'s `available`/`time_band_supported` flags), an empty CSV
+    with only a header row would silently collapse that same distinction
+    back into a misleading blank/zero.
     """
     cols = _REPORT_CSV_COLUMNS.get(report_type, [])
     buf = io.StringIO()
@@ -362,7 +380,9 @@ def _csv_response(report_type: str, rows: list, ctx: RangeCtx, definition: Defin
     w = csv.writer(buf)
     w.writerow([format_definition_csv_line(definition)])
     w.writerow(cols)
-    if report_type == "trend":
+    if unavailable_message is not None:
+        w.writerow([unavailable_message])
+    elif report_type == "trend":
         for d in rows:
             offenders = "; ".join(o.get("route_code", "") for o in (d.get("top_offenders") or []))
             w.writerow([d.get("date"), d.get("avg_min"), d.get("avg_min_smoothed"), d.get("samples"), offenders])
@@ -370,6 +390,18 @@ def _csv_response(report_type: str, rows: list, ctx: RangeCtx, definition: Defin
         for r in rows:
             *lead, low_confidence = r
             w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else ""])
+    elif report_type == "dwell_run":
+        for r in rows:
+            w.writerow(
+                [
+                    r.get("route_code"),
+                    r.get("service_type") or "",
+                    r.get("dwell_samples"),
+                    r.get("dwell_avg_sec"),
+                    r.get("run_samples"),
+                    r.get("run_avg_sec"),
+                ]
+            )
     else:
         for r in rows:
             w.writerow(list(r))
@@ -487,6 +519,26 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band}],
+            ctx=_ctx_payload(ctx),
+            definition=definition,
+        )
+    elif report_type == "dwell_run":
+        payload = await compute_dwell_run_decomposition(agency_id, ctx, conn)
+        # format_dwell_run_text itself is the single source of truth for the
+        # available/time_band_supported "not a real zero" messages -- reusing
+        # it here (rather than re-deriving the same two strings a second
+        # time) is what guarantees the CSV export can never drift from the
+        # JSON/text response's own wording for these two states.
+        text = format_dwell_run_text(payload, locale=locale)
+        if format == "csv":
+            if not payload["available"] or not payload.get("time_band_supported", True):
+                return _csv_response(report_type, [], ctx, definition, unavailable_message=text)
+            return _csv_response(report_type, payload["routes"], ctx, definition)
+        return ReportResponse(
+            report_type=report_type,
+            rendered_at=datetime.now(timezone.utc),
+            text=text,
+            rows=[payload],
             ctx=_ctx_payload(ctx),
             definition=definition,
         )

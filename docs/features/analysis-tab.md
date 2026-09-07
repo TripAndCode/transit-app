@@ -25,8 +25,8 @@ What the user sees/does:
 - **Filter bar** — `frontend/src/components/TabFilterBar.tsx`.
 - **Report list** (left column) — one button per report type
   (`ranking`, `ranking_best`, `on_time`, `worst_5min`, `trend`,
-  `compare_ranking`, `dow_weekday`, `dow_weekend`) plus a separate
-  `route_forecast` entry; clicking navigates to
+  `compare_ranking`, `dow_weekday`, `dow_weekend`, `dwell_run`) plus a
+  separate `route_forecast` entry; clicking navigates to
   `/agencies/{id}/analysis/{reportType}` carrying the current filter as a
   query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
@@ -38,7 +38,14 @@ What the user sees/does:
   (`frontend/src/components/charts/DowBandGrid.tsx`), a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). An empty result
-  shows `EmptyState` with a "reset to this week" recovery action.
+  shows `EmptyState` with a "reset to this week" recovery action. `dwell_run`
+  instead renders `DwellRunBlock` (defined inline in `AnalysisTab.tsx`): a
+  per-route dwell-time/running-time table decomposing `arr_delay` (populated
+  only for `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately
+  from the existing delay histogram — an explicit `EmptyState` renders
+  instead when the agency's feed never sends `arr_delay` (`available:
+  false`) or the current time-band filter isn't servable by this
+  decomposition (`time_band_supported: false`), never a misleading zero.
   `route_forecast` instead renders `frontend/src/components/RouteForecastSection.tsx`
   (agency-wide landing view, or a per-route detail view when exactly one
   route is selected in the shared filter - see its own file-header comment).
@@ -59,7 +66,7 @@ What the user sees/does:
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
 | `useReports(agencyId)` | `GET /api/{agency_id}/reports` (`api/routers/reports.py: list_reports`) | Static metadata only — the fixed `_REPORT_TYPES` tuple, no DB read. |
-| `useReport(agencyId, reportType, ctx)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `CLAUDE.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
+| `useReport(agencyId, reportType, ctx)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `CLAUDE.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
 | `useSuggestion(agencyId, exclude)` (drives `InsightPanel`) | `GET /api/{agency_id}/reports/suggest` (`api/routers/reports.py: get_suggestion`) | `pipeline/reports/suggest.py: compute_suggestion()` — a rule-based pick (anomaly over a 1-day window, or trend-shift/on-time over a 7-day window) mirroring `api/routers/map.py`'s `today_route_summary` anchor date; polled every 5 minutes. |
 | `useForecastOverview(agencyId)` / `useForecastHeatmap(agencyId, route)` (both drive `RouteForecastSection`) | `GET /api/{agency_id}/forecast/overview` / `GET /api/{agency_id}/forecast/heatmap?route=...` (`api/routers/reports.py`) | Both re-pool `agg_route_hour_dow` on read (a seasonal-naive baseline, explicitly **not** a prediction — both responses carry a `disclaimer` string). `forecast/overview`'s route list additionally joins the last 7 analyzed days from `agg_route_daily` for each route's sparkline (best-effort — a failure there degrades to no sparklines rather than a 500). |
 
@@ -69,7 +76,7 @@ What the user sees/does:
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DowBandHeatmapCard` composition |
+| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DowBandHeatmapCard`/`DwellRunBlock` composition |
 | `frontend/src/components/ReportTable.tsx` | Generic report-row table renderer |
 | `frontend/src/components/charts/DailyChart.tsx` | Trend report's daily line chart |
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
@@ -86,9 +93,12 @@ What the user sees/does:
 |---|---|
 | `api/routers/reports.py` | `/reports` (list), `/reports/{report_type}` (compute + CSV), `/reports/suggest`, `/forecast/heatmap`, `/forecast/overview` |
 | `pipeline/reports/rankings.py` | The seven report-tab `compute_*` functions |
+| `pipeline/reports/dwell_run.py` | `compute_dwell_run_decomposition` — the `dwell_run` report's read side |
+| `pipeline/dwell_run.py` | Pure dwell/running-time math (schedule + `arr_delay`/`dep_delay` → actual timestamps → dwell/running seconds) shared by the analyze-time builder and the read side |
+| `pipeline/histogram.py` | Fixed-width histogram bucketing/percentile math, accepting custom `(lo, hi, width)` bounds so `pipeline/dwell_run.py` can reuse it with its own bucket scale |
 | `pipeline/reports/suggest.py` | `compute_suggestion()` — the Insight Panel's rule engine |
 | `pipeline/reports/forecast.py` | `summarize_agency_overview`, `summarize_expected_delay_heatmap`, `hourly_cells_to_dow_band` — shape the forecast endpoints' payloads |
-| `pipeline/analyze.py` | Builds every `agg_*` table the fast paths and forecast endpoints read |
+| `pipeline/analyze.py` | Builds every `agg_*` table the fast paths and forecast endpoints read, including `agg_route_daily_dwell_run` (`static_join` agencies with a static schedule loaded only) |
 
 ## How to verify manually
 
@@ -97,7 +107,9 @@ What the user sees/does:
 - Backend: `tests/api/test_reports.py`, `tests/api/test_forecast_heatmap.py`,
   `tests/api/test_forecast_overview_endpoint.py`,
   `tests/unit/test_forecast_heatmap.py`, `tests/unit/test_forecast_overview.py`,
-  `tests/unit/test_reports_rounding.py`.
+  `tests/unit/test_reports_rounding.py`, `tests/unit/test_dwell_run.py`
+  (pure dwell/running-time math), `tests/pipeline/test_analyze.py`'s
+  `agg_route_daily_dwell_run` cases.
 - Frontend: `frontend/src/components/ReportTable.test.tsx`,
   `frontend/src/components/charts/DowBandGrid.test.tsx`,
   `frontend/src/components/RouteForecastSection.test.tsx`,

@@ -79,7 +79,7 @@ async def reports_client(reports_app):
 
 @pytest.mark.asyncio
 async def test_reports_list_returns_static_metadata(reports_client):
-    """The list endpoint returns the canonical 8 report types regardless of data."""
+    """The list endpoint returns the canonical 9 report types regardless of data."""
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports")
     assert resp.status_code == 200
@@ -94,6 +94,7 @@ async def test_reports_list_returns_static_metadata(reports_client):
         "compare_ranking",
         "dow_weekend",
         "dow_weekday",
+        "dwell_run",
     }
     for r in data:
         assert "rendered_at" in r
@@ -1308,3 +1309,142 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
     resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
     assert resp.json() is None
+
+
+def _run_analyze_from_ch(agency_id, ch_client):
+    """Like `_run_analyze`, but for dwell_run tests that seed ClickHouse
+    `updates` directly (via `insert_updates`) instead of mirroring from
+    Postgres `updates` -- `arr_delay` exists only in the ClickHouse `updates`
+    schema (Postgres `updates` has zero production readers and was never
+    extended to carry it -- see the `transit-app-gotchas` skill), so
+    `mirror_updates_to_ch` can't carry an `arr_delay` value through."""
+    import os
+
+    import psycopg2
+
+    from pipeline.analyze import analyze
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_not_available_for_non_static_join_agency(reports_client):
+    """The fixture agency's ingest_strategy is left NULL (not static_join),
+    so the decomposition must render an explicit 'not available' state,
+    never a zero/blank one."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is False
+    assert payload["routes"] == []
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_time_band_filter_is_explicitly_unsupported(reports_client):
+    """Even for an available (static_join) agency, a time_band filter isn't
+    servable by this decomposition (no live-scan fallback) -- must say so
+    explicitly rather than silently ignoring the filter."""
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["time_band_supported"] is False
+    assert payload["routes"] == []
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_export_not_available_says_so_instead_of_empty(reports_client):
+    """format=csv for a non-static_join agency must render the same explicit
+    'not available' message the JSON/text response does -- an empty
+    (header-only) CSV would be indistinguishable from "genuinely zero
+    observations", exactly the misleading blank the feature exists to
+    avoid."""
+    import csv
+    import io
+
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    # row 0: definition preamble, row 1: column header, row 2: the message.
+    assert len(rows) == 3
+    assert rows[2][0]  # non-empty explanatory message, not silently absent
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_empty(reports_client):
+    """Same as the not-available case, but for the time_band_supported=False
+    state (still an available static_join agency)."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning&format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    assert len(rows) == 3
+    assert rows[2][0]
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client):
+    """End-to-end: seed a static schedule + ClickHouse `arr_delay`/`dep_delay`
+    for a 3-stop trip (same hand-computed fixture as
+    tests/unit/test_dwell_run.py and tests/pipeline/test_analyze.py's
+    agg_route_daily_dwell_run test), analyze(), then read it back through the
+    HTTP endpoint and check the exact averages."""
+    from datetime import datetime, timezone
+
+    from pipeline.clickhouse import insert_updates
+
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await pool.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", agency_id
+    )
+    for seq, arr, dep in [(1, "10:00:00", "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:10:00", "10:10:00")]:
+        await pool.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', $2, 'S1', $3, $4)",
+            agency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
+    # (file_name, captured_at, trip_id, service_type, scheduled_time, route_code,
+    #  stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop, feed_timestamp)
+    rows = [
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 1, 30, "S1", None, None, None, None),
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 2, 50, "S1", 20, None, None, None),
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 3, 10, "S1", 10, None, None, None),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    _run_analyze_from_ch(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["time_band_supported"] is True
+    routes = payload["routes"]
+    assert len(routes) == 1
+    r = routes[0]
+    assert r["route_code"] == "44"
+    assert r["dwell_samples"] == 2
+    assert r["dwell_avg_sec"] == pytest.approx(45.0)  # (90 + 0) / 2
+    assert r["run_samples"] == 2
+    assert r["run_avg_sec"] == pytest.approx(245.0)  # (290 + 200) / 2
