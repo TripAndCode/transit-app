@@ -8,6 +8,7 @@ Public API is re-exported here so ``from pipeline.reports import compute_X``
 (used by api/routers and pipeline/query) keeps working unchanged.
 """
 
+from pipeline.reports.definition import DefinitionMeta, format_definition_csv_line, resolve_definition_meta
 from pipeline.reports.overview import compute_overview_summary
 from pipeline.reports.rankings import (
     ON_TIME_PRESETS,
@@ -22,6 +23,7 @@ from pipeline.reports.rankings import (
 
 __all__ = [
     "ON_TIME_PRESETS",
+    "DefinitionMeta",
     "compute_compare_ranking",
     "compute_dow_ranking",
     "compute_hourly_heatmap",
@@ -30,4 +32,6 @@ __all__ = [
     "compute_ranking",
     "compute_trend_series",
     "compute_worst_5min",
+    "format_definition_csv_line",
+    "resolve_definition_meta",
 ]

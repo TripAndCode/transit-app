@@ -135,3 +135,11 @@ What the user sees/does:
   `api/routers/reports.py`'s `_REPORT_CSV_COLUMNS` (operator-facing
   downloads, not routed through `_LOCALES` - update this table directly if a
   report's column set changes).
+- Every JSON report response and CSV export carries a `definition` block
+  (`pipeline/reports/definition.py`) stating the on-time/late tolerance,
+  measurement point, dedup rule, and exclusion threshold that produced the
+  numbers — resolved from the same tolerance params `get_report` validates,
+  never hardcoded, so a custom-tolerance export can't silently read back as
+  the `legacy_60s` default. In the CSV it's a one-cell preamble row before
+  the column header; in the UI, `DefinitionMetaBlock` renders it from the
+  API response's `definition` field.

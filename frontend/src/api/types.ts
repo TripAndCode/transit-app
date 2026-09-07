@@ -170,10 +170,26 @@ export type ReportMeta = {
   rendered_at: string;
 };
 
+/** Which on-time/late tolerance (and the shared dedup/exclusion rule) a
+ *  report or comparison view's numbers actually used -- always present, but
+ *  `preset`/`early_tolerance_sec`/`late_tolerance_sec` are `null` for report
+ *  types with no on-time/late tolerance concept (e.g. `ranking`, `trend`).
+ *  See pipeline/reports/definition.py, the single source of truth these
+ *  values are resolved from. */
+export type DefinitionMeta = {
+  preset: string | null;
+  early_tolerance_sec: number | null;
+  late_tolerance_sec: number | null;
+  exclusion_threshold_sec: number;
+  measurement_point: string;
+  dedup_rule: string;
+};
+
 export type ReportResponse = ReportMeta & {
   text: string;
   rows: unknown[];
   ctx?: ResponseCtx;
+  definition: DefinitionMeta;
 };
 
 export type Suggestion = {
@@ -468,5 +484,6 @@ export type NetworkSummary = {
   from: string;
   to: string;
   agencies: NetworkAgencyRow[];
+  definition: DefinitionMeta;
 };
 

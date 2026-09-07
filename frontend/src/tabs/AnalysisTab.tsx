@@ -15,6 +15,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
+import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 
@@ -196,10 +197,11 @@ export function AnalysisTab() {
               )}
             </div>
             {detail.data.ctx && (
-              <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 16px" }}>
+              <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 4px" }}>
                 {t("reports.range_suffix", { from: detail.data.ctx.from, to: detail.data.ctx.to })}
               </div>
             )}
+            {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
             {detail.data.report_type === "trend" ? (
               <TrendBlock
                 data={

@@ -20,6 +20,7 @@ from api.range import RangeCtx, get_range_ctx
 from pipeline.query.formatter import format_result, format_trend_text
 from pipeline.reports import (
     ON_TIME_PRESETS,
+    DefinitionMeta,
     compute_compare_ranking,
     compute_dow_ranking,
     compute_hourly_heatmap,
@@ -27,6 +28,8 @@ from pipeline.reports import (
     compute_ranking,
     compute_trend_series,
     compute_worst_5min,
+    format_definition_csv_line,
+    resolve_definition_meta,
 )
 from pipeline.reports.forecast import (
     hourly_cells_to_dow_band,
@@ -77,6 +80,12 @@ class ReportResponse(BaseModel):
     text: str
     rows: list
     ctx: ReportCtx
+    # Which on-time/late tolerance (and the shared dedup/exclusion rule) this
+    # response's rows actually used -- see pipeline.reports.definition. Always
+    # present, even for report types with no tolerance concept (fields None),
+    # so a caller comparing two responses can check the definition matches
+    # instead of assuming it does.
+    definition: DefinitionMeta
 
 
 def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
@@ -338,12 +347,20 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
 }
 
 
-def _csv_response(report_type: str, rows: list, ctx: RangeCtx) -> StreamingResponse:
-    """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding)."""
+def _csv_response(report_type: str, rows: list, ctx: RangeCtx, definition: DefinitionMeta) -> StreamingResponse:
+    """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding).
+
+    The first data row (before the column header) is a single-cell
+    definition-metadata preamble (see
+    ``pipeline.reports.definition.format_definition_csv_line``) so a CSV
+    exported with non-default tolerances shows those exact values instead of
+    silently reading as the legacy_60s default.
+    """
     cols = _REPORT_CSV_COLUMNS.get(report_type, [])
     buf = io.StringIO()
     buf.write("﻿")  # BOM
     w = csv.writer(buf)
+    w.writerow([format_definition_csv_line(definition)])
     w.writerow(cols)
     if report_type == "trend":
         for d in rows:
@@ -411,9 +428,12 @@ async def get_report(
     if early_tolerance_sec is not None and report_type != "on_time":
         raise HTTPException(status_code=400, detail="early_tolerance_sec only applies to the on_time report")
     if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min"):
-        raise HTTPException(
-            status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min reports"
-        )
+        raise HTTPException(status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min reports")
+
+    # Resolved from the same (now-validated) params compute_on_time/
+    # compute_worst_5min themselves consume below, so this can never show a
+    # tolerance different from the one the rows were actually computed with.
+    definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
 
     n = limit or 100
     intent: dict = {}
@@ -460,7 +480,7 @@ async def get_report(
         dow_band = hourly_cells_to_dow_band(hourly, locale=locale)
         days = series["days"]
         if format == "csv":
-            return _csv_response(report_type, days, ctx)
+            return _csv_response(report_type, days, ctx, definition)
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
@@ -468,12 +488,13 @@ async def get_report(
             text=text,
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band}],
             ctx=_ctx_payload(ctx),
+            definition=definition,
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")
 
     if format == "csv":
-        return _csv_response(report_type, rows, ctx)
+        return _csv_response(report_type, rows, ctx, definition)
 
     text = format_result(intent["query_type"], rows, intent, locale=locale)
     return ReportResponse(
@@ -482,4 +503,5 @@ async def get_report(
         text=text,
         rows=rows,
         ctx=_ctx_payload(ctx),
+        definition=definition,
     )

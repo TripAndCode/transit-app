@@ -34,6 +34,13 @@ What the user sees/does:
   when `clamp_pct` (implausible/clamped readings) is ≥1%, and a "stale" badge
   when the feed hasn't reported recently. The current agency's own card is
   visually highlighted with a "YOU" badge.
+- **Definition metadata block** (`DefinitionMetaBlock`, always visible,
+  above the card list) — states the on-time/late tolerance, measurement
+  point, dedup rule, and exclusion threshold behind every card's on-time %,
+  from the response's `definition` field (`pipeline/reports/definition.py`).
+  This board has no tolerance query param of its own, so it always resolves
+  to the `legacy_60s` preset — surfaced explicitly so it can be checked
+  against a per-agency report's own `definition` block instead of assumed.
 
 ## Request path
 

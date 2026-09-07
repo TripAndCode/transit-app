@@ -142,6 +142,15 @@
     "delay_unit": "分",
     "you_badge": "あなた"
   },
+  "definitionMeta": {
+    "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
+    "unbounded": "無制限",
+    "not_applicable": "対象外",
+    "seconds": "{{value}}秒",
+    "measurement_point": "集計範囲：全停留所・全観測",
+    "dedup_rule": "重複排除：停留所イベントごとに最新観測を採用",
+    "exclusion_rule": "除外基準：|遅延|>{{sec}}秒を除外"
+  },
   "app": {
     "data_stale": {
       "banner": "データが最新ではありません — 最終取り込み: {{when}}",
