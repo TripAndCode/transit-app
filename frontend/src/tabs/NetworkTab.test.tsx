@@ -5,7 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
-import type { NetworkAgencyRow } from "../api/types";
+import type { DefinitionMeta, NetworkAgencyRow } from "../api/types";
 
 function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
   return {
@@ -14,6 +14,15 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     data_from: "2026-04-01", data_to: "2026-04-02", ...over,
   };
 }
+
+const definition: DefinitionMeta = {
+  preset: "legacy_60s",
+  early_tolerance_sec: null,
+  late_tolerance_sec: 60,
+  exclusion_threshold_sec: 7200,
+  measurement_point: "all_stops_all_observations",
+  dedup_rule: "latest_observation_per_stop_event",
+};
 
 function renderTab(agencyId = "1") {
   renderWithProviders(
@@ -31,7 +40,7 @@ describe("NetworkTab", () => {
   it("renders agency cards in given order with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07",
+        from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 10, on_time_pct: 50, clamp_pct: 0.14 }),
           row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, on_time_pct: 88, clamp_pct: 10, is_stale: true, data_from: "2026-04-03", data_to: "2026-04-05" }),
@@ -63,7 +72,7 @@ describe("NetworkTab", () => {
   it("links each agency name to its overview, carrying the current range", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07",
+        from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [row({ agency_id: 7, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -85,7 +94,7 @@ describe("NetworkTab", () => {
 
   it("renders the empty message and no agency cards when there are no agencies", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
@@ -112,7 +121,7 @@ describe("NetworkTab", () => {
   it("shows a 'you' badge and highlights the card matching the current agencyId in the URL", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07",
+        from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [
           row({ agency_id: 1, agency_name: "Hiroden" }),
           row({ agency_id: 2, agency_name: "HiroBus" }),
@@ -131,7 +140,7 @@ describe("NetworkTab", () => {
   it("shows no 'you' badge when there is no agencyId in the URL", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07",
+        from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -147,7 +156,7 @@ describe("NetworkTab", () => {
   it("renders the coverage-range separator via the locale-aware key, not a hardcoded en-dash", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
-        from: "2026-04-01", to: "2026-04-07",
+        from: "2026-04-01", to: "2026-04-07", definition,
         agencies: [row({ agency_id: 1, agency_name: "Hiroden", data_from: "2026-04-01", data_to: "2026-04-02" })],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -157,9 +166,23 @@ describe("NetworkTab", () => {
     expect(screen.getByText("2026-04-01 〜 2026-04-02")).toBeInTheDocument();
   });
 
+  it("renders the always-visible definition metadata block from the API response", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent("legacy_60s");
+    expect(block).toHaveTextContent("unbounded");
+  });
+
   it("sets both range date inputs' lang attribute to the active UI language", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", agencies: [] },
+      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();

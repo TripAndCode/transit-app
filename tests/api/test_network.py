@@ -216,6 +216,25 @@ async def test_network_summary_endpoint(net_client, ch_client):
     assert brow["is_stale"] is True
 
 
+async def test_network_summary_includes_definition_metadata(net_client):
+    """The board's on_time_pct always reads the exact legacy_60s column (no
+    tolerance query param exists on this endpoint) -- the definition block
+    must say so explicitly rather than leaving a user to assume it, and must
+    match pipeline.reports.definition's resolved legacy values exactly (not
+    a hardcoded/duplicated copy of them)."""
+    client, _pool, _a, _b, _cc = net_client
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    body = r.json()
+    definition = body["definition"]
+    assert definition["preset"] == "legacy_60s"
+    assert definition["early_tolerance_sec"] is None
+    assert definition["late_tolerance_sec"] == 60
+    assert definition["exclusion_threshold_sec"] == 7200
+    assert definition["measurement_point"] == "all_stops_all_observations"
+    assert definition["dedup_rule"] == "latest_observation_per_stop_event"
+
+
 async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
     """Fix 8a regression: ClickHouse backs ONLY the ``is_stale`` field here —
     every other field (avg_delay_min, on_time_pct, samples, raw_samples,

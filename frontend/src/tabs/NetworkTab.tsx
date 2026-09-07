@@ -4,6 +4,7 @@ import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
 import type { NetworkAgencyRow } from "../api/types";
 
@@ -175,6 +176,8 @@ export function NetworkTab() {
           <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
         </label>
       </div>
+
+      {data && <DefinitionMetaBlock definition={data.definition} />}
 
       {isPending && <Skeleton height={320} />}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}

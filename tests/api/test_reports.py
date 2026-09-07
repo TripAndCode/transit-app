@@ -196,9 +196,9 @@ async def test_on_time_no_params_is_byte_identical_to_legacy(reports_client, ch_
     _run_analyze(agency_id, ch_client)
 
     baseline = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
-    preset = (
-        await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&preset=legacy_60s")
-    ).json()["rows"]
+    preset = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&preset=legacy_60s")).json()[
+        "rows"
+    ]
     r_base = next(x for x in baseline if x[0] == "RLEGACY")
     r_preset = next(x for x in preset if x[0] == "RLEGACY")
     assert r_base == r_preset
@@ -245,6 +245,127 @@ async def test_worst_5min_custom_late_tolerance_reads_histogram(reports_client, 
     rows = resp.json()["rows"]
     r = next(x for x in rows if x[0] == "RSEV")
     assert r[2] == 3  # only the 400s group is later than the 300s cutoff
+
+
+@pytest.mark.asyncio
+async def test_on_time_default_response_carries_legacy_definition_metadata(reports_client, ch_client):
+    """The JSON response's `definition` block must reflect the legacy_60s
+    default when no tolerance params are passed -- the always-visible
+    metadata block a comparison view renders."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route(pool, agency_id, "RDEF", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")
+    assert resp.status_code == 200
+    definition = resp.json()["definition"]
+    assert definition["preset"] == "legacy_60s"
+    assert definition["early_tolerance_sec"] is None
+    assert definition["late_tolerance_sec"] == 60
+    assert definition["exclusion_threshold_sec"] == 7200
+    assert definition["measurement_point"] == "all_stops_all_observations"
+    assert definition["dedup_rule"] == "latest_observation_per_stop_event"
+
+
+@pytest.mark.asyncio
+async def test_on_time_custom_tolerance_response_carries_exact_custom_definition(reports_client, ch_client):
+    """Exporting a report with non-default tolerances must show those EXACT
+    values in the metadata block, not the legacy_60s defaults."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-19"
+    await _seed_route(pool, agency_id, "RCUS", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/on_time?from={day}&to={day}&early_tolerance_sec=30&late_tolerance_sec=120"
+    )
+    assert resp.status_code == 200
+    definition = resp.json()["definition"]
+    assert definition["preset"] == "custom"
+    assert definition["early_tolerance_sec"] == 30
+    assert definition["late_tolerance_sec"] == 120
+
+
+@pytest.mark.asyncio
+async def test_worst_5min_custom_tolerance_response_carries_exact_custom_definition(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    day = "2026-05-20"
+    await _seed_route(pool, agency_id, "RW5", "平日", day, [400] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?from={day}&to={day}&late_tolerance_sec=180")
+    assert resp.status_code == 200
+    definition = resp.json()["definition"]
+    assert definition["preset"] == "custom"
+    assert definition["early_tolerance_sec"] is None
+    assert definition["late_tolerance_sec"] == 180
+
+
+@pytest.mark.asyncio
+async def test_reports_without_tolerance_concept_still_carry_dedup_and_exclusion_metadata(reports_client, ch_client):
+    """ranking has no on-time/late tolerance concept (preset/tolerances are
+    None), but the shared dedup rule and exclusion threshold still apply to
+    every aggregate it reads, so the metadata block must still surface
+    them."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-21"
+    await _seed_route(pool, agency_id, "RRANK", "平日", day, [120] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    assert resp.status_code == 200
+    definition = resp.json()["definition"]
+    assert definition["preset"] is None
+    assert definition["early_tolerance_sec"] is None
+    assert definition["late_tolerance_sec"] is None
+    assert definition["exclusion_threshold_sec"] == 7200
+    assert definition["dedup_rule"] == "latest_observation_per_stop_event"
+
+
+@pytest.mark.asyncio
+async def test_csv_export_definition_metadata_preamble_reflects_custom_tolerance(reports_client, ch_client):
+    """Exporting a CSV with non-default tolerances must render those exact
+    values in the leading definition-metadata row, not the legacy_60s
+    defaults."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-22"
+    await _seed_route(pool, agency_id, "RCSV", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/on_time?from={day}&to={day}&early_tolerance_sec=45&late_tolerance_sec=90&format=csv"
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    preamble = rows[0][0]
+    assert "45秒" in preamble
+    assert "90秒" in preamble
+    assert "custom" in preamble
+    assert "legacy_60s" not in preamble
+    assert "7200" in preamble
+    # The header row (系統コード, ...) must still be exactly the second row.
+    assert rows[1] == ["系統コード", "種別", "定時率(%)", "平均遅延(分)", "観測数", "確信度低"]
+
+
+@pytest.mark.asyncio
+async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    day = "2026-05-23"
+    await _seed_route(pool, agency_id, "RCSVDEF", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&format=csv")
+    assert resp.status_code == 200
+    import csv
+    import io
+
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    preamble = rows[0][0]
+    assert "legacy_60s" in preamble
 
 
 @pytest.mark.asyncio
@@ -325,7 +446,10 @@ async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, 
     assert "False" not in body
 
     rows = list(csv.reader(io.StringIO(body)))
-    header, data_rows = rows[0], rows[1:]
+    # rows[0] is the definition-metadata preamble line (see
+    # test_csv_export_definition_metadata_preamble_reflects_custom_tolerance
+    # below) -- the column header is the second row.
+    header, data_rows = rows[1], rows[2:]
     assert header[-1] == "確信度低"
     uncertain = next(r for r in data_rows if r[0] == "R_UNCERTAIN")
     confident = next(r for r in data_rows if r[0] == "R_CONFIDENT")

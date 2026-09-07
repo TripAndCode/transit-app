@@ -142,6 +142,19 @@
     "delay_unit": "min",
     "you_badge": "YOU"
   },
+  "definitionMeta": {
+    "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
+    "unbounded": "unbounded",
+    "not_applicable": "n/a",
+    "seconds": "{{value}}s",
+    "measurementPoint": {
+      "all_stops_all_observations": "measured across all stops, all observations"
+    },
+    "dedupRule": {
+      "latest_observation_per_stop_event": "duplicate readings: latest observation per stop event wins"
+    },
+    "exclusion_rule": "excludes |delay| > {{sec}}s as implausible"
+  },
   "app": {
     "data_stale": {
       "banner": "Data is out of date — last ingest: {{when}}",
