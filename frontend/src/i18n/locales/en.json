@@ -906,7 +906,9 @@
       "dow_weekday": "Weekday pattern",
       "dow_weekend": "Weekend pattern",
       "dwell_run": "Dwell/running time",
-      "route_forecast": "Route forecast"
+      "route_forecast": "Route forecast",
+      "council_summary": "Council report",
+      "delay_certificate": "Delay certificate"
     },
     "col": {
       "route": "Route",
@@ -922,7 +924,15 @@
       "weekend": "Weekend/Holiday",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Confidence"
+      "confidence": "Confidence",
+      "planned_trips": "Planned trips",
+      "executed_trips": "Executed trips",
+      "service_delivered_pct": "Service-delivered %",
+      "agency_name": "Agency",
+      "date": "Date",
+      "scheduled_time": "Scheduled",
+      "actual_time": "Actual",
+      "delay_sec": "Delay (s)"
     },
     "confidence_low_mark": "wide range",
     "direction": {
