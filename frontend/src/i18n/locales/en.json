@@ -147,8 +147,12 @@
     "unbounded": "unbounded",
     "not_applicable": "n/a",
     "seconds": "{{value}}s",
-    "measurement_point": "measured across all stops, all observations",
-    "dedup_rule": "duplicate readings: latest observation per stop event wins",
+    "measurementPoint": {
+      "all_stops_all_observations": "measured across all stops, all observations"
+    },
+    "dedupRule": {
+      "latest_observation_per_stop_event": "duplicate readings: latest observation per stop event wins"
+    },
     "exclusion_rule": "excludes |delay| > {{sec}}s as implausible"
   },
   "app": {

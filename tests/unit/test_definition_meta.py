@@ -5,6 +5,8 @@ Mirrors compute_on_time/compute_worst_5min's own None-default resolution
 silently drift from what a report actually computes.
 """
 
+import pytest
+
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -104,3 +106,23 @@ def test_csv_line_default_shows_legacy_preset_and_unbounded_early():
     assert "legacy_60s" in line
     assert "無制限" in line  # unbounded early tolerance
     assert "60秒" in line
+
+
+def test_csv_line_measurement_point_text_is_read_from_the_field_not_hardcoded():
+    """format_definition_csv_line must derive its measurement-point text from
+    meta.measurement_point -- not print a fixed string regardless of the
+    field's value. An unrecognized identifier must fail loudly (KeyError)
+    rather than silently rendering stale text, proving the lookup is real:
+    a hardcoded implementation would ignore the bogus value and succeed."""
+    meta = resolve_definition_meta("on_time", None, None).model_copy(
+        update={"measurement_point": "some_other_measurement_point"}
+    )
+    with pytest.raises(KeyError):
+        format_definition_csv_line(meta)
+
+
+def test_csv_line_dedup_rule_text_is_read_from_the_field_not_hardcoded():
+    """Same guarantee as the measurement-point test above, for dedup_rule."""
+    meta = resolve_definition_meta("on_time", None, None).model_copy(update={"dedup_rule": "some_other_dedup_rule"})
+    with pytest.raises(KeyError):
+        format_definition_csv_line(meta)

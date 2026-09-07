@@ -21,22 +21,21 @@ from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
 )
 
-# Every report/comparison view reads through pipeline.db.build_dedup_ch_sql,
-# which resolves duplicate observations for the same stop event (same route,
-# service_type, scheduled_time, trip_id, JST calendar day, stop_sequence) by
-# keeping the one with the latest (captured_at, file_name) -- see that
-# function's own docstring for why "latest wins" replaced a prior
-# "MAX(dep_delay)" behavior. Named here as a stable identifier (not directly
-# imported from pipeline.db, which has no such constant of its own) so a
-# JSON response can carry it as data and let the frontend render translated
-# text, while the CSV export below renders it inline.
+# Stable identifiers (not resolved per request, unlike the tolerance fields
+# below) so a caller can render/translate them instead of a fixed string
+# baked into this module. ``pipeline.db.build_dedup_ch_sql`` implements the
+# dedup rule itself (latest observation per stop event wins); no separate
+# "measurement point" knob exists elsewhere in the pipeline today.
 DEDUP_RULE = "latest_observation_per_stop_event"
-
-# Every aggregate a report or comparison view reads pools across ALL stops
-# (not just termini) and ALL observations in the requested range -- there is
-# no separate "measurement point" knob anywhere in the pipeline today, so
-# this is a fixed descriptor rather than something resolved per request.
 MEASUREMENT_POINT = "all_stops_all_observations"
+
+# Operator-facing Japanese text for the CSV preamble (format_definition_csv_line,
+# below), keyed by the constants above rather than a re-typed string literal --
+# a dict literal keyed by a bare name is resolved against that name's *current*
+# value, so this can't silently fall out of sync with either constant the way
+# two independently hand-typed copies could.
+_MEASUREMENT_POINT_CSV_TEXT: dict[str, str] = {MEASUREMENT_POINT: "全停留所・全観測"}
+_DEDUP_RULE_CSV_TEXT: dict[str, str] = {DEDUP_RULE: "停留所イベントごとに最新観測を採用"}
 
 
 class DefinitionMeta(BaseModel):
@@ -115,8 +114,15 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     early = "無制限" if meta.early_tolerance_sec is None else f"{meta.early_tolerance_sec}秒"
     late = "対象外" if meta.late_tolerance_sec is None else f"{meta.late_tolerance_sec}秒"
     preset = meta.preset or "対象外"
+    # Looked up from *meta*'s own fields, not the module constants directly,
+    # so an unrecognized value raises KeyError instead of silently rendering
+    # stale text -- the same failure mode a caller passing an unexpected
+    # preset already gets from _MEASUREMENT_POINT_CSV_TEXT/_DEDUP_RULE_CSV_TEXT
+    # only having one entry each today.
+    measurement_point = _MEASUREMENT_POINT_CSV_TEXT[meta.measurement_point]
+    dedup_rule = _DEDUP_RULE_CSV_TEXT[meta.dedup_rule]
     return (
         f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; "
-        f"集計範囲=全停留所・全観測; 重複排除=停留所イベントごとに最新観測を採用; "
+        f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外"
     )

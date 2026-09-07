@@ -40,9 +40,16 @@ export function DefinitionMetaBlock({ definition }: Props) {
           {" · "}
         </>
       )}
-      {t("definitionMeta.measurement_point")}
+      {/* Translation-key suffix from the API's own identifier, mirroring
+          ReportTable.tsx's `valueKey` pattern -- an unrecognized identifier
+          falls back to rendering the raw value rather than silently
+          reusing whatever text happened to be here before, so the two can
+          never drift apart unnoticed. */}
+      {t(`definitionMeta.measurementPoint.${definition.measurement_point}`, {
+        defaultValue: definition.measurement_point,
+      })}
       {" · "}
-      {t("definitionMeta.dedup_rule")}
+      {t(`definitionMeta.dedupRule.${definition.dedup_rule}`, { defaultValue: definition.dedup_rule })}
       {" · "}
       {t("definitionMeta.exclusion_rule", { sec: definition.exclusion_threshold_sec })}
     </div>

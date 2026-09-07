@@ -147,8 +147,12 @@
     "unbounded": "無制限",
     "not_applicable": "対象外",
     "seconds": "{{value}}秒",
-    "measurement_point": "集計範囲：全停留所・全観測",
-    "dedup_rule": "重複排除：停留所イベントごとに最新観測を採用",
+    "measurementPoint": {
+      "all_stops_all_observations": "集計範囲：全停留所・全観測"
+    },
+    "dedupRule": {
+      "latest_observation_per_stop_event": "重複排除：停留所イベントごとに最新観測を採用"
+    },
     "exclusion_rule": "除外基準：|遅延|>{{sec}}秒を除外"
   },
   "app": {
