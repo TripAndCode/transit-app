@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
@@ -12,7 +13,8 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     agency_id: 1, agency_name: "A", avg_delay_min: 5, on_time_pct: 90,
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
-    planned_trips: 120, executed_trips: 114, service_delivered_pct: 95, ...over,
+    planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
+    has_ridership_weights: false, weighted_on_time_pct: null, ...over,
   };
 }
 
@@ -198,6 +200,42 @@ describe("NetworkTab", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("legacy_60s");
     expect(block).toHaveTextContent("unbounded");
+  });
+
+  it("hides the ridership-weighted toggle when no agency has configured weights", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [row({ agency_id: 1, agency_name: "Hiroden" })],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.queryByTestId("ridership-weighted-toggle")).not.toBeInTheDocument();
+  });
+
+  it("shows the ridership-weighted toggle and swaps the on-time figure when checked", async () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", on_time_pct: 50, has_ridership_weights: true, weighted_on_time_pct: 82.7 }),
+          // No configured weight for this agency -- toggling on must leave
+          // its own figure alone (there's nothing weighted to show).
+          row({ agency_id: 2, agency_name: "HiroBus", on_time_pct: 88, has_ridership_weights: false, weighted_on_time_pct: null }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const toggle = screen.getByTestId("ridership-weighted-toggle");
+    expect(screen.getByText("50.0%")).toBeInTheDocument();
+    expect(screen.getByText("88.0%")).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    expect(screen.getByText("82.7% (weighted)")).toBeInTheDocument();
+    expect(screen.getByText("88.0%")).toBeInTheDocument(); // HiroBus unchanged: not configured
   });
 
   it("sets both range date inputs' lang attribute to the active UI language", () => {

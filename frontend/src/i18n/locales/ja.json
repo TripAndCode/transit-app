@@ -142,7 +142,11 @@
     "no_data_in_range": "期間内のデータなし",
     "view_agency": "{{name}} の概況を見る",
     "delay_unit": "分",
-    "you_badge": "あなた"
+    "you_badge": "あなた",
+    "ridership_weighted_toggle": "利用者数で重み付け",
+    "col_on_time_weighted": "定時率（利用者数で重み付け）",
+    "on_time_weighted_suffix": "（重み付け）",
+    "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。"
   },
   "definitionMeta": {
     "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
