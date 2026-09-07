@@ -691,3 +691,34 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   regression, matching item 90's earlier precedent of shipping a PR with an
   explicit, still-open verification gap rather than silently claiming
   completion. (PR #353)
+- 2026-09-08: Resumed item 96 (PR #353) once host disk space was freed (42G
+  available, throwaway `transit-test-pg`/`transit-test-ch` containers already
+  running). `main` had advanced since the prior review pass (2 unrelated
+  commits: review-tooling and `daily_git_hygiene.py` changes), so merged
+  `main` into the branch per the two-pass gate's resync rule. Ran `make test`
+  against the merged branch for the first time (previously blocked by the
+  disk-full condition) and found one genuine regression the earlier
+  hand-traced-only review passes had missed: `pipeline/prediction_accuracy.py`
+  `rows_to_lead_bucket_stats` diffed a naive `captured_at` (ClickHouse returns
+  it without tzinfo) against the already-tz-aware `scheduled_departure`,
+  raising `TypeError: can't subtract offset-naive and offset-aware datetimes`
+  on any real (non-fixture) row — `tests/unit/test_db_prediction_accuracy_ch.py
+  ::test_prediction_accuracy_ch_sql_end_to_end` caught it once it could
+  actually run. Fixed by normalizing `captured_at` to UTC-aware before the
+  diff, matching this codebase's established tzinfo-patch idiom used
+  elsewhere for the same ClickHouse-returned-naive-datetime pattern. The
+  remaining 2 `make test` failures (`tests/db/test_migrate.py::
+  test_migrate_up_records_all_versions`/`test_migrate_down_and_up`) reproduce
+  identically on an unmodified `main` checkout, confirming they're pre-existing
+  cross-contamination in the shared throwaway Postgres container (a phantom
+  migration version from unrelated concurrent work) rather than a regression
+  from this branch. Re-ran both required `/review-branch` passes in full
+  (fresh manifest and independent dispatch each time) against the merged,
+  fixed diff: both clean of Majors on both passes — one additional Minor
+  surfaced (`latest_feed_timestamp`'s `datetime.fromtimestamp` has no
+  bounds validation against a corrupted epoch value, unlike this codebase's
+  `MAX_PLAUSIBLE_DELAY_SEC` clamping precedent for other GTFS-RT-sourced
+  fields), left as follow-up like the earlier Minors since neither new
+  function has a live caller yet. Both passes are now genuinely complete,
+  `poetry run ruff check`/`poetry run mypy` clean, and `make test` passes
+  except the two confirmed-unrelated migrate failures. Mergeable. (PR #353)
