@@ -9,6 +9,7 @@ Public API is re-exported here so ``from pipeline.reports import compute_X``
 """
 
 from pipeline.reports.definition import DefinitionMeta, format_definition_csv_line, resolve_definition_meta
+from pipeline.reports.dwell_run import compute_dwell_run_decomposition
 from pipeline.reports.overview import compute_overview_summary
 from pipeline.reports.rankings import (
     ON_TIME_PRESETS,
@@ -26,6 +27,7 @@ __all__ = [
     "DefinitionMeta",
     "compute_compare_ranking",
     "compute_dow_ranking",
+    "compute_dwell_run_decomposition",
     "compute_hourly_heatmap",
     "compute_on_time",
     "compute_overview_summary",

@@ -40,6 +40,7 @@ def build_dedup_ch_sql(
     *,
     extra_where: str = "",
     include_captured_at: bool = False,
+    include_arr_delay: bool = False,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -100,8 +101,21 @@ def build_dedup_ch_sql(
 
     Column order/count in the SELECT list must stay exactly
     `route_code, service_type, scheduled_time, trip_id, date,
-    stop_sequence, dep_delay[, last_captured_at]` — `pipeline/analyze.py`
-    consumes the result by tuple position (`r[-1]` for `last_captured_at`).
+    stop_sequence, dep_delay[, last_captured_at][, arr_delay]` —
+    `pipeline/analyze.py` consumes the result by tuple position (`r[-1]` for
+    `last_captured_at` when `include_captured_at`; `arr_delay`, when
+    requested, is always the LAST column regardless of `include_captured_at`,
+    so a caller combining both flags still finds it at `r[-1]`).
+
+    `include_arr_delay` additionally clamps `arr_delay` to the same
+    plausibility window as `dep_delay` (`MAX_PLAUSIBLE_DELAY_SEC`) whenever
+    it's non-NULL — a frozen/stale feed can corrupt `arr_delay` the same way
+    it corrupts `dep_delay` (see that constant's own docstring), and an
+    implausible `arr_delay` would otherwise inflate a dwell/running-time
+    computation built from it. Rows with `arr_delay IS NULL` are NOT dropped
+    by this clamp — `dep_delay`-only rows are still needed (e.g. as the
+    "previous stop" side of a running-time computation); only an
+    out-of-plausible-range NON-NULL `arr_delay` value is excluded.
 
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
@@ -120,13 +134,19 @@ def build_dedup_ch_sql(
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
+    arr = ", argMax(u.arr_delay, (u.captured_at, u.file_name)) AS arr_delay" if include_arr_delay else ""
+    arr_clamp = (
+        f" AND (u.arr_delay IS NULL OR u.arr_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC})"
+        if include_arr_delay
+        else ""
+    )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
-        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured} "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{arr} "
         "FROM updates AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
-        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{arr_clamp}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
     )
