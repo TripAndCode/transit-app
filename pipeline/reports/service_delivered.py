@@ -9,24 +9,23 @@ never a weekly ``calendar.txt``) joined to ``static_trips``.
 
 ``executed_trips`` is ``planned_trips`` minus the trip-days GTFS-RT reports
 as not executed — identified via ``schedule_relationship_trip = CANCELED``
-and any populated ``schedule_relationship_stop = SKIPPED`` (see
-``api.clickhouse.service_delivered_probe_by_agency``, the only place these
-columns live).
+and any populated ``schedule_relationship_stop = SKIPPED``, precomputed per
+day into Postgres ``agg_service_delivered_daily`` by
+``pipeline.analyze.analyze()`` (see that builder for the ClickHouse query
+this reads from, which lives against raw `updates`, not this module).
 
 Both ``executed_trips`` and ``service_delivered_pct`` are ``None`` ("not
 available") rather than a misleadingly perfect 100% whenever the ratio isn't
-computable: the agency's RT feed doesn't populate ``schedule_relationship_trip``
-at all in this range (item 89 only wires this up per confirmed-sending feed),
-or there is no static schedule to plan against (``planned_trips == 0``).
+computable: only feeds confirmed to send it populate
+``schedule_relationship_trip`` (today: the ``static_join`` ingest strategy;
+``aomori_regex`` always leaves it NULL), or there is no static schedule to
+plan against (``planned_trips == 0``).
 """
 
 from __future__ import annotations
 
-import logging
 from datetime import date
 from typing import Any
-
-from api.clickhouse import service_delivered_probe_by_agency
 
 _PLANNED_TRIPS_SQL = """
     SELECT cd.agency_id, COUNT(*) AS planned
@@ -37,9 +36,18 @@ _PLANNED_TRIPS_SQL = """
     GROUP BY cd.agency_id
 """
 
+_NON_EXECUTED_TRIPS_SQL = """
+    SELECT agency_id, SUM(non_executed_trips) AS non_executed
+    FROM agg_service_delivered_daily
+    WHERE date BETWEEN $1 AND $2
+    GROUP BY agency_id
+"""
+
+_POPULATED_AGENCIES_SQL = "SELECT agency_id FROM agencies WHERE ingest_strategy = 'static_join'"
+
 
 async def compute_service_delivered_by_agency(
-    conn, ch, agency_ids: list[int], from_date: date, to_date: date, log: logging.Logger
+    conn, agency_ids: list[int], from_date: date, to_date: date
 ) -> dict[int, dict[str, Any]]:
     """Per-agency ``{"planned_trips", "executed_trips", "service_delivered_pct"}``
     over ``[from_date, to_date]``.
@@ -47,7 +55,9 @@ async def compute_service_delivered_by_agency(
     ``planned_trips`` is always a real (possibly zero) integer count.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     whenever the ratio isn't computable for this agency/range (see module
-    docstring) — never silently 0 canceled / 100% delivered.
+    docstring) — never silently 0 canceled / 100% delivered. Both queries
+    below are indexed range scans on precomputed Postgres aggregates — no
+    ClickHouse access on this read path.
     """
     if not agency_ids:
         return {}
@@ -60,20 +70,27 @@ async def compute_service_delivered_by_agency(
     planned_rows = await conn.fetch(_PLANNED_TRIPS_SQL, from_str, to_str)
     planned = {r["agency_id"]: int(r["planned"]) for r in planned_rows}
 
-    probed = await service_delivered_probe_by_agency(ch, agency_ids, from_date, to_date, log)
+    # agg_service_delivered_daily only carries a row for a (agency, date) that
+    # actually had a non-executed trip -- a day with zero cancellations has no
+    # row at all, so an agency with no row in range still legitimately reads
+    # non_executed=0 via the .get(..., 0) default below, not "not available".
+    non_executed_rows = await conn.fetch(_NON_EXECUTED_TRIPS_SQL, from_date, to_date)
+    non_executed = {r["agency_id"]: int(r["non_executed"]) for r in non_executed_rows}
+
+    populated_rows = await conn.fetch(_POPULATED_AGENCIES_SQL)
+    populated_ids = {r["agency_id"] for r in populated_rows}
 
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:
         p = planned.get(aid, 0)
-        populated, non_executed = probed.get(aid, (False, 0))
-        if not populated or p <= 0:
+        if aid not in populated_ids or p <= 0:
             result[aid] = {"planned_trips": p, "executed_trips": None, "service_delivered_pct": None}
             continue
         # Clamp at 0: a canceled/skipped trip-day whose trip_id doesn't
         # actually match anything in the static schedule (feed drift, or a
         # RT-only ADDED trip marked CANCELED) must not drive the ratio
         # negative.
-        executed = max(p - non_executed, 0)
+        executed = max(p - non_executed.get(aid, 0), 0)
         result[aid] = {
             "planned_trips": p,
             "executed_trips": executed,

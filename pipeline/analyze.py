@@ -19,6 +19,7 @@ Aggregation tables produced:
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
+- agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
 - agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
 
 None of the builders below gate a group out at insert time by its sample
@@ -114,6 +115,7 @@ _AGG_TABLES_ORDERED = (
     "agg_stop_routes",
     "agg_route_stop_daily",
     "agg_feed_health",
+    "agg_service_delivered_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -803,6 +805,78 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             with conn.cursor() as cur:
                 cur.execute(sql, p)
                 logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
+
+        # ── agg_service_delivered_daily (per-day non-executed trip count) ──
+        # Powers pipeline.reports.service_delivered's executed/planned ratio
+        # without a live per-request ClickHouse scan over `updates`. Agency-wide
+        # and independent of has_static above (a static schedule loaded only
+        # matters to the READ side's planned_trips count) -- pure aggregation
+        # queried directly against ClickHouse, same shape as agg_feed_health.
+        #
+        # Only feeds confirmed to send schedule_relationship_trip/_stop
+        # populate this table (today: the static_join ingest strategy;
+        # aomori_regex always leaves both columns NULL) -- an agency on any
+        # other ingest_strategy is skipped entirely (zero rows here), which the
+        # read path distinguishes from "confirmed zero cancellations" via
+        # agencies.ingest_strategy, never via row presence in this table.
+        with conn.cursor() as cur:
+            cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+            row = cur.fetchone()
+        if row and row[0] == "static_join":
+            # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`
+            # is NULL when picking the max -- it does not return NULL just
+            # because the true latest (captured_at, file_name) row happens to
+            # have a NULL field. A raw `argMax(schedule_relationship_stop,
+            # ...)` would therefore still return a stale SKIPPED=1 from an
+            # earlier poll even after a later poll corrects that stop back to
+            # normal (NULL) -- the later NULL row is invisible to argMax, not
+            # merely filtered by an explicit `IS NOT NULL` (removing such a
+            # filter alone does not fix this; the column itself must never be
+            # NULL going into argMax). `coalesce(..., -1)` maps NULL to a
+            # sentinel outside the real value range (0/1/2 per GTFS-RT's
+            # ScheduleRelationship enum) so argMax always sees a real value
+            # for every row and genuinely reflects the latest observation,
+            # including a correction back to "not skipped/canceled". Applied
+            # to both subqueries for the same reason, even though today's
+            # confirmed-populating feeds always send schedule_relationship_
+            # trip on every observation (never NULL) -- this is defensive
+            # symmetry, not dead code, since nothing prevents a future feed
+            # from sending it more sparingly. No date range filter -- analyze()
+            # always covers this agency's full history, same as agg_feed_health
+            # and the dedup materialization above. A day with zero non-executed
+            # trips has no matching row in the inner UNION, so it emits no row
+            # here at all -- the read path sums with a zero default rather than
+            # assuming row-per-day density.
+            ch_service_delivered = ch_client.query(
+                """
+                SELECT svc_date, count() FROM (
+                    SELECT svc_date, trip_id FROM (
+                        SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                               argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
+                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        GROUP BY svc_date, trip_id
+                    ) WHERE trip_rel = 3
+                    UNION DISTINCT
+                    SELECT svc_date, trip_id FROM (
+                        SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                               argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
+                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        GROUP BY svc_date, trip_id, stop_sequence
+                    ) WHERE stop_rel = 1
+                ) GROUP BY svc_date
+                """,
+                parameters={"agency_id": agency_id},
+            )
+            with conn.cursor() as cur:
+                if ch_service_delivered.result_rows:
+                    psycopg2.extras.execute_values(
+                        cur,
+                        "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES %s",
+                        [(agency_id, *r) for r in ch_service_delivered.result_rows],
+                    )
+                logger.info(f"  agg_service_delivered_daily: {len(ch_service_delivered.result_rows)} rows")
+        else:
+            logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
 
         # ── agg_meta: audit record of this build (NOT load-bearing) ──────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
