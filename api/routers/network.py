@@ -24,6 +24,14 @@ class NetworkAgencyRow(BaseModel):
     is_stale: bool
     data_from: str | None
     data_to: str | None
+    # See pipeline.reports.service_delivered for the executed/planned
+    # definition. executed_trips/service_delivered_pct are None together
+    # ("not available") whenever the ratio isn't computable for this agency
+    # (its feed doesn't populate schedule_relationship_trip, or there's no
+    # static schedule loaded) -- never a misleading 100%.
+    planned_trips: int
+    executed_trips: int | None
+    service_delivered_pct: float | None
 
 
 class NetworkSummary(BaseModel):

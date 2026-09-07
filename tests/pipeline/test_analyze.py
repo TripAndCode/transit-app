@@ -1,6 +1,7 @@
-from datetime import time
+from datetime import datetime, time, timezone
 
 from pipeline.analyze import analyze
+from pipeline.clickhouse import insert_updates
 from tests.conftest import mirror_updates_to_ch
 
 
@@ -900,3 +901,118 @@ def test_analyze_builds_agg_feed_health(pg_conn, agency_id, ch_client):
         by_date = {str(d): (raw, clamp) for d, raw, clamp in cur.fetchall()}
     assert by_date["2026-06-09"] == (3, 1)  # 3 raw observations, 1 implausible
     assert by_date["2026-06-10"] == (1, 0)
+
+
+def _set_ingest_strategy(pg_conn, agency_id, strategy):
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET ingest_strategy = %s WHERE agency_id = %s", (strategy, agency_id))
+    pg_conn.commit()
+
+
+def _ch_service_delivered_row(
+    trip_id,
+    captured_at,
+    *,
+    file_name="f.pb",
+    stop_sequence=1,
+    schedule_relationship_trip=None,
+    schedule_relationship_stop=None,
+):
+    """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
+    (agency_id excluded), with only the fields this builder reads populated."""
+    return (
+        file_name,
+        captured_at,
+        trip_id,
+        "平日",
+        "11:00:00",
+        "R1",
+        stop_sequence,
+        60,
+        None,  # stop_id
+        None,  # arr_delay
+        schedule_relationship_trip,
+        schedule_relationship_stop,
+        None,  # feed_timestamp
+    )
+
+
+def test_analyze_builds_agg_service_delivered_daily_for_static_join_agency(pg_conn, agency_id, ch_client):
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day1 = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
+    day2 = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_service_delivered_row("T1", day1, file_name="t1.pb", schedule_relationship_trip=0),
+        _ch_service_delivered_row("T2", day1, file_name="t2.pb", schedule_relationship_trip=3),  # CANCELED
+        _ch_service_delivered_row(
+            "T3", day1, file_name="t3.pb", schedule_relationship_trip=0, schedule_relationship_stop=1
+        ),  # stop SKIPPED
+        _ch_service_delivered_row("T4", day2, file_name="t4.pb", schedule_relationship_trip=0),  # normal
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): n for d, n in cur.fetchall()}
+    # T2 (CANCELED) + T3 (stop SKIPPED) = 2 on day1; day2's T4 has no
+    # cancellation/skip -> the source query emits no row for that day at all.
+    assert by_date == {"2026-04-01": 2}
+
+
+def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
+    """An agency whose ingest_strategy isn't static_join must get zero rows in
+    agg_service_delivered_daily regardless of what schedule_relationship_*
+    values happen to be present in `updates` -- the read path's "not
+    available" determination keys off ingest_strategy, and this builder must
+    not waste a ClickHouse scan on an agency that will never read as
+    populated anyway."""
+    day1 = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    insert_updates(
+        ch_client, agency_id, [_ch_service_delivered_row("T1", day1, file_name="t1.pb", schedule_relationship_trip=3)]
+    )
+    analyze(agency_id, pg_conn, ch_client)  # agency_id fixture leaves ingest_strategy NULL
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM agg_service_delivered_daily WHERE agency_id = %s", (agency_id,))
+        count = cur.fetchone()[0]
+    assert count == 0
+
+
+def test_analyze_service_delivered_daily_latest_stop_observation_wins_over_stale_skip(pg_conn, agency_id, ch_client):
+    """Regression: a stop flagged SKIPPED on an early poll, corrected back to
+    normal on a later poll (higher captured_at), must not count as
+    non-executed -- the stop-level subquery's raw WHERE must not filter
+    `schedule_relationship_stop IS NOT NULL` before argMax runs, or the
+    corrective NULL is dropped before the aggregate ever sees it and the
+    stale SKIPPED=1 wins."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    early = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        # T1: early poll SKIPPED, later poll corrects it back to normal.
+        _ch_service_delivered_row(
+            "T1", early, file_name="a.pb", schedule_relationship_trip=0, schedule_relationship_stop=1
+        ),
+        _ch_service_delivered_row(
+            "T1", later, file_name="b.pb", schedule_relationship_trip=0, schedule_relationship_stop=None
+        ),
+        # T2: genuinely SKIPPED, no later correction -- must count.
+        _ch_service_delivered_row(
+            "T2", early, file_name="c.pb", schedule_relationship_trip=0, schedule_relationship_stop=1
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s AND date = '2026-04-01'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 1  # only T2; T1's correction must not resurrect the stale SKIPPED flag

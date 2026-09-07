@@ -29,11 +29,14 @@ What the user sees/does:
 - **Ranked agency card list** — one card per agency, sorted worst-avg-delay
   first (server-side order), each showing: rank, agency name (links to that
   agency's Overview tab, carrying the current date range), avg delay (color
-  by `delayColor()`) + on-time %, a relative delay bar (scaled to the
-  worst agency in the list), sample count, and two optional flags: a red dot
-  when `clamp_pct` (implausible/clamped readings) is ≥1%, and a "stale" badge
-  when the feed hasn't reported recently. The current agency's own card is
-  visually highlighted with a "YOU" badge.
+  by `delayColor()`) + on-time % + service-delivered % (executed trips ÷
+  planned trips from the static GTFS schedule — reads "—" rather than a
+  misleading 100% for an agency whose feed doesn't report cancellations),
+  a relative delay bar (scaled to the worst agency in the list), sample
+  count, and two optional flags: a red dot when `clamp_pct`
+  (implausible/clamped readings) is ≥1%, and a "stale" badge when the feed
+  hasn't reported recently. The current agency's own card is visually
+  highlighted with a "YOU" badge.
 - **Definition metadata block** (`DefinitionMetaBlock`, always visible,
   above the card list) — states the on-time/late tolerance, measurement
   point, dedup rule, and exclusion threshold behind every card's on-time %,
@@ -46,7 +49,7 @@ What the user sees/does:
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. |
+| `useNetworkSummary(ctx)` (only `ctx.from`/`ctx.to` are used) | `GET /api/network/summary?from=...&to=...` (`api/routers/network.py: network_summary`, not scoped under `/api/{agency_id}` like every other endpoint in this doc set) | `pipeline/reports/network.py: compute_network_summary()` — `samples` (deduped observation count) and the avg-delay/on-time figures come from Postgres `agg_route_daily_dist`; `raw_samples`/`clamp_count` (feed health) come from `agg_feed_health`. Freshness (`is_stale`) compares each agency's max `agg_route_daily_dist` date against a live ClickHouse `max_captured_at_before` probe per agency (one indexed read each) — a missing live timestamp is treated as "not stale" rather than failing, mirroring `today_route_summary`'s own freshness try/except in `api/routers/map.py`. `planned_trips`/`executed_trips`/`service_delivered_pct` come from `pipeline/reports/service_delivered.py: compute_service_delivered_by_agency()` — planned trips from Postgres `static_calendar_dates`/`static_trips`, non-executed trips summed from the precomputed Postgres `agg_service_delivered_daily` (built once per agency by `pipeline.analyze.analyze()` from a ClickHouse `updates` scan keyed on `schedule_relationship_trip`/`schedule_relationship_stop`); reads `None` for an agency whose `ingest_strategy` isn't `static_join`, or that has no static schedule loaded. |
 
 ## Key files
 
@@ -65,8 +68,9 @@ What the user sees/does:
 |---|---|
 | `api/routers/network.py` | `GET /api/network/summary` |
 | `pipeline/reports/network.py` | `compute_network_summary()` |
+| `pipeline/reports/service_delivered.py` | `compute_service_delivered_by_agency()` — planned-vs-executed trip counts |
 | `api/clickhouse.py` | `max_captured_at_before_by_agency` — the per-agency live-freshness probe |
-| `pipeline/analyze.py` | Builds `agg_route_daily_dist` and `agg_feed_health` — the aggregates this tab reads |
+| `pipeline/analyze.py` | Builds `agg_route_daily_dist`, `agg_feed_health`, and `agg_service_delivered_daily` — the aggregates this tab reads |
 
 ## How to verify manually
 

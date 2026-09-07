@@ -20,14 +20,18 @@ async def net_pool(apply_schema):
     compute_network_summary.cache_clear()
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
-        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
+        await c.execute(
+            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, updates CASCADE"
+        )
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
         cc = await c.fetchrow(ins, "C", "http://nc")
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
-        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
+        await c.execute(
+            "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, updates CASCADE"
+        )
     await pool.close()
 
 
@@ -64,6 +68,121 @@ async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
                 updates_at,
                 time(11, 37),
             )
+
+
+async def _seed_static_schedule(pool, aid, *, service_id: str, trip_ids: list[str], svc_date: str) -> None:
+    """Seed one static-GTFS "planned trips" fixture: `len(trip_ids)` trips
+    under `service_id`, all scheduled to run on `svc_date` (YYYYMMDD text,
+    matching calendar_dates.txt's raw format) via exception_type=1.
+    """
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1,$2,$3,1)",
+            aid,
+            service_id,
+            svc_date,
+        )
+        for tid in trip_ids:
+            await c.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1,$2,'R1',$3)",
+                aid,
+                tid,
+                service_id,
+            )
+
+
+async def _set_ingest_strategy(pool, aid, strategy):
+    async with pool.acquire() as c:
+        await c.execute("UPDATE agencies SET ingest_strategy = $1 WHERE agency_id = $2", strategy, aid)
+
+
+async def _seed_service_delivered_daily(pool, aid, rows):
+    """rows: list of (date_iso, non_executed_trips)."""
+    async with pool.acquire() as c:
+        for d, n in rows:
+            await c.execute(
+                "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES ($1,$2,$3)",
+                aid,
+                date.fromisoformat(d),
+                n,
+            )
+
+
+async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client):
+    """The read path sums agg_service_delivered_daily over the range and
+    divides against the static schedule's planned count -- no ClickHouse
+    access. 5 planned trips, 1 non-executed trip-day precomputed -> 80%."""
+    pool, a, b, _cc = net_pool
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    # Agency B: static_join too, but its feed had zero cancellations in range
+    # (no agg_service_delivered_daily row at all) -> reads 100%, not "not available".
+    await _seed_static_schedule(pool, b, service_id="WD", trip_ids=["U1", "U2", "U3"], svc_date="20260401")
+    await _set_ingest_strategy(pool, b, "static_join")
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    by = {r["agency_id"]: r for r in rows}
+    assert by[a]["planned_trips"] == 5
+    assert by[a]["executed_trips"] == 4
+    assert by[a]["service_delivered_pct"] == 80.0
+    assert by[b]["planned_trips"] == 3
+    assert by[b]["executed_trips"] == 3
+    assert by[b]["service_delivered_pct"] == 100.0
+
+
+async def test_compute_service_delivered_not_available_when_not_static_join(net_pool, ch_async_client):
+    """An agency whose ingest_strategy isn't static_join reads "not available"
+    (None), never a misleading 100%, regardless of static-schedule data."""
+    pool, _a, b, _cc = net_pool
+    await _seed_static_schedule(pool, b, service_id="WD", trip_ids=["U1", "U2", "U3"], svc_date="20260401")
+    # b's ingest_strategy is left NULL (net_pool's INSERT never sets it).
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == b)
+    assert row["planned_trips"] == 3
+    assert row["executed_trips"] is None
+    assert row["service_delivered_pct"] is None
+
+
+async def test_compute_service_delivered_no_static_schedule_is_not_available(net_pool, ch_async_client):
+    """No static schedule loaded (planned_trips == 0) reads "not available",
+    never a divide-by-zero 100%, even for a static_join agency with
+    precomputed non-executed rows."""
+    pool, a, _b, _cc = net_pool
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 0
+    assert row["executed_trips"] is None
+    assert row["service_delivered_pct"] is None
+
+
+async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client):
+    """A non_executed_trips total exceeding planned_trips (feed drift, or a
+    RT-only ADDED trip marked CANCELED) must clamp executed_trips at 0, never
+    go negative."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 5)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 2
+    assert row["executed_trips"] == 0
+    assert row["service_delivered_pct"] == 0.0
 
 
 async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_async_client):
@@ -210,6 +329,9 @@ async def test_network_summary_endpoint(net_client, ch_client):
         "clamp_count",
         "clamp_pct",
         "is_stale",
+        "planned_trips",
+        "executed_trips",
+        "service_delivered_pct",
     }
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
