@@ -76,8 +76,19 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   worktree.
 - Report only findings that affect correctness, security, performance, enforcement,
   or the objective. No style nits.
-- Format each finding as `Major` or `Minor`, with confidence, file and line, impact,
-  and a concrete fix. Report obstacles separately. If nothing qualifies, say so.
+- Format each finding as `Major` or `Minor`, with its dimension, confidence, file and
+  line, a `failure:` line, and a concrete fix. `failure:` names the input or state
+  that produces a wrong output, a crash, or a missed gate, not the impact that would
+  follow; a finding whose failure cannot be stated concretely is speculation and does
+  not qualify. Name the single dimension the finding belongs to even when several were
+  assigned, because the caller deduplicates on file, line, and dimension together.
+  Report obstacles separately. If nothing qualifies, say so.
+- Before reporting that something is absent — a missing guard, an unhandled case, a
+  dropped update — confirm the symptom is not already handled elsewhere: the enclosing
+  function, the caller, an upstream CTE, a shared helper. The small source windows this
+  file asks for are cheap precisely because they can miss such handling, so where it
+  stays unconfirmed, report the finding at `confidence: low` rather than asserting the
+  absence.
 - Any SQL investigation is read-only against dev Postgres/ClickHouse. Tests use only
   the throwaway databases described in `transit-app-gotchas`.
 - Do not edit, commit, or push.

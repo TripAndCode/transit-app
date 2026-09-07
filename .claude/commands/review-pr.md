@@ -110,11 +110,15 @@ checked and how many candidates that removed.
 
 ## 6. Report in the terminal
 
-Deduplicate across reviewers, keep only evidence-backed findings that affect
+Deduplicate across reviewers on file, line, and dimension together — a different axis
+from step 5, which matched candidates against threads already on the PR. One line
+reported twice under the same dimension is one finding; the same line under two
+dimensions is two and both stay. Keep only evidence-backed findings that affect
 correctness, security, performance, enforcement, or the stated objective, and drop
-low-confidence noise. Rank `Major` before `Minor`. Each finding carries confidence,
-file and line inside the review worktree, impact, and a concrete fix. List obstacles
-separately. If nothing qualifies, say so plainly.
+low-confidence noise. Rank `Major` before `Minor`. Each finding carries its dimension,
+confidence, file and line inside the review worktree, the `failure:` line the agent
+file requires, and a concrete fix. List obstacles separately. If nothing qualifies, say
+so plainly.
 
 Check that new logic has a concrete matching test, and use the manifest's `test_share`
 only as a prompt to inspect, never as a finding on its own. A missing test is a
