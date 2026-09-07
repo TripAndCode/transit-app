@@ -213,10 +213,12 @@ async def test_on_time_custom_tolerance_matches_hand_computed_window(reports_cli
     edge (60 seconds away from LO=-300), so the estimate is exact and
     hand-countable: the -200s group falls outside the tighter early
     tolerance and no longer counts as on-time, unlike the legacy unbounded-
-    early default."""
+    early default. The late group is seeded at 150s (well clear of the
+    ``[60, 120)`` bucket the ``late_tolerance_sec=60`` boundary itself falls
+    in) so this stays an exact count rather than a one-bucket estimate."""
     client, agency_id, pool = reports_client
     day = "2026-05-16"
-    await _seed_route(pool, agency_id, "RTOL", "平日", day, [-200] * 8 + [30] * 12 + [90] * 5)
+    await _seed_route(pool, agency_id, "RTOL", "平日", day, [-200] * 8 + [30] * 12 + [150] * 5)
     _run_analyze(agency_id, ch_client)
 
     resp = await client.get(

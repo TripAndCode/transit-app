@@ -99,15 +99,20 @@ def count_in_range(counts: list[int], low_sec: float | None, high_sec: float | N
     ``on_time_count``/``late5_count`` columns.
 
     Each bucket's count is split proportionally to how much of its
-    ``[low, high)`` span falls inside ``[low_sec, high_sec]``, i.e. delay is
-    assumed uniform within a bucket -- the same assumption
+    ``[low, high)`` span falls inside the query window, i.e. delay is assumed
+    uniform within a bucket -- the same assumption
     :func:`percentile_from_hist`'s interpolation makes for the inverse
-    (quantile -> value) direction. The result is therefore exact only when
-    both bounds land on a bucket edge (a multiple of ``WIDTH`` away from
-    ``LO``); otherwise the error is bounded by one bucket (``WIDTH`` seconds)
-    of real observations near either edge, same bound as that function's own
-    documented approximation. ``None`` on either side means unbounded on
-    that side. ``counts`` must have length :data:`N_BUCKETS`.
+    (quantile -> value) direction. ``dep_delay`` is whole seconds, so an
+    inclusive ``high_sec`` is compared as ``high_sec + 1`` against each
+    bucket's half-open ``[low, high)`` bound -- matching :func:`bucketize`'s
+    own half-open convention, so an observation exactly equal to ``high_sec``
+    (or ``low_sec``) is attributed to the correct side instead of the whole
+    bucket it lands in being silently clipped to zero width. Every bucket
+    strictly below/above a bound is counted exactly; the one bucket a bound
+    falls inside still carries the usual one-bucket (``WIDTH`` seconds)
+    uniform-distribution error, same bound as that function's own documented
+    approximation. ``None`` on either side means unbounded on that side.
+    ``counts`` must have length :data:`N_BUCKETS`.
     """
     total = 0.0
     for index, c in enumerate(counts):
@@ -115,7 +120,7 @@ def count_in_range(counts: list[int], low_sec: float | None, high_sec: float | N
             continue
         low, high = _bucket_bounds(index)
         lo_clip = low if low_sec is None else max(low, low_sec)
-        hi_clip = high if high_sec is None else min(high, high_sec)
+        hi_clip = high if high_sec is None else min(high, high_sec + 1)
         if hi_clip <= lo_clip:
             continue
         total += c * (hi_clip - lo_clip) / (high - low)
