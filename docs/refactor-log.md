@@ -745,4 +745,9 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `pipeline.reports.ridership.agency_has_ridership_weights`, deleted as dead
   code by this same branch's own earlier fix-and-reverify cycle) — fixed by
   repointing both references to `compute_ridership_weighted_on_time_by_agency`,
-  the function that now actually implements the contract. (PR #355)
+  the function that now actually implements the contract. Resync Pass 2
+  (fresh manifest, fresh independent 3-call dispatch against the fixed head)
+  found zero Majors and zero new findings across all three calls, including
+  an explicit re-confirmation that no stale reference to the removed
+  symbols remains anywhere in code or docs. Both required `/review-branch`
+  passes are now clean against the merged, fixed diff. (PR #355)
