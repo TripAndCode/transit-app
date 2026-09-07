@@ -90,8 +90,9 @@ SUPERSEDED_BRANCH_RE = re.compile(r"^vps-loop/item-\d+-superseded-[0-9a-f]+$")
 
 # `/review-pr`'s own `git worktree add .worktrees/review-<headRefName>` convention
 # (`.claude/commands/review-pr.md`). If that command ever renames either part, this
-# match silently stops firing and the incident this constant's own caller fixes
-# recurs -- named here so the coupling is greppable from both ends.
+# match silently stops firing, and every orphaned venv is retained fail-closed until
+# a human intervenes -- named here so the coupling is greppable from both ends, and
+# covered by `test_review_worktree_naming_matches_review_pr_md`.
 REVIEW_WORKTREE_PARENT_DIR = ".worktrees"
 REVIEW_WORKTREE_PREFIX = "review-"
 
@@ -652,38 +653,29 @@ def poetry_env_path(location: Path) -> Path | None:
 
 
 def is_review_worktree(worktree_path: Path) -> bool:
-    """Match `/review-pr`'s own `REVIEW_WORKTREE_PARENT_DIR`/`REVIEW_WORKTREE_PREFIX*` shape.
+    """Match `/review-pr`'s own worktree naming shape; see `compute_in_use_poetry_venvs`
+    for why this exemption exists and what residual it accepts.
 
-    `review-pr.md`'s Boundaries section forbids running the repository's
-    test suites (or any other poetry command) there, and its teardown
-    section makes leaving the worktree in place indefinitely -- so
-    `/follow-up-pr-review` can diff the next push against it -- a supported
-    outcome, not a stale leftover. Neither documented workflow that creates
-    this shape (`/review-pr`, `/follow-up-pr-review`) ever runs a poetry
-    command with this worktree as its cwd, so an unresolved venv here is
-    overwhelmingly "never created," not "transiently unresolved." The
-    residual this can't rule out -- a venv created out-of-band (a human
-    debugging on the host, or a reviewer running one manually despite the
-    docs) plus `poetry env info` hiccupping on that same run -- costs at
-    most one re-creatable review-worktree venv if it ever lands, unlike the
-    `/vps-loop-run` worker case below, which is left unexempted because its
-    residual could be a real, load-bearing venv.
-
-    Matched structurally -- a `REVIEW_WORKTREE_PARENT_DIR` segment anywhere
-    in the path immediately followed by a `REVIEW_WORKTREE_PREFIX`-prefixed
-    one -- not by comparing only the last two components, since `/review-pr`
-    names the review worktree after the reviewed branch's own head ref,
-    which can itself contain slashes (`vps-loop/item-85` produces
-    `.worktrees/review-vps-loop/item-85`, three components deep, not two).
-    Also not anchored to any particular checkout: `/review-pr` runs its `git
-    worktree add` relative to whichever checkout invokes it, which is
-    normally but not necessarily the main one.
+    Matched structurally: a `REVIEW_WORKTREE_PARENT_DIR` segment immediately
+    followed by a `REVIEW_WORKTREE_PREFIX`-prefixed one, and nothing shaped
+    like a further nested worktree after that pair. Not just the last two
+    components, since `/review-pr` names the review worktree after the
+    reviewed branch's own head ref, which can itself contain slashes
+    (`vps-loop/item-85` produces `.worktrees/review-vps-loop/item-85`, three
+    components deep, not two) -- and not anchored to any particular
+    checkout, since `/review-pr` runs its `git worktree add` relative to
+    whichever checkout invokes it, normally but not necessarily the main
+    one. The "nothing nested after" requirement excludes a worktree created
+    *inside* a review worktree (e.g. a sandboxed `/vps-loop-run` worker
+    somehow dispatched from one) from inheriting this exemption -- that
+    shape must still hit this module's ordinary fail-closed handling.
     """
 
-    return any(
-        parent == REVIEW_WORKTREE_PARENT_DIR and child.startswith(REVIEW_WORKTREE_PREFIX)
-        for parent, child in itertools.pairwise(worktree_path.parts)
-    )
+    parts = worktree_path.parts
+    for index, (parent, child) in enumerate(itertools.pairwise(parts)):
+        if parent == REVIEW_WORKTREE_PARENT_DIR and child.startswith(REVIEW_WORKTREE_PREFIX):
+            return not any(part in {"worktrees", REVIEW_WORKTREE_PARENT_DIR} for part in parts[index + 2 :])
+    return False
 
 
 def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:
@@ -698,19 +690,25 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
 
     A worktree gets three, narrower grace conditions before the same
     fail-closed treatment applies:
-    - `is_review_worktree` matches `/review-pr`'s own worktree convention (see
-      that function's own docstring for the exemption's residual and why it
-      differs from the `/vps-loop-run` worker case below). `poetry_env_path`
-      is still attempted first, exactly like any other worktree -- a
-      resolved result is added to `in_use` the same as anywhere else. Only a
-      `None` result gets the exemption: no age check, no raise.
+    - `is_review_worktree` matches `/review-pr`'s own worktree convention.
+      Neither documented workflow that creates this shape (`/review-pr`,
+      `/follow-up-pr-review`) ever runs a poetry command with it as cwd, so
+      an unresolved venv here is overwhelmingly "never created," not
+      "transiently unresolved" -- unlike the `/vps-loop-run` worker case
+      below, whose unresolved venv could be a real, load-bearing one.
+      `poetry_env_path` is still attempted first, exactly like any other
+      worktree -- a resolved result is added to `in_use` the same as
+      anywhere else, so a venv created out-of-band despite the documented
+      read-only workflow is never dropped. Only a `None` result gets the
+      exemption, and only when the worktree still exists: no age check, no
+      raise.
     - `git worktree list`'s own `prunable` flag means the administrative
       entry outlived the actual directory (removed out-of-band, or pending
       its own `git worktree prune`) -- unambiguously "nothing runs out of
-      here," not `poetry_env_path`'s own two indistinguishable `None`
-      outcomes below, so it's skipped rather than
-      raised on. A `locked` worktree whose directory is merely absent is
-      NOT treated the same way: git itself refuses to mark a locked
+      here," not the venv-never-created-versus-transiently-unresolved
+      ambiguity `poetry_env_path`'s `None` leaves open, so it's skipped
+      rather than raised on. A `locked` worktree whose directory is merely
+      absent is NOT treated the same way: git itself refuses to mark a locked
       worktree `prunable` even when its directory is gone (confirmed
       live), since locking is meant to protect it from exactly this kind
       of cleanup -- so an absent-but-locked worktree still falls through
@@ -788,9 +786,11 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
         if venv is not None:
             in_use.add(venv)
             continue
-        if is_review_worktree(resolved_worktree):
-            # See is_review_worktree's own docstring for the exemption and its residual.
-            # A resolved venv was already kept above; only the unresolved case reaches here.
+        # `worktree.path.exists()`: a review worktree is left in place indefinitely by
+        # design, so it is present by definition -- requiring existence here preserves
+        # the locked-and-absent fail-closed raise below for this shape too, matching the
+        # invariant the `prunable`/absent-and-unlocked check above already states.
+        if worktree.path.exists() and is_review_worktree(resolved_worktree):
             continue
         creation_stamp = worktree.path / ".git"
         if not creation_stamp.is_file():
