@@ -20,6 +20,8 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
 - agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
+- agg_route_headway    — scheduled-headway median + high-frequency classification per route (static GTFS only)
+- agg_route_headway_daily — per-day reconstructed ACTUAL headway median per route (static_join agencies only)
 - agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
 
 None of the builders below gate a group out at insert time by its sample
@@ -52,13 +54,16 @@ lateness contribution instead of counting it.
 """
 
 import logging
+from collections import defaultdict
 from datetime import timezone
+from statistics import median
 
 import psycopg2.extras
 
 from api.range import time_band_case_sql
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
+from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, reconstruct_headways
 from pipeline.histogram import (
     HI,
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -116,6 +121,8 @@ _AGG_TABLES_ORDERED = (
     "agg_route_stop_daily",
     "agg_feed_health",
     "agg_service_delivered_daily",
+    "agg_route_headway",
+    "agg_route_headway_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -806,6 +813,119 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 cur.execute(sql, p)
                 logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
+            # ── agg_route_headway (scheduled-headway classification) ─────
+            # Powers item 94's high-frequency route filter. Derived purely
+            # from the static GTFS schedule (static_stop_times/static_trips/
+            # static_routes), independent of any RT history -- unlike
+            # agg_route_headway_daily below, this needs no ingest_strategy
+            # gate; every agency with a static feed loaded (has_static) gets
+            # a row for every route_code its schedule resolves to.
+            #
+            # route_code (RT's `updates.route_code`) is matched to the static
+            # schedule's route_id via the SAME digit-suffix regex used
+            # everywhere else this codebase bridges the two id spaces
+            # (api/routers/static.py, pipeline/reports/overview.py's
+            # `_route_short_names`) -- route_id itself IS the route_code for
+            # a feed whose route_id carries no trailing "(NNNN)"
+            # (regexp_replace no-ops on a non-matching input).
+            #
+            # A route can run under more than one GTFS service_id (weekday
+            # vs. weekend calendars, etc.) with genuinely different
+            # headways; mixing both into one sorted sequence of departure
+            # times would interleave two independent schedules and produce a
+            # spuriously DENSER (smaller-gap) blend than either calendar
+            # alone. Instead, for each route this picks the single
+            # service_id with the most distinct trips (its dominant,
+            # most-typical calendar) and derives the median from that
+            # calendar's departures only.
+            #
+            # Headway gaps are pooled across every stop_id the route calls
+            # at (not just one "representative" stop) before taking the
+            # median -- avoids having to justify picking one stop as
+            # representative, and a consistently-spaced route has a similar
+            # gap distribution at every stop it serves. A zero-second gap
+            # (two trips scheduled for the exact same departure_time at the
+            # same stop -- typically a multi-berth stop or a data artifact,
+            # not real zero-headway service) is excluded rather than let it
+            # drag the median down.
+            #
+            # departure_time is raw GTFS text ("H:MM:SS" or similar) --
+            # unlike `updates.scheduled_time` (normalized at ingest time by
+            # pipeline.strategies._time.normalize_departure_time and capped
+            # to same-day hours), static_stop_times stores it completely
+            # unvalidated, so this filters to the strict numeric "H+:MM:SS"
+            # shape before splitting on ':' and summing to seconds-of-day
+            # (deliberately NOT capped at 24h -- GTFS's
+            # post-midnight-continuation hours like "25:30:00" are valid
+            # schedule data and must not raise or misparse; only a
+            # non-numeric/malformed shape is excluded).
+            hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
+            sql = f"""
+                WITH route_map AS (
+                    SELECT route_id, regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code
+                    FROM static_routes WHERE agency_id = %(agency_id)s
+                ),
+                trips_with_route AS (
+                    SELECT t.trip_id, t.service_id, rm.route_code
+                    FROM static_trips t
+                    JOIN route_map rm ON rm.route_id = t.route_id
+                    WHERE t.agency_id = %(agency_id)s
+                ),
+                service_trip_counts AS (
+                    SELECT route_code, service_id, COUNT(DISTINCT trip_id) AS trip_count
+                    FROM trips_with_route
+                    GROUP BY route_code, service_id
+                ),
+                dominant_service AS (
+                    SELECT DISTINCT ON (route_code) route_code, service_id
+                    FROM service_trip_counts
+                    ORDER BY route_code, trip_count DESC, service_id
+                ),
+                scheduled_departures AS (
+                    SELECT twr.route_code, sst.stop_id,
+                        (split_part(sst.departure_time, ':', 1))::int * 3600
+                      + (split_part(sst.departure_time, ':', 2))::int * 60
+                      + (split_part(sst.departure_time, ':', 3))::int AS dep_sec
+                    FROM trips_with_route twr
+                    JOIN dominant_service ds
+                      ON ds.route_code = twr.route_code AND ds.service_id = twr.service_id
+                    JOIN static_stop_times sst
+                      ON sst.agency_id = %(agency_id)s AND sst.trip_id = twr.trip_id
+                    WHERE sst.departure_time ~ '^[0-9]+:[0-5][0-9]:[0-5][0-9]$'
+                ),
+                gaps AS (
+                    SELECT route_code,
+                           dep_sec - LAG(dep_sec) OVER (PARTITION BY route_code, stop_id ORDER BY dep_sec)
+                               AS headway_sec
+                    FROM scheduled_departures
+                ),
+                medians AS (
+                    SELECT route_code,
+                           PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
+                           COUNT(*) AS scheduled_samples
+                    FROM gaps
+                    WHERE headway_sec IS NOT NULL AND headway_sec > 0
+                    GROUP BY route_code
+                )
+                SELECT %(agency_id)s AS agency_id, route_code,
+                       scheduled_headway_median_sec, scheduled_samples,
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency
+                FROM medians
+            """
+            _build_and_insert(
+                sql,
+                "agg_route_headway",
+                [
+                    "agency_id",
+                    "route_code",
+                    "scheduled_headway_median_sec",
+                    "scheduled_samples",
+                    "is_high_frequency",
+                ],
+                p,
+                conn,
+            )
+
         # ── agg_service_delivered_daily (per-day non-executed trip count) ──
         # Powers pipeline.reports.service_delivered's executed/planned ratio
         # without a live per-request ClickHouse scan over `updates`. Agency-wide
@@ -877,6 +997,113 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 logger.info(f"  agg_service_delivered_daily: {len(ch_service_delivered.result_rows)} rows")
         else:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
+
+        # ── agg_route_headway_daily (per-day reconstructed ACTUAL headway) ──
+        # Powers item 94's Excess Waiting Time computation. Reconstructed
+        # straight from ClickHouse `updates.stop_id` (not stop_sequence --
+        # see pipeline/headways.py's module docstring for why the physical
+        # stop is the correct grouping), so -- like agg_service_delivered_daily
+        # above -- only an agency confirmed to populate stop_id (today:
+        # static_join; aomori_regex always leaves it NULL) gets any rows
+        # here. Skipped entirely (zero rows) for any other ingest_strategy,
+        # same "row presence keyed off ingest_strategy" convention.
+        with conn.cursor() as cur:
+            cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+            row = cur.fetchone()
+        if row and row[0] == "static_join":
+            # One row per (route_code, stop_id, service day) with an ARRAY of
+            # that group's actual event times (seconds-of-day, scheduled_time
+            # parsed + dep_delay) -- cardinality is bounded by routes × stops
+            # × days, not by raw observation count, so it's safe to fetch as
+            # one block (ch_client.query(), not the streaming reader
+            # `_analyze_deduped` needs) even though the pre-aggregation
+            # GROUP BY underneath it scans the agency's full `updates`
+            # history. `argMax(..., (captured_at, file_name))` per
+            # (route_code, stop_id, date, trip_id) is the SAME
+            # latest-observation-wins dedup rule as build_dedup_ch_sql, just
+            # keyed by stop_id instead of stop_sequence.
+            #
+            # scheduled_time is normalized "HH:MM[:SS]" text (see
+            # pipeline.strategies._time.normalize_departure_time) -- seconds
+            # are optional per that normalizer, so the parse below tolerates
+            # a 2-element split (defaulting seconds to 0) rather than
+            # indexing a possibly-absent third element.
+            #
+            # `assumeNotNull(scheduled_time)` in the `filtered` CTE is
+            # load-bearing, not cosmetic: ClickHouse infers splitByChar's
+            # return type from its ARGUMENT's type, and `Array(...)` can
+            # never itself be `Nullable` (only its elements can) -- passing
+            # the raw `Nullable(String)` `scheduled_time` straight to
+            # splitByChar makes the planner try to type the result as
+            # `Nullable(Array(String))` and raises `ILLEGAL_TYPE_OF_ARGUMENT`
+            # at query-planning time, regardless of whether any row is
+            # actually NULL at runtime. The `filtered` CTE's own
+            # `scheduled_time IS NOT NULL` WHERE clause makes the
+            # assumeNotNull() call runtime-safe; it does nothing to satisfy
+            # the planner on its own; splitByChar needs a statically
+            # non-Nullable argument type.
+            ch_headway = ch_client.query(
+                """
+                WITH per_event AS (
+                    SELECT route_code, stop_id, toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                           argMax(dep_delay, (captured_at, file_name)) AS dep_delay,
+                           argMax(scheduled_time, (captured_at, file_name)) AS scheduled_time
+                    FROM updates
+                    WHERE agency_id = {agency_id:UInt16} AND stop_id IS NOT NULL AND route_code IS NOT NULL
+                    GROUP BY route_code, stop_id, svc_date, trip_id
+                ),
+                filtered AS (
+                    SELECT route_code, stop_id, svc_date, dep_delay,
+                           assumeNotNull(scheduled_time) AS scheduled_time_nn
+                    FROM per_event
+                    WHERE dep_delay IS NOT NULL
+                      AND dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}
+                      AND scheduled_time IS NOT NULL
+                ),
+                timed AS (
+                    SELECT route_code, stop_id, svc_date,
+                           toInt64(dep_delay)
+                             + toInt64(splitByChar(':', scheduled_time_nn)[1]) * 3600
+                             + toInt64(splitByChar(':', scheduled_time_nn)[2]) * 60
+                             + if(length(splitByChar(':', scheduled_time_nn)) >= 3,
+                                  toInt64(splitByChar(':', scheduled_time_nn)[3]), 0) AS actual_sec
+                    FROM filtered
+                    WHERE length(splitByChar(':', scheduled_time_nn)) >= 2
+                )
+                SELECT route_code, stop_id, svc_date, groupArray(actual_sec) AS times
+                FROM timed
+                GROUP BY route_code, stop_id, svc_date
+                """,
+                parameters={
+                    "agency_id": agency_id,
+                    "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
+                    "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
+                },
+            )
+            # Pool every stop's reconstructed gaps for the same (route_code,
+            # date) together -- same rationale as agg_route_headway's static
+            # side: a consistently-spaced route has a similar gap
+            # distribution at every stop it serves, and pooling avoids
+            # having to justify picking one "representative" stop.
+            # Zero/negative gaps (a duplicate or out-of-order observation)
+            # are excluded, not counted as a real zero-headway event.
+            pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
+            for route_code, _stop_id, svc_date, times in ch_headway.result_rows:
+                pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
+            headway_rows = [
+                (agency_id, route_code, svc_date, median(gaps), len(gaps))
+                for (route_code, svc_date), gaps in pooled.items()
+                if gaps
+            ]
+            _insert_agg(
+                "agg_route_headway_daily",
+                ["agency_id", "route_code", "date", "actual_headway_median_sec", "actual_samples"],
+                headway_rows,
+                conn,
+            )
+            logger.info(f"  agg_route_headway_daily: {len(headway_rows)} rows")
+        else:
+            logger.info("  agg_route_headway_daily: 0 rows (ingest_strategy != static_join)")
 
         # ── agg_meta: audit record of this build (NOT load-bearing) ──────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
