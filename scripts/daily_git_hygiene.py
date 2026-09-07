@@ -676,9 +676,14 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     A worktree gets three, narrower grace conditions before the same
     fail-closed treatment applies:
     - `is_review_worktree` matches `/review-pr`'s own `.worktrees/review-*`
-      convention, which is guaranteed by that command's design to never run
-      poetry at all -- skipped unconditionally, with no age check, since
-      there is no "eventually resolves" case to wait for.
+      convention. `poetry_env_path` is still attempted first, exactly like
+      any other worktree -- if it resolves (a reviewer or a human ran a
+      poetry command there despite that command's read-only design), the
+      result is added to `in_use` the same as anywhere else. Only a `None`
+      result gets the exemption: no age check, and no raise, since
+      `/review-pr` guarantees no venv is ever created for this shape in the
+      first place, unlike every other unresolved case below, which raises
+      because it might be exactly that.
     - `git worktree list`'s own `prunable` flag means the administrative
       entry outlived the actual directory (removed out-of-band, or pending
       its own `git worktree prune`) -- unambiguously "nothing runs out of
@@ -750,6 +755,12 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     worktrees = cleanup_git_state.parse_worktrees(
         cleanup_git_state.run_git(repo, "worktree", "list", "--porcelain").stdout
     )
+    # `git worktree list` always reports the main working tree first, regardless of which
+    # worktree `--repo` pointed `repo` at -- `/review-pr` creates `.worktrees/review-*`
+    # relative to the main checkout specifically, so `is_review_worktree` below must anchor
+    # there too, not at `resolved_repo`, which is only "the main checkout" when `--repo`
+    # happened to be given that path.
+    main_worktree = worktrees[0].path.resolve()
     now_epoch = time.time()
     in_use = {main_venv}
     for worktree in worktrees:
@@ -758,11 +769,17 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
             continue  # main_venv (the caller's, not re-derived here) already covers this one
         if worktree.prunable or (not worktree.locked and not worktree.path.exists()):
             continue
-        if is_review_worktree(resolved_worktree, resolved_repo):
-            continue
         venv = poetry_env_path(worktree.path)
         if venv is not None:
             in_use.add(venv)
+            continue
+        if is_review_worktree(resolved_worktree, main_worktree):
+            # Unlike every other case below, this is not "unresolved, so treat
+            # cautiously" -- `/review-pr` guarantees no venv is ever created for this
+            # shape, so `poetry_env_path` resolving None here is never ambiguous. If a
+            # human or a reviewer's own `poetry run` ever DOES create one, the branch
+            # above already caught it before reaching this line, and it stays in
+            # `in_use` regardless of this exemption.
             continue
         creation_stamp = worktree.path / ".git"
         if not creation_stamp.is_file():

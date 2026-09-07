@@ -1205,13 +1205,13 @@ def test_is_review_worktree_false_for_a_path_outside_the_repo():
     assert hygiene.is_review_worktree(Path("/elsewhere/.worktrees/review-main"), Path("/repo")) is False
 
 
-def test_compute_in_use_poetry_venvs_skips_a_review_worktree_without_calling_poetry(
+def test_compute_in_use_poetry_venvs_skips_an_unresolvable_review_worktree_without_raising(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A `/review-pr` worktree never runs poetry by that command's own design, so it is
-    skipped unconditionally -- no age grace period, and `poetry_env_path` is never called
-    for it, unlike a genuine unresolvable-venv worktree which must age past the grace
-    period first."""
+    """A `/review-pr` worktree with no resolvable venv is exempted from the fail-closed
+    raise, with no age grace period needed -- but `poetry_env_path` IS still attempted for
+    it first, same as any other worktree, so a real venv there (see the sibling test below)
+    is never silently dropped from `in_use`."""
 
     worktree_path = repository / ".worktrees" / "review-main"
     worktree_path.parent.mkdir()
@@ -1229,7 +1229,61 @@ def test_compute_in_use_poetry_venvs_skips_a_review_worktree_without_calling_poe
     in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
 
     assert in_use == {main_venv}
-    assert worktree_path.resolve() not in queried
+    assert worktree_path.resolve() in queried  # resolution was attempted, just not required to succeed
+
+
+def test_compute_in_use_poetry_venvs_keeps_a_review_worktrees_venv_if_one_actually_exists(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The review-worktree exemption only waives the fail-closed raise on an unresolved
+    venv -- it must never suppress a venv that DOES resolve there (e.g. a human or a
+    reviewer ran a poetry command despite `/review-pr`'s read-only design), which would
+    otherwise be the exact false "not in use" this function exists to prevent."""
+
+    worktree_path = repository / ".worktrees" / "review-main"
+    worktree_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
+
+    real_venv = repository.parent / "venv-review-main"
+
+    def _fake_env_path(location: Path) -> Path | None:
+        return real_venv if location.resolve() == worktree_path.resolve() else None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    main_venv = repository.parent / "venv-main"
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
+
+    assert in_use == {main_venv, real_venv}
+
+
+def test_compute_in_use_poetry_venvs_review_worktree_check_anchors_on_main_not_repo_arg(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`/review-pr` always creates `.worktrees/review-*` relative to the MAIN checkout, so
+    the exemption must anchor there even when `repo` (as `--repo` can, per
+    `vps-loop-run.md`) points at a different, linked worktree instead. The main checkout's
+    own venv is given a resolvable path here so the assertion isolates the anchor fix from
+    the unrelated, pre-existing "main checkout's `.git` is a directory, not a linked
+    worktree's `.git` file" shape this function's age-check path does not handle."""
+
+    review_path = repository / ".worktrees" / "review-main"
+    review_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(review_path), "main")
+    linked_path = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "linked-branch", str(linked_path), "main")
+
+    real_main_venv = repository.parent / "venv-main-checkout"
+
+    def _fake_env_path(location: Path) -> Path | None:
+        return real_main_venv if location.resolve() == repository.resolve() else None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    linked_venv = tmp_path / "venv-linked"
+    in_use = hygiene.compute_in_use_poetry_venvs(linked_path, linked_venv, min_age_hours=0)
+
+    assert in_use == {linked_venv, real_main_venv}
 
 
 def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_directory_is_absent(
