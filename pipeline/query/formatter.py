@@ -68,6 +68,24 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_header", "en"): "[Daily trend ({from_date} to {to_date})]\nmean: {avg:.2f} min / observed days: {days}",
     ("trend_empty", "ja"): "選択した期間にデータがありません。",
     ("trend_empty", "en"): "No data in the selected period.",
+    ("dwell_run_header", "ja"): "【滞留・走行時間の内訳】",
+    ("dwell_run_header", "en"): "[Dwell/running time decomposition]",
+    ("dwell_run_row", "ja"): (
+        "{rank}位: 路線{route}（{service}）滞留平均{dwell}分（{dwell_samples}件）、"
+        "走行平均{run}分（{run_samples}件）"
+    ),
+    ("dwell_run_row", "en"): (
+        "#{rank} route {route} ({service}) dwell avg {dwell} min ({dwell_samples} samples), "
+        "running avg {run} min ({run_samples} samples)"
+    ),
+    ("dwell_run_not_available", "ja"): (
+        "この事業者のフィードは到着遅延（arr_delay）を送信しないため、滞留・走行時間の内訳は利用できません。"
+    ),
+    ("dwell_run_not_available", "en"): (
+        "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available."
+    ),
+    ("dwell_run_time_band_unsupported", "ja"): "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
+    ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
 }
 
 
@@ -281,3 +299,36 @@ def format_trend_text(days: list, from_date, to_date, locale: str = "ja") -> str
         return _t("trend_empty", locale)
     observed_days = sum(1 for d in days if d.get("avg_min") is not None)
     return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=observed_days)
+
+
+def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
+    """Locale-aware text for the dwell/running-time decomposition report.
+
+    ``payload`` is ``pipeline.reports.compute_dwell_run_decomposition``'s own
+    dict shape -- ``available=False`` (this agency's feed never sends
+    `arr_delay`) and ``time_band_supported=False`` (a time-band filter isn't
+    servable for this decomposition yet) each get their own explicit copy,
+    never a silently empty/zero table.
+    """
+    if not payload.get("available"):
+        return _t("dwell_run_not_available", locale)
+    if not payload.get("time_band_supported", True):
+        return _t("dwell_run_time_band_unsupported", locale)
+    routes = payload.get("routes") or []
+    if not routes:
+        return _no_data(locale)
+    lines = [
+        _t(
+            "dwell_run_row",
+            locale,
+            rank=i,
+            route=r["route_code"],
+            service=r.get("service_type") or "",
+            dwell=_r(r["dwell_avg_sec"] / 60 if r.get("dwell_avg_sec") is not None else None),
+            run=_r(r["run_avg_sec"] / 60 if r.get("run_avg_sec") is not None else None),
+            dwell_samples=r.get("dwell_samples", 0),
+            run_samples=r.get("run_samples", 0),
+        )
+        for i, r in enumerate(routes, 1)
+    ]
+    return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
