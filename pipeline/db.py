@@ -180,6 +180,51 @@ def build_dedup_ch_sql(
     )
 
 
+def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
+    """Return the SQL body that gathers EVERY raw observation per stop event
+    (not just the latest one `build_dedup_ch_sql` resolves to), for
+    `pipeline.prediction_accuracy`'s early-vs-final delay-estimate error
+    metric.
+
+    Same grouping key, same `agency_id`/plausibility-clamp `WHERE`, and the
+    same `argMax(u.dep_delay, (u.captured_at, u.file_name))` final-value
+    resolution as `build_dedup_ch_sql` (kept byte-for-byte parallel so the
+    two queries can never silently disagree about which row is "the final
+    observation" for a stop event) -- but this query ALSO projects
+    `groupArray(tuple(u.captured_at, u.dep_delay))`, the raw per-observation
+    history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
+    to compare early readings against that final value.
+
+    `HAVING count() > 1` drops every stop event observed exactly once: a
+    singleton has no EARLY observation to compare against its own (only)
+    final one, so it can never contribute to this metric and would just be
+    dead weight in the result set (and in `groupArray`'s per-row memory).
+
+    Column order/count in the SELECT list is exactly `route_code,
+    service_type, scheduled_time, trip_id, date, stop_sequence,
+    final_dep_delay, observations` -- `pipeline.prediction_accuracy.
+    rows_to_lead_bucket_stats` consumes the result by tuple position.
+
+    See `build_dedup_ch_sql`'s own docstring for the rationale behind the
+    JST `toDate()` bucketing, the `{agency_id:UInt16}` parameter binding,
+    and qualifying every base-table column reference with the `u.` alias
+    (all identical here, not repeated).
+    """
+    extra = f" AND ({extra_where})" if extra_where else ""
+    return (
+        "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
+        "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
+        "FROM updates AS u "
+        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
+        "HAVING count() > 1"
+    )
+
+
 def _static_loaded(conn, agency_id: int) -> bool:
     """Return True iff the agency has any rows in `static_stops`."""
     try:

@@ -1181,6 +1181,167 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
     assert worktree_path.resolve() not in queried
 
 
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (Path("/repo/.worktrees/review-main"), True),
+        (Path("/repo/.worktrees/review-vps-loop/item-85"), True),
+        (Path("/anywhere/.worktrees/review-main"), True),  # structural, not anchored to a particular checkout
+        (Path("/repo/.worktrees/other"), False),
+        (Path("/repo/.claude/worktrees/agent-a85e93fb4ec1fbec1"), False),
+        (Path("/repo/review-main"), False),
+        (Path("/repo/.worktrees-old/review-main"), False),  # exact segment match, not a substring
+        (Path("/repo/x.worktrees/review-main"), False),
+        (Path("/repo/.worktrees"), False),  # `.worktrees` with nothing after it to match `review-*`
+        (Path("/repo/.worktrees/review-main/.claude/worktrees/agent-abc"), False),  # nested worktree, not this shape
+        # An extra segment with no worktree marker in it is indistinguishable from more of
+        # a slash-containing head ref (same shape as the `review-vps-loop/item-85` case
+        # above) -- matching it is what makes the slash-containing case work at all.
+        (Path("/repo/.worktrees/review-main/subdir"), True),
+    ],
+)
+def test_is_review_worktree_matches_only_the_review_pr_convention(path: Path, expected: bool):
+    """A `.worktrees` segment immediately followed by a `review-`-prefixed one, anywhere in
+    the path (not just the last two components, since a reviewed branch's own head ref can
+    contain slashes) and with nothing shaped like a further nested worktree after it --
+    `/review-pr`'s own naming -- matches, regardless of which checkout it sits under."""
+
+    assert hygiene.is_review_worktree(path) is expected
+
+
+def test_review_worktree_naming_matches_review_pr_md():
+    """Upgrades the naming coupling `REVIEW_WORKTREE_PARENT_DIR`'s own comment calls
+    "greppable" into an enforced check: if `/review-pr` ever renames its worktree
+    convention without updating these constants, this fails loudly instead of the
+    exemption silently stopping firing and the disk-full incident recurring."""
+
+    review_pr_doc = (ROOT / ".claude" / "commands" / "review-pr.md").read_text(encoding="utf-8")
+
+    assert f"{hygiene.REVIEW_WORKTREE_PARENT_DIR}/{hygiene.REVIEW_WORKTREE_PREFIX}" in review_pr_doc
+
+
+def test_compute_in_use_poetry_venvs_skips_an_unresolvable_review_worktree_without_raising(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A `/review-pr` worktree with no resolvable venv is exempted from the fail-closed
+    raise, with no age grace period needed -- but `poetry_env_path` IS still attempted for
+    it first, same as any other worktree, so a real venv there (see the sibling test below)
+    is never silently dropped from `in_use`."""
+
+    worktree_path = repository / ".worktrees" / "review-main"
+    worktree_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
+
+    queried: list[Path] = []
+
+    def _fake_env_path(location: Path) -> Path | None:
+        queried.append(location.resolve())
+        return None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    main_venv = repository.parent / "venv-main"
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
+
+    assert in_use == {main_venv}
+    assert worktree_path.resolve() in queried  # resolution was attempted, just not required to succeed
+
+
+def test_compute_in_use_poetry_venvs_keeps_a_review_worktrees_venv_if_one_actually_exists(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The review-worktree exemption only waives the fail-closed raise on an unresolved
+    venv -- it must never suppress a venv that DOES resolve there (e.g. a human or a
+    reviewer ran a poetry command despite `/review-pr`'s read-only design), which would
+    otherwise be the exact false "not in use" this function exists to prevent."""
+
+    worktree_path = repository / ".worktrees" / "review-main"
+    worktree_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
+
+    real_venv = repository.parent / "venv-review-main"
+
+    def _fake_env_path(location: Path) -> Path | None:
+        return real_venv if location.resolve() == worktree_path.resolve() else None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    main_venv = repository.parent / "venv-main"
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
+
+    assert in_use == {main_venv, real_venv}
+
+
+def test_compute_in_use_poetry_venvs_exempts_a_review_worktree_created_under_a_linked_worktree(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`/review-pr` runs its `git worktree add` relative to whichever checkout invokes it --
+    normally but not necessarily the main one. `repo` here is the MAIN checkout, while the
+    review worktree sits under a *different*, linked worktree entirely -- not a descendant
+    of `repo` at all -- so this only passes if the exemption is genuinely structural rather
+    than anchored to whichever path `repo` happens to be."""
+
+    linked_path = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "linked-branch", str(linked_path), "main")
+    review_path = linked_path / ".worktrees" / "review-main"
+    review_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(review_path), "main")
+
+    linked_venv = tmp_path / "venv-linked"
+
+    def _fake_env_path(location: Path) -> Path | None:
+        return linked_venv if location.resolve() == linked_path.resolve() else None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    main_venv = tmp_path / "venv-main"
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
+
+    assert in_use == {main_venv, linked_venv}
+
+
+def test_compute_in_use_poetry_venvs_still_raises_for_a_non_review_shaped_worktree_in_repo(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The exemption's scope is enforced at the call site, not just in `is_review_worktree`
+    alone: an in-repo worktree that is NOT `.worktrees/review-*` -- e.g. a `/vps-loop-run`
+    worker's `.claude/worktrees/agent-*` shape -- must still hit the fail-closed raise past
+    the grace period, proving the gate itself (not only the pure predicate) rejects a
+    broader match than the stated policy."""
+
+    worktree_path = repository / ".claude" / "worktrees" / "agent-a85e93fb4ec1fbec1"
+    worktree_path.parent.mkdir(parents=True)
+    git(repository, "worktree", "add", "-b", "vps-loop/item-88", str(worktree_path), "main")
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
+
+    with pytest.raises(hygiene.HygieneError):
+        hygiene.compute_in_use_poetry_venvs(repository, repository.parent / "venv-main", min_age_hours=0)
+
+
+def test_compute_in_use_poetry_venvs_raises_for_a_locked_review_worktree_whose_directory_is_absent(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The review-worktree exemption requires the worktree to actually exist -- `/review-pr`
+    leaves it in place indefinitely by design, so a locked-but-absent one is not that shape
+    at all, and must hit the same fail-closed raise a locked-absent non-review worktree
+    does (the sibling test below), not be silently skipped."""
+
+    worktree_path = repository / ".worktrees" / "review-main"
+    worktree_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
+    git(repository, "worktree", "lock", str(worktree_path))
+    shutil.rmtree(worktree_path)  # remove the directory directly while still locked
+    listing = git(repository, "worktree", "list", "--porcelain")
+    assert "locked" in listing
+    assert "prunable" not in listing
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
+
+    with pytest.raises(hygiene.HygieneError):
+        hygiene.compute_in_use_poetry_venvs(repository, repository.parent / "venv-main", min_age_hours=0)
+
+
 def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_directory_is_absent(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
