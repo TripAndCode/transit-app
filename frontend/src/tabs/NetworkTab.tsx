@@ -102,6 +102,9 @@ export function NetworkTab() {
             <div style={onTimeStyle} aria-label={t("network.col_on_time")}>
               {a.on_time_pct == null ? "—" : `${a.on_time_pct.toFixed(1)}%`}
             </div>
+            <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
+              {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
+            </div>
           </div>
         </div>
         <div style={barRow}>
@@ -159,6 +162,7 @@ export function NetworkTab() {
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
+          <li><strong>{t("network.col_delivered")}</strong> — {t("network.help_delivered")}</li>
           <li><strong>{t("network.col_samples")}</strong> — {t("network.help_samples")}</li>
           <li><strong>{t("network.col_feed")}</strong> — {t("network.help_feed")}</li>
           <li><strong>{t("network.col_freshness")}</strong> — {t("network.help_freshness")}</li>

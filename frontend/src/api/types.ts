@@ -478,6 +478,9 @@ export type NetworkAgencyRow = {
   is_stale: boolean;
   data_from: string | null;
   data_to: string | null;
+  planned_trips: number;
+  executed_trips: number | null;
+  service_delivered_pct: number | null;
 };
 
 export type NetworkSummary = {

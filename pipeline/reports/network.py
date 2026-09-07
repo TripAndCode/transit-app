@@ -8,6 +8,12 @@ time_band/dow/routes are not applied). Reuses the pure freshness rule.
 ``raw_samples``/``clamp_count`` are raw poll counts (from agg_feed_health) —
 different populations. ``clamp_pct`` is the implausible-reading ratio
 (clamp_count / raw_samples; higher = worse) shown by the feed-health banner.
+
+``planned_trips``/``executed_trips``/``service_delivered_pct`` come from
+`pipeline.reports.service_delivered.compute_service_delivered_by_agency` —
+see that module for the executed/planned definition and why the latter two
+read `None` ("not available") for an agency whose feed doesn't populate
+`schedule_relationship_trip`.
 """
 
 import logging
@@ -18,6 +24,7 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
+from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 
 _log = logging.getLogger(__name__)
 
@@ -80,6 +87,13 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         aid: None if mx is None else mx.astimezone(_JST).date() for aid, mx in probed.items()
     }
 
+    # Independent of the freshness probe above (different ClickHouse query
+    # shape entirely) but the same per-agency-degrades-alone contract: see
+    # compute_service_delivered_by_agency / service_delivered_probe_by_agency.
+    delivered = await compute_service_delivered_by_agency(
+        conn, ch, [a["agency_id"] for a in agencies], from_date, to_date, _log
+    )
+
     rows: list[dict[str, Any]] = []
     for a in agencies:
         aid = a["agency_id"]
@@ -93,6 +107,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         clamp_pct = round(clamp / raw * 100, 2) if raw else None
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
+        d = delivered.get(aid, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
         rows.append(
             {
                 "agency_id": aid,
@@ -106,6 +121,9 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "is_stale": is_stale(agg_max.get(aid), live_max.get(aid)),
                 "data_from": data_from,
                 "data_to": data_to,
+                "planned_trips": d["planned_trips"],
+                "executed_trips": d["executed_trips"],
+                "service_delivered_pct": d["service_delivered_pct"],
             }
         )
     # None (no data yet) sorts last; among real values, worst delay first.

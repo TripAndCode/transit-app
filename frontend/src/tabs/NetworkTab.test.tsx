@@ -11,7 +11,8 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
   return {
     agency_id: 1, agency_name: "A", avg_delay_min: 5, on_time_pct: 90,
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
-    data_from: "2026-04-01", data_to: "2026-04-02", ...over,
+    data_from: "2026-04-01", data_to: "2026-04-02",
+    planned_trips: 120, executed_trips: 114, service_delivered_pct: 95, ...over,
   };
 }
 
@@ -67,6 +68,25 @@ describe("NetworkTab", () => {
     expect(screen.getByText("2026-04-01 – 2026-04-02")).toBeInTheDocument();
     expect(screen.getByText("no data in range")).toBeInTheDocument();
     expect(screen.getByText("How to read this")).toBeInTheDocument();
+  });
+
+  it("shows the service-delivered % next to on-time %, and a dash when not available", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", service_delivered_pct: 96.7, planned_trips: 300, executed_trips: 290 }),
+          // No populated schedule_relationship data for this agency's feed —
+          // must read as "not available" (a dash), never a misleading 100%.
+          row({ agency_id: 2, agency_name: "Aomori", service_delivered_pct: null, planned_trips: 0, executed_trips: null }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByText("96.7%")).toBeInTheDocument();
+    const aomoriCard = screen.getByText("Aomori").closest(".network-card");
+    expect(aomoriCard).toHaveTextContent("—");
   });
 
   it("links each agency name to its overview, carrying the current range", () => {

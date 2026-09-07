@@ -7,7 +7,7 @@ shutdown, same lifecycle shape as app.state.pool for Postgres.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import clickhouse_connect
 
@@ -185,5 +185,77 @@ async def max_captured_at_before_by_agency(
         except Exception:
             log.warning("ClickHouse freshness probe failed for agency %s — degrading", aid, exc_info=True)
             return aid, None
+
+    return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))
+
+
+async def service_delivered_probe_by_agency(
+    ch, agency_ids: list[int], from_date: date, to_date: date, log: logging.Logger
+) -> dict[int, tuple[bool, int]]:
+    """Per-agency ``(schedule_relationship_populated, non_executed_trip_days)``
+    over ``[from_date, to_date]`` (JST civil days), run concurrently.
+
+    ``schedule_relationship_populated`` is a raw existence check (any row
+    with ``schedule_relationship_trip IS NOT NULL`` in range) — item 89 only
+    populates this column for RT feeds confirmed to send it (today: the
+    static_join strategy's agencies), so an agency whose feed never sends it
+    (e.g. aomori_regex) always reads ``False`` here, not "zero cancellations".
+
+    ``non_executed_trip_days`` counts distinct (service day, trip_id) pairs
+    whose LATEST observation — ``argMax`` by ``(captured_at, file_name)``,
+    the same dedup rule as `pipeline.db.build_dedup_ch_sql` — was either
+    trip-level CANCELED (`schedule_relationship_trip` = 3) or had any stop
+    marked SKIPPED (`schedule_relationship_stop` = 1). The two signals are
+    combined with `UNION DISTINCT` so a trip-day matching both is only
+    counted once.
+
+    Same degrade-on-failure shape as `max_captured_at_before_by_agency`: a
+    failing probe degrades to ``(False, 0)``, which
+    `pipeline.reports.service_delivered` reads as "not available" rather
+    than a misleadingly perfect delivered rate.
+    """
+
+    async def _probe(aid: int) -> tuple[int, tuple[bool, int]]:
+        try:
+            params = {"agency_id": aid, "from_date": from_date, "to_date": to_date}
+            populated_result = await ch.query(
+                "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} "
+                "AND toDate(captured_at, 'Asia/Tokyo') >= {from_date:Date} "
+                "AND toDate(captured_at, 'Asia/Tokyo') <= {to_date:Date} "
+                "AND schedule_relationship_trip IS NOT NULL LIMIT 1",
+                parameters=params,
+            )
+            if not populated_result.result_rows:
+                return aid, (False, 0)
+            non_executed_result = await ch.query(
+                "SELECT count() FROM ("
+                "  SELECT svc_date, trip_id FROM ("
+                "    SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id, "
+                "           argMax(schedule_relationship_trip, (captured_at, file_name)) AS trip_rel "
+                "    FROM updates "
+                "    WHERE agency_id = {agency_id:UInt16} "
+                "      AND toDate(captured_at, 'Asia/Tokyo') >= {from_date:Date} "
+                "      AND toDate(captured_at, 'Asia/Tokyo') <= {to_date:Date} "
+                "    GROUP BY svc_date, trip_id"
+                "  ) WHERE trip_rel = 3"
+                "  UNION DISTINCT"
+                "  SELECT svc_date, trip_id FROM ("
+                "    SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id, "
+                "           argMax(schedule_relationship_stop, (captured_at, file_name)) AS stop_rel "
+                "    FROM updates "
+                "    WHERE agency_id = {agency_id:UInt16} "
+                "      AND toDate(captured_at, 'Asia/Tokyo') >= {from_date:Date} "
+                "      AND toDate(captured_at, 'Asia/Tokyo') <= {to_date:Date} "
+                "      AND schedule_relationship_stop IS NOT NULL "
+                "    GROUP BY svc_date, trip_id, stop_sequence"
+                "  ) WHERE stop_rel = 1"
+                ")",
+                parameters=params,
+            )
+            non_executed = int(non_executed_result.result_rows[0][0]) if non_executed_result.result_rows else 0
+            return aid, (True, non_executed)
+        except Exception:
+            log.warning("ClickHouse service-delivered probe failed for agency %s — degrading", aid, exc_info=True)
+            return aid, (False, 0)
 
     return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))
