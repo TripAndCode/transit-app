@@ -115,7 +115,9 @@ from step 5, which matched candidates against threads already on the PR. One lin
 reported twice under the same dimension is one finding; the same line under two
 dimensions is two and both stay. Keep only evidence-backed findings that affect
 correctness, security, performance, enforcement, or the stated objective, and drop
-low-confidence noise. Rank `Major` before `Minor`. Each finding carries its dimension,
+low-confidence noise — except the agent file's unconfirmed-absence findings reported
+at `confidence: low`; keep those, marked unverified, so the reader can confirm them
+cheaply. Rank `Major` before `Minor`. Each finding carries its dimension,
 confidence, file and line inside the review worktree, the `failure:` line the agent
 file requires, and a concrete fix. List obstacles separately. If nothing qualifies, say
 so plainly.

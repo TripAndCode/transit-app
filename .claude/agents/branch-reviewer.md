@@ -80,15 +80,19 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   line, a `failure:` line, and a concrete fix. `failure:` names the input or state
   that produces a wrong output, a crash, or a missed gate, not the impact that would
   follow; a finding whose failure cannot be stated concretely is speculation and does
-  not qualify. Name the single dimension the finding belongs to even when several were
-  assigned, because the caller deduplicates on file, line, and dimension together.
+  not qualify, except the unconfirmed-absence case below. Name the single dimension
+  the finding belongs to even when several were assigned, because the caller
+  deduplicates on file, line, and dimension together; under a brief instead of a named
+  dimension, name the brief's own category (e.g. `regressions`) in that slot.
   Report obstacles separately. If nothing qualifies, say so.
 - Before reporting that something is absent — a missing guard, an unhandled case, a
   dropped update — confirm the symptom is not already handled elsewhere: the enclosing
   function, the caller, an upstream CTE, a shared helper. The small source windows this
   file asks for are cheap precisely because they can miss such handling, so where it
-  stays unconfirmed, report the finding at `confidence: low` rather than asserting the
-  absence.
+  stays unconfirmed, report it at `confidence: low` instead of dropping it as
+  speculation or asserting the absence outright — name the window you read and the
+  caller you could not check as its failure statement. A caller's synthesis step is
+  expected not to discard this specific case as low-confidence noise.
 - Any SQL investigation is read-only against dev Postgres/ClickHouse. Tests use only
   the throwaway databases described in `transit-app-gotchas`.
 - Do not edit, commit, or push.
