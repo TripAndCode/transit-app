@@ -21,6 +21,8 @@ under a filtered label.
 from __future__ import annotations
 
 from api.range import RangeCtx
+from pipeline import perf
+from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter
 
@@ -37,6 +39,8 @@ async def _agency_available(agency_id: int, conn) -> bool:
     return bool(row and row["ingest_strategy"] in _AVAILABLE_STRATEGIES)
 
 
+@perf.timed("reports.dwell_run")
+@async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Per-route dwell/running-time distribution summary over ``ctx``'s range.
 
@@ -114,11 +118,17 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
                 "route_code": r["route_code"],
                 "service_type": r["service_type"] or None,
                 "dwell_samples": dwell_samples,
-                "dwell_avg_sec": (r["dwell_sum_sec"] / dwell_samples) if dwell_samples else None,
+                # Postgres SUM(bigint) returns NUMERIC, which asyncpg maps to
+                # Decimal -- float() here matches rankings.py's identical
+                # Decimal-from-SUM() -> float cast (e.g. its own
+                # `float(_round2(sum_sec / n / 60.0))`), since the default
+                # JSON encoding of a bare Decimal renders it as a string
+                # ("45"), not a number.
+                "dwell_avg_sec": float(r["dwell_sum_sec"] / dwell_samples) if dwell_samples else None,
                 "dwell_p50_sec": percentile_from_dwell_hist(r["hist_dwell"], 0.5),
                 "dwell_p90_sec": percentile_from_dwell_hist(r["hist_dwell"], 0.9),
                 "run_samples": run_samples,
-                "run_avg_sec": (r["run_sum_sec"] / run_samples) if run_samples else None,
+                "run_avg_sec": float(r["run_sum_sec"] / run_samples) if run_samples else None,
                 "run_p50_sec": percentile_from_run_hist(r["hist_run"], 0.5),
                 "run_p90_sec": percentile_from_run_hist(r["hist_run"], 0.9),
             }

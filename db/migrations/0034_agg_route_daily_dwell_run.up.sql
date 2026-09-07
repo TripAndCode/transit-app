@@ -1,6 +1,6 @@
 -- Per-route, per-day dwell-time / running-time DISTRIBUTION -- the
--- decomposition view alongside agg_route_daily_dist's delay histogram (item
--- 95). Dwell time is time spent AT a stop (this visit's departure minus its
+-- decomposition view alongside agg_route_daily_dist's delay histogram.
+-- Dwell time is time spent AT a stop (this visit's departure minus its
 -- own arrival); running time is time spent BETWEEN stops (this visit's
 -- arrival minus the previous stop visit's departure). Both need an actual
 -- arrival timestamp, which only exists where the RT feed sent

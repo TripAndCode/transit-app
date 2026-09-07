@@ -1149,3 +1149,108 @@ def test_analyze_skips_agg_route_daily_dwell_run_without_static_schedule(pg_conn
         cur.execute("SELECT COUNT(*) FROM agg_route_daily_dwell_run WHERE agency_id = %s", (agency_id,))
         count = cur.fetchone()[0]
     assert count == 0
+
+
+def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, agency_id, ch_client):
+    """Regression: a stop event whose LATEST poll has `arr_delay = NULL`
+    (feed stopped sending an arrival estimate for that stop) must be treated
+    as unavailable for that stop-visit, not silently resurrect an EARLIER
+    poll's non-NULL `arr_delay` -- ClickHouse's `argMax(arg, val)` silently
+    SKIPS a row whose `arg` is NULL when picking the row with the maximal
+    `val`, so a naive `argMax(u.arr_delay, (captured_at, file_name))` would
+    return the earlier, stale value instead of NULL. `build_dedup_ch_sql`
+    guards against this with a `coalesce`/`NULLIF` sentinel wrap (mirroring
+    the same fix already applied to `schedule_relationship_trip`/
+    `schedule_relationship_stop`)."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    early = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_dwell_run_row("T1", later, 1, 30, None, file_name="s1.pb"),
+        # Stop 2: early poll has a real arr_delay; the LATEST poll (higher
+        # captured_at) has none -- the true latest-observation-wins answer
+        # for this stop-visit is "no arrival estimate", not the early value.
+        _ch_dwell_run_row("T1", early, 2, 50, 20, file_name="s2a.pb"),
+        _ch_dwell_run_row("T1", later, 2, 50, None, file_name="s2b.pb"),
+        _ch_dwell_run_row("T1", later, 3, 10, 10, file_name="s3.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
+    # Only stop 3 (dwell 0, running 200) contributes -- stop 2's dwell/running
+    # must NOT be computed from the stale resurrected arr_delay=20 (which
+    # would wrongly produce dwell_samples=2/dwell_sum_sec=90/run_samples=2/
+    # run_sum_sec=490, identical to the single-poll-per-stop happy path).
+    assert dwell_samples == 1
+    assert dwell_sum_sec == 0
+    assert run_samples == 1
+    assert run_sum_sec == 200
+
+
+def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_next_running(
+    pg_conn, agency_id, ch_client
+):
+    """Regression: a stop lacking a static schedule row (arrival_time/
+    departure_time optional for non-timepoint intermediate stops in real
+    GTFS feeds) must yield None for its own dwell/running AND make the
+    FOLLOWING stop's running time None too -- not silently pair the
+    following stop with the departure from two segments back. The SQL
+    builder's `visits` CTE must LEFT JOIN `static_stop_times` (not INNER
+    JOIN) and must not filter a NULL-schedule row out of `actuals` before
+    the `LAG()` window runs, or `LAG()` silently skips past the missing stop
+    and pairs the next stop with the wrong previous departure."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Test Stop')",
+            (agency_id,),
+        )
+        # Deliberately NO row for stop_sequence 2 -- only stops 1 and 3 have
+        # a static schedule, mirroring an interior stop with no
+        # arrival_time/departure_time in the source GTFS feed.
+        for seq, arr, dep in [(1, "10:00:00", "10:00:00"), (3, "10:10:00", "10:10:00")]:
+            cur.execute(
+                "INSERT INTO static_stop_times "
+                "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+                "VALUES (%s, 'T1', %s, 'S1', %s, %s)",
+                (agency_id, seq, arr, dep),
+            )
+    pg_conn.commit()
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_dwell_run_row("T1", day, 1, 30, None, file_name="s1.pb"),
+        # Stop 2 has real RT data but no static schedule row above.
+        _ch_dwell_run_row("T1", day, 2, 50, 20, file_name="s2.pb"),
+        _ch_dwell_run_row("T1", day, 3, 10, 10, file_name="s3.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
+    # Stop 3's own dwell (0) is unaffected -- it doesn't depend on stop 2.
+    # Stop 3's running time DOES depend on stop 2's actual departure, which
+    # is None (no schedule) -- run_samples must be 0, not 1 (which the bug
+    # would produce by pairing stop 3 with stop 1's departure instead:
+    # actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
+    assert dwell_samples == 1
+    assert dwell_sum_sec == 0
+    assert run_samples == 0
+    assert run_sum_sec == 0

@@ -1,5 +1,5 @@
 """Per-stop-visit dwell-time and running-time decomposition of `arr_delay`
-(item 89) and `dep_delay`.
+(populated only for `ingest_strategy == 'static_join'` feeds) and `dep_delay`.
 
 Dwell time is time spent AT a stop: this visit's actual departure minus its
 own actual arrival. Running time is time spent BETWEEN stops: this visit's
@@ -138,7 +138,7 @@ class StopVisit:
     arrival; `dep_delay` is always a real int (see module docstring).
     """
 
-    __slots__ = ("stop_sequence", "sched_arr_sec", "sched_dep_sec", "arr_delay", "dep_delay")
+    __slots__ = ("arr_delay", "dep_delay", "sched_arr_sec", "sched_dep_sec", "stop_sequence")
 
     def __init__(
         self,

@@ -35,6 +35,14 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # very-late bus still counts.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
+# Outside the +/-MAX_PLAUSIBLE_DELAY_SEC window every non-NULL arr_delay reaching
+# argMax already satisfies (see build_dedup_ch_sql's arr_clamp), so this can never
+# collide with a real value; derived from MAX_PLAUSIBLE_DELAY_SEC so the two can't
+# drift apart. -1 (used for the small schedule_relationship_trip/_stop enums
+# elsewhere) isn't safe here since arr_delay is a signed seconds value and small
+# negative delays are legitimate.
+_ARR_DELAY_NULL_SENTINEL = -MAX_PLAUSIBLE_DELAY_SEC - 1
+
 
 def build_dedup_ch_sql(
     *,
@@ -117,6 +125,19 @@ def build_dedup_ch_sql(
     "previous stop" side of a running-time computation); only an
     out-of-plausible-range NON-NULL `arr_delay` value is excluded.
 
+    `arr_delay` is legitimately NULL per-row (sparse RT arrival coverage), but
+    ClickHouse's `argMax(arg, val)` silently SKIPS a row whose `arg` is NULL
+    when picking the row with the maximal `val` — it does not fall back to
+    NULL just because the true-latest `(captured_at, file_name)` row happens
+    to have a NULL `arr_delay`. Left unguarded, that resurrects an earlier,
+    stale non-NULL `arr_delay` instead of correctly reporting "no arrival
+    estimate for the latest observation". The `coalesce(u.arr_delay,
+    _ARR_DELAY_NULL_SENTINEL)` / `NULLIF(..., _ARR_DELAY_NULL_SENTINEL)` wrap
+    below forces every row into `argMax`'s selection (so latest-observation-
+    wins is still honored) while converting the sentinel back to NULL in the
+    final result. The same fix already applies to `schedule_relationship_trip`/
+    `schedule_relationship_stop` elsewhere in this codebase.
+
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
     below.
@@ -134,7 +155,13 @@ def build_dedup_ch_sql(
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
-    arr = ", argMax(u.arr_delay, (u.captured_at, u.file_name)) AS arr_delay" if include_arr_delay else ""
+    arr = (
+        ", NULLIF(argMax(coalesce(u.arr_delay, "
+        f"{_ARR_DELAY_NULL_SENTINEL}), (u.captured_at, u.file_name)), "
+        f"{_ARR_DELAY_NULL_SENTINEL}) AS arr_delay"
+        if include_arr_delay
+        else ""
+    )
     arr_clamp = (
         f" AND (u.arr_delay IS NULL OR u.arr_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC})"
         if include_arr_delay

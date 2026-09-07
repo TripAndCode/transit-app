@@ -1314,7 +1314,7 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
 def _run_analyze_from_ch(agency_id, ch_client):
     """Like `_run_analyze`, but for dwell_run tests that seed ClickHouse
     `updates` directly (via `insert_updates`) instead of mirroring from
-    Postgres `updates` -- item 89 added `arr_delay` only to the ClickHouse
+    Postgres `updates` -- `arr_delay` exists only in the ClickHouse `updates`
     schema (Postgres `updates` has zero production readers and was never
     extended to carry it -- see the `transit-app-gotchas` skill), so
     `mirror_updates_to_ch` can't carry an `arr_delay` value through."""

@@ -1,4 +1,4 @@
-"""Pure-logic tests for dwell-time/running-time decomposition (item 95).
+"""Pure-logic tests for dwell-time/running-time decomposition.
 
 Mirrors tests/unit/test_histogram.py's style: synthetic, hand-computable
 inputs with no DB fixtures (pure functions only).

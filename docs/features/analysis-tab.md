@@ -40,7 +40,8 @@ What the user sees/does:
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). An empty result
   shows `EmptyState` with a "reset to this week" recovery action. `dwell_run`
   instead renders `DwellRunBlock` (defined inline in `AnalysisTab.tsx`): a
-  per-route dwell-time/running-time table decomposing `arr_delay` (item 89)
+  per-route dwell-time/running-time table decomposing `arr_delay` (populated
+  only for `ingest_strategy == 'static_join'` feeds) and `dep_delay` separately
   from the existing delay histogram — an explicit `EmptyState` renders
   instead when the agency's feed never sends `arr_delay` (`available:
   false`) or the current time-band filter isn't servable by this
@@ -94,7 +95,7 @@ What the user sees/does:
 | `pipeline/reports/rankings.py` | The seven report-tab `compute_*` functions |
 | `pipeline/reports/dwell_run.py` | `compute_dwell_run_decomposition` — the `dwell_run` report's read side |
 | `pipeline/dwell_run.py` | Pure dwell/running-time math (schedule + `arr_delay`/`dep_delay` → actual timestamps → dwell/running seconds) shared by the analyze-time builder and the read side |
-| `pipeline/histogram.py` | Fixed-width histogram bucketing/percentile math, generalized (item 95) to accept custom `(lo, hi, width)` bounds so `pipeline/dwell_run.py` can reuse it with its own bucket scale |
+| `pipeline/histogram.py` | Fixed-width histogram bucketing/percentile math, accepting custom `(lo, hi, width)` bounds so `pipeline/dwell_run.py` can reuse it with its own bucket scale |
 | `pipeline/reports/suggest.py` | `compute_suggestion()` — the Insight Panel's rule engine |
 | `pipeline/reports/forecast.py` | `summarize_agency_overview`, `summarize_expected_delay_heatmap`, `hourly_cells_to_dow_band` — shape the forecast endpoints' payloads |
 | `pipeline/analyze.py` | Builds every `agg_*` table the fast paths and forecast endpoints read, including `agg_route_daily_dwell_run` (`static_join` agencies with a static schedule loaded only) |

@@ -220,9 +220,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # ON COMMIT DROP ties the temp table's lifetime to this txn (safe for
         # the per-agency analyze loop on one connection); ANALYZE gives the
         # planner stats for the downstream GROUP BYs.
-        ch_sql = build_dedup_ch_sql(include_captured_at=True)
+        ch_sql = build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True)
         # Column order must match build_dedup_ch_sql's SELECT list exactly:
-        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence, dep_delay, last_captured_at
+        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
+        # dep_delay, last_captured_at, arr_delay (arr_delay is always last
+        # regardless of include_captured_at -- see build_dedup_ch_sql's docstring).
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
             cur.execute(
@@ -230,7 +232,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 CREATE TEMP TABLE _analyze_deduped (
                     route_code text, service_type text, scheduled_time time,
                     trip_id text, date date, stop_sequence int, dep_delay int,
-                    captured_at timestamptz
+                    captured_at timestamptz, arr_delay int
                 ) ON COMMIT DROP
                 """
             )
@@ -258,13 +260,15 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     # fixup, a ClickHouse timestamp that's naive-but-means-UTC
                     # would get reinterpreted as JST and land 9h early. Same
                     # guard as pipeline/clickhouse.py's max_captured_at /
-                    # max_captured_at_before. last_captured_at is the last
-                    # element of each row (see build_dedup_ch_sql's SELECT
-                    # list above).
+                    # max_captured_at_before. last_captured_at is the
+                    # second-to-last element of each row -- arr_delay is
+                    # always last regardless of include_captured_at (see
+                    # build_dedup_ch_sql's SELECT list above).
                     rows = [
                         (
-                            *r[:-1],
-                            r[-1].replace(tzinfo=timezone.utc) if r[-1] is not None and r[-1].tzinfo is None else r[-1],
+                            *r[:-2],
+                            r[-2].replace(tzinfo=timezone.utc) if r[-2] is not None and r[-2].tzinfo is None else r[-2],
+                            r[-1],
                         )
                         for r in block
                     ]
@@ -909,10 +913,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
 
         # ── agg_route_daily_dwell_run (per-day dwell/running-time distribution) ──
-        # Decomposes arr_delay (item 89) + dep_delay into per-stop-visit dwell
-        # time (this visit's departure minus its own arrival) and running
-        # time (this visit's arrival minus the PREVIOUS visit's departure) --
-        # see pipeline/dwell_run.py for the shared math this mirrors in SQL.
+        # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
+        # visit's departure minus its own arrival) and running time (this
+        # visit's arrival minus the PREVIOUS visit's departure) -- see
+        # pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
+        # arr_delay straight from _analyze_deduped (materialised once above)
+        # rather than running its own second ClickHouse scan -- see that
+        # section's own comment for why a second scan is deliberately avoided.
         # Requires BOTH a static schedule (arrival_time/departure_time come
         # from static_stop_times, which `has_static` alone confirms rows
         # exist for) AND an ingest strategy confirmed to send `arr_delay`
@@ -921,31 +928,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # "row presence is not the availability signal, ingest_strategy is"
         # convention as agg_service_delivered_daily.
         if has_static and row and row[0] == "static_join":
-            ch_sql = build_dedup_ch_sql(include_arr_delay=True)
-            # Column order matches build_dedup_ch_sql's SELECT list exactly:
-            # route_code, service_type, scheduled_time, trip_id, date,
-            # stop_sequence, dep_delay, arr_delay (no include_captured_at
-            # here, so arr_delay is the last column).
-            with conn.cursor() as cur:
-                cur.execute("DROP TABLE IF EXISTS _analyze_dwell_run")
-                cur.execute(
-                    """
-                    CREATE TEMP TABLE _analyze_dwell_run (
-                        route_code text, service_type text, scheduled_time time,
-                        trip_id text, date date, stop_sequence int, dep_delay int,
-                        arr_delay int
-                    ) ON COMMIT DROP
-                    """
-                )
-                with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
-                    for block in stream:
-                        if not block:
-                            continue
-                        psycopg2.extras.execute_values(
-                            cur, "INSERT INTO _analyze_dwell_run VALUES %s", block, page_size=10_000
-                        )
-                cur.execute("ANALYZE _analyze_dwell_run")
-
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
@@ -959,28 +941,33 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                         d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay,
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
-                    FROM _analyze_dwell_run d
-                    JOIN static_stop_times sst
+                    FROM _analyze_deduped d
+                    LEFT JOIN static_stop_times sst
                       ON sst.agency_id = %(agency_id)s
                      AND sst.trip_id = d.trip_id
                      AND sst.stop_sequence = d.stop_sequence
                 ),
                 actuals AS (
-                    -- actual_dep_sec always resolves once sched_dep_sec is
-                    -- known (dep_delay is never NULL here -- see
-                    -- build_dedup_ch_sql). actual_arr_sec additionally needs
-                    -- BOTH arr_delay and the schedule's own arrival_time, so
-                    -- it's frequently NULL even on a row that clears the
-                    -- WHERE below -- that's the "dwell/running needs
-                    -- arr_delay, running's previous-stop side only needs
-                    -- dep_delay" split pipeline.dwell_run's module docstring
-                    -- describes.
+                    -- A stop lacking a static schedule row (LEFT JOIN found no
+                    -- match) or lacking arrival_time/departure_time within one
+                    -- yields NULL sched_dep_sec/sched_arr_sec here -- every
+                    -- such visit is still KEPT (not filtered out) so the
+                    -- LAG() window below sees every stop_sequence in order;
+                    -- dropping the row would let LAG() silently skip past it
+                    -- and pair the FOLLOWING stop with the wrong previous
+                    -- departure. actual_dep_sec is NULL exactly when
+                    -- sched_dep_sec is NULL. actual_arr_sec additionally needs
+                    -- BOTH arr_delay and sched_arr_sec, so it's frequently
+                    -- NULL even when actual_dep_sec resolves -- that's the
+                    -- "dwell/running needs arr_delay, running's previous-stop
+                    -- side only needs dep_delay" split pipeline.dwell_run's
+                    -- module docstring describes.
                     SELECT route_code, service_type, trip_id, date, stop_sequence,
-                        sched_dep_sec + dep_delay AS actual_dep_sec,
+                        CASE WHEN sched_dep_sec IS NOT NULL
+                             THEN sched_dep_sec + dep_delay END AS actual_dep_sec,
                         CASE WHEN arr_delay IS NOT NULL AND sched_arr_sec IS NOT NULL
                              THEN sched_arr_sec + arr_delay END AS actual_arr_sec
                     FROM visits
-                    WHERE sched_dep_sec IS NOT NULL
                 ),
                 with_prev AS (
                     SELECT *,
