@@ -120,10 +120,15 @@ def build_dedup_ch_sql(
     it's non-NULL — a frozen/stale feed can corrupt `arr_delay` the same way
     it corrupts `dep_delay` (see that constant's own docstring), and an
     implausible `arr_delay` would otherwise inflate a dwell/running-time
-    computation built from it. Rows with `arr_delay IS NULL` are NOT dropped
-    by this clamp — `dep_delay`-only rows are still needed (e.g. as the
-    "previous stop" side of a running-time computation); only an
-    out-of-plausible-range NON-NULL `arr_delay` value is excluded.
+    computation built from it. This clamp is folded into the `arr_delay`
+    SELECT expression itself (an out-of-range value becomes unmeasured for
+    THAT COLUMN ONLY, via the same NULL-handling path as a genuinely-NULL
+    `arr_delay`), NOT into this query's shared row-level `WHERE` — this
+    query's `WHERE`/`GROUP BY` is shared by every caller (including plain
+    `include_captured_at=True` callers with no interest in `arr_delay` at
+    all), so a row-level filter here would drop that row from the `dep_delay`
+    `argMax` too, silently resurrecting a stale `dep_delay` for a row whose
+    only problem was an implausible `arr_delay`.
 
     `arr_delay` is legitimately NULL per-row (sparse RT arrival coverage), but
     ClickHouse's `argMax(arg, val)` silently SKIPS a row whose `arg` is NULL
@@ -156,14 +161,10 @@ def build_dedup_ch_sql(
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
     arr = (
-        ", NULLIF(argMax(coalesce(u.arr_delay, "
+        ", NULLIF(argMax(coalesce(CASE WHEN u.arr_delay BETWEEN "
+        f"-{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC} THEN u.arr_delay END, "
         f"{_ARR_DELAY_NULL_SENTINEL}), (u.captured_at, u.file_name)), "
         f"{_ARR_DELAY_NULL_SENTINEL}) AS arr_delay"
-        if include_arr_delay
-        else ""
-    )
-    arr_clamp = (
-        f" AND (u.arr_delay IS NULL OR u.arr_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC})"
         if include_arr_delay
         else ""
     )
@@ -173,7 +174,7 @@ def build_dedup_ch_sql(
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{arr} "
         "FROM updates AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
-        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{arr_clamp}{extra} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
     )
