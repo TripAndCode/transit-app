@@ -363,7 +363,7 @@ def _insert_with_feed_timestamp(ch_client, agency_id, captured_at, feed_timestam
                 None,  # arr_delay
                 None,  # schedule_relationship_trip
                 None,  # schedule_relationship_stop
-                feed_timestamp,
+                int(feed_timestamp.timestamp()),  # feed_timestamp: Nullable(UInt64), epoch seconds
             )
         ],
     )

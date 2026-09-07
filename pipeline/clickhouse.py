@@ -215,4 +215,7 @@ def latest_feed_timestamp(client, agency_id: int) -> datetime | None:
     value = result.result_rows[0][0]
     if value is None:
         return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    # `feed_timestamp` is `Nullable(UInt64)` (raw epoch seconds), unlike
+    # `captured_at`'s `DateTime64` above -- convert rather than reuse the
+    # tzinfo-patch idiom, which only applies to genuine datetime columns.
+    return datetime.fromtimestamp(value, tz=timezone.utc)
