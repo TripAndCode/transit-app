@@ -185,3 +185,34 @@ def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime
         return None
     value = result.result_rows[0][0]
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def latest_feed_timestamp(client, agency_id: int) -> datetime | None:
+    """The most recently ingested row's self-reported `feed_timestamp`
+    (the GTFS-RT `FeedHeader.timestamp` -- see
+    `pipeline.strategies._pb.decode_feed_timestamp`), NOT our own ingest
+    `captured_at`. `None` when the agency has no rows at all, or when its
+    latest row's ingest strategy doesn't confirm this field (see
+    `pipeline.strategies.__init__`'s docstring on per-agency nullable
+    coverage).
+
+    `ORDER BY captured_at DESC LIMIT 1` (same index-served form as
+    `max_captured_at` — see its docstring) rather than
+    `maxOrNull(feed_timestamp)`: the freshness question this answers is "is
+    the agency's feed itself still ticking forward", which the latest
+    POLL's own `feed_timestamp` answers directly — not "what's the largest
+    `feed_timestamp` ever seen", which a full per-agency scan would take
+    just as long to answer without being any more correct under normal
+    (monotonically increasing) feed behavior.
+    """
+    result = client.query(
+        "SELECT feed_timestamp FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY captured_at DESC LIMIT 1",
+        parameters={"agency_id": agency_id},
+    )
+    if not result.result_rows:
+        return None
+    value = result.result_rows[0][0]
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
