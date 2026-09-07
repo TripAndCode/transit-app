@@ -7,11 +7,11 @@ actual arrival minus the PREVIOUS stop visit's actual departure (same trip,
 same service day). Both derive an "actual" timestamp (seconds since the
 service day's midnight) from the static schedule's own arrival_time/
 departure_time (``static_stop_times``) plus the RT feed's `arr_delay`/
-`dep_delay` for that stop visit -- neither `_analyze_deduped` nor
-`agg_route_daily_dist` reads `arr_delay` or the schedule's `arrival_time`;
-this module and its own analyze()-time materialization
-(`agg_route_daily_dwell_run`, see pipeline/analyze.py) are the first
-consumer of both.
+`dep_delay` for that stop visit -- `agg_route_daily_dist` and every other
+pre-existing `agg_*` builder never read `arr_delay` or the schedule's
+`arrival_time`; `_analyze_deduped` carries `arr_delay` solely so this
+module's own analyze()-time materialization (`agg_route_daily_dwell_run`,
+see pipeline/analyze.py) can consume it.
 
 A dwell-time observation needs this visit's own `arr_delay`; a running-time
 observation needs this visit's `arr_delay` too, PLUS the PREVIOUS visit's

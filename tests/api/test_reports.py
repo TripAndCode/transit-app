@@ -1363,6 +1363,41 @@ async def test_dwell_run_time_band_filter_is_explicitly_unsupported(reports_clie
 
 
 @pytest.mark.asyncio
+async def test_dwell_run_csv_export_not_available_says_so_instead_of_empty(reports_client):
+    """format=csv for a non-static_join agency must render the same explicit
+    'not available' message the JSON/text response does -- an empty
+    (header-only) CSV would be indistinguishable from "genuinely zero
+    observations", exactly the misleading blank the feature exists to
+    avoid."""
+    import csv
+    import io
+
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    # row 0: definition preamble, row 1: column header, row 2: the message.
+    assert len(rows) == 3
+    assert rows[2][0]  # non-empty explanatory message, not silently absent
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_empty(reports_client):
+    """Same as the not-available case, but for the time_band_supported=False
+    state (still an available static_join agency)."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning&format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    assert len(rows) == 3
+    assert rows[2][0]
+
+
+@pytest.mark.asyncio
 async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client):
     """End-to-end: seed a static schedule + ClickHouse `arr_delay`/`dep_delay`
     for a 3-stop trip (same hand-computed fixture as
