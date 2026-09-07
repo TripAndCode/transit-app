@@ -19,6 +19,7 @@ from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from pipeline.query.formatter import format_result, format_trend_text
 from pipeline.reports import (
+    ON_TIME_PRESETS,
     compute_compare_ranking,
     compute_dow_ranking,
     compute_hourly_heatmap,
@@ -371,6 +372,24 @@ async def get_report(
     report_type: str,
     limit: int | None = Query(default=None, ge=1),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
+    preset: str | None = Query(
+        default=None,
+        description="Named on-time/late tolerance preset (currently only 'legacy_60s'). "
+        "Mutually exclusive with early_tolerance_sec/late_tolerance_sec.",
+    ),
+    early_tolerance_sec: int | None = Query(
+        default=None,
+        ge=0,
+        description="on_time only: how many seconds early a departure may still be 'on time'. "
+        "Unset means unbounded (any early departure counts), matching legacy_60s.",
+    ),
+    late_tolerance_sec: int | None = Query(
+        default=None,
+        ge=0,
+        description="on_time/worst_5min: the late-side cutoff (default 60s for on_time, 300s for "
+        "worst_5min). Passing this opts into a query-time histogram estimate instead of the "
+        "exact legacy_60s column.",
+    ),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
     ch=Depends(get_ch),
@@ -380,6 +399,21 @@ async def get_report(
     """Compute the named report live and render it."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
+
+    if preset is not None:
+        if early_tolerance_sec is not None or late_tolerance_sec is not None:
+            raise HTTPException(
+                status_code=400, detail="preset cannot be combined with early_tolerance_sec/late_tolerance_sec"
+            )
+        if preset not in ON_TIME_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+        early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
+    if early_tolerance_sec is not None and report_type != "on_time":
+        raise HTTPException(status_code=400, detail="early_tolerance_sec only applies to the on_time report")
+    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min"):
+        raise HTTPException(
+            status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min reports"
+        )
 
     n = limit or 100
     intent: dict = {}
@@ -392,7 +426,15 @@ async def get_report(
         rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="asc", limit=n)
         intent = {"query_type": "ranking", "limit": n, "sort_order": "asc"}
     elif report_type == "on_time":
-        rows = await compute_on_time(agency_id, ctx, conn, ch=ch, limit=n)
+        rows = await compute_on_time(
+            agency_id,
+            ctx,
+            conn,
+            ch=ch,
+            limit=n,
+            early_tolerance_sec=early_tolerance_sec,
+            late_tolerance_sec=late_tolerance_sec,
+        )
         # Appends a `low_confidence` bool (95% Wilson interval too wide to
         # trust the percentage) as a display-layer annotation — doesn't
         # change compute_on_time's own 5-tuple contract, so pooling callers
@@ -400,7 +442,7 @@ async def get_report(
         rows = annotate_on_time_pct_confidence(rows)
         intent = {"query_type": "on_time", "limit": n}
     elif report_type == "worst_5min":
-        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n)
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n, late_tolerance_sec=late_tolerance_sec)
         intent = {"query_type": "worst_5min", "limit": n}
     elif report_type == "compare_ranking":
         rows = await compute_compare_ranking(agency_id, ctx, conn, limit=n, ch=ch)

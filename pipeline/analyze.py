@@ -58,7 +58,14 @@ import psycopg2.extras
 from api.range import time_band_case_sql
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
-from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH
+from pipeline.histogram import (
+    HI,
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+    LO,
+    N_BUCKETS,
+    WIDTH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +247,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # ── agg_route_stats ──────────────────────────────────────────────
         # No minimum-sample HAVING here — see the module docstring's no-gate
         # policy.
-        sql = """
+        # on_time_pct_raw/late_5min_plus/late5_pct_raw bake the legacy_60s
+        # preset's fixed thresholds (LEGACY_ON_TIME_LATE_TOLERANCE_SEC=60,
+        # LEGACY_SEVERE_LATE_TOLERANCE_SEC=300) into these exact scalar
+        # columns — the only preset analyze() materialises. A caller wanting
+        # a different on-time/late tolerance reads agg_route_daily_dist's
+        # `hist` column instead and estimates it at query time (see
+        # pipeline.histogram.count_in_range /
+        # pipeline.reports.rankings.compute_on_time), rather than needing a
+        # re-aggregation for every tolerance someone might ask for.
+        on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
+        late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
+        sql = f"""
             WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
             grouped AS (
                 SELECT
@@ -262,9 +280,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     -- PERCENTILE_DISC calls) keeps this to a single per-group
                     -- sort of dep_delay.
                     PERCENTILE_DISC(ARRAY[0.5, 0.9]) WITHIN GROUP (ORDER BY dep_delay) AS pctl_sec,
-                    SUM(CASE WHEN dep_delay>300 THEN 1 ELSE 0 END) AS late_5min_plus,
-                    SUM(CASE WHEN dep_delay<=60 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
-                    SUM(CASE WHEN dep_delay>300 THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1 ELSE 0 END) AS late_5min_plus,
+                    SUM(CASE WHEN dep_delay<={on_time_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS on_time_pct_raw,
+                    SUM(CASE WHEN dep_delay>{late_thr} THEN 1.0 ELSE 0 END)*100.0/COUNT(*) AS late5_pct_raw,
                     COUNT(*) AS samples,
                     SUM(dep_delay) AS sum_delay_sec
                 FROM deduped
@@ -490,6 +508,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # NULL-service routes (the live reports never filtered them); NULL is
         # coalesced to '' in the inner CTE so GROUP BY service_type — and the
         # NOT NULL PK — see the sentinel, never a raw NULL/'' split.
+        # on_time_count/late5_count bake the legacy_60s preset's fixed
+        # thresholds — see the identical rationale on agg_route_stats above.
+        # A caller wanting a different tolerance reads `hist` instead (same
+        # column this table already stores for p50/p90 interpolation).
         sql = f"""
             WITH deduped AS (SELECT * FROM _analyze_deduped),
             bucketed AS (
@@ -503,8 +525,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 date::text, route_code, service_type,
                 COUNT(*)                              AS samples,
                 SUM(dep_delay)                        AS sum_delay_sec,
-                COUNT(*) FILTER (WHERE dep_delay <= 60)  AS on_time_count,
-                COUNT(*) FILTER (WHERE dep_delay > 300)  AS late5_count,
+                COUNT(*) FILTER (WHERE dep_delay <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC})  AS on_time_count,
+                COUNT(*) FILTER (WHERE dep_delay > {LEGACY_SEVERE_LATE_TOLERANCE_SEC})  AS late5_count,
                 {_HIST_ARRAY}                         AS hist
             FROM bucketed
             GROUP BY date, route_code, service_type
