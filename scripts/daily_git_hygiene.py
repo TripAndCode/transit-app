@@ -643,6 +643,26 @@ def poetry_env_path(location: Path) -> Path | None:
     return Path(path).resolve() if path else None
 
 
+def is_review_worktree(worktree_path: Path, repo_path: Path) -> bool:
+    """Match `/review-pr`'s own `.worktrees/review-<branch>` convention.
+
+    That command's own docs (`review-pr.md` step 7) call this worktree
+    read-only and say leaving it in place indefinitely -- for
+    `/follow-up-pr-review` to diff the next push against later -- is a
+    supported, expected outcome, not a stale leftover. It never runs the
+    repository's test suite or any other poetry command, so unlike every
+    other worktree shape this module handles, there is no "poetry just
+    failed to resolve a real venv" case to protect against here: no venv is
+    ever created for it in the first place.
+    """
+
+    try:
+        relative = worktree_path.relative_to(repo_path)
+    except ValueError:
+        return False
+    return len(relative.parts) >= 2 and relative.parts[0] == ".worktrees" and relative.parts[1].startswith("review-")
+
+
 def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:
     """Every currently in-use poetry venv path: `main_venv` plus every worktree's own.
 
@@ -653,8 +673,12 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     raise a confusing "`--venv-root` is misconfigured" error for what is
     really an unrelated, one-off `poetry` hiccup.
 
-    A worktree gets two, narrower grace conditions before the same
+    A worktree gets three, narrower grace conditions before the same
     fail-closed treatment applies:
+    - `is_review_worktree` matches `/review-pr`'s own `.worktrees/review-*`
+      convention, which is guaranteed by that command's design to never run
+      poetry at all -- skipped unconditionally, with no age check, since
+      there is no "eventually resolves" case to wait for.
     - `git worktree list`'s own `prunable` flag means the administrative
       entry outlived the actual directory (removed out-of-band, or pending
       its own `git worktree prune`) -- unambiguously "nothing runs out of
@@ -698,6 +722,21 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     (never a directory -- only the main checkout's own `.git` is one), so
     an unexpected shape there also raises rather than silently guessing.
 
+    A known, undetected residual on the far side of that same trade-off: a
+    `/vps-loop-run` worker dispatched into a sandbox with no `poetry
+    install` permission (`transit-app-gotchas` documents this as routine,
+    not rare) can go past `min_age_hours` never having created a venv
+    either, for a structurally different reason than the review-worktree
+    case above -- but nothing here can tell that apart from a worktree
+    whose poetry install is merely running late or a transient hiccup hid a
+    real one, since `poetry_env_path` returns the same `None` for all three.
+    Unlike the review-worktree case, this is not exempted: doing so by
+    matching `.claude/worktrees/agent-*` would also exempt the much more
+    common worktree that *did* successfully create a real venv on a run
+    where `poetry env info` merely hiccupped, which is exactly the false
+    "not in use" this function exists to prevent. Left to raise (and delay
+    pruning) until a human confirms which case it actually is.
+
     Assumes `repo` is the only clone of this project on the host, and that
     no worktree path is ever reused after removal within one venv's
     `min_age_hours` window: an unrelated second clone, or a fresh worktree
@@ -718,6 +757,8 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
         if resolved_worktree == resolved_repo:
             continue  # main_venv (the caller's, not re-derived here) already covers this one
         if worktree.prunable or (not worktree.locked and not worktree.path.exists()):
+            continue
+        if is_review_worktree(resolved_worktree, resolved_repo):
             continue
         venv = poetry_env_path(worktree.path)
         if venv is not None:

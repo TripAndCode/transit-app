@@ -1181,6 +1181,57 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
     assert worktree_path.resolve() not in queried
 
 
+@pytest.mark.parametrize(
+    ("relative", "expected"),
+    [
+        ("/.worktrees/review-main", True),
+        ("/.worktrees/review-vps-loop/item-85", True),
+        ("/.worktrees/other", False),
+        ("/.claude/worktrees/agent-a85e93fb4ec1fbec1", False),
+        ("/review-main", False),
+    ],
+)
+def test_is_review_worktree_matches_only_the_review_pr_convention(relative: str, expected: bool):
+    """Only `.worktrees/review-*` under the repo root -- `/review-pr`'s own naming -- matches."""
+
+    repo_path = Path("/repo")
+
+    assert hygiene.is_review_worktree(Path(f"/repo{relative}"), repo_path) is expected
+
+
+def test_is_review_worktree_false_for_a_path_outside_the_repo():
+    """A worktree that isn't even under `repo_path` can't match by construction."""
+
+    assert hygiene.is_review_worktree(Path("/elsewhere/.worktrees/review-main"), Path("/repo")) is False
+
+
+def test_compute_in_use_poetry_venvs_skips_a_review_worktree_without_calling_poetry(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A `/review-pr` worktree never runs poetry by that command's own design, so it is
+    skipped unconditionally -- no age grace period, and `poetry_env_path` is never called
+    for it, unlike a genuine unresolvable-venv worktree which must age past the grace
+    period first."""
+
+    worktree_path = repository / ".worktrees" / "review-main"
+    worktree_path.parent.mkdir()
+    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
+
+    queried: list[Path] = []
+
+    def _fake_env_path(location: Path) -> Path | None:
+        queried.append(location.resolve())
+        return None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    main_venv = repository.parent / "venv-main"
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
+
+    assert in_use == {main_venv}
+    assert worktree_path.resolve() not in queried
+
+
 def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_directory_is_absent(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
