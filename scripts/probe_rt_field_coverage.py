@@ -91,7 +91,11 @@ def main() -> None:
             print(f"FETCH FAILED: {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        raw = pathlib.Path(args.file).read_bytes()
+        try:
+            raw = pathlib.Path(args.file).read_bytes()
+        except OSError as e:
+            print(f"READ FAILED: {e}", file=sys.stderr)
+            sys.exit(1)
 
     cov = field_coverage(raw)
     print(json.dumps(_assess(cov), indent=2, ensure_ascii=False))

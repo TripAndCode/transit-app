@@ -767,8 +767,8 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   single second — the boundary this item's own verify criterion names.
   (PR #356)
 - 2026-09-08: Built the tooling half of bulk-onboarding the Hiroshima Bus
-  Association's remaining GTFS operators (item 103); the actual `agencies.csv`
-  update is a follow-up step, not included here (see below). New
+  Association's remaining GTFS operators (item 103); a later commit on this
+  branch applied the actual `agencies.csv` update (see below). New
   `pipeline.strategies.static_join.field_coverage(pb_bytes)` generalizes item
   87's per-field coverage check (stop_id/arr_delay/schedule_relationship_trip/
   schedule_relationship_stop/feed_timestamp) into a reusable function that
@@ -804,18 +804,21 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (dedup-by-feed_url, idempotent `--write`, unsupported-platform exclusion,
   and the coverage-threshold assessment) without a DB or network dependency.
 
-  What's left, and why it isn't done here: this session's sandbox allows
-  editing/creating files under subdirectories but denies both `Edit` and
-  `Write` (and any Bash-based file mutation) against repository-root files,
-  including `agencies.csv` and `gtfs_pipeline.py` themselves — a hard
-  tooling boundary distinct from (and encountered in addition to) this
-  item's already-documented network-access-unavailable constraint. So
-  `agencies.csv` itself still lists only agencies 8/9/10; running
-  `scripts/bus_kyo_association_feeds.py --write` to actually append the 10
-  new rows, then `scripts/probe_rt_field_coverage.py --url <realtime_url>`
-  against each one's live feed (both need permissions this session doesn't
-  have), then `make analyze-all`, is the concrete remaining path to this
-  item's Verify line. Backend verification of the diff itself (`make test`,
+  What's left, and why the item's Verify line still isn't satisfied: a later
+  commit on this branch (`feat(agencies): onboard Hiroshima Bus Association
+  operators`) appended the 10 confirmed `mcapps.jp`/`static_join`/`direct_url`
+  rows (agency_id 11, 12, 13, 14, 15, 17, 18, 19, 53, 54) to `agencies.csv`,
+  so it no longer lists only agencies 8/9/10. But none of these 10
+  newly-added agencies has had
+  `scripts/probe_rt_field_coverage.py --url <realtime_url>` run against its
+  live feed, and no `make analyze-all` run has been done for any of them —
+  both still require network egress this environment doesn't have. So this
+  item's Verify line ("at least one newly-onboarded agency ingests
+  successfully end-to-end ... and its per-field RT capability is correctly
+  reported") remains NOT satisfied by this diff: live-feed verification
+  against a real feed for one of the 10 is the concrete remaining blocker,
+  not something this branch's code alone can claim. Backend verification of
+  the diff itself (`make test`,
   `ruff`, `mypy`) also could not be run in this sandbox, per the same
   `transit-app-gotchas`-documented dispatched-worker execution gap other
   items have hit; the new code was instead checked by tracing it against the
