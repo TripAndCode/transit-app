@@ -1012,6 +1012,18 @@
         "run_p90": "Running p90",
         "run_samples": "Running samples"
       }
+    },
+    "headway_quality": {
+      "title": "Headway quality",
+      "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
+      "empty": "No high-frequency route has enough data in this range yet.",
+      "col": {
+        "route": "Route",
+        "ewt": "Excess wait",
+        "cov": "Spacing CoV",
+        "long_gap_rate": "Long-gap rate",
+        "samples": "Samples"
+      }
     }
   },
   "insight_panel": {

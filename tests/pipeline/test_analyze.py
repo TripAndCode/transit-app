@@ -1075,19 +1075,23 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency "
+            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency, scheduled_wait_mean_sec "
             "FROM agg_route_headway WHERE agency_id = %s ORDER BY route_code",
             (agency_id,),
         )
-        by_route = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        by_route = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
 
-    freq_median, freq_hf = by_route["R_FREQ"]
+    freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
     assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
     assert freq_hf is True
+    # Perfectly regular headway -> mean wait reduces to headway/2 (item 94's
+    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
+    assert abs(freq_wait - 240) < 1
 
-    slow_median, slow_hf = by_route["R_SLOW"]
+    slow_median, slow_hf, slow_wait = by_route["R_SLOW"]
     assert abs(slow_median - 1800) < 1  # hand-computed: 1800s (30 min) between every pair
     assert slow_hf is False
+    assert abs(slow_wait - 900) < 1
 
 
 def _ch_headway_row(
@@ -1170,15 +1174,24 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
+            "SELECT actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
+            "actual_headway_sumsq_sec2, long_gap_count FROM agg_route_headway_daily "
             "WHERE agency_id = %s AND route_code = 'R1'",
             (agency_id,),
         )
         row = cur.fetchone()
     assert row is not None
-    median_sec, samples = row
+    median_sec, samples, sum_sec, sumsq_sec2, long_gap_count = row
     assert samples == 2  # 3 events -> 2 consecutive gaps
     assert abs(median_sec - 480) <= 3
+    # Both gaps land exactly on 480s -- sum/sumsq are the item 94 sufficient
+    # statistics behind that same median, additive across days (see
+    # pipeline.headways module docstring).
+    assert abs(sum_sec - 960) <= 6
+    assert abs(sumsq_sec2 - 460800) <= 6000
+    # No static schedule seeded for R1 in this fixture -> no scheduled
+    # median to compare against -> nothing is countable as "long" yet.
+    assert long_gap_count == 0
 
 
 def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
@@ -1238,6 +1251,46 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
     # only see 2 events -> 1 sample.
     assert samples == 2
     assert abs(median_sec - 600) <= 3
+
+
+def test_analyze_reconstructs_actual_headway_long_gap_count_against_scheduled_median(pg_conn, agency_id, ch_client):
+    """A route classified high-frequency by its static schedule (8-minute /
+    480s scheduled headway) whose RT-reconstructed gaps for one day show a
+    bunched pair (30s) followed by a compensating long gap (900s, over
+    1.75 * 480s = 840s) -- long_gap_count must count only the 900s gap,
+    read back from agg_route_headway (inserted earlier in the SAME
+    analyze() transaction) as the scheduled reference."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R1",
+        "WD",
+        "s1",
+        ["08:00:00", "08:08:00", "08:16:00", "08:24:00", "08:32:00"],
+    )
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:00:30", dep_delay=0, file_name="b.pb"),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:15:30", dep_delay=0, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_samples, actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count "
+            "FROM agg_route_headway_daily WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    samples, sum_sec, sumsq_sec2, long_gap_count = row
+    assert samples == 2  # gaps: 30s, 900s
+    assert abs(sum_sec - 930) <= 3
+    assert abs(sumsq_sec2 - (30 * 30 + 900 * 900)) <= 3000
+    assert long_gap_count == 1  # only the 900s gap exceeds 1.75 * 480 = 840
 
 
 def test_analyze_skips_agg_route_headway_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):

@@ -804,3 +804,69 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   diff was instead manually traced end-to-end against hand-computed
   expected values for every new arithmetic path. (PR #358)
 - 2026-09-09: Using `static_version_id` (item 88), compute planned trip counts and planned vehicle-kilometers per static-feed version and mark schedule-revision boundary dates on the Trend chart's time series, plus a "vehicle-km delivered" headline supply metric on `GET /api/network/summary` (item 98). New migration `0037` adds `agg_static_version_summary` (agency_id, static_version_id, trip_count, vehicle_km, computed_at) — deliberately UPSERT-only, exempt from `pipeline.analyze.analyze()`'s usual per-agency wipe-and-rewrite loop, so a past version's figures survive `static_loader.load_static()` overwriting the raw `static_trips`/`static_shapes` rows on its next reload; `analyze()`'s new builder computes `trip_count` as a plain `COUNT(*)` of `static_trips` (mirrors `trips.txt`, independent of any date range, so two different static GTFS versions with a different trip count produce different rows) and `vehicle_km` as the summed `ST_Length` (geography) of each trip's shape, excluding trips with no resolvable `shape_id` from the sum and leaving the whole figure `NULL` (not zero) when the agency has no `shapes.txt` loaded at all. New migration `0038` adds `agg_schedule_revision_daily` (agency_id, date, static_version_id), populated by a second new `analyze()` builder as a normal wipe-and-rewrite table (source data lives permanently in ClickHouse `updates`, so full recomputation is safe): a ClickHouse query picks, per day, the `static_version_id` stamped on the most rows that day (mode via `argMax(version, cnt)`), inserting no row at all for a day with no non-NULL version (Aomori's `aomori_regex` strategy never joins static data; any day predating item 88). New `pipeline/reports/schedule_revision.py: get_schedule_revision_boundaries()` reads that table and flags a boundary date only when it's exactly one calendar day after a known-version previous day with a different version — a gap in coverage is "unknown", never "known to differ" — wired into `GET /api/{agency_id}/reports/trend`'s JSON response as a new `revision_boundaries` field (skipped for the CSV export, which has no chart to annotate). New `pipeline/reports/supply.py: compute_supply_metrics_by_agency()` reads the most-recently-computed `agg_static_version_summary` row per agency and combines it with item 92's `service_delivered_pct` to produce `vehicle_km_delivered_pct` (the trip-level executed/planned ratio applied to planned vehicle-km, since there's no per-trip executed/canceled distance breakdown to do better) — `None` (trip-count-only fallback via `planned_trip_count` alone) whenever either `planned_vehicle_km` or `service_delivered_pct` isn't available; wired into `pipeline/reports/network.py: compute_network_summary()` and `api/routers/network.py`'s `NetworkAgencyRow` alongside the existing `static_version_id`/`planned_trip_count`. Frontend: `DailyChart.tsx` renders each boundary date as a dashed vertical marker (with a `revisionBoundaries` prop threaded through `AnalysisTab.tsx`'s `TrendBlock`), and `NetworkTab.tsx` renders the vehicle-km-delivered percentage next to the existing service-delivered percentage, falling back to the plain planned trip count (never a bare dash hiding real supply data) when vehicle-km isn't computable; `frontend/src/api/types.ts` and both locale bundles gained the matching fields/keys. `tests/pipeline/test_analyze.py` covers both new builders directly, including a dedicated regression proving a past version's row survives a simulated reload (`DELETE FROM static_trips` + a second `analyze()` run) with its original trip count intact, and a dominant-version-per-day case with a simulated mid-day reload (1 row of the old version vs. 2 of the new). `tests/api/test_network.py` covers the vehicle-km-delivered ratio, the no-shapes trip-count-only fallback, the no-recorded-version "not available" case, and the most-recently-computed-version tie-break. `tests/api/test_reports.py` adds an end-to-end trend-endpoint case reproducing the item's own verification scenario (two ClickHouse-tagged versions across three days yield exactly one correctly-dated boundary). `tests/unit/test_schedule_revision.py` covers the pure boundary-detection algorithm's edge cases (constant version, boundary landing exactly on `from_date`, a coverage gap before a version change, multiple boundaries, empty input) against a fake connection, no DB needed. Verified: `poetry run ruff check`/`ruff format --check`/`mypy` clean on every touched backend file; a scoped `poetry run pytest` covering every new/changed test file (139 tests) all passed; a full-suite run showed 20 unrelated failures (rate-limiting and internal-IP/loopback-rejection tests in `test_api_map.py`/`test_api_agencies.py`/`test_admin_ops.py`/`test_api_ask.py`, none of which touch any file this item changed) that reproduced from two full suites having briefly run concurrently against the same throwaway databases earlier in this session — confirmed pre-existing/environmental by re-running two of the failing tests in isolation, both passing cleanly. Frontend: `npm run typecheck`, `npm run lint` (0 errors, pre-existing unrelated warnings only), `npm run lint:i18n`, `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, a targeted `npm run test` run for the changed frontend files (19/19 passed), and `npm run build:bundle && npm run check:entry-chunk` (499.7 KiB entry static closure, MapLibre-free) — all clean. (PR #360)
+- 2026-09-09: Item 94 (depends on item 93): compute and surface Excess Waiting
+  Time (EWT), the coefficient of variation of headways, and the long-gap rate
+  for routes `agg_route_headway.is_high_frequency` already classifies
+  high-frequency, as a second metric panel rendered alongside (never instead
+  of) the existing `on_time` report — every non-high-frequency route's
+  `on_time` row, and every other report type, is untouched. `pipeline/
+  headways.py` gained the shared formulas: `mean_wait_from_moments`/
+  `mean_wait_sec` (the renewal-process E[H^2]/(2·E[H]) mean-wait-time
+  formula, not headway/2 — length-biased sampling means variance in the
+  headways itself raises expected wait), `excess_wait_time_sec` (actual mean
+  wait minus scheduled mean wait, both via the formula above), `coefficient_
+  of_variation`, and `count_long_gaps`/`long_gap_rate` against a new
+  `LONG_GAP_MULTIPLIER = 1.75` (midpoint of the 1.5x-2x band). Each has a
+  direct-from-samples form (used by the new pure-fixture unit tests) and a
+  from-pooled-sufficient-statistics form (`mean_wait_from_pooled`/
+  `coefficient_of_variation_from_pooled`, algebraically interchangeable with
+  the direct form when fed the same population's (n, sum, sum-of-squares)
+  triple — proven by a dedicated pooling-equivalence test) for combining
+  multiple days of `agg_route_headway_daily` via a plain SQL `SUM` instead of
+  re-fetching raw gaps. New migration `0040` adds `scheduled_wait_mean_sec`
+  to `agg_route_headway` (computed in the same SQL query that already derives
+  the scheduled median, via `AVG(headway_sec^2)/(2*AVG(headway_sec))`) and
+  `actual_headway_sum_sec`/`actual_headway_sumsq_sec2`/`long_gap_count` to
+  `agg_route_headway_daily` (computed in Python from the same per-day gap
+  list the existing median already comes from; `long_gap_count` reads back
+  the just-inserted `agg_route_headway` scheduled median within the same
+  `analyze()` transaction to threshold against) — all four nullable with no
+  backfill, matching migration 0028's precedent, since `analyze()` fully
+  rewrites both tables every run. New `pipeline/reports/headway_quality.py:
+  compute_headway_quality()` pools those columns over a date range (+ DOW +
+  route filter; no service_type/time_band predicate exists on this table) and
+  joins to `is_high_frequency` routes only, returning nothing at all for a
+  route with zero in-range daily rows rather than a row of nulls. Wired into
+  a new dedicated `GET /api/{agency_id}/headway_quality` endpoint (kept
+  outside the generic `/reports/{report_type}` dispatcher — no CSV/
+  definition-metadata concept applies to a server-side-classified route
+  subset) and a new `HeadwayQualityPanel` component rendered under
+  `AnalysisTab.tsx`'s `on_time` report only. Verified: a synthetic evenly-
+  spaced fixture (`[480, 480, 480]`) yields `mean_wait_sec == headway/2`
+  exactly and `coefficient_of_variation == 0`, so `excess_wait_time_sec`
+  against an identical scheduled fixture is exactly `0.0`; a synthetic
+  bunched fixture (`[60, 900]`, same total as two 480s scheduled headways)
+  yields a positive `excess_wait_time_sec` and a `0.5` long-gap rate (only
+  the 900s gap exceeds `1.75 * 480 = 840`) — both reproduced end-to-end
+  through the new API endpoint against seeded `agg_route_headway`/
+  `agg_route_headway_daily` rows, and through `pipeline.analyze`'s actual
+  builder against a seeded static schedule + bunched ClickHouse `updates`
+  fixture. `poetry run ruff check`/`mypy` clean on every touched backend
+  file. A scoped `poetry run pytest` covering every new/changed test file
+  (`tests/unit/test_headways.py`, `tests/pipeline/test_analyze.py`,
+  `tests/api/test_headway_quality.py`) passed cleanly, including a full,
+  non-concurrent `RUN_CH_INTEGRATION=1` run of `tests/pipeline/test_analyze.py`
+  in isolation. A full `make test` (no ClickHouse integration) run reached
+  36% with zero failures before this sandbox's shared ClickHouse/Postgres
+  throwaway containers became unresponsive (a hang reproducing independently
+  of `RUN_CH_INTEGRATION`, and in files this item never touches, e.g.
+  `tests/pipeline/test_static_join.py` and `tests/api/test_admin_architecture.py`
+  on different attempts) — consistent with this session's earlier documented
+  concurrent-run collision against the same containers, not a regression from
+  this item's diff; every file this item actually changed already has
+  isolated passing evidence above. Frontend: `npm run typecheck`, `npm run
+  lint` (0 errors, pre-existing unrelated warnings only), `npm run lint:i18n`,
+  `npm run lint:i18n-strings`, the full `npm run test` suite (567/567 passed),
+  `npm run test:check-entry-chunk`, and `npm run build:bundle && npm run
+  check:entry-chunk` (500.9 KiB entry static closure, MapLibre-free) — all
+  clean. (PR #361)
