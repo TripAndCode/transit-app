@@ -103,7 +103,8 @@ async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[d
             else actual_wait_mean_sec - scheduled_wait_mean_sec
         )
         cov = coefficient_of_variation_from_pooled(n, sum_sec, sumsq_sec2)
-        long_gap_rate = None if not n else r["long_gap_count"] / n
+        long_gap_count = r["long_gap_count"]
+        long_gap_rate = None if not n or long_gap_count is None else long_gap_count / n
         out.append(
             {
                 "route_code": r["route_code"],

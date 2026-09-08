@@ -47,6 +47,10 @@ async def headway_client(apply_schema):
             # High-frequency, but every agg_route_headway_daily row seeded
             # for it below falls outside the requested date range.
             (aid, "R_NODATA", 480.0, 10, True, 240.0),
+            # High-frequency, in-range daily data exists, but that data
+            # predates migration 0040's sufficient-statistics columns and
+            # hasn't been re-`analyze()`-d yet (see below).
+            (aid, "R_PREMIGRATE", 480.0, 10, True, 240.0),
         ],
     )
     await pool.executemany(
@@ -69,6 +73,12 @@ async def headway_client(apply_schema):
             # R_NODATA's only row is well outside the [2026-04-01, 2026-04-02]
             # range the tests below request.
             (aid, "R_NODATA", date(2026, 5, 1), 480.0, 2, 960.0, 460800.0, 0),
+            # R_PREMIGRATE: `actual_samples` (pre-existing column) is
+            # populated, but the three migration-0040 sufficient-statistics
+            # columns are still NULL -- the transitional state between
+            # applying that migration and the next `make analyze-all` for
+            # this agency. Must degrade to None metrics, not a 500.
+            (aid, "R_PREMIGRATE", date(2026, 4, 1), 480.0, 2, None, None, None),
         ],
     )
 
@@ -113,6 +123,25 @@ async def test_headway_quality_excludes_non_high_frequency_and_out_of_range_rout
 
     assert "R_SLOW" not in codes  # never surfaced, however much daily data it has
     assert "R_NODATA" not in codes  # high-frequency, but no data in the requested range
+
+
+async def test_headway_quality_premigration_daily_row_yields_none_metrics(headway_client):
+    """A high-frequency route whose in-range daily row predates migration
+    0040's sufficient-statistics columns (NULL sum/sumsq/long_gap_count,
+    non-null `actual_samples`) must surface as a 200 with unresolved (None)
+    metric fields, per `HeadwayQualityRow`'s documented contract -- not a
+    500 from `TypeError`s in the pooled-statistics arithmetic.
+    """
+    client, aid = headway_client
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+    assert r.status_code == 200
+    by_route = {row["route_code"]: row for row in r.json()["rows"]}
+
+    premigrate = by_route["R_PREMIGRATE"]
+    assert premigrate["ewt_sec"] is None
+    assert premigrate["cov"] is None
+    assert premigrate["long_gap_rate"] is None
+    assert premigrate["samples"] == 2
 
 
 async def test_headway_quality_empty_agency_returns_empty_rows(headway_client):

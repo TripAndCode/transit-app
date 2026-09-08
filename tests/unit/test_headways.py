@@ -182,3 +182,13 @@ def test_mean_wait_from_pooled_no_samples_is_none():
 def test_coefficient_of_variation_from_pooled_needs_two_samples_and_positive_mean():
     assert coefficient_of_variation_from_pooled(1, 480.0, 480.0 * 480.0) is None
     assert coefficient_of_variation_from_pooled(2, 0.0, 0.0) is None
+
+
+def test_pooled_forms_return_none_rather_than_raise_on_null_sufficient_stats():
+    # A `agg_route_headway_daily` row whose `actual_samples` (pre-existing
+    # column) is populated but whose sum/sumsq predate migration 0040 and
+    # haven't been backfilled by `analyze()` yet comes back from Postgres as
+    # a positive n with NULL sum_sec/sumsq_sec2 -- both pooled forms must
+    # degrade to None, not raise TypeError on arithmetic against None.
+    assert mean_wait_from_pooled(2, None, None) is None
+    assert coefficient_of_variation_from_pooled(2, None, None) is None

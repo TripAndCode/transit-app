@@ -124,7 +124,7 @@ def mean_wait_sec(gaps: Sequence[float]) -> float | None:
     return mean_wait_from_moments(sum(gaps) / n, sum(g * g for g in gaps) / n)
 
 
-def mean_wait_from_pooled(n: int, sum_sec: float, sumsq_sec2: float) -> float | None:
+def mean_wait_from_pooled(n: int, sum_sec: float | None, sumsq_sec2: float | None) -> float | None:
     """Mean wait time from pooled sufficient statistics -- *n* headway
     samples, their sum, and their sum of squares. `sum`/`sumsq` are
     additive across any partition of the same gap population (e.g. summing
@@ -132,9 +132,12 @@ def mean_wait_from_pooled(n: int, sum_sec: float, sumsq_sec2: float) -> float | 
     computing directly over the days' concatenated gaps), so this is what a
     caller pooling multiple days of `agg_route_headway_daily` should use
     instead of re-deriving E[H]/E[H^2] from raw gaps it no longer has.
-    ``None`` when there are no samples.
+    ``None`` when there are no samples, or *sum_sec*/*sumsq_sec2* is
+    ``None`` -- a row whose `actual_samples` predates the sufficient-
+    statistics columns being added has a non-null sample count but null
+    sums, and that must surface as an unresolved metric, not a crash.
     """
-    if n <= 0:
+    if n <= 0 or sum_sec is None or sumsq_sec2 is None:
         return None
     return mean_wait_from_moments(sum_sec / n, sumsq_sec2 / n)
 
@@ -170,12 +173,14 @@ def coefficient_of_variation(gaps: Sequence[float]) -> float | None:
     return coefficient_of_variation_from_pooled(n, sum(gaps), sum(g * g for g in gaps))
 
 
-def coefficient_of_variation_from_pooled(n: int, sum_sec: float, sumsq_sec2: float) -> float | None:
+def coefficient_of_variation_from_pooled(n: int, sum_sec: float | None, sumsq_sec2: float | None) -> float | None:
     """`coefficient_of_variation`'s pooled-sufficient-statistics form (see
     `mean_wait_from_pooled` for the pooling rationale). ``None`` when there
-    are fewer than two samples or the mean is non-positive.
+    are fewer than two samples, *sum_sec*/*sumsq_sec2* is ``None`` (see
+    `mean_wait_from_pooled`'s docstring for when that happens), or the mean
+    is non-positive.
     """
-    if n < 2 or sum_sec <= 0:
+    if n < 2 or sum_sec is None or sumsq_sec2 is None or sum_sec <= 0:
         return None
     mean = sum_sec / n
     # E[H^2] - E[H]^2 -- algebraically non-negative, but float rounding on
