@@ -613,6 +613,11 @@
       "hour": "時",
       "next_stop_sequence": "次の停留所順",
       "avg_added_min": "追加遅延(分)",
+      "scheduled_run_min": "所要時間(時刻表・分)",
+      "actual_run_p50_min": "所要時間(実績中央値・分)",
+      "actual_run_p85_min": "所要時間(実績p85・分)",
+      "padding_min": "余裕時間(分)",
+      "time_adjustment_rate": "調整停車率",
       "low_confidence": "確信度"
     },
     "low_confidence_mark": "幅あり",

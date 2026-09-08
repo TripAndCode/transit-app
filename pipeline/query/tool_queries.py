@@ -29,11 +29,23 @@ unit-test callers that construct these functions' args by hand without
 wiring a client at all.
 """
 
+from collections import defaultdict
 from dataclasses import replace
 
 from api.range import RangeCtx
-from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.db import hms_to_sec_sql
+from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
+from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
+from pipeline.stats import linear_percentile
+
+# Ingest strategies confirmed to ever populate `arr_delay`/`scheduled_sec`
+# (see pipeline/strategies/static_join.py's parse_feed docstring); mirrors
+# pipeline.reports.dwell_run's identical `_AVAILABLE_STRATEGIES` gate for the
+# same underlying reason (both need RT fields only static_join's
+# Hiroshima-style feeds send) -- duplicated per module rather than shared,
+# matching that module's own established convention.
+_SCHEDULE_PADDING_STRATEGIES = frozenset({"static_join"})
 
 
 async def route_dow_breakdown(
@@ -306,6 +318,215 @@ async def schedule_realism_segments(
         (stop_sequence, next_stop_sequence, _round2(avg_added_min), samples)
         for stop_sequence, next_stop_sequence, avg_added_min, samples in result.result_rows
     ]
+
+
+async def schedule_realism_padding(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch=None,
+    *,
+    route: str,
+    early_threshold_sec: int = 60,
+    hold_allowance_sec: int = 60,
+) -> dict:
+    """Per-segment, per-hour-of-day schedule-padding decomposition for one
+    route over ctx — the richer companion to `schedule_realism_segments`
+    that distinguishes deliberate timetable slack from an actual service
+    failure, built on `pipeline.dwell_run`'s dwell/running-time math
+    (`compute_trip_dwell_running`) and the `scheduled_sec` column (populated
+    alongside `arr_delay` — see below). Backs tools._tool_schedule_realism,
+    which falls back to the dep_delay-only `schedule_realism_segments` view
+    when this returns ``available: False`` or no rows.
+
+    Only agencies whose ingest strategy is confirmed to send
+    `StopTimeUpdate.arrival` (`static_join` — same gate as
+    `pipeline.reports.dwell_run`) ever populate `arr_delay`/`scheduled_sec`,
+    which this decomposition needs for both the actual-vs-scheduled running
+    time comparison and the hour-of-day bucket (an hour parsed from
+    `scheduled_time` would silently drop every after-midnight extended-hour
+    trip, whose `scheduled_time` is NULL by design — see
+    `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec` docstring).
+    Returns ``{"available": False, "rows": [], "terminus_early_rate": None,
+    "terminus_samples": 0}`` for any other ingest strategy, or when `ch` is
+    not attached.
+
+    Each ``rows`` entry is a tuple ``(stop_sequence, next_stop_sequence,
+    hour, scheduled_run_min, actual_run_p50_min, actual_run_p85_min,
+    samples, padding_min, time_adjustment_rate)``:
+
+    - `scheduled_run_min` is the static schedule's running time for this
+      specific segment (next stop's `arrival_time` minus this stop's
+      `departure_time`), averaged across whichever trip patterns
+      contributed a sample to this (segment, hour) bucket.
+    - `actual_run_p50_min`/`actual_run_p85_min` are the median/85th
+      percentile (`pipeline.stats.linear_percentile`) of each trip-day's
+      OBSERVED running time for this segment — `compute_trip_dwell_running`'s
+      `running_sec` at the next stop (this visit's actual arrival minus the
+      previous visit's actual departure, both reconstructed from the static
+      schedule plus `arr_delay`/`dep_delay`).
+    - `padding_min` is `scheduled_run_min - actual_run_p50_min`: positive
+      means the timetable allows systematically more time than vehicles
+      actually take on this segment (padding/slack), distinguishing that
+      from `schedule_realism_segments`'s `avg_added_min`, which can't tell
+      genuine schedule slack apart from delay that started upstream.
+    - `time_adjustment_rate` is the share of this stop's on-time-or-early
+      arrivals (`arr_delay <= 0`) where the vehicle then dwelled more than
+      `hold_allowance_sec` beyond its scheduled dwell — a stop reached LATE
+      is excluded, since holding there guards against nothing (the "avoid
+      an early departure" hold this indicator targets only makes sense for
+      a vehicle that is already at or ahead of schedule). ``None`` when no
+      on-time-or-early arrival at that stop was observed in this bucket.
+
+    ``terminus_early_rate`` is a single route-level scalar (not broken out
+    by segment/hour): the share of trips whose LAST scheduled stop (highest
+    `stop_sequence` in `static_stop_times` for that `trip_id`) was reached
+    at least `early_threshold_sec` seconds ahead of schedule.
+    ``terminus_samples`` is the observation count behind it; ``None`` when
+    zero.
+    """
+    empty: dict = {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
+    if ch is None:
+        return empty
+    agency_row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
+    if not agency_row or agency_row["ingest_strategy"] not in _SCHEDULE_PADDING_STRATEGIES:
+        return empty
+
+    cte_sql, ch_params = _dedup_cte_ch(ctx, include_arr_delay=True, include_scheduled_sec=True)
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay\n"
+        "FROM deduped\n"
+        "WHERE route_code = {srp_route:String}\n"
+        "ORDER BY trip_id, date, stop_sequence",
+        parameters={"agency_id": agency_id, "srp_route": str(route), **ch_params},
+    )
+    ch_rows = _ch_rows(result)
+    if not ch_rows:
+        return {"available": True, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
+
+    trip_ids = sorted({r["trip_id"] for r in ch_rows})
+    static_rows = await conn.fetch(
+        "SELECT trip_id, stop_sequence, "
+        f"{hms_to_sec_sql('arrival_time')} AS sched_arr_sec, "
+        f"{hms_to_sec_sql('departure_time')} AS sched_dep_sec "
+        "FROM static_stop_times WHERE agency_id = $1 AND trip_id = ANY($2::text[])",
+        agency_id,
+        trip_ids,
+    )
+    schedule: dict[str, dict[int, tuple]] = {}
+    terminus_seq: dict[str, int] = {}
+    for r in static_rows:
+        schedule.setdefault(r["trip_id"], {})[r["stop_sequence"]] = (r["sched_arr_sec"], r["sched_dep_sec"])
+        terminus_seq[r["trip_id"]] = max(terminus_seq.get(r["trip_id"], -1), r["stop_sequence"])
+    if not schedule:
+        return {"available": True, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
+
+    # Group the raw per-visit rows by (trip_id, date) -- `trip_id` here is a
+    # recurring GTFS *schedule* identifier, not a per-day run identifier (see
+    # schedule_realism_segments' docstring), so the same trip_id recurs on
+    # every day that service pattern operates and each day's run must be
+    # windowed independently.
+    groups: dict[tuple, list[tuple]] = defaultdict(list)
+    for r in ch_rows:
+        groups[(r["trip_id"], r["date"])].append(
+            (r["stop_sequence"], r["scheduled_sec"], r["dep_delay"], r["arr_delay"])
+        )
+
+    segment_actual_run: dict[tuple[int, int, int], list[float]] = defaultdict(list)
+    segment_scheduled_run: dict[tuple[int, int, int], list[float]] = defaultdict(list)
+    dwell_excess: dict[tuple[int, int, int], int] = defaultdict(int)
+    dwell_total: dict[tuple[int, int, int], int] = defaultdict(int)
+    terminus_early = 0
+    terminus_total = 0
+
+    for (trip_id, _visit_date), visits in groups.items():
+        sched_map = schedule.get(trip_id)
+        if not sched_map:
+            continue
+        visits.sort(key=lambda v: v[0])
+        stop_visits = [
+            StopVisit(stop_sequence, *sched_map.get(stop_sequence, (None, None)), arr_delay, dep_delay)
+            for stop_sequence, _scheduled_sec, dep_delay, arr_delay in visits
+        ]
+        computed = {c["stop_sequence"]: c for c in compute_trip_dwell_running(stop_visits)}
+
+        term_seq = terminus_seq.get(trip_id)
+        for stop_sequence, _scheduled_sec, _dep_delay, arr_delay in visits:
+            if stop_sequence == term_seq and arr_delay is not None:
+                terminus_total += 1
+                if arr_delay <= -early_threshold_sec:
+                    terminus_early += 1
+
+        for i in range(len(visits) - 1):
+            s_cur, sched_sec_cur, _dep_delay_cur, arr_delay_cur = visits[i]
+            s_next = visits[i + 1][0]
+            if s_next != s_cur + 1:
+                continue
+            if sched_sec_cur is None:
+                continue
+            hour = sched_sec_cur // 3600
+            key = (s_cur, s_next, hour)
+
+            running_sec = computed.get(s_next, {}).get("running_sec")
+            if running_sec is not None:
+                segment_actual_run[key].append(running_sec)
+
+            sa_cur, sd_cur = sched_map.get(s_cur, (None, None))
+            sa_next, _sd_next = sched_map.get(s_next, (None, None))
+            if sa_next is not None and sd_cur is not None:
+                segment_scheduled_run[key].append(sa_next - sd_cur)
+
+            dwell_sec = computed.get(s_cur, {}).get("dwell_sec")
+            if dwell_sec is not None and sa_cur is not None and sd_cur is not None and arr_delay_cur is not None:
+                # Only a stop reached on time or early is a candidate "held
+                # to avoid an early departure" -- a stop reached LATE has no
+                # early-departure risk to guard against, so a long dwell
+                # there is more likely congestion/boarding volume than a
+                # deliberate schedule-adjustment hold.
+                if arr_delay_cur <= 0:
+                    scheduled_dwell_sec = sd_cur - sa_cur
+                    dwell_total[key] += 1
+                    if dwell_sec - scheduled_dwell_sec > hold_allowance_sec:
+                        dwell_excess[key] += 1
+
+    out_rows = []
+    for key in sorted(set(segment_actual_run) | set(segment_scheduled_run)):
+        actual = segment_actual_run.get(key, [])
+        if not actual:
+            continue
+        scheduled = segment_scheduled_run.get(key, [])
+        p50_sec = linear_percentile(actual, 0.5)
+        p85_sec = linear_percentile(actual, 0.85)
+        scheduled_avg_sec = sum(scheduled) / len(scheduled) if scheduled else None
+        padding_min = (
+            float(_round2((scheduled_avg_sec - p50_sec) / 60.0)) if scheduled_avg_sec is not None else None
+        )
+        dt = dwell_total.get(key, 0)
+        de = dwell_excess.get(key, 0)
+        time_adjustment_rate = float(_round2(de / dt)) if dt > 0 else None
+        s_cur, s_next, hour = key
+        out_rows.append(
+            (
+                s_cur,
+                s_next,
+                hour,
+                float(_round2(scheduled_avg_sec / 60.0)) if scheduled_avg_sec is not None else None,
+                float(_round2(p50_sec / 60.0)),
+                float(_round2(p85_sec / 60.0)),
+                len(actual),
+                padding_min,
+                time_adjustment_rate,
+            )
+        )
+
+    terminus_early_rate = float(_round2(terminus_early / terminus_total)) if terminus_total > 0 else None
+    return {
+        "available": True,
+        "rows": out_rows,
+        "terminus_early_rate": terminus_early_rate,
+        "terminus_samples": terminus_total,
+    }
 
 
 async def route_trend_shift(

@@ -767,3 +767,38 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
   single second — the boundary this item's own verify criterion names.
   (PR #356)
+- 2026-09-08: Item 97 — extended the `schedule_realism` Ask tool with a
+  per-segment, per-hour-of-day schedule-padding decomposition
+  (`pipeline.query.tool_queries.schedule_realism_padding`), for `static_join`
+  agencies only (needs `arr_delay` + `scheduled_sec`): scheduled running time
+  per segment (from `static_stop_times`) alongside the observed running
+  time's median/85th percentile (new `pipeline.stats.linear_percentile`,
+  fed by `pipeline.dwell_run.compute_trip_dwell_running`'s per-visit
+  dwell/running math), a `padding_min` gap between the two, a terminus
+  early-arrival rate, and a `time_adjustment_rate` flagging a stop reached
+  on time or early that then dwelled well beyond its scheduled dwell
+  (holding to avoid an early departure, not boarding/alighting). Reads raw
+  per-visit rows straight from ClickHouse's `updates` (no new aggregate
+  table) and reconstructs each trip-day's stop sequence in Python, so a
+  ctx time-band filter degrades to fewer valid consecutive-stop pairs
+  instead of needing an explicit "not supported" gate the way the
+  pre-aggregated dwell/running report does. `_tool_schedule_realism` uses
+  this richer view when available and non-empty, falling back to the
+  existing dep_delay-only `schedule_realism_segments` view otherwise (every
+  other ingest strategy, or a static_join route with no padding data yet).
+  Plumbing: `pipeline.db.build_dedup_ch_sql` gained an `include_scheduled_sec`
+  flag (an hour bucket parsed from `scheduled_time` would silently drop
+  every after-midnight extended-hour trip, whose `scheduled_time` is NULL
+  by design — `scheduled_sec` is populated for those too), `_dedup_cte_ch`
+  forwards it, and `_hms_to_sec_sql` moved from `pipeline.analyze` to a
+  public `pipeline.db.hms_to_sec_sql` so this new Postgres-side reader could
+  share the same static-schedule-time parse instead of duplicating it.
+  Added `tests/unit/test_stats.py` coverage for `linear_percentile`,
+  `tests/query/test_tool_queries.py` fixtures covering both the intended
+  padding-visualization/terminus-early-arrival-rate scenario and the
+  held-dwell `time_adjustment_rate` indicator, plus a
+  `tests/query/test_tools_integration.py` dispatch-level test. Backend
+  verification (`poetry run ruff`/`mypy`/`pytest`) could not be run inside
+  this dispatched-worker sandbox (no `poetry` permission available), so the
+  diff was instead manually traced end-to-end against hand-computed
+  expected values for every new arithmetic path. (PR #358)
