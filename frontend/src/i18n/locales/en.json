@@ -142,7 +142,11 @@
     "no_data_in_range": "no data in range",
     "view_agency": "View {{name}} overview",
     "delay_unit": "min",
-    "you_badge": "YOU"
+    "you_badge": "YOU",
+    "ridership_weighted_toggle": "Weight by ridership",
+    "col_on_time_weighted": "On-time % (ridership-weighted)",
+    "on_time_weighted_suffix": " (weighted)",
+    "help_ridership_weighted": "When a manually-configured ridership weight exists for this agency, pools each route's on-time contribution by that weight instead of counting every route equally."
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
@@ -315,6 +319,7 @@
     "yes": "Yes",
     "no": "No",
     "unit_min": "min",
+    "unit_sec": "s",
     "unit_min_sec_signed": "{{sign}}{{m}} min {{s}} s",
     "unit_min_signed": "{{sign}}{{value}} min",
     "unit_sec_signed": "{{sign}}{{value}} s",
@@ -900,7 +905,10 @@
       "compare_ranking": "Compare ranking",
       "dow_weekday": "Weekday pattern",
       "dow_weekend": "Weekend pattern",
-      "route_forecast": "Route forecast"
+      "dwell_run": "Dwell/running time",
+      "route_forecast": "Route forecast",
+      "council_summary": "Council report",
+      "delay_certificate": "Delay certificate"
     },
     "col": {
       "route": "Route",
@@ -916,7 +924,15 @@
       "weekend": "Weekend/Holiday",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Confidence"
+      "confidence": "Confidence",
+      "planned_trips": "Planned trips",
+      "executed_trips": "Executed trips",
+      "service_delivered_pct": "Service-delivered %",
+      "agency_name": "Agency",
+      "date": "Date",
+      "scheduled_time": "Scheduled",
+      "actual_time": "Actual",
+      "delay_sec": "Delay (s)"
     },
     "confidence_low_mark": "wide range",
     "direction": {
@@ -971,6 +987,20 @@
       "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
       "offender": "Route {{code}} ({{min}} min)"
+    },
+    "dwell_run": {
+      "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",
+      "time_band_unsupported": "This decomposition doesn't support a time-band filter yet.",
+      "col": {
+        "dwell_avg": "Dwell avg",
+        "dwell_p50": "Dwell p50",
+        "dwell_p90": "Dwell p90",
+        "dwell_samples": "Dwell samples",
+        "run_avg": "Running avg",
+        "run_p50": "Running p50",
+        "run_p90": "Running p90",
+        "run_samples": "Running samples"
+      }
     }
   },
   "insight_panel": {

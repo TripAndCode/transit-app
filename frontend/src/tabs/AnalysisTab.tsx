@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { TrendDay } from "../api/types";
+import type { DwellRunPayload, TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -18,6 +18,7 @@ import { ReportTable } from "../components/ReportTable";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
+import { useRouteNames } from "../api/useRouteNames";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -49,7 +50,10 @@ export function AnalysisTab() {
     compare_ranking: t("reports.type.compare_ranking"),
     dow_weekday: t("reports.type.dow_weekday"),
     dow_weekend: t("reports.type.dow_weekend"),
+    dwell_run: t("reports.type.dwell_run"),
     route_forecast: t("reports.type.route_forecast"),
+    council_summary: t("reports.type.council_summary"),
+    delay_certificate: t("reports.type.delay_certificate"),
   };
 
   return (
@@ -213,6 +217,8 @@ export function AnalysisTab() {
                 }
                 ctx={ctx}
               />
+            ) : detail.data.report_type === "dwell_run" ? (
+              <DwellRunBlock payload={(detail.data.rows as unknown as DwellRunPayload[])[0]} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
@@ -284,6 +290,70 @@ function TrendBlock({
   );
 }
 
+function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
+  const { t } = useTranslation();
+  const { agencyId } = useParams();
+  const id = agencyId ? Number(agencyId) : null;
+  const { format: formatRoute } = useRouteNames(id);
+
+  if (!payload || !payload.available) {
+    return <EmptyState title={t("reports.dwell_run.not_available")} />;
+  }
+  if (!payload.time_band_supported) {
+    return <EmptyState title={t("reports.dwell_run.time_band_unsupported")} />;
+  }
+  if (payload.routes.length === 0) {
+    return (
+      <EmptyState
+        title={t("reports.no_data.title")}
+        hint={t("reports.no_data.hint")}
+      />
+    );
+  }
+
+  const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
+  const fmtSamples = (v: number): string => v.toLocaleString();
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: "var(--bg-soft)" }}>
+            <th style={th(40)}>#</th>
+            <th style={th()}>{t("reports.col.route")}</th>
+            <th style={th()}>{t("reports.col.service")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p90")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_samples")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_avg")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p50")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p90")}</th>
+            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_samples")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {payload.routes.map((r, i) => (
+            <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+              <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
+              <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
+              <td style={td()}>{r.service_type ? t(`common.service_value.${r.service_type}`, { defaultValue: r.service_type }) : "—"}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_avg_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p50_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p90_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSamples(r.dwell_samples)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_avg_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_p50_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_p90_sec)}</td>
+              <td style={{ ...td(), textAlign: "right" }}>{fmtSamples(r.run_samples)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function DowBandHeatmapCard({
   grid,
   worst,
@@ -333,3 +403,20 @@ function DowBandHeatmapCard({
     </div>
   );
 }
+
+// Local table-cell helpers for DwellRunBlock above -- same shape as
+// ReportTable.tsx's own (unexported) th/td, duplicated here rather than
+// exported cross-module since DwellRunBlock's table doesn't share
+// ReportTable's tuple-row/SCHEMAS shape.
+const th = (w?: number): React.CSSProperties => ({
+  padding: "8px 10px",
+  textAlign: "left",
+  fontWeight: 500,
+  color: "var(--text-secondary)",
+  fontSize: 12,
+  width: w,
+});
+const td = (): React.CSSProperties => ({
+  padding: "6px 10px",
+  fontSize: 13,
+});

@@ -40,36 +40,60 @@ LEGACY_SEVERE_LATE_TOLERANCE_SEC = 300
 LEGACY_PRESET_NAME = "legacy_60s"
 
 
-def bucketize(delay_sec: int) -> int:
-    """Return the histogram bucket index for *delay_sec*."""
-    if delay_sec < LO:
+def n_buckets_for(*, lo: int = LO, hi: int = HI, width: int = WIDTH) -> int:
+    """Return the bucket-array length for a given ``(lo, hi, width)`` bound
+    triple — one underflow bucket, ``(hi - lo) // width`` inner bins, one
+    overflow bucket. :data:`N_BUCKETS` is exactly ``n_buckets_for()`` (the
+    default delay-histogram bounds); other distributions (e.g.
+    ``pipeline.dwell_run``'s dwell/running-time histograms) call this with
+    their own bounds instead of hardcoding a bucket count that could drift
+    from the bounds actually used to build it.
+    """
+    return (hi - lo) // width + 2
+
+
+def bucketize(delay_sec: int, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> int:
+    """Return the histogram bucket index for *delay_sec*.
+
+    ``lo``/``hi``/``width`` default to this module's own delay-histogram
+    bounds; a caller bucketing a differently-scaled distribution (e.g. dwell
+    or running time, seconds-at-a-stop rather than seconds-of-delay) passes
+    its own bounds instead — the underflow/overflow/inner-bin shape is
+    identical either way, only the edges move.
+    """
+    n_inner = (hi - lo) // width
+    if delay_sec < lo:
         return 0
-    if delay_sec >= HI:
-        return _N_INNER + 1
-    return 1 + (delay_sec - LO) // WIDTH
+    if delay_sec >= hi:
+        return n_inner + 1
+    return 1 + (delay_sec - lo) // width
 
 
-def _bucket_bounds(index: int) -> tuple[float, float]:
+def _bucket_bounds(index: int, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> tuple[float, float]:
     """Return the [low, high) second bounds of a bucket for interpolation.
 
     The open-ended underflow/overflow buckets are given a single WIDTH so a
     percentile landing in them resolves to a finite, sensible edge value
     rather than ``-inf``/``+inf``.
     """
+    n_inner = (hi - lo) // width
     if index == 0:
-        return (LO - WIDTH, LO)
-    if index == _N_INNER + 1:
-        return (HI, HI + WIDTH)
-    low = LO + (index - 1) * WIDTH
-    return (low, low + WIDTH)
+        return (lo - width, lo)
+    if index == n_inner + 1:
+        return (hi, hi + width)
+    low = lo + (index - 1) * width
+    return (low, low + width)
 
 
-def percentile_from_hist(counts: list[int], q: float) -> float | None:
+def percentile_from_hist(
+    counts: list[int], q: float, *, lo: int = LO, hi: int = HI, width: int = WIDTH
+) -> float | None:
     """Interpolate the *q* quantile (0..1) in seconds from merged bucket *counts*.
 
     Linear interpolation within the bucket that contains the target rank — the
     standard histogram-percentile estimate. Returns ``None`` for an empty
-    histogram. ``counts`` must have length :data:`N_BUCKETS`.
+    histogram. ``counts`` must have length ``n_buckets_for(lo=lo, hi=hi,
+    width=width)`` (:data:`N_BUCKETS` for the default bounds).
     """
     total = sum(counts)
     if total == 0:
@@ -82,17 +106,25 @@ def percentile_from_hist(counts: list[int], q: float) -> float | None:
             continue
         last_populated = index
         if cumulative + c >= target:
-            low, high = _bucket_bounds(index)
+            low, high = _bucket_bounds(index, lo=lo, hi=hi, width=width)
             # Fraction into this bucket where the target rank falls.
             frac = (target - cumulative) / c
             return low + frac * (high - low)
         cumulative += c
     # Floating-point slack (target == total) falls through — return the top
     # edge of the last POPULATED bucket, not the fixed overflow edge.
-    return _bucket_bounds(last_populated)[1]
+    return _bucket_bounds(last_populated, lo=lo, hi=hi, width=width)[1]
 
 
-def count_in_range(counts: list[int], low_sec: float | None, high_sec: float | None) -> float:
+def count_in_range(
+    counts: list[int],
+    low_sec: float | None,
+    high_sec: float | None,
+    *,
+    lo: int = LO,
+    hi: int = HI,
+    width: int = WIDTH,
+) -> float:
     """Estimate the count of observations with ``low_sec <= delay <= high_sec``
     from merged bucket *counts*, for an on-time/late tolerance chosen at query
     time instead of the fixed threshold analyze() bakes into the exact
@@ -118,10 +150,44 @@ def count_in_range(counts: list[int], low_sec: float | None, high_sec: float | N
     for index, c in enumerate(counts):
         if c == 0:
             continue
-        low, high = _bucket_bounds(index)
+        low, high = _bucket_bounds(index, lo=lo, hi=hi, width=width)
         lo_clip = low if low_sec is None else max(low, low_sec)
         hi_clip = high if high_sec is None else min(high, high_sec + 1)
         if hi_clip <= lo_clip:
             continue
         total += c * (hi_clip - lo_clip) / (high - low)
     return total
+
+
+def bucket_case_sql(column: str, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> str:
+    """Return a SQL ``CASE`` expression bucketing *column* exactly like
+    :func:`bucketize` (same bounds/edge conventions).
+
+    ``NULL`` propagates to ``NULL`` (not bucket 0), so a caller composing a
+    ``COUNT(*) FILTER (WHERE bucket_col = i)`` histogram naturally excludes
+    rows where *column* itself is unmeasured, rather than miscounting them as
+    underflow. ``analyze()``'s own delay-histogram ``_BUCKET_EXPR`` predates
+    this helper and doesn't need the NULL guard (``dep_delay`` is already
+    filtered non-NULL upstream there); new bucketed columns that CAN be NULL
+    per row (e.g. ``pipeline.dwell_run``'s dwell/running seconds) should use
+    this helper instead of hand-rolling the same CASE shape.
+    """
+    n_inner = (hi - lo) // width
+    return (
+        f"CASE WHEN {column} IS NULL THEN NULL "
+        f"WHEN {column} < {lo} THEN 0 "
+        f"WHEN {column} >= {hi} THEN {n_inner + 1} "
+        f"ELSE 1 + ({column} - ({lo})) / {width} END"
+    )
+
+
+def hist_array_sql(bucket_col: str, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> str:
+    """Return a fixed-length ``ARRAY[...]`` SQL expression of per-bucket
+    ``COUNT(*) FILTER (WHERE bucket_col = i)`` counts, one per bucket index —
+    the aggregate-time counterpart to :func:`bucket_case_sql`. A row whose
+    *bucket_col* is NULL (see that function's NULL-propagation note) matches
+    no ``= i`` filter and is silently excluded from every bucket, not
+    miscounted into one.
+    """
+    n = n_buckets_for(lo=lo, hi=hi, width=width)
+    return "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE {bucket_col} = {i})" for i in range(n)) + "]::int[]"

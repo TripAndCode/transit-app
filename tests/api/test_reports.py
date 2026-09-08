@@ -7,6 +7,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
@@ -79,7 +81,7 @@ async def reports_client(reports_app):
 
 @pytest.mark.asyncio
 async def test_reports_list_returns_static_metadata(reports_client):
-    """The list endpoint returns the canonical 8 report types regardless of data."""
+    """The list endpoint returns the canonical 11 report types regardless of data."""
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports")
     assert resp.status_code == 200
@@ -94,6 +96,9 @@ async def test_reports_list_returns_static_metadata(reports_client):
         "compare_ranking",
         "dow_weekend",
         "dow_weekday",
+        "dwell_run",
+        "council_summary",
+        "delay_certificate",
     }
     for r in data:
         assert "rendered_at" in r
@@ -1308,3 +1313,509 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
     resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
     assert resp.json() is None
+
+
+def _run_analyze_from_ch(agency_id, ch_client):
+    """Like `_run_analyze`, but for dwell_run tests that seed ClickHouse
+    `updates` directly (via `insert_updates`) instead of mirroring from
+    Postgres `updates` -- `arr_delay` exists only in the ClickHouse `updates`
+    schema (Postgres `updates` has zero production readers and was never
+    extended to carry it -- see the `transit-app-gotchas` skill), so
+    `mirror_updates_to_ch` can't carry an `arr_delay` value through."""
+    import os
+
+    import psycopg2
+
+    from pipeline.analyze import analyze
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_not_available_for_non_static_join_agency(reports_client):
+    """The fixture agency's ingest_strategy is left NULL (not static_join),
+    so the decomposition must render an explicit 'not available' state,
+    never a zero/blank one."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is False
+    assert payload["routes"] == []
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_time_band_filter_is_explicitly_unsupported(reports_client):
+    """Even for an available (static_join) agency, a time_band filter isn't
+    servable by this decomposition (no live-scan fallback) -- must say so
+    explicitly rather than silently ignoring the filter."""
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["time_band_supported"] is False
+    assert payload["routes"] == []
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_export_not_available_says_so_instead_of_empty(reports_client):
+    """format=csv for a non-static_join agency must render the same explicit
+    'not available' message the JSON/text response does -- an empty
+    (header-only) CSV would be indistinguishable from "genuinely zero
+    observations", exactly the misleading blank the feature exists to
+    avoid."""
+    import csv
+    import io
+
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    # row 0: definition preamble, row 1: column header, row 2: the message.
+    assert len(rows) == 3
+    assert rows[2][0]  # non-empty explanatory message, not silently absent
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_empty(reports_client):
+    """Same as the not-available case, but for the time_band_supported=False
+    state (still an available static_join agency)."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning&format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    assert len(rows) == 3
+    assert rows[2][0]
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client):
+    """End-to-end: seed a static schedule + ClickHouse `arr_delay`/`dep_delay`
+    for a 3-stop trip (same hand-computed fixture as
+    tests/unit/test_dwell_run.py and tests/pipeline/test_analyze.py's
+    agg_route_daily_dwell_run test), analyze(), then read it back through the
+    HTTP endpoint and check the exact averages."""
+    from datetime import datetime, timezone
+
+    from pipeline.clickhouse import insert_updates
+
+    client, agency_id, pool = reports_client
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    await pool.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", agency_id
+    )
+    for seq, arr, dep in [(1, "10:00:00", "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:10:00", "10:10:00")]:
+        await pool.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', $2, 'S1', $3, $4)",
+            agency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
+    # (file_name, captured_at, trip_id, service_type, scheduled_time, route_code,
+    #  stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop, feed_timestamp)
+    rows = [
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 1, 30, "S1", None, None, None, None),
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 2, 50, "S1", 20, None, None, None),
+        ("f.pb", day, "T1", "平日", "10:00:00", "44", 3, 10, "S1", 10, None, None, None),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    _run_analyze_from_ch(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run?from=2026-04-01&to=2026-04-01")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is True
+    assert payload["time_band_supported"] is True
+    routes = payload["routes"]
+    assert len(routes) == 1
+    r = routes[0]
+    assert r["route_code"] == "44"
+    assert r["dwell_samples"] == 2
+    assert r["dwell_avg_sec"] == pytest.approx(45.0)  # (90 + 0) / 2
+    assert r["run_samples"] == 2
+    assert r["run_avg_sec"] == pytest.approx(245.0)  # (290 + 200) / 2
+
+
+# ---------------------------------------------------------------------------
+# council_summary / delay_certificate
+# ---------------------------------------------------------------------------
+# The report list itself is covered by test_reports_list_returns_static_metadata
+# above (now asserting the full 11-type set), so no separate listing test here.
+
+
+@pytest.mark.asyncio
+async def test_council_summary_pools_on_time_across_routes_not_a_naive_average(reports_client, ch_client):
+    """The pooled on-time rate must be sample-weighted across every route,
+    not an unweighted mean of each route's own rate: R1 (25 samples, 60%
+    on-time) and R2 (10 samples, 100% on-time) pool to 71.4% ((15+10)/35),
+    not the naive average of the two rates (80%)."""
+    client, agency_id, pool = reports_client
+    day = "2026-06-10"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 15 + [90] * 10)  # 15/25 on-time (<=60s)
+    await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 10)  # 10/10 on-time
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    assert resp.status_code == 200
+    row = resp.json()["rows"][0]
+    # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct)
+    assert row[2] == 35
+    assert float(row[0]) == 71.4  # (15+10)/35*100 = 71.428... -> 71.4, not the naive-average 80.0
+
+
+@pytest.mark.asyncio
+async def test_council_summary_custom_tolerance_pools_histogram_not_naive_average(reports_client, ch_client):
+    """Same pooling guarantee as the legacy-preset test above, but on the
+    query-time histogram-estimate path (an explicit early/late tolerance).
+    R1 (-200/30/150 split, mirroring the exact-bucket-edge on_time test) has
+    12/25 on-time within [-60, 60]; R2 (10 samples, all at 30s) has 10/10.
+    Pooled: 22/35 = 62.857...% -> 62.9, not the naive average (74.0)."""
+    client, agency_id, pool = reports_client
+    day = "2026-06-11"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [-200] * 8 + [30] * 12 + [150] * 5)
+    await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 10)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&early_tolerance_sec=60&late_tolerance_sec=60"
+    )
+    assert resp.status_code == 200
+    row = resp.json()["rows"][0]
+    assert row[2] == 35
+    assert float(row[0]) == 62.9
+
+
+@pytest.mark.asyncio
+async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
+    """The report template's rendered footnotes must show the exact
+    tolerance/preset actually used, not the legacy_60s defaults -- mirrors
+    the CSV preamble's own guarantee (pipeline.reports.definition)."""
+    client, agency_id, pool = reports_client
+    day = "2026-06-12"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    default_resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    custom_resp = await client.get(
+        f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&early_tolerance_sec=45&late_tolerance_sec=90"
+    )
+    assert default_resp.status_code == custom_resp.status_code == 200
+    default_text = default_resp.json()["text"]
+    custom_text = custom_resp.json()["text"]
+    assert "legacy_60s" in default_text
+    assert "45秒" in custom_text
+    assert "90秒" in custom_text
+    assert "custom" in custom_text
+    assert "legacy_60s" not in custom_text
+
+
+@pytest.mark.asyncio
+async def test_council_summary_service_delivered_not_available_footnote(reports_client, ch_client):
+    """An agency with no static schedule (planned_trips == 0, the default
+    reports_client fixture's agency) must show "not available", never a
+    misleading 100%, and the footnotes must say so explicitly."""
+    client, agency_id, pool = reports_client
+    day = "2026-06-13"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    assert resp.status_code == 200
+    body = resp.json()
+    row = body["rows"][0]
+    assert row[4] is None  # executed_trips
+    assert row[5] is None  # service_delivered_pct
+    assert "計測できません" in body["text"]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_service_delivered_available_when_static_join_and_scheduled(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    day = "2026-06-14"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    await _seed_static_schedule(
+        pool, agency_id, service_id="WD", trip_ids=["T1", "T2", "T3", "T4"], svc_date="20260614"
+    )
+    await _set_ingest_strategy(pool, agency_id, "static_join")
+    await _seed_service_delivered_daily(pool, agency_id, [("2026-06-14", 1)])
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    assert resp.status_code == 200
+    body = resp.json()
+    row = body["rows"][0]
+    assert row[3] == 4  # planned_trips
+    assert row[4] == 3  # executed_trips
+    assert row[5] == 75.0  # service_delivered_pct
+    assert "計測できません" not in body["text"]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_client, ch_client):
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    day = "2026-06-15"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&format=csv")
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    # rows[0] = definition preamble, rows[1..] = extra footnotes, then the
+    # column header row, matched by locating it rather than a fixed index --
+    # the number of footnote rows (freshness/quality/service-delivered
+    # caveats) can legitimately vary by scenario.
+    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    assert header_idx >= 1
+    footnote_cells = [r[0] for r in rows[1:header_idx]]
+    assert any("計測できません" in c for c in footnote_cells)
+    data_row = rows[header_idx + 1]
+    assert data_row[2] == "25"  # samples
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_excludes_at_threshold_includes_one_above(reports_client, ch_client, ch_async_client):
+    """Core boundary check: a synthetic trip's dep_delay exactly AT the
+    threshold must be excluded ("exceeds", not ">="); one second above must
+    be included."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-20"
+    threshold = 300
+    await _seed_route(pool, agency_id, "RCERT", "平日", day, [threshold, threshold + 1])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec={threshold}")
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    cert_rows = [r for r in rows if r[1] == "RCERT"]
+    delays = [r[6] for r in cert_rows]
+    assert threshold not in delays
+    assert (threshold + 1) in delays
+    assert len(cert_rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_uses_default_threshold_when_omitted(reports_client, ch_client, ch_async_client):
+    from api.main import app
+    from pipeline.reports import DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-21"
+    await _seed_route(
+        pool,
+        agency_id,
+        "RDEF",
+        "平日",
+        day,
+        [DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC, DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC + 1],
+    )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")
+    assert resp.status_code == 200
+    rows = [r for r in resp.json()["rows"] if r[1] == "RDEF"]
+    assert len(rows) == 1
+    assert rows[0][6] == DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC + 1
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_row_shape_and_actual_time_shift(reports_client, ch_client, ch_async_client):
+    """Row shape is (agency_name, route_code, service_type, date,
+    scheduled_time, actual_time, dep_delay); actual_time is scheduled_time
+    shifted by dep_delay seconds. _seed_route schedules every row at 10:00:00."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-22"
+    await _seed_route(pool, agency_id, "RSHIFT", "平日", day, [400])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300")
+    assert resp.status_code == 200
+    rows = [r for r in resp.json()["rows"] if r[1] == "RSHIFT"]
+    assert len(rows) == 1
+    _agency_name, route_code, service_type, date_str, scheduled_time, actual_time, dep_delay = rows[0]
+    assert route_code == "RSHIFT"
+    assert service_type == "平日"
+    assert date_str == day
+    assert scheduled_time == "10:00:00"
+    assert dep_delay == 400
+    assert actual_time == "10:06:40"  # 10:00:00 + 400s
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_client):
+    import csv
+    import io
+
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-23"
+    await _seed_route(pool, agency_id, "RCSV", "平日", day, [400])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300&format=csv"
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    data = [r for r in rows[header_idx + 1 :] if r and r[1] == "RCSV"]
+    assert len(data) == 1
+    assert data[0][6] == "400"
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_csv_export_includes_threshold_footnote(reports_client, ch_client, ch_async_client):
+    import csv
+    import io
+
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-26"
+    await _seed_route(pool, agency_id, "RFOOT", "平日", day, [400])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300&format=csv"
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    footnote_cells = [r[0] for r in rows[1:header_idx]]
+    assert any("300" in c for c in footnote_cells)
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_uses_origin_stop_delay_per_trip(reports_client, ch_client, ch_async_client):
+    """A single trip_id spans many stop events; compute_delay_certificate
+    must collapse them to ONE row per (trip_id, date) using the origin
+    stop's (lowest stop_sequence) departure delay, not emit one row per
+    stop event."""
+    from datetime import datetime, time
+
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-27"
+    trip_id = f"RMULTI-{day}-trip-0"
+    async with pool.acquire() as conn:
+        # stop_sequence=1 (origin): dep_delay=400, exceeds the 300s threshold.
+        # stop_sequence=2 (a later stop on the same trip): dep_delay=100,
+        # which alone would NOT exceed the threshold.
+        for seq, delay in [(1, 400), (2, 100)]:
+            await conn.execute(
+                "INSERT INTO updates "
+                "(agency_id, trip_id, route_code, service_type, scheduled_time, "
+                " stop_sequence, dep_delay, captured_at, file_name) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                agency_id,
+                trip_id,
+                "RMULTI",
+                "平日",
+                time(10, 0),
+                seq,
+                delay,
+                datetime.fromisoformat(f"{day}T10:{seq:02d}:00"),
+                f"test/RMULTI/{day}/{seq}.pb",
+            )
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300")
+    assert resp.status_code == 200
+    rows = [r for r in resp.json()["rows"] if r[1] == "RMULTI"]
+    assert len(rows) == 1
+    assert rows[0][6] == 400  # origin stop's dep_delay, not the later stop's
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_rejects_on_time_only_params(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?early_tolerance_sec=60")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_threshold_sec_rejected_for_non_delay_certificate_report(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?threshold_sec=100")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_requires_a_clickhouse_client():
+    """Unlike every other report in this package, delay_certificate has no
+    fast path at all -- it must raise rather than silently return an empty
+    export when no ClickHouse client is available."""
+    from pipeline.reports.council import compute_delay_certificate
+
+    with pytest.raises(RuntimeError):
+        await compute_delay_certificate(1, object(), object(), None)
+
+
+@pytest.mark.asyncio
+async def test_council_summary_degrades_is_stale_when_clickhouse_freshness_probe_fails(reports_client, ch_client):
+    """Same degrade shape as pipeline.reports.network.compute_network_summary:
+    a ClickHouse hiccup on the freshness-only probe must not fail the whole
+    report -- is_stale degrades to False (agg_day, None) rather than 500ing
+    the on-time/service-delivered numbers, which come entirely from Postgres."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports.council import compute_council_summary
+
+    _client, agency_id, pool = reports_client
+    day = "2026-06-16"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+
+    class _BrokenCh:
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("simulated ClickHouse outage")
+
+    ctx = RangeCtx(from_date=date(2026, 6, 16), to_date=date(2026, 6, 16))
+    async with pool.acquire() as conn:
+        payload = await compute_council_summary(agency_id, ctx, conn, _BrokenCh())
+    assert payload["on_time_pct"] == 100.0
+    assert payload["is_stale"] is False

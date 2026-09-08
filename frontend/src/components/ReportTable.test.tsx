@@ -63,3 +63,23 @@ describe("ReportTable on_time confidence column", () => {
     expect(screen.queryByText("wide range")).not.toBeInTheDocument();
   });
 });
+
+describe("ReportTable council_summary/delay_certificate schemas", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders the pooled council_summary row", () => {
+    mockRoutes([]);
+    renderTable([[71.4, 3.2, 35, 4, 3, 75.0]], "council_summary");
+    expect(screen.getByText("71.4%")).toBeInTheDocument();
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
+  });
+
+  it("renders a delay_certificate row without crashing on the un-enriched route column", () => {
+    mockRoutes([]);
+    renderTable([["Test Agency", "RCERT", "平日", "2026-06-20", "10:00:00", "10:06:40", 400]], "delay_certificate");
+    expect(screen.getByText("Test Agency")).toBeInTheDocument();
+    expect(screen.getByText("400")).toBeInTheDocument();
+  });
+});

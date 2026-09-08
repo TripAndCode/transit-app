@@ -217,6 +217,32 @@ export type TrendDay = {
   top_offenders: { route_code: string; service_type: string; avg_min: number; samples: number }[];
 };
 
+export type DwellRunRoute = {
+  route_code: string;
+  service_type: string | null;
+  dwell_samples: number;
+  dwell_avg_sec: number | null;
+  dwell_p50_sec: number | null;
+  dwell_p90_sec: number | null;
+  run_samples: number;
+  run_avg_sec: number | null;
+  run_p50_sec: number | null;
+  run_p90_sec: number | null;
+};
+
+/** Payload for the ``dwell_run`` report -- see
+ *  pipeline/reports/dwell_run.py's compute_dwell_run_decomposition, the
+ *  single source of truth for this shape. `available=false` means this
+ *  agency's feed never reports arrival delay (dwell/running time can't be
+ *  derived at all); `time_band_supported=false` means the current time-band
+ *  filter isn't servable by this decomposition yet -- both are explicit
+ *  states the UI must render, never a silently empty/zero table. */
+export type DwellRunPayload = {
+  available: boolean;
+  time_band_supported: boolean;
+  routes: DwellRunRoute[];
+};
+
 export type ToolResult = {
   kind: "table" | "series" | "kv" | "empty" | "text";
   /** Backend-rendered summary string, already in the locale the
@@ -481,6 +507,12 @@ export type NetworkAgencyRow = {
   planned_trips: number;
   executed_trips: number | null;
   service_delivered_pct: number | null;
+  /** False whenever this agency has no manually-configured ridership weights
+   * at all -- the weighted-view toggle must key off this, not off
+   * weighted_on_time_pct being null (a configured agency with zero samples
+   * in range is also null there, but is still configured). */
+  has_ridership_weights: boolean;
+  weighted_on_time_pct: number | null;
 };
 
 export type NetworkSummary = {

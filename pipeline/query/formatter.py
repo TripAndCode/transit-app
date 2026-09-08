@@ -16,6 +16,7 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import dow_label
+from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -68,6 +69,44 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("trend_header", "en"): "[Daily trend ({from_date} to {to_date})]\nmean: {avg:.2f} min / observed days: {days}",
     ("trend_empty", "ja"): "選択した期間にデータがありません。",
     ("trend_empty", "en"): "No data in the selected period.",
+    ("dwell_run_header", "ja"): "【滞留・走行時間の内訳】",
+    ("dwell_run_header", "en"): "[Dwell/running time decomposition]",
+    ("dwell_run_row", "ja"): (
+        "{rank}位: 路線{route}（{service}）滞留平均{dwell}分（{dwell_samples}件）、"
+        "走行平均{run}分（{run_samples}件）"
+    ),
+    ("dwell_run_row", "en"): (
+        "#{rank} route {route} ({service}) dwell avg {dwell} min ({dwell_samples} samples), "
+        "running avg {run} min ({run_samples} samples)"
+    ),
+    ("dwell_run_not_available", "ja"): (
+        "この事業者のフィードは到着遅延（arr_delay）を送信しないため、滞留・走行時間の内訳は利用できません。"
+    ),
+    ("dwell_run_not_available", "en"): (
+        "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available."
+    ),
+    ("dwell_run_time_band_unsupported", "ja"): "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
+    ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
+    ("council_header", "ja"): "【運行実績月次・年次報告（{agency}、{from_date} 〜 {to_date}）】",
+    ("council_header", "en"): "[Monthly/annual performance report ({agency}, {from_date} to {to_date})]",
+    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測{samples}件）、運行実績率 {delivered}%",
+    ("council_headline", "en"): (
+        "On-time rate {on_time}%, mean delay {avg} min ({samples} samples), service-delivered rate {delivered}%"
+    ),
+    ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
+    ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
+    ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
+    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of observations were excluded as implausible.",
+    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の生観測データがありません）。",
+    ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
+    ("council_service_delivered_unavailable", "ja"): "運行実績率: この事業者のフィードでは計測できません。",
+    ("council_service_delivered_unavailable", "en"): "Service-delivered rate: not available for this agency's feed.",
+    ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
+    ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
+    ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_threshold_footnote", "ja"): "遅延{threshold}秒超の便のみを掲載しています。",
+    ("delay_certificate_threshold_footnote", "en"): "Only trips exceeding the {threshold}s delay threshold are listed.",
 }
 
 
@@ -281,3 +320,111 @@ def format_trend_text(days: list, from_date, to_date, locale: str = "ja") -> str
         return _t("trend_empty", locale)
     observed_days = sum(1 for d in days if d.get("avg_min") is not None)
     return _t("trend_header", locale, from_date=from_date, to_date=to_date, avg=avg, days=observed_days)
+
+
+def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
+    """Locale-aware text for the dwell/running-time decomposition report.
+
+    ``payload`` is ``pipeline.reports.compute_dwell_run_decomposition``'s own
+    dict shape -- ``available=False`` (this agency's feed never sends
+    `arr_delay`) and ``time_band_supported=False`` (a time-band filter isn't
+    servable for this decomposition yet) each get their own explicit copy,
+    never a silently empty/zero table.
+    """
+    if not payload.get("available"):
+        return _t("dwell_run_not_available", locale)
+    if not payload.get("time_band_supported", True):
+        return _t("dwell_run_time_band_unsupported", locale)
+    routes = payload.get("routes") or []
+    if not routes:
+        return _no_data(locale)
+    lines = [
+        _t(
+            "dwell_run_row",
+            locale,
+            rank=i,
+            route=r["route_code"],
+            service=r.get("service_type") or "",
+            dwell=_r(r["dwell_avg_sec"] / 60 if r.get("dwell_avg_sec") is not None else None),
+            run=_r(r["run_avg_sec"] / 60 if r.get("run_avg_sec") is not None else None),
+            dwell_samples=r.get("dwell_samples", 0),
+            run_samples=r.get("run_samples", 0),
+        )
+        for i, r in enumerate(routes, 1)
+    ]
+    return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
+
+
+def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, locale: str = "ja") -> list[str]:
+    """Footnote lines for the monthly/annual council report template:
+    the definition metadata
+    (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
+    freshness/quality caveats a council audience needs before trusting the
+    numbers next to them. Every line is derived from *definition*/*payload*'s
+    own fields, never a fixed string, so a non-default tolerance/definition,
+    a genuinely stale aggregate, or a low-quality feed each change the
+    rendered footnotes to match -- the same guarantee
+    ``format_definition_csv_line`` already gives the CSV export.
+    """
+    lines = list(format_definition_footnotes(definition, locale))
+    if payload.get("is_stale"):
+        lines.append(_t("council_stale_caveat", locale))
+    clamp_pct = payload.get("clamp_pct")
+    if clamp_pct is None:
+        lines.append(_t("council_quality_unavailable", locale))
+    elif clamp_pct > 0:
+        lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
+    if payload.get("service_delivered_pct") is None:
+        lines.append(_t("council_service_delivered_unavailable", locale))
+    return lines
+
+
+def format_council_summary_text(
+    payload: dict,
+    definition: DefinitionMeta,
+    agency_name: str,
+    from_date: Any,
+    to_date: Any,
+    locale: str = "ja",
+) -> str:
+    """Locale-aware prose body for the monthly/annual council report
+    template: a headline (on-time rate, average delay, service-delivered
+    rate) over ``[from_date, to_date]``, footnoted with the definition
+    metadata and this agency's freshness/quality caveats
+    (:func:`format_council_summary_footnotes`). ``payload`` is
+    ``pipeline.reports.council.compute_council_summary``'s own dict shape.
+    """
+    header = _t("council_header", locale, agency=agency_name, from_date=from_date, to_date=to_date)
+    if not payload.get("samples"):
+        body = _no_data(locale)
+    else:
+        body = _t(
+            "council_headline",
+            locale,
+            on_time=_r(payload.get("on_time_pct")),
+            avg=_r(payload.get("avg_delay_min")),
+            samples=payload.get("samples", 0),
+            delivered=_r(payload.get("service_delivered_pct")),
+        )
+    footnote_mark = "※" if locale != "en" else "* "
+    footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
+    return f"{header}\n{body}\n{footnotes}"
+
+
+def format_delay_certificate_footnotes(threshold_sec: int, locale: str = "ja") -> list[str]:
+    """Single footnote line stating the exceeds-threshold used, mirroring
+    :func:`format_council_summary_footnotes`'s pattern -- the CSV export's
+    only caveat readers need before trusting which trips were excluded.
+    """
+    return [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
+
+
+def format_delay_certificate_text(rows: list, threshold_sec: int, locale: str = "ja") -> str:
+    """Locale-aware summary line for the delay-certificate export -- a short
+    count + threshold statement, not a per-row transcript (this export can
+    run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
+    not this text body).
+    """
+    if not rows:
+        return _t("delay_certificate_empty", locale, threshold=threshold_sec)
+    return _t("delay_certificate_summary", locale, count=len(rows), threshold=threshold_sec)
