@@ -853,6 +853,14 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # other ingest_strategy is skipped entirely (zero rows here), which the
         # read path distinguishes from "confirmed zero cancellations" via
         # agencies.ingest_strategy, never via row presence in this table.
+        # Materialization here is gated on ingest_strategy alone, not on
+        # pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+        # -- sharing an ingest strategy does not by itself prove a given agency's
+        # feed actually populates these fields. Today this is safe because every
+        # reader of this table (pipeline.reports.service_delivered) re-applies
+        # that confirmed-agency intersection before returning data; any new
+        # direct reader of agg_service_delivered_daily must do the same or it
+        # will treat an unconfirmed agency's rows as trustworthy.
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
@@ -926,7 +934,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # (today: static_join; reuses `row` from the agg_service_delivered_daily
         # check just above) -- either missing means zero rows here, same
         # "row presence is not the availability signal, ingest_strategy is"
-        # convention as agg_service_delivered_daily.
+        # convention as agg_service_delivered_daily. Same read-side-only caveat
+        # applies: this gate doesn't re-check RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+        # either, relying on pipeline.dwell_run's reader to do so (see the note
+        # on the agg_service_delivered_daily gate above).
         if has_static and row and row[0] == "static_join":
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
