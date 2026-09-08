@@ -765,4 +765,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   rows) and excludes a trip exactly AT its configurable threshold
   (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
   single second — the boundary this item's own verify criterion names.
-  (PR #pending)
+  (PR #356)
