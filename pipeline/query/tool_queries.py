@@ -414,7 +414,7 @@ async def schedule_realism_padding(
         agency_id,
         trip_ids,
     )
-    schedule: dict[str, dict[int, tuple]] = {}
+    schedule: dict[str, dict[int, tuple[int | None, int | None]]] = {}
     terminus_seq: dict[str, int] = {}
     for r in static_rows:
         schedule.setdefault(r["trip_id"], {})[r["stop_sequence"]] = (r["sched_arr_sec"], r["sched_dep_sec"])
@@ -446,7 +446,7 @@ async def schedule_realism_padding(
             continue
         visits.sort(key=lambda v: v[0])
         stop_visits = [
-            StopVisit(stop_sequence, *sched_map.get(stop_sequence, (None, None)), arr_delay, dep_delay)
+            StopVisit(stop_sequence, *sched_map.get(stop_sequence, (None, None)), arr_delay, dep_delay)  # type: ignore[call-arg]
             for stop_sequence, _scheduled_sec, dep_delay, arr_delay in visits
         ]
         computed = {c["stop_sequence"]: c for c in compute_trip_dwell_running(stop_visits)}
@@ -498,7 +498,8 @@ async def schedule_realism_padding(
         scheduled = segment_scheduled_run.get(key, [])
         p50_sec = linear_percentile(actual, 0.5)
         p85_sec = linear_percentile(actual, 0.85)
-        scheduled_avg_sec = sum(scheduled) / len(scheduled) if scheduled else None
+        assert p50_sec is not None and p85_sec is not None
+        scheduled_avg_sec: float | None = sum(scheduled) / len(scheduled) if scheduled else None
         padding_min = float(_round2((scheduled_avg_sec - p50_sec) / 60.0)) if scheduled_avg_sec is not None else None
         dt = dwell_total.get(key, 0)
         de = dwell_excess.get(key, 0)
