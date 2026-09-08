@@ -33,11 +33,13 @@ def test_apply_schema_creates_updates_table():
         "route_code",
         "stop_sequence",
         "dep_delay",
+        "scheduled_sec",
         "stop_id",
         "arr_delay",
         "schedule_relationship_trip",
         "schedule_relationship_stop",
         "feed_timestamp",
+        "static_version_id",
     ]
     # idempotent re-apply must not raise
     apply_schema(client)
@@ -46,14 +48,14 @@ def test_apply_schema_creates_updates_table():
 
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_apply_schema_backfills_new_columns_on_pre_existing_table():
-    """apply_schema must reach a table that already existed before its five
-    newest nullable columns (stop_id, arr_delay, schedule_relationship_trip,
-    schedule_relationship_stop, feed_timestamp) were added to schema.sql --
-    CREATE TABLE IF NOT EXISTS is a no-op against such a table, so without a
-    dedicated ADD COLUMN step, insert_updates' column_names=UPDATE_COLUMNS
-    (which now names all five) would have ClickHouse reject its entire
-    batch -- not just the new fields -- the moment it ran against a table
-    nobody had manually migrated.
+    """apply_schema must reach a table that already existed before its newest
+    nullable columns (scheduled_sec, stop_id, arr_delay,
+    schedule_relationship_trip, schedule_relationship_stop, feed_timestamp,
+    static_version_id) were added to schema.sql -- CREATE TABLE IF NOT EXISTS
+    is a no-op against such a table, so without a dedicated ADD COLUMN step,
+    insert_updates' column_names=UPDATE_COLUMNS (which now names all of them)
+    would have ClickHouse reject its entire batch -- not just the new
+    fields -- the moment it ran against a table nobody had manually migrated.
     """
     client = _ch_test_client()
     client.command("DROP TABLE IF EXISTS updates")
@@ -109,22 +111,24 @@ def test_apply_schema_backfills_new_columns_on_pre_existing_table():
         "route_code",
         "stop_sequence",
         "dep_delay",
+        "scheduled_sec",
         "stop_id",
         "arr_delay",
         "schedule_relationship_trip",
         "schedule_relationship_stop",
         "feed_timestamp",
+        "static_version_id",
     ]
 
-    # The pre-existing row's old columns survive untouched; the five new
-    # columns backfill as NULL for it (ADD COLUMN is metadata-only, it does
-    # not rewrite existing parts with a real value).
+    # The pre-existing row's old columns survive untouched; the new columns
+    # backfill as NULL for it (ADD COLUMN is metadata-only, it does not
+    # rewrite existing parts with a real value).
     rows = client.query(
-        "SELECT agency_id, trip_id, dep_delay, stop_id, arr_delay, "
-        "schedule_relationship_trip, schedule_relationship_stop, feed_timestamp "
+        "SELECT agency_id, trip_id, dep_delay, scheduled_sec, stop_id, arr_delay, "
+        "schedule_relationship_trip, schedule_relationship_stop, feed_timestamp, static_version_id "
         "FROM updates"
     ).result_rows
-    assert rows == [(1, "T1", 30, None, None, None, None, None)]
+    assert rows == [(1, "T1", 30, None, None, None, None, None, None, None)]
 
     # Idempotent: a table that already has the new columns must not raise.
     apply_schema(client)

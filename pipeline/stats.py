@@ -57,6 +57,33 @@ def pct_is_uncertain(successes: int, n: int, max_half_width_pp: float = 5.0) -> 
     return (high - low) * 100 / 2 > max_half_width_pp
 
 
+def linear_percentile(values: list[float], q: float) -> float | None:
+    """Linear-interpolated quantile (0..1) of a raw (non-bucketed) sample.
+
+    Standard "closest ranks, linearly interpolated" estimator (numpy's
+    default ``'linear'`` method): sorts *values*, then interpolates between
+    the two data points that straddle rank ``q * (n - 1)``. Distinct from
+    ``pipeline.histogram.percentile_from_hist``, which interpolates a
+    quantile from pre-bucketed COUNT histograms (the ``agg_*`` write path's
+    representation) -- this operates on a raw in-memory list instead, for
+    callers building a distribution from live per-row values that were never
+    bucketed (e.g. a single Ask-tool request's ClickHouse row set, too small
+    and short-lived to justify materializing a histogram for). ``None`` for
+    an empty sample, since there's no quantile of nothing.
+    """
+    if not values:
+        return None
+    xs = sorted(values)
+    n = len(xs)
+    if n == 1:
+        return float(xs[0])
+    pos = q * (n - 1)
+    lo = int(pos)
+    hi = min(lo + 1, n - 1)
+    frac = pos - lo
+    return xs[lo] + frac * (xs[hi] - xs[lo])
+
+
 def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     """Append a ``low_confidence`` bool to each on-time-style row.
 

@@ -613,6 +613,11 @@
       "hour": "Hour",
       "next_stop_sequence": "Next Stop #",
       "avg_added_min": "Added (min)",
+      "scheduled_run_min": "Scheduled run (min)",
+      "actual_run_p50_min": "Actual run median (min)",
+      "actual_run_p85_min": "Actual run p85 (min)",
+      "padding_min": "Padding (min)",
+      "time_adjustment_rate": "Held for schedule (rate)",
       "low_confidence": "Confidence"
     },
     "low_confidence_mark": "wide range",

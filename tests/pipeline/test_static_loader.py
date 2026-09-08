@@ -162,3 +162,41 @@ def test_load_static_populates_service_id_for_hiroden(pg_conn, tmp_path):
     assert total > 0, "no trips loaded"
     # Hiroden has service_id on every trip
     assert with_sid == total, f"only {with_sid}/{total} trips have service_id"
+
+
+def test_load_static_sets_static_version_id_from_zip_stem(pg_conn, agency_id, tmp_path):
+    """static_trips.static_version_id must be the loaded zip's filename stem,
+    the same value for every row loaded in one load_static() call — the only
+    identifier that survives past this function to mark which static feed
+    version an RT row's static_join later matched against."""
+    zip_path = _make_zip(
+        tmp_path,
+        trips_rows=["T1,R1,,", "T2,R1,,"],
+        filename="gtfs_static_20260101.zip",
+    )
+    load_static(zip_path, agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_id, static_version_id FROM static_trips WHERE agency_id = %s ORDER BY trip_id",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+    assert rows == [("T1", "gtfs_static_20260101"), ("T2", "gtfs_static_20260101")]
+
+
+def test_load_static_updates_static_version_id_on_reload(pg_conn, agency_id, tmp_path):
+    """A later load_static() call with a differently-named zip must replace
+    the previous static_version_id, not leave the stale value behind —
+    matching this function's existing per-table DELETE-then-insert
+    idempotency for every other static_trips column."""
+    zip_path_1 = _make_zip(tmp_path, trips_rows=["T1,R1,,"], filename="gtfs_static_20260101.zip")
+    load_static(zip_path_1, agency_id, pg_conn)
+    zip_path_2 = _make_zip(tmp_path, trips_rows=["T1,R1,,"], filename="gtfs_static_20260201.zip")
+    load_static(zip_path_2, agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT static_version_id FROM static_trips WHERE agency_id = %s AND trip_id = 'T1'",
+            (agency_id,),
+        )
+        rows = cur.fetchall()
+    assert rows == [("gtfs_static_20260201",)]

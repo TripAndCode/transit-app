@@ -7,6 +7,7 @@ which is itself untracked/local per this repo's `docs/*` convention). Each
 entry is added as part of the same PR that completes the step (the worker's
 own commit, occasionally followed by a small coordinator commit filling in
 the PR number once it's known).
+- 2026-09-07: Item 88: `pipeline/strategies/static_join.py` no longer drops a post-midnight (`departure_time` hour >= 24) trip's row outright. `pipeline/strategies/_time.py` gained `parse_departure_time`, a single-parse superset of `normalize_departure_time` that also returns the raw seconds-since-service-day-start value (populated for both "ok" and "extended" status); `static_join.py` uses it to keep the row with `scheduled_time` NULL and a new `scheduled_sec Nullable(Int32)` ClickHouse column set instead. `pipeline.clickhouse.UPDATE_COLUMNS` gained `scheduled_sec` as a trailing entry, and `insert_updates` now pads a shorter (legacy 8-tuple) row with `None` for it so `aomori_regex.py` and every pre-existing fixture/test row keep working unchanged. `static_version_id` was also added, resolving the persistence-design question this item's first half had flagged as a blocker (no existing identifier survives past the static-feed fetch step): migration `0036_static_trips_version_id` adds a nullable `static_trips.static_version_id TEXT` column, `pipeline/static_loader.py`'s `load_static()` populates it at INSERT time from the loaded zip's filename stem (same value for every row in one `load_static()` call), and `static_join.py`'s existing `static_trips` join now reads it and forwards it into ClickHouse's `updates.static_version_id` column per RT row. (PR #357)
 
 Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
 
@@ -767,3 +768,38 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
   single second — the boundary this item's own verify criterion names.
   (PR #356)
+- 2026-09-08: Item 97 — extended the `schedule_realism` Ask tool with a
+  per-segment, per-hour-of-day schedule-padding decomposition
+  (`pipeline.query.tool_queries.schedule_realism_padding`), for `static_join`
+  agencies only (needs `arr_delay` + `scheduled_sec`): scheduled running time
+  per segment (from `static_stop_times`) alongside the observed running
+  time's median/85th percentile (new `pipeline.stats.linear_percentile`,
+  fed by `pipeline.dwell_run.compute_trip_dwell_running`'s per-visit
+  dwell/running math), a `padding_min` gap between the two, a terminus
+  early-arrival rate, and a `time_adjustment_rate` flagging a stop reached
+  on time or early that then dwelled well beyond its scheduled dwell
+  (holding to avoid an early departure, not boarding/alighting). Reads raw
+  per-visit rows straight from ClickHouse's `updates` (no new aggregate
+  table) and reconstructs each trip-day's stop sequence in Python, so a
+  ctx time-band filter degrades to fewer valid consecutive-stop pairs
+  instead of needing an explicit "not supported" gate the way the
+  pre-aggregated dwell/running report does. `_tool_schedule_realism` uses
+  this richer view when available and non-empty, falling back to the
+  existing dep_delay-only `schedule_realism_segments` view otherwise (every
+  other ingest strategy, or a static_join route with no padding data yet).
+  Plumbing: `pipeline.db.build_dedup_ch_sql` gained an `include_scheduled_sec`
+  flag (an hour bucket parsed from `scheduled_time` would silently drop
+  every after-midnight extended-hour trip, whose `scheduled_time` is NULL
+  by design — `scheduled_sec` is populated for those too), `_dedup_cte_ch`
+  forwards it, and `_hms_to_sec_sql` moved from `pipeline.analyze` to a
+  public `pipeline.db.hms_to_sec_sql` so this new Postgres-side reader could
+  share the same static-schedule-time parse instead of duplicating it.
+  Added `tests/unit/test_stats.py` coverage for `linear_percentile`,
+  `tests/query/test_tool_queries.py` fixtures covering both the intended
+  padding-visualization/terminus-early-arrival-rate scenario and the
+  held-dwell `time_adjustment_rate` indicator, plus a
+  `tests/query/test_tools_integration.py` dispatch-level test. Backend
+  verification (`poetry run ruff`/`mypy`/`pytest`) could not be run inside
+  this dispatched-worker sandbox (no `poetry` permission available), so the
+  diff was instead manually traced end-to-end against hand-computed
+  expected values for every new arithmetic path. (PR #358)

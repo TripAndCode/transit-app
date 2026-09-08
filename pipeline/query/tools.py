@@ -45,6 +45,7 @@ from pipeline.query.tool_queries import (
     route_hour_dow_pattern,
     route_info,
     route_trend_shift,
+    schedule_realism_padding,
     schedule_realism_segments,
     segment_hotspots,
 )
@@ -144,6 +145,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("schedule_realism_summary", "en"): "Schedule realism — route {route}",
     ("schedule_realism_no_data", "ja"): "路線{route} の区間別データが選択期間にありません。",
     ("schedule_realism_no_data", "en"): "No per-segment data for route {route} in the selected window.",
+    ("schedule_realism_padding_summary", "ja"): "路線{route} 時刻表の妥当性（余裕時間の可視化）",
+    ("schedule_realism_padding_summary", "en"): "Schedule realism — route {route} (padding view)",
+    ("schedule_realism_terminus_suffix", "ja"): "／終点早着率 {pct}%（{n}件中）",
+    ("schedule_realism_terminus_suffix", "en"): " — terminus early-arrival rate {pct}% (n={n})",
     ("trend_shift_summary", "ja"): "路線{route} トレンド変化",
     ("trend_shift_summary", "en"): "Trend shift — route {route}",
     ("trend_shift_no_data", "ja"): "路線{route} のトレンドデータが選択期間にありません。",
@@ -573,7 +578,8 @@ SYSTEM_PROMPT = """\
 - route_meta(route): 路線の路線情報
 - segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット(どの区間で遅延が発生・蓄積しているか)
 - time_pattern(route): 路線の時間帯・曜日別パターン(いつ一番悪化するか。全期間集計で期間指定は効かない)
-- schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性(区間ごとの遅延加算。余裕時間不足の判定)
+- schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性
+  (区間・時間帯ごとに時刻表上の所要時間と実績を比較し余裕時間の有無を判定。対応エージェンシーでは終点早着率・調整停車も表示)
 - trend_shift(route, days_back?, from?, to?): 慢性的な遅延か、期間内で最近悪化したか(トレンドの変化)の判定
 - describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
@@ -1077,9 +1083,45 @@ async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
 
 
 async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
+    """Schedule-padding view (`schedule_realism_padding`) when the agency's
+    ingest strategy makes it available and there's at least one segment to
+    show; otherwise the dep_delay-only `schedule_realism_segments` view,
+    which works for every ingest strategy but can't distinguish deliberate
+    timetable slack from delay that started upstream (see that function's
+    own docstring) — the same "richer view when available, degrade
+    gracefully otherwise" pattern `pipeline.reports.dwell_run` uses.
+    """
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
         return route
+
+    padding = await schedule_realism_padding(agency_id, ctx, conn, ch, route=str(route))
+    if padding["available"] and padding["rows"]:
+        summary = _summary("schedule_realism_padding_summary", lang=locale, route=route)
+        if padding["terminus_early_rate"] is not None:
+            summary += _summary(
+                "schedule_realism_terminus_suffix",
+                lang=locale,
+                pct=round(padding["terminus_early_rate"] * 100),
+                n=padding["terminus_samples"],
+            )
+        return ToolResult(
+            kind="table",
+            summary=summary,
+            rows=[list(r) for r in padding["rows"]],
+            columns=[
+                "stop_sequence",
+                "next_stop_sequence",
+                "hour",
+                "scheduled_run_min",
+                "actual_run_p50_min",
+                "actual_run_p85_min",
+                "samples",
+                "padding_min",
+                "time_adjustment_rate",
+            ],
+        )
+
     rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("schedule_realism_no_data", lang=locale, route=route))
