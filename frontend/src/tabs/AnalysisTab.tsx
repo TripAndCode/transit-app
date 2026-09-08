@@ -15,6 +15,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
+import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
@@ -231,6 +232,13 @@ export function AnalysisTab() {
                 hint={t("reports.no_data.hint")}
                 action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
               />
+            )}
+            {/* Second, narrower metric panel (item 94) -- high-frequency
+                routes only, rendered alongside (never instead of) the
+                on_time table above. Every other report_type is completely
+                unaffected. */}
+            {detail.data.report_type === "on_time" && id != null && (
+              <HeadwayQualityPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>

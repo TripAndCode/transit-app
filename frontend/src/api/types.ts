@@ -192,6 +192,23 @@ export type ReportResponse = ReportMeta & {
   definition: DefinitionMeta;
 };
 
+/** One high-frequency route's pooled Excess Waiting Time / coefficient of
+ *  variation / long-gap rate over the request's range (item 94) -- see
+ *  pipeline/reports/headway_quality.py's compute_headway_quality. A
+ *  non-high-frequency route never appears in this list at all. */
+export type HeadwayQualityRow = {
+  route_code: string;
+  ewt_sec: number | null;
+  cov: number | null;
+  long_gap_rate: number | null;
+  samples: number;
+};
+
+export type HeadwayQualityResponse = {
+  rows: HeadwayQualityRow[];
+  ctx: ResponseCtx;
+};
+
 export type Suggestion = {
   report_type: string;
   route_code: string;

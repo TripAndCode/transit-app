@@ -20,8 +20,10 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
 - agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
-- agg_route_headway    — scheduled-headway median + high-frequency classification per route (static GTFS only)
-- agg_route_headway_daily — per-day reconstructed ACTUAL headway median per route (static_join agencies only)
+- agg_route_headway    — scheduled-headway median + high-frequency classification + scheduled mean-wait
+  per route (static GTFS only)
+- agg_route_headway_daily — per-day reconstructed ACTUAL headway median + sufficient statistics for
+  excess-wait/CoV/long-gap pooling (static_join agencies only)
 - agg_route_daily_dwell_run — per-day dwell/running-time distribution (decomposition view; static_join agencies only)
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
@@ -68,7 +70,7 @@ from api.range import time_band_case_sql
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
-from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, reconstruct_headways
+from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, count_long_gaps, reconstruct_headways
 from pipeline.histogram import (
     HI,
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -921,14 +923,24 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 medians AS (
                     SELECT route_code,
                            PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
-                           COUNT(*) AS scheduled_samples
+                           COUNT(*) AS scheduled_samples,
+                           -- E[H^2] / (2*E[H]) over this route's scheduled headway
+                           -- distribution -- item 94's mean-wait-time formula
+                           -- (pipeline.headways.mean_wait_from_moments), computed
+                           -- here in SQL instead of pulling every raw headway_sec
+                           -- back into Python. NULLIF guards the (already
+                           -- near-impossible, since headway_sec > 0 is filtered
+                           -- below) zero-mean case.
+                           AVG(headway_sec::float8 * headway_sec::float8)
+                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code
                 )
                 SELECT %(agency_id)s AS agency_id, route_code,
                        scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
+                       scheduled_wait_mean_sec
                 FROM medians
             """
             _build_and_insert(
@@ -940,6 +952,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "scheduled_headway_median_sec",
                     "scheduled_samples",
                     "is_high_frequency",
+                    "scheduled_wait_mean_sec",
                 ],
                 p,
                 conn,
@@ -1271,14 +1284,46 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
             for route_code, _stop_id, svc_date, times in ch_headway.result_rows:
                 pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
+            # Scheduled median per route, read back from agg_route_headway
+            # (already INSERTed earlier in this SAME transaction, above) --
+            # used only to threshold "long" gaps (item 94). A route with no
+            # resolvable scheduled median (never classified/high-frequency)
+            # gets long_gap_count=0 via count_long_gaps' own None handling;
+            # such a route is never surfaced by the query-time report
+            # anyway (see pipeline.reports.headway_quality), so 0 vs. NULL
+            # here is not user-visible.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT route_code, scheduled_headway_median_sec FROM agg_route_headway WHERE agency_id = %s",
+                    (agency_id,),
+                )
+                scheduled_median_by_route = dict(cur.fetchall())
             headway_rows = [
-                (agency_id, route_code, svc_date, median(gaps), len(gaps))
+                (
+                    agency_id,
+                    route_code,
+                    svc_date,
+                    median(gaps),
+                    len(gaps),
+                    sum(gaps),
+                    sum(g * g for g in gaps),
+                    count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
+                )
                 for (route_code, svc_date), gaps in pooled.items()
                 if gaps
             ]
             _insert_agg(
                 "agg_route_headway_daily",
-                ["agency_id", "route_code", "date", "actual_headway_median_sec", "actual_samples"],
+                [
+                    "agency_id",
+                    "route_code",
+                    "date",
+                    "actual_headway_median_sec",
+                    "actual_samples",
+                    "actual_headway_sum_sec",
+                    "actual_headway_sumsq_sec2",
+                    "long_gap_count",
+                ],
                 headway_rows,
                 conn,
             )

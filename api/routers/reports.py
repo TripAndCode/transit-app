@@ -35,6 +35,7 @@ from pipeline.reports import (
     compute_delay_certificate,
     compute_dow_ranking,
     compute_dwell_run_decomposition,
+    compute_headway_quality,
     compute_hourly_heatmap,
     compute_on_time,
     compute_ranking,
@@ -127,6 +128,52 @@ async def list_reports(
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
+
+
+class HeadwayQualityRow(BaseModel):
+    """One high-frequency route's pooled Excess Waiting Time / coefficient of
+    variation / long-gap rate over the request's range — see
+    ``pipeline.reports.headway_quality.compute_headway_quality``.
+
+    Every field but ``route_code``/``samples`` is nullable together: a route
+    can appear here (it's classified high-frequency) yet still have no
+    resolvable metric for the requested range slice (e.g. its scheduled
+    schedule mean-wait predates this feature and hasn't been re-analyzed).
+    """
+
+    route_code: str
+    ewt_sec: float | None
+    cov: float | None
+    long_gap_rate: float | None
+    samples: int
+
+
+class HeadwayQualityResponse(BaseModel):
+    """Payload for ``GET /headway_quality`` — a second, narrower metric
+    panel restricted to high-frequency routes, meant to render alongside
+    (not instead of) the ``on_time`` report for the same range (item 94)."""
+
+    rows: list[HeadwayQualityRow]
+    ctx: ReportCtx
+
+
+@router.get("/headway_quality", response_model=HeadwayQualityResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def get_headway_quality(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ctx: RangeCtx = Depends(get_range_ctx),
+):
+    """Excess Waiting Time / CoV / long-gap rate, high-frequency routes only.
+
+    Not part of the generic ``/reports/{report_type}`` dispatcher above
+    (no CSV/definition-metadata concept applies to a route subset filtered
+    server-side by classification, not by a ranking/threshold the caller
+    chose) — a dedicated endpoint, like ``/forecast/overview`` above.
+    """
+    rows = await compute_headway_quality(agency_id, ctx, conn)
+    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_ctx_payload(ctx))
 
 
 class SuggestionResponse(BaseModel):
