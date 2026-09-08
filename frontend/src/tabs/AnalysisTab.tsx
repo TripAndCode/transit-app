@@ -16,6 +16,7 @@ import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
+import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
@@ -239,6 +240,14 @@ export function AnalysisTab() {
                 unaffected. */}
             {detail.data.report_type === "on_time" && id != null && (
               <HeadwayQualityPanel aid={id} ctx={ctx} />
+            )}
+            {/* Third, still-narrower panel (item 104) -- an internal
+                bonus/malus simulation over whichever routes have a
+                configured minimum performance standard, rendered alongside
+                (never instead of) on_time/headway_quality above. Renders
+                nothing itself when this agency has no standards configured. */}
+            {detail.data.report_type === "on_time" && id != null && (
+              <PerformanceStandardPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
