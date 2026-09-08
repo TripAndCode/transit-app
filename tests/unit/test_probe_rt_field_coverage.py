@@ -35,8 +35,10 @@ def test_assess_matches_confirmed_agency_coverage():
 
 def test_assess_flags_a_feed_that_never_sends_schedule_relationship():
     """A new agency whose feed never populates schedule_relationship_* must
-    NOT be silently reported as matching -- this is exactly the gap item 103
-    guards against before assuming service_delivered/dwell_run availability."""
+    NOT be silently reported as matching -- a static_join agency's optional
+    fields are not guaranteed populated just because the platform matches an
+    already-confirmed agency, and downstream service_delivered/dwell_run
+    logic must not assume availability without this check."""
     cov = {
         "stop_time_updates": 100,
         "feed_timestamp": 1_770_000_000,
@@ -53,9 +55,10 @@ def test_assess_flags_a_feed_that_never_sends_schedule_relationship():
 
 
 def test_assess_flags_arr_delay_coverage_outside_sparse_range():
-    """arr_delay must be genuinely sparse (item 87's finding) -- either
-    always-present (1.0, suggesting a different field semantics) or
-    always-absent (0.0) is flagged, not silently accepted."""
+    """arr_delay is only sent when a StopTimeUpdate carries an `arrival`
+    submessage, so genuine sparsity is expected -- either always-present
+    (1.0, suggesting a different field semantics) or always-absent (0.0) is
+    flagged, not silently accepted."""
     cov = {
         "stop_time_updates": 100,
         "feed_timestamp": 1_770_000_000,
