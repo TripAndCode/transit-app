@@ -1,10 +1,11 @@
 """Pure-logic tests for pipeline/stats.py (Wilson interval + confidence flag)."""
 
 import math
+import statistics
 
 import pytest
 
-from pipeline.stats import annotate_on_time_pct_confidence, pct_is_uncertain, wilson_interval
+from pipeline.stats import annotate_on_time_pct_confidence, linear_percentile, pct_is_uncertain, wilson_interval
 
 
 def test_wilson_interval_matches_known_reference():
@@ -83,6 +84,36 @@ def test_wilson_interval_symmetry_around_half():
     low_b, high_b = wilson_interval(70, 100)
     assert low_b == pytest.approx(1 - high_a, abs=1e-9)
     assert high_b == pytest.approx(1 - low_a, abs=1e-9)
+
+
+def test_linear_percentile_empty_is_none():
+    assert linear_percentile([], 0.5) is None
+
+
+def test_linear_percentile_single_value():
+    assert linear_percentile([42.0], 0.5) == 42.0
+    assert linear_percentile([42.0], 0.85) == 42.0
+
+
+def test_linear_percentile_median_matches_statistics_median():
+    # statistics.median's even-n "average the two middle values" behaviour
+    # is exactly what linear interpolation at q=0.5 produces too, for the
+    # same input, so this doubles as a cross-check against the stdlib.
+    values = [10.0, 20.0, 30.0, 40.0]
+    assert linear_percentile(values, 0.5) == statistics.median(values)
+
+
+def test_linear_percentile_matches_known_hand_computation():
+    # 5 sorted values [10, 20, 30, 40, 50]; q=0.85 -> rank 0.85*4=3.4,
+    # interpolating 40% of the way from index 3 (40) to index 4 (50) -> 44.
+    values = [50.0, 10.0, 40.0, 20.0, 30.0]  # deliberately unsorted input
+    assert linear_percentile(values, 0.85) == pytest.approx(44.0)
+
+
+def test_linear_percentile_endpoints():
+    values = [5.0, 1.0, 3.0]
+    assert linear_percentile(values, 0.0) == 1.0
+    assert linear_percentile(values, 1.0) == 5.0
 
 
 def test_wilson_interval_matches_hand_derivation_for_10pct():

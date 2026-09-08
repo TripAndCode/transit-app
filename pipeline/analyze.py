@@ -59,7 +59,7 @@ import psycopg2.extras
 
 from api.range import time_band_case_sql
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_dedup_ch_sql, hms_to_sec_sql
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.histogram import (
     HI,
@@ -148,31 +148,6 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
     sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
     with conn.cursor() as cur:
         psycopg2.extras.execute_batch(cur, sql, rows)
-
-
-def _hms_to_sec_sql(column: str) -> str:
-    """Return a SQL expression parsing a static-schedule HH:MM:SS (or H:MM)
-    text field into seconds since the service day's midnight.
-
-    Tolerates GTFS's after-midnight extended-hour notation (e.g. "25:30:00")
-    since this is plain integer arithmetic, not a cast into a Postgres TIME
-    column (which can't represent hour >= 24 -- see
-    pipeline/strategies/_time.py's normalize_departure_time, which is why the
-    INGEST-time `scheduled_time` column drops such trips instead). A value
-    that doesn't match the expected shape (missing/malformed static data)
-    resolves to NULL rather than raising and aborting analyze() for the
-    whole agency -- the same "degrade the one row, don't abort the batch"
-    convention compute_hourly_heatmap's live ClickHouse fallback already
-    uses for its own `toUInt8OrNull(substring(scheduled_time, 1, 2))` hour
-    extraction.
-    """
-    return (
-        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-9]{{2}}(:[0-9]{{2}})?$' THEN "
-        f"split_part({column}, ':', 1)::int * 3600 "
-        f"+ split_part({column}, ':', 2)::int * 60 "
-        f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
-        f"ELSE NULL END"
-    )
 
 
 def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> None:
@@ -932,8 +907,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_hist_expr = hist_array_sql("br", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
-            sched_arr_expr = _hms_to_sec_sql("sst.arrival_time")
-            sched_dep_expr = _hms_to_sec_sql("sst.departure_time")
+            sched_arr_expr = hms_to_sec_sql("sst.arrival_time")
+            sched_dep_expr = hms_to_sec_sql("sst.departure_time")
             sql = f"""
                 WITH visits AS (
                     SELECT
