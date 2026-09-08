@@ -28,13 +28,25 @@ Only the newest completed day is compared, which catches the realistic failure
 modes (cron crashed mid-loop, forgot to re-analyze). It does NOT detect an
 interior missing day — analyze's atomic per-agency wipe-and-rewrite cannot
 produce one, so a mid-range gap would only arise from manual row surgery.
+
+`check_feed_freshness`/`feed_is_stale` below answer a different question with
+the same day-granularity rule (`is_stale`, reused directly): not whether the
+MATERIALIZED aggregates lag the live fact table, but whether the feed ITSELF
+has stopped ticking forward, via its own self-reported `feed_timestamp` (the
+GTFS-RT `FeedHeader.timestamp`, populated per agency — see
+`pipeline.clickhouse.UPDATE_COLUMNS`). Reusing `is_stale` for both means a
+feed that has gone fully silent since before today's JST midnight is flagged
+exactly the same way an agg-lag is: this coarse, whole-day-boundary signal
+does not catch a feed frozen for a few hours WITHIN the current day (the same
+limitation `is_stale` already has for the aggregate case above).
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
+from pipeline.clickhouse import latest_feed_timestamp as ch_latest_feed_timestamp
 from pipeline.clickhouse import max_captured_at_before as ch_max_captured_at_before
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -82,3 +94,47 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
             if is_stale(agg_max, live_max):
                 stale.append(StaleAgency(aid, agg_max, live_max))
     return stale
+
+
+@dataclass(frozen=True)
+class FeedFreshness:
+    agency_id: int
+    feed_timestamp: datetime | None
+    age_seconds: float | None
+    is_stale: bool
+
+
+def feed_is_stale(now: datetime, feed_timestamp: datetime | None) -> bool:
+    """Whether an agency's GTFS-RT feed has fallen behind, per its own
+    self-reported `feed_timestamp` (see the module docstring's "different
+    question" note) — reuses `is_stale`'s exact day-granularity comparison
+    (JST calendar day) so this can never disagree with the aggregate-lag
+    rule above about what "behind" means.
+
+    `feed_timestamp is None` means the field is unpopulated for this
+    agency's ingest strategy, or the agency has no rows at all — a
+    structural gap, not evidence the feed is unhealthy — so this resolves
+    to "not stale" (nothing to judge), unlike `is_stale`'s own
+    `agg_max_day=None` branch, which means something different (a completed
+    day IS owed but genuinely missing).
+    """
+    if feed_timestamp is None:
+        return False
+    return is_stale(feed_timestamp.astimezone(_JST).date(), now.astimezone(_JST).date())
+
+
+def check_feed_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[FeedFreshness]:
+    """Per-agency `(now - feed_timestamp)` staleness — see `feed_is_stale`.
+
+    Read-only. `conn` is accepted (unused) for signature parity with
+    `check_agg_freshness`, so a future caller that wants to run both checks
+    together can do so uniformly.
+    """
+    del conn
+    now = datetime.now(timezone.utc)
+    out: list[FeedFreshness] = []
+    for aid in agency_ids:
+        ts = ch_latest_feed_timestamp(ch_client, aid)
+        age = None if ts is None else (now - ts).total_seconds()
+        out.append(FeedFreshness(agency_id=aid, feed_timestamp=ts, age_seconds=age, is_stale=feed_is_stale(now, ts)))
+    return out

@@ -13,6 +13,12 @@ from pipeline.reports.network import compute_network_summary
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
+_TRUNCATE_SQL = (
+    "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, "
+    "ridership_weights, updates CASCADE"
+)
+
+
 @pytest.fixture
 async def net_pool(apply_schema):
     # In-process compute cache is keyed on (from_date, to_date) only, so two
@@ -20,15 +26,46 @@ async def net_pool(apply_schema):
     compute_network_summary.cache_clear()
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as c:
-        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
+        await c.execute(_TRUNCATE_SQL)
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
         cc = await c.fetchrow(ins, "C", "http://nc")
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
-        await c.execute("TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, updates CASCADE")
+        await c.execute(_TRUNCATE_SQL)
     await pool.close()
+
+
+async def _seed_route_dist(pool, aid, route_code, dist):
+    """dist: list of (date_iso, samples, sum_delay_sec, on_time_count) for one route_code
+    (unlike _seed below, which hardcodes route_code='R1' -- this lets a test seed
+    several distinct routes under one agency, needed for ridership-weighting tests)."""
+    async with pool.acquire() as c:
+        for d, n, sd, ot in dist:
+            await c.execute(
+                "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
+                "samples, sum_delay_sec, on_time_count, late5_count, hist) "
+                "VALUES ($1,$2,$3,'平日',$4,$5,$6,0,$7)",
+                aid,
+                date.fromisoformat(d),
+                route_code,
+                n,
+                sd,
+                ot,
+                [0] * 37,
+            )
+
+
+async def _seed_ridership_weight(pool, aid, route_code, weight):
+    """route_code=None inserts that agency's default (route_code IS NULL) weight row."""
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO ridership_weights (agency_id, route_code, weight) VALUES ($1,$2,$3)",
+            aid,
+            route_code,
+            weight,
+        )
 
 
 async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
@@ -64,6 +101,121 @@ async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
                 updates_at,
                 time(11, 37),
             )
+
+
+async def _seed_static_schedule(pool, aid, *, service_id: str, trip_ids: list[str], svc_date: str) -> None:
+    """Seed one static-GTFS "planned trips" fixture: `len(trip_ids)` trips
+    under `service_id`, all scheduled to run on `svc_date` (YYYYMMDD text,
+    matching calendar_dates.txt's raw format) via exception_type=1.
+    """
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1,$2,$3,1)",
+            aid,
+            service_id,
+            svc_date,
+        )
+        for tid in trip_ids:
+            await c.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1,$2,'R1',$3)",
+                aid,
+                tid,
+                service_id,
+            )
+
+
+async def _set_ingest_strategy(pool, aid, strategy):
+    async with pool.acquire() as c:
+        await c.execute("UPDATE agencies SET ingest_strategy = $1 WHERE agency_id = $2", strategy, aid)
+
+
+async def _seed_service_delivered_daily(pool, aid, rows):
+    """rows: list of (date_iso, non_executed_trips)."""
+    async with pool.acquire() as c:
+        for d, n in rows:
+            await c.execute(
+                "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES ($1,$2,$3)",
+                aid,
+                date.fromisoformat(d),
+                n,
+            )
+
+
+async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client):
+    """The read path sums agg_service_delivered_daily over the range and
+    divides against the static schedule's planned count -- no ClickHouse
+    access. 5 planned trips, 1 non-executed trip-day precomputed -> 80%."""
+    pool, a, b, _cc = net_pool
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    # Agency B: static_join too, but its feed had zero cancellations in range
+    # (no agg_service_delivered_daily row at all) -> reads 100%, not "not available".
+    await _seed_static_schedule(pool, b, service_id="WD", trip_ids=["U1", "U2", "U3"], svc_date="20260401")
+    await _set_ingest_strategy(pool, b, "static_join")
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    by = {r["agency_id"]: r for r in rows}
+    assert by[a]["planned_trips"] == 5
+    assert by[a]["executed_trips"] == 4
+    assert by[a]["service_delivered_pct"] == 80.0
+    assert by[b]["planned_trips"] == 3
+    assert by[b]["executed_trips"] == 3
+    assert by[b]["service_delivered_pct"] == 100.0
+
+
+async def test_compute_service_delivered_not_available_when_not_static_join(net_pool, ch_async_client):
+    """An agency whose ingest_strategy isn't static_join reads "not available"
+    (None), never a misleading 100%, regardless of static-schedule data."""
+    pool, _a, b, _cc = net_pool
+    await _seed_static_schedule(pool, b, service_id="WD", trip_ids=["U1", "U2", "U3"], svc_date="20260401")
+    # b's ingest_strategy is left NULL (net_pool's INSERT never sets it).
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == b)
+    assert row["planned_trips"] == 3
+    assert row["executed_trips"] is None
+    assert row["service_delivered_pct"] is None
+
+
+async def test_compute_service_delivered_no_static_schedule_is_not_available(net_pool, ch_async_client):
+    """No static schedule loaded (planned_trips == 0) reads "not available",
+    never a divide-by-zero 100%, even for a static_join agency with
+    precomputed non-executed rows."""
+    pool, a, _b, _cc = net_pool
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 0
+    assert row["executed_trips"] is None
+    assert row["service_delivered_pct"] is None
+
+
+async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client):
+    """A non_executed_trips total exceeding planned_trips (feed drift, or a
+    RT-only ADDED trip marked CANCELED) must clamp executed_trips at 0, never
+    go negative."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 5)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 2
+    assert row["executed_trips"] == 0
+    assert row["service_delivered_pct"] == 0.0
 
 
 async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_async_client):
@@ -210,10 +362,34 @@ async def test_network_summary_endpoint(net_client, ch_client):
         "clamp_count",
         "clamp_pct",
         "is_stale",
+        "planned_trips",
+        "executed_trips",
+        "service_delivered_pct",
+        "has_ridership_weights",
+        "weighted_on_time_pct",
     }
     brow = next(x for x in body["agencies"] if x["agency_id"] == b)
     assert brow["clamp_pct"] is None
     assert brow["is_stale"] is True
+
+
+async def test_network_summary_includes_definition_metadata(net_client):
+    """The board's on_time_pct always reads the exact legacy_60s column (no
+    tolerance query param exists on this endpoint) -- the definition block
+    must say so explicitly rather than leaving a user to assume it, and must
+    match pipeline.reports.definition's resolved legacy values exactly (not
+    a hardcoded/duplicated copy of them)."""
+    client, _pool, _a, _b, _cc = net_client
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert r.status_code == 200
+    body = r.json()
+    definition = body["definition"]
+    assert definition["preset"] == "legacy_60s"
+    assert definition["early_tolerance_sec"] is None
+    assert definition["late_tolerance_sec"] == 60
+    assert definition["exclusion_threshold_sec"] == 7200
+    assert definition["measurement_point"] == "all_stops_all_observations"
+    assert definition["dedup_rule"] == "latest_observation_per_stop_event"
 
 
 async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
@@ -244,3 +420,93 @@ async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(ne
     arow = next(x for x in body["agencies"] if x["agency_id"] == a)
     assert arow["avg_delay_min"] == 10.0  # Postgres-backed field unaffected by the CH outage
     assert arow["is_stale"] is False  # degraded live_max=None -> is_stale(agg_day, None) is False
+
+
+async def test_ridership_weighted_on_time_absent_without_a_weight_table(net_pool, ch_async_client):
+    """An agency with zero ridership_weights rows has no weighting configured
+    at all -- has_ridership_weights must read False and weighted_on_time_pct
+    None, never a value silently computed with an implicit weight of 1
+    everywhere."""
+    pool, a, _b, _cc = net_pool
+    await _seed_route_dist(pool, a, "R1", [("2026-04-01", 100, 60000, 50)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["has_ridership_weights"] is False
+    assert row["weighted_on_time_pct"] is None
+
+
+async def test_ridership_weighted_on_time_shifts_toward_the_heavily_weighted_route(net_pool, ch_async_client):
+    """R1 is high-ridership (weight 10x) and on-time 90% of the time; R2 is
+    low-ridership (weight 1x, the un-weighted default) and on-time only 10%
+    of the time -- same sample count each, so the UNWEIGHTED rate sits at the
+    midpoint (50%). The ridership-weighted rate must sit closer to R1's own
+    90% than the unweighted rate does, i.e. shift toward the low-ridership
+    route's poor performance LESS than the unweighted rate would."""
+    pool, a, _b, _cc = net_pool
+    await _seed_route_dist(pool, a, "R1", [("2026-04-01", 100, 60000, 90)])
+    await _seed_route_dist(pool, a, "R2", [("2026-04-01", 100, 60000, 10)])
+    await _seed_ridership_weight(pool, a, "R1", 10)
+    await _seed_ridership_weight(pool, a, "R2", 1)
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["on_time_pct"] == 50.0
+    assert row["has_ridership_weights"] is True
+    # (90*10 + 10*1) / (100*10 + 100*1) * 100 = 910/1100*100 = 82.7
+    assert row["weighted_on_time_pct"] == 82.7
+    assert abs(row["weighted_on_time_pct"] - 90) < abs(row["on_time_pct"] - 90)
+
+
+async def test_ridership_weighted_on_time_uses_agency_default_weight_as_fallback(net_pool, ch_async_client):
+    """A route with no route-specific ridership_weights row falls back to its
+    agency's default (route_code IS NULL) row, not an implicit 1, when one is
+    configured."""
+    pool, a, _b, _cc = net_pool
+    await _seed_route_dist(pool, a, "R1", [("2026-04-01", 100, 60000, 90)])
+    await _seed_route_dist(pool, a, "R2", [("2026-04-01", 100, 60000, 10)])
+    await _seed_ridership_weight(pool, a, "R1", 10)
+    await _seed_ridership_weight(pool, a, None, 5)  # agency default, covers R2
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    # (90*10 + 10*5) / (100*10 + 100*5) * 100 = 950/1500*100 = 63.3
+    assert row["weighted_on_time_pct"] == 63.3
+
+
+async def test_ridership_weighted_on_time_none_when_configured_but_no_samples_in_range(net_pool, ch_async_client):
+    """Configured (has_ridership_weights True) but zero agg_route_daily_dist
+    samples in the requested range reads None, distinguishable from "not
+    configured" only via has_ridership_weights, not by weighted_on_time_pct
+    alone."""
+    pool, a, _b, _cc = net_pool
+    await _seed_ridership_weight(pool, a, "R1", 10)
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["has_ridership_weights"] is True
+    assert row["weighted_on_time_pct"] is None
+
+
+async def test_network_summary_endpoint_surfaces_ridership_weighting(net_client):
+    """End-to-end: the same weighting behavior is reachable through
+    GET /api/network/summary, not just the compute layer."""
+    client, pool, a, _b, _cc = net_client
+    await _seed_route_dist(pool, a, "R1", [("2026-04-01", 100, 60000, 90)])
+    await _seed_route_dist(pool, a, "R2", [("2026-04-01", 100, 60000, 10)])
+    await _seed_ridership_weight(pool, a, "R1", 10)
+    await _seed_ridership_weight(pool, a, "R2", 1)
+
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-01"})
+    assert r.status_code == 200
+    arow = next(x for x in r.json()["agencies"] if x["agency_id"] == a)
+    assert arow["has_ridership_weights"] is True
+    assert arow["weighted_on_time_pct"] == 82.7

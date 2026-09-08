@@ -69,10 +69,14 @@ agent file forbids reviewers from moving it for the same reason.
 
 ## 3. Synthesize and iterate only when needed
 
-Deduplicate findings and keep evidence-backed Major/Minor issues. If a Major is
-fixed, regenerate the manifest and rerun only the reviewer group that owned that
-finding. Cap at two fix iterations. Do not repeat clean groups merely for “fresh
-eyes.”
+Deduplicate findings on file, line, and dimension together. Reviewer groups read the
+same files from different angles, so one line reported twice under the same dimension
+is one finding, while the same line under two dimensions is two and both stay. Keep
+evidence-backed Major/Minor issues, including the agent file's unconfirmed-absence
+findings reported at `confidence: low` — that is signal to confirm, not noise to drop.
+If a Major is fixed, regenerate the manifest and rerun only the reviewer group that
+owned that finding. Cap at two fix iterations. Do not repeat clean groups merely for
+“fresh eyes.”
 
 For a high-risk diff, after all Major findings are resolved, run one final integrated
 review over the cumulative diff. Use Opus for this final call when the Agent tool

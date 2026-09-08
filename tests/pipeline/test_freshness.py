@@ -338,3 +338,101 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
 
     assert "fresh aggregates" in caplog.text
     assert "stale aggregates" not in caplog.text
+
+
+# ── check_feed_freshness: (now - feed_timestamp) staleness ─────────────────
+
+
+def _insert_with_feed_timestamp(ch_client, agency_id, captured_at, feed_timestamp):
+    from pipeline.clickhouse import insert_updates
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "f.pb",
+                captured_at,
+                "T1",
+                "平日",
+                "11:37",
+                "44372",
+                1,
+                60,
+                None,  # stop_id
+                None,  # arr_delay
+                None,  # schedule_relationship_trip
+                None,  # schedule_relationship_stop
+                int(feed_timestamp.timestamp()),  # feed_timestamp: Nullable(UInt64), epoch seconds
+            )
+        ],
+    )
+
+
+def test_check_feed_freshness_stale_when_last_seen_days_ago(pg_conn, ch_client, agency_id):
+    from datetime import datetime, timezone
+
+    from pipeline.freshness import check_feed_freshness
+
+    old = datetime(2026, 4, 1, 2, 37, 0, tzinfo=timezone.utc)
+    _insert_with_feed_timestamp(ch_client, agency_id, old, old)
+
+    result = check_feed_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(result) == 1
+    assert result[0].agency_id == agency_id
+    assert result[0].feed_timestamp == old
+    assert result[0].is_stale is True
+    assert result[0].age_seconds is not None and result[0].age_seconds > 0
+
+
+def test_check_feed_freshness_fresh_when_recently_seen(pg_conn, ch_client, agency_id):
+    from datetime import datetime, timedelta, timezone
+
+    from pipeline.freshness import check_feed_freshness
+
+    recent = datetime.now(timezone.utc) - timedelta(seconds=30)
+    _insert_with_feed_timestamp(ch_client, agency_id, recent, recent)
+
+    result = check_feed_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(result) == 1
+    assert result[0].is_stale is False
+    assert result[0].age_seconds is not None
+    assert 0 <= result[0].age_seconds < 60
+
+
+def test_check_feed_freshness_no_rows_is_not_stale(pg_conn, ch_client, agency_id):
+    from pipeline.freshness import check_feed_freshness
+
+    result = check_feed_freshness(pg_conn, ch_client, [agency_id])
+
+    assert len(result) == 1
+    assert result[0].feed_timestamp is None
+    assert result[0].age_seconds is None
+    assert result[0].is_stale is False
+
+
+def test_check_feed_freshness_multi_agency_only_stale_flagged(pg_conn, ch_client, agency_id):
+    from datetime import datetime, timedelta, timezone
+
+    from pipeline.freshness import check_feed_freshness
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+            ("test agency 2", "http://example.test/feed2"),
+        )
+        second_id = cur.fetchone()[0]
+    pg_conn.commit()
+
+    old = datetime(2026, 4, 1, 2, 37, 0, tzinfo=timezone.utc)
+    recent = datetime.now(timezone.utc) - timedelta(seconds=30)
+    _insert_with_feed_timestamp(ch_client, agency_id, old, old)
+    _insert_with_feed_timestamp(ch_client, second_id, recent, recent)
+
+    result = check_feed_freshness(pg_conn, ch_client, [agency_id, second_id])
+
+    by_agency = {r.agency_id: r for r in result}
+    assert by_agency[agency_id].is_stale is True
+    assert by_agency[second_id].is_stale is False

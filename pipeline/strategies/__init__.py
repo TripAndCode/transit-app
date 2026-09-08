@@ -2,12 +2,15 @@
 
 Each ingest strategy module exposes:
     parse_feed(pb_bytes: bytes, agency_id: int, conn) -> list[tuple]
-        Returns rows ready for pipeline.clickhouse.insert_updates (8-tuple;
-        a strategy that also derives scheduled_sec, e.g. static_join.py,
-        returns a 9-tuple with it appended — see pipeline.clickhouse.
-        UPDATE_COLUMNS and insert_updates' trailing-column padding for
-        shorter tuples. agency_id is prepended by insert_updates, not part
-        of this tuple).
+        Returns rows ready for pipeline.clickhouse.insert_updates (15-tuple,
+        see pipeline.clickhouse.UPDATE_COLUMNS — agency_id is prepended by
+        insert_updates, not part of this tuple). A strategy whose source
+        feed doesn't populate one of the trailing fields (stop_id, arr_delay,
+        schedule_relationship_trip, schedule_relationship_stop,
+        feed_timestamp, scheduled_sec, static_version_id) passes NULL for it
+        rather than guessing; a strategy's tuple shorter than 15 elements
+        (predating one of these fields) is right-padded with None by
+        insert_updates instead.
 
 Each static strategy module exposes:
     fetch(agency_id: int, conn, dest_dir: pathlib.Path) -> Optional[pathlib.Path]

@@ -122,6 +122,7 @@
     "col_agency": "事業者",
     "col_avg_delay": "平均遅延（分）",
     "col_on_time": "定時率",
+    "col_delivered": "運行率",
     "col_samples": "観測数",
     "col_feed": "フィード（異常値%）",
     "col_freshness": "鮮度",
@@ -132,6 +133,7 @@
     "help_agency": "交通事業者。",
     "help_avg_delay": "期間中の平均的な遅れ（分）。ドットは深刻度を示します。",
     "help_on_time": "定時基準内に収まった割合。",
+    "help_delivered": "静的時刻表に対して実際に運行された便の割合 — 事業者のフィードが運休情報を送っていない場合は「—」と表示されます。",
     "help_samples": "数値の基となる観測数。",
     "help_feed": "異常値として除外された割合 — 高い場合はフィード停止の可能性。",
     "help_freshness": "表の数値が最新の取り込みデータまで反映されているか。「未更新」は集計が追いついておらず、直近の日付がまだ含まれていない可能性を示します。",
@@ -140,7 +142,24 @@
     "no_data_in_range": "期間内のデータなし",
     "view_agency": "{{name}} の概況を見る",
     "delay_unit": "分",
-    "you_badge": "あなた"
+    "you_badge": "あなた",
+    "ridership_weighted_toggle": "利用者数で重み付け",
+    "col_on_time_weighted": "定時率（利用者数で重み付け）",
+    "on_time_weighted_suffix": "（重み付け）",
+    "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。"
+  },
+  "definitionMeta": {
+    "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
+    "unbounded": "無制限",
+    "not_applicable": "対象外",
+    "seconds": "{{value}}秒",
+    "measurementPoint": {
+      "all_stops_all_observations": "集計範囲：全停留所・全観測"
+    },
+    "dedupRule": {
+      "latest_observation_per_stop_event": "重複排除：停留所イベントごとに最新観測を採用"
+    },
+    "exclusion_rule": "除外基準：|遅延|>{{sec}}秒を除外"
   },
   "app": {
     "data_stale": {
@@ -300,6 +319,7 @@
     "yes": "はい",
     "no": "いいえ",
     "unit_min": "分",
+    "unit_sec": "秒",
     "unit_min_sec_signed": "{{sign}}{{m}}分{{s}}秒",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
@@ -885,7 +905,10 @@
       "compare_ranking": "比較ランキング",
       "dow_weekday": "平日傾向",
       "dow_weekend": "週末傾向",
-      "route_forecast": "路線別予測"
+      "dwell_run": "滞留・走行時間",
+      "route_forecast": "路線別予測",
+      "council_summary": "議会向け報告",
+      "delay_certificate": "遅延証明書"
     },
     "col": {
       "route": "路線",
@@ -901,7 +924,15 @@
       "weekend": "土日祝",
       "diff": "差",
       "direction": "向き",
-      "confidence": "確信度"
+      "confidence": "確信度",
+      "planned_trips": "計画本数",
+      "executed_trips": "運行本数",
+      "service_delivered_pct": "運行実績率",
+      "agency_name": "事業者名",
+      "date": "日付",
+      "scheduled_time": "定刻",
+      "actual_time": "実績時刻",
+      "delay_sec": "遅延(秒)"
     },
     "confidence_low_mark": "幅あり",
     "direction": {
@@ -956,6 +987,20 @@
       "smoothed_label": "- - - 7日移動平均",
       "worst_label": "悪化:",
       "offender": "路線{{code}}({{min}}分)"
+    },
+    "dwell_run": {
+      "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",
+      "time_band_unsupported": "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
+      "col": {
+        "dwell_avg": "滞留平均",
+        "dwell_p50": "滞留p50",
+        "dwell_p90": "滞留p90",
+        "dwell_samples": "滞留観測数",
+        "run_avg": "走行平均",
+        "run_p50": "走行p50",
+        "run_p90": "走行p90",
+        "run_samples": "走行観測数"
+      }
     }
   },
   "insight_panel": {

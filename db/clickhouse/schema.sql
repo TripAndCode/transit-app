@@ -2,10 +2,10 @@
 -- predates the trip_id/scheduled_time LowCardinality change below and still
 -- has the old String/Nullable(String) types — see db/clickhouse/bootstrap.py
 -- for the one-time ALTER TABLE needed to migrate it (a separate, deliberate
--- action, not something apply_schema does automatically). The same applies
--- to scheduled_sec below: it needs a one-time ADD COLUMN on that live table
--- (also documented in bootstrap.py) since `CREATE TABLE IF NOT EXISTS` is a
--- no-op for a table that already exists.
+-- action, not something apply_schema does automatically). Every nullable
+-- column added below since (scheduled_sec onward) does NOT need that manual
+-- step: apply_schema's _NEW_NULLABLE_COLUMNS self-heals a pre-existing table
+-- via idempotent ADD COLUMN IF NOT EXISTS (see bootstrap.py).
 CREATE TABLE IF NOT EXISTS updates (
     agency_id      UInt16,
     captured_at    DateTime64(0, 'UTC'),
@@ -22,7 +22,23 @@ CREATE TABLE IF NOT EXISTS updates (
     -- represent an hour >= 24), scheduled_sec holds a value for those rows
     -- too instead of the ingest strategy having to drop them. NULL when
     -- departure_time itself didn't parse as a time at all (empty/malformed).
-    scheduled_sec  Nullable(Int32)
+    scheduled_sec  Nullable(Int32),
+    -- RT-sourced fields confirmed present in at least one currently-configured
+    -- agency's feed (see pipeline/strategies/*.py's parse_feed docstrings for
+    -- which agencies populate which of these) -- absent for any agency whose
+    -- feed doesn't send the underlying protobuf field, and unread by any
+    -- agg_*/dashboard consumer today.
+    stop_id                    LowCardinality(Nullable(String)),
+    arr_delay                  Nullable(Int32),
+    schedule_relationship_trip Nullable(UInt8),
+    schedule_relationship_stop Nullable(UInt8),
+    feed_timestamp             Nullable(UInt64),
+    -- static_trips.static_version_id (the loaded GTFS static zip's filename
+    -- stem, e.g. "gtfs_static_20260101") for the static feed version this RT
+    -- row's static_join matched against. NULL when the JOIN missed (no
+    -- matching static_trips row) or for ingest strategies that don't join
+    -- static data at all (e.g. aomori_regex.py).
+    static_version_id LowCardinality(Nullable(String))
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(captured_at)
 ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)

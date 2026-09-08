@@ -35,11 +35,20 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # very-late bus still counts.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
+# Outside the +/-MAX_PLAUSIBLE_DELAY_SEC window every non-NULL arr_delay reaching
+# argMax already satisfies (see build_dedup_ch_sql's arr_clamp), so this can never
+# collide with a real value; derived from MAX_PLAUSIBLE_DELAY_SEC so the two can't
+# drift apart. -1 (used for the small schedule_relationship_trip/_stop enums
+# elsewhere) isn't safe here since arr_delay is a signed seconds value and small
+# negative delays are legitimate.
+_ARR_DELAY_NULL_SENTINEL = -MAX_PLAUSIBLE_DELAY_SEC - 1
+
 
 def build_dedup_ch_sql(
     *,
     extra_where: str = "",
     include_captured_at: bool = False,
+    include_arr_delay: bool = False,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -100,8 +109,39 @@ def build_dedup_ch_sql(
 
     Column order/count in the SELECT list must stay exactly
     `route_code, service_type, scheduled_time, trip_id, date,
-    stop_sequence, dep_delay[, last_captured_at]` — `pipeline/analyze.py`
-    consumes the result by tuple position (`r[-1]` for `last_captured_at`).
+    stop_sequence, dep_delay[, last_captured_at][, arr_delay]` —
+    `pipeline/analyze.py` consumes the result by tuple position (`r[-1]` for
+    `last_captured_at` when `include_captured_at`; `arr_delay`, when
+    requested, is always the LAST column regardless of `include_captured_at`,
+    so a caller combining both flags still finds it at `r[-1]`).
+
+    `include_arr_delay` additionally clamps `arr_delay` to the same
+    plausibility window as `dep_delay` (`MAX_PLAUSIBLE_DELAY_SEC`) whenever
+    it's non-NULL — a frozen/stale feed can corrupt `arr_delay` the same way
+    it corrupts `dep_delay` (see that constant's own docstring), and an
+    implausible `arr_delay` would otherwise inflate a dwell/running-time
+    computation built from it. This clamp is folded into the `arr_delay`
+    SELECT expression itself (an out-of-range value becomes unmeasured for
+    THAT COLUMN ONLY, via the same NULL-handling path as a genuinely-NULL
+    `arr_delay`), NOT into this query's shared row-level `WHERE` — this
+    query's `WHERE`/`GROUP BY` is shared by every caller (including plain
+    `include_captured_at=True` callers with no interest in `arr_delay` at
+    all), so a row-level filter here would drop that row from the `dep_delay`
+    `argMax` too, silently resurrecting a stale `dep_delay` for a row whose
+    only problem was an implausible `arr_delay`.
+
+    `arr_delay` is legitimately NULL per-row (sparse RT arrival coverage), but
+    ClickHouse's `argMax(arg, val)` silently SKIPS a row whose `arg` is NULL
+    when picking the row with the maximal `val` — it does not fall back to
+    NULL just because the true-latest `(captured_at, file_name)` row happens
+    to have a NULL `arr_delay`. Left unguarded, that resurrects an earlier,
+    stale non-NULL `arr_delay` instead of correctly reporting "no arrival
+    estimate for the latest observation". The `coalesce(u.arr_delay,
+    _ARR_DELAY_NULL_SENTINEL)` / `NULLIF(..., _ARR_DELAY_NULL_SENTINEL)` wrap
+    below forces every row into `argMax`'s selection (so latest-observation-
+    wins is still honored) while converting the sentinel back to NULL in the
+    final result. The same fix already applies to `schedule_relationship_trip`/
+    `schedule_relationship_stop` elsewhere in this codebase.
 
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
@@ -120,15 +160,68 @@ def build_dedup_ch_sql(
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
+    arr = (
+        ", NULLIF(argMax(coalesce(CASE WHEN u.arr_delay BETWEEN "
+        f"-{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC} THEN u.arr_delay END, "
+        f"{_ARR_DELAY_NULL_SENTINEL}), (u.captured_at, u.file_name)), "
+        f"{_ARR_DELAY_NULL_SENTINEL}) AS arr_delay"
+        if include_arr_delay
+        else ""
+    )
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
-        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured} "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{arr} "
         "FROM updates AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
+    )
+
+
+def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
+    """Return the SQL body that gathers EVERY raw observation per stop event
+    (not just the latest one `build_dedup_ch_sql` resolves to), for
+    `pipeline.prediction_accuracy`'s early-vs-final delay-estimate error
+    metric.
+
+    Same grouping key, same `agency_id`/plausibility-clamp `WHERE`, and the
+    same `argMax(u.dep_delay, (u.captured_at, u.file_name))` final-value
+    resolution as `build_dedup_ch_sql` (kept byte-for-byte parallel so the
+    two queries can never silently disagree about which row is "the final
+    observation" for a stop event) -- but this query ALSO projects
+    `groupArray(tuple(u.captured_at, u.dep_delay))`, the raw per-observation
+    history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
+    to compare early readings against that final value.
+
+    `HAVING count() > 1` drops every stop event observed exactly once: a
+    singleton has no EARLY observation to compare against its own (only)
+    final one, so it can never contribute to this metric and would just be
+    dead weight in the result set (and in `groupArray`'s per-row memory).
+
+    Column order/count in the SELECT list is exactly `route_code,
+    service_type, scheduled_time, trip_id, date, stop_sequence,
+    final_dep_delay, observations` -- `pipeline.prediction_accuracy.
+    rows_to_lead_bucket_stats` consumes the result by tuple position.
+
+    See `build_dedup_ch_sql`'s own docstring for the rationale behind the
+    JST `toDate()` bucketing, the `{agency_id:UInt16}` parameter binding,
+    and qualifying every base-table column reference with the `u.` alias
+    (all identical here, not repeated).
+    """
+    extra = f" AND ({extra_where})" if extra_where else ""
+    return (
+        "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
+        "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
+        "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
+        "FROM updates AS u "
+        "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
+        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
+        "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence "
+        "HAVING count() > 1"
     )
 
 

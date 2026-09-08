@@ -7,12 +7,30 @@ from decimal import ROUND_HALF_UP, Decimal
 from api.range import RangeCtx, build_updates_filter_ch
 from pipeline import perf
 from pipeline.cache import async_lru_cache
-from pipeline.histogram import percentile_from_hist
+from pipeline.histogram import (
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
+    LEGACY_PRESET_NAME,
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+    count_in_range,
+    percentile_from_hist,
+)
 from pipeline.reports.filters import _MIN, _agg_filter, _ch_rows, _dedup_cte_ch, _dist_filter, _round2
 
 # Reports read the precomputed per-day distribution (agg_route_daily_dist) and
 # sum across the range. The aggregate has no hour-of-day column, so a time_band
 # filter can't be served from it — those queries fall back to the live scan.
+
+# Named on-time/late tolerance presets exposed to API callers (see
+# api/routers/reports.py). "legacy_60s" is the only preset today: it is an
+# explicit, opt-in spelling of "don't override the tolerance" (compute_on_time/
+# compute_worst_5min already default to it), not a distinct code path — see
+# both functions' own docstrings for why that distinction matters (only the
+# untouched default reads the exact analyze()-time column; ANY explicit
+# tolerance, even one numerically equal to the legacy value, reads the
+# approximate histogram instead).
+ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
+    LEGACY_PRESET_NAME: (None, None),
+}
 
 
 def _service_or_none(service_type: str) -> str | None:
@@ -232,15 +250,30 @@ async def compute_on_time(
     threshold_sec: int = 60,
     limit: int = 100,
     sort_order: str = "desc",
+    early_tolerance_sec: int | None = None,
+    late_tolerance_sec: int | None = None,
 ) -> list[tuple]:
-    """On-time percentage per route-service. ``threshold_sec`` is the cutoff.
+    """On-time percentage per route-service.
 
     ``sort_order='desc'`` returns best on-time routes first (highest %);
     ``sort_order='asc'`` returns worst routes first (lowest %) for BUG-3.
 
-    Reads agg_route_daily_dist (exact). The on-time threshold is baked into
-    ``on_time_count`` (<=60s) at analyze time, so a non-default ``threshold_sec``
-    or a time_band filter falls back to the live scan (ClickHouse).
+    ``early_tolerance_sec``/``late_tolerance_sec`` generalize the on-time
+    window to ``-early_tolerance_sec <= dep_delay <= late_tolerance_sec`` (an
+    unboundedly-early departure still counts as on-time when
+    ``early_tolerance_sec`` is left ``None`` — the LEGACY_60S preset's own
+    behavior, unchanged). Leaving BOTH unset (the default, ``ON_TIME_PRESETS
+    [LEGACY_PRESET_NAME]``) is byte-identical to the historical behavior:
+    ``on_time_count`` (<=60s, baked in at analyze time) is read exactly, and
+    ``threshold_sec``/``time_band`` still control the pre-existing live
+    ClickHouse fallback for that path. Passing EITHER tolerance — even a
+    value numerically equal to the legacy default — opts into a query-time
+    estimate from agg_route_daily_dist's merged delay histogram instead (see
+    :func:`pipeline.histogram.count_in_range`; bounded to one histogram
+    bucket, i.e. ``pipeline.histogram.WIDTH`` seconds, of error), so a custom
+    on-time definition still avoids both a raw-``updates`` scan and an
+    analyze() re-aggregation. A time_band filter still needs the live scan
+    either way (the histogram has no hour-of-day dimension).
 
     Returned percentages carry no confidence signal of their own -- a caller
     displaying one of these percentages to a user should also call
@@ -250,20 +283,55 @@ async def compute_on_time(
     thin-sample percentage with the same visual weight as a well-supported
     one.
     """
-    if ctx.time_band != "all" or threshold_sec != 60:
-        if ch is None:
-            raise RuntimeError(
-                "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
-            )
-        return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
+    if early_tolerance_sec is None and late_tolerance_sec is None:
+        if ctx.time_band != "all" or threshold_sec != LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+            if ch is None:
+                raise RuntimeError(
+                    "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
+                )
+            return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
 
-    rows = await _read_dist_scalars(agency_id, ctx, conn)
-    out: list[tuple] = []
+        rows = await _read_dist_scalars(agency_id, ctx, conn)
+        out: list[tuple] = []
+        for r in rows:
+            samples = r["samples"]
+            if samples <= 20:
+                continue
+            on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(
+                Decimal("0.1"), rounding=ROUND_HALF_UP
+            )
+            out.append(
+                (
+                    r["route_code"],
+                    _service_or_none(r["service_type"]),
+                    on_time_pct,
+                    _avg_min(r["sum_delay_sec"], samples),
+                    samples,
+                )
+            )
+        # Two-pass stable sort: route_code (element 0) tie-breaks ties on
+        # on_time_pct in ascending order regardless of `reverse` — same
+        # unordered-GROUP-BY source as compute_ranking above.
+        out.sort(key=lambda t: t[0])
+        out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
+        return out[:limit]
+
+    # Custom on-time window: estimate from the merged histogram at query time.
+    low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
+    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+    if ctx.time_band != "all":
+        if ch is None:
+            raise RuntimeError("compute_on_time's time_band-filtered live fallback requires a ClickHouse client")
+        return await _on_time_live_window(agency_id, ctx, conn, ch, low_sec, high_sec, limit, sort_order)
+
+    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    out = []
     for r in rows:
         samples = r["samples"]
         if samples <= 20:
             continue
-        on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        on_time_est = count_in_range(r["hist"], low_sec, high_sec)
+        on_time_pct = (Decimal(str(on_time_est)) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
         out.append(
             (
                 r["route_code"],
@@ -273,9 +341,6 @@ async def compute_on_time(
                 samples,
             )
         )
-    # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # on_time_pct in ascending order regardless of `reverse` — same
-    # unordered-GROUP-BY source as compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
     return out[:limit]
@@ -312,6 +377,54 @@ async def _on_time_live(
     ]
 
 
+async def _on_time_live_window(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    ch,
+    low_sec: int | None,
+    high_sec: int,
+    limit: int,
+    sort_order: str,
+) -> list[tuple]:
+    """Live raw-scan on-time window — fallback for time_band + custom-tolerance
+    queries, where neither the exact ``on_time_count`` column (single fixed
+    threshold) nor the merged histogram (no hour-of-day dimension) can serve
+    the request. ``low_sec=None`` means unbounded below, matching
+    :func:`compute_on_time`'s own early_tolerance_sec=None convention.
+
+    Every group here has > 20 rows (the HAVING gate), so `avg` is never NaN.
+    """
+    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    order = "DESC" if sort_order.lower() == "desc" else "ASC"
+    low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
+    result = await ch.query(
+        f"WITH {cte_sql}\n"
+        "SELECT route_code, service_type,\n"
+        f"       sum(CASE WHEN dep_delay <= {{ot_high:Int32}} AND {low_clause} THEN 1.0 ELSE 0 END)\n"
+        "           * 100.0 / count(*) AS on_time_pct,\n"
+        "       avg(dep_delay) / 60.0 AS avg_min,\n"
+        "       count(*) AS samples\n"
+        "FROM deduped\n"
+        "GROUP BY route_code, service_type\n"
+        "HAVING count(*) > 20\n"
+        f"ORDER BY on_time_pct {order}, route_code\n"
+        "LIMIT {ot_limit:UInt32}",
+        parameters={
+            "agency_id": agency_id,
+            "ot_high": high_sec,
+            "ot_low": 0 if low_sec is None else low_sec,
+            "ot_limit": limit,
+            **ch_params,
+        },
+    )
+    # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
+    return [
+        (route_code, service_type, _round1(on_time_pct), _round2(avg_min), samples)
+        for route_code, service_type, on_time_pct, avg_min, samples in result.result_rows
+    ]
+
+
 @perf.timed("reports.worst_5min")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_worst_5min(
@@ -320,55 +433,96 @@ async def compute_worst_5min(
     conn,
     ch=None,
     limit: int = 100,
+    late_tolerance_sec: int | None = None,
 ) -> list[tuple]:
-    """Routes ranked by count of >5min late observations.
+    """Routes ranked by count of severely-late observations.
 
     Reads agg_route_daily_dist (``late5_count`` is exact, >300s baked in at
-    analyze time). A time_band filter falls back to the live scan (ClickHouse).
+    analyze time — the LEGACY_60S preset's own severe-late cutoff). Leaving
+    ``late_tolerance_sec`` unset (the default) is byte-identical to that
+    historical behavior. Passing an explicit value — even ``300`` itself —
+    opts into a query-time estimate from the merged delay histogram instead
+    (see :func:`pipeline.histogram.count_in_range`; bounded to one histogram
+    bucket of error), rather than needing an analyze() re-aggregation for a
+    non-default severity cutoff. A time_band filter still falls back to the
+    live scan (ClickHouse) either way — the histogram has no hour-of-day
+    dimension, and the exact column has none either.
     """
+    late = LEGACY_SEVERE_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     if ctx.time_band != "all":
         if ch is None:
             raise RuntimeError("compute_worst_5min's time_band-filtered live fallback requires a ClickHouse client")
-        return await _worst_5min_live(agency_id, ctx, conn, ch, limit)
+        return await _worst_5min_live(agency_id, ctx, conn, ch, limit, late)
 
-    rows = await _read_dist_scalars(agency_id, ctx, conn)
-    out: list[tuple] = []
+    if late_tolerance_sec is None:
+        rows = await _read_dist_scalars(agency_id, ctx, conn)
+        out: list[tuple] = []
+        for r in rows:
+            late5 = r["late5_count"]
+            if late5 <= 0:  # mirror live HAVING SUM(...) > 0
+                continue
+            out.append(
+                (
+                    r["route_code"],
+                    _service_or_none(r["service_type"]),
+                    late5,
+                    _avg_min(r["sum_delay_sec"], r["samples"]),
+                    r["samples"],
+                )
+            )
+        # Two-pass stable sort: route_code (element 0) tie-breaks ties on
+        # late5_count in ascending order — same unordered-GROUP-BY source as
+        # compute_ranking above.
+        out.sort(key=lambda t: t[0])
+        out.sort(key=lambda t: t[2], reverse=True)
+        return out[:limit]
+
+    # Custom severe-late cutoff: estimate from the merged histogram at query time.
+    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    out = []
     for r in rows:
-        late5 = r["late5_count"]
-        if late5 <= 0:  # mirror live HAVING SUM(...) > 0
+        samples = r["samples"]
+        late5_est = samples - count_in_range(r["hist"], None, late)
+        # ROUND_HALF_UP, not the built-in round()'s banker's rounding — same
+        # rationale as _avg_min/_round1 above, applied to this estimate's
+        # nearest-integer count.
+        late5 = int(Decimal(str(late5_est)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if late5 <= 0:
             continue
         out.append(
             (
                 r["route_code"],
                 _service_or_none(r["service_type"]),
                 late5,
-                _avg_min(r["sum_delay_sec"], r["samples"]),
-                r["samples"],
+                _avg_min(r["sum_delay_sec"], samples),
+                samples,
             )
         )
-    # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-    # late5_count in ascending order — same unordered-GROUP-BY source as
-    # compute_ranking above.
     out.sort(key=lambda t: t[0])
     out.sort(key=lambda t: t[2], reverse=True)
     return out[:limit]
 
 
-async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int) -> list[tuple]:
+async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, late_tolerance_sec: int) -> list[tuple]:
     """Live raw-scan worst-5min — fallback for time_band-filtered queries."""
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code, service_type,\n"
-        "       sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) AS late5_count,\n"
+        "       sum(CASE WHEN dep_delay > {w5_threshold:Int32} THEN 1 ELSE 0 END) AS late5_count,\n"
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         "       count(*) AS samples\n"
         "FROM deduped\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING sum(CASE WHEN dep_delay > 300 THEN 1 ELSE 0 END) > 0\n"
+        "HAVING sum(CASE WHEN dep_delay > {w5_threshold:Int32} THEN 1 ELSE 0 END) > 0\n"
         "ORDER BY late5_count DESC, route_code\n"
         "LIMIT {w5_limit:UInt32}",
-        parameters={"agency_id": agency_id, "w5_limit": limit, **ch_params},
+        parameters={
+            "agency_id": agency_id,
+            "w5_threshold": late_tolerance_sec,
+            "w5_limit": limit,
+            **ch_params,
+        },
     )
     # Round in Python (half-up) to match Postgres ROUND() — see _ranking_live.
     return [

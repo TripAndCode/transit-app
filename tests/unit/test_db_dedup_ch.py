@@ -191,6 +191,55 @@ def test_dedup_ch_excludes_implausible_delay_spikes():
 
 
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_include_arr_delay_implausible_value_nulls_arr_delay_without_dropping_row():
+    """An implausible `arr_delay` (frozen/stale-feed spike, same class of
+    corruption `MAX_PLAUSIBLE_DELAY_SEC` already guards `dep_delay` against)
+    must be treated as unmeasured for the `arr_delay` COLUMN ONLY -- the row
+    itself must still be selected and its (perfectly valid) `dep_delay` must
+    still win `argMax` normally. This query's WHERE/GROUP BY is shared by
+    every caller of `include_captured_at=True` (analyze()'s single
+    `_analyze_deduped` materialization feeds every aggregate, not just the
+    dwell/running-time one that needs `arr_delay`), so a row-level filter on
+    `arr_delay` here would corrupt `dep_delay` resolution for every other
+    aggregate too -- regression coverage for exactly that failure mode."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import insert_updates
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(
+        client,
+        1,
+        [
+            (
+                "f.pb",
+                datetime(2026, 1, 1, 3, 0, 0, tzinfo=timezone.utc),
+                "T1",
+                "weekday",
+                "10:00",
+                "R1",
+                1,
+                30,  # dep_delay: perfectly plausible
+                "S1",
+                MAX_PLAUSIBLE_DELAY_SEC + 1,  # arr_delay: implausible spike
+                None,
+                None,
+                None,
+            ),
+        ],
+    )
+    sql = build_dedup_ch_sql(include_arr_delay=True)
+    result = client.query(sql, parameters={"agency_id": 1})
+    rows = result.result_rows
+    assert len(rows) == 1, "the row must still be selected -- an implausible arr_delay must not drop it"
+    dep_delay, arr_delay = rows[0][-2], rows[0][-1]
+    assert dep_delay == 30, "dep_delay must still resolve normally, unaffected by arr_delay's implausibility"
+    assert arr_delay is None, "the implausible arr_delay must read back as NULL (unmeasured), not the raw spike value"
+    client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_dedup_cte_ch_picks_latest_observation():
     """`pipeline.reports.filters._dedup_cte_ch` composes
     `build_updates_filter_ch`'s WHERE fragment with `build_dedup_ch_sql`'s

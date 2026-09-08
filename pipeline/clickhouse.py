@@ -16,11 +16,12 @@ import clickhouse_connect
 # file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
 # explicitly, so clickhouse-connect maps by name, not position.
 #
-# scheduled_sec is trailing and optional per-strategy: only static_join.py
-# derives it today (aomori_regex.py's rows, and every existing test fixture
-# built before this column existed, still pass 8-tuples) -- insert_updates
-# pads a short row with None rather than requiring every caller to grow its
-# tuple in lockstep with this list.
+# The 5 entries stop_id .. feed_timestamp were added after the original 9,
+# and scheduled_sec / static_version_id after that -- a row tuple shorter
+# than this list (the original 8-element parse_feed shape, still used by
+# plenty of tests/fixtures that predate these fields) is right-padded with
+# NULLs for the trailing ones in insert_updates, rather than requiring every
+# caller to be rewritten just to add trailing, currently-unread columns.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -31,7 +32,13 @@ UPDATE_COLUMNS = [
     "route_code",
     "stop_sequence",
     "dep_delay",
+    "stop_id",
+    "arr_delay",
+    "schedule_relationship_trip",
+    "schedule_relationship_stop",
+    "feed_timestamp",
     "scheduled_sec",
+    "static_version_id",
 ]
 
 
@@ -96,16 +103,16 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     instead of every call site having to grow its tuple in lockstep with
     UPDATE_COLUMNS.
     """
+    n_cols = len(UPDATE_COLUMNS) - 1  # excluding agency_id, which is prepended below
     seen: set[tuple] = set()
     ch_rows = []
-    n_row_cols = len(UPDATE_COLUMNS) - 1  # excludes agency_id, prepended below
     for r in rows:
         key = (r[0], r[2], r[6])  # (file_name, trip_id, stop_sequence)
         if key in seen:
             continue
         seen.add(key)
-        if len(r) < n_row_cols:
-            r = (*r, *([None] * (n_row_cols - len(r))))
+        if len(r) < n_cols:
+            r = (*r, *([None] * (n_cols - len(r))))
         ch_rows.append((agency_id, *r))
     if not ch_rows:
         return 0
@@ -188,3 +195,37 @@ def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime
         return None
     value = result.result_rows[0][0]
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def latest_feed_timestamp(client, agency_id: int) -> datetime | None:
+    """The most recently ingested row's self-reported `feed_timestamp`
+    (the GTFS-RT `FeedHeader.timestamp` -- see
+    `pipeline.strategies._pb.decode_feed_timestamp`), NOT our own ingest
+    `captured_at`. `None` when the agency has no rows at all, or when its
+    latest row's ingest strategy doesn't confirm this field (see
+    `pipeline.strategies.__init__`'s docstring on per-agency nullable
+    coverage).
+
+    `ORDER BY captured_at DESC LIMIT 1` (same index-served form as
+    `max_captured_at` — see its docstring) rather than
+    `maxOrNull(feed_timestamp)`: the freshness question this answers is "is
+    the agency's feed itself still ticking forward", which the latest
+    POLL's own `feed_timestamp` answers directly — not "what's the largest
+    `feed_timestamp` ever seen", which a full per-agency scan would take
+    just as long to answer without being any more correct under normal
+    (monotonically increasing) feed behavior.
+    """
+    result = client.query(
+        "SELECT feed_timestamp FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "ORDER BY captured_at DESC LIMIT 1",
+        parameters={"agency_id": agency_id},
+    )
+    if not result.result_rows:
+        return None
+    value = result.result_rows[0][0]
+    if value is None:
+        return None
+    # `feed_timestamp` is `Nullable(UInt64)` (raw epoch seconds), unlike
+    # `captured_at`'s `DateTime64` above -- convert rather than reuse the
+    # tzinfo-patch idiom, which only applies to genuine datetime columns.
+    return datetime.fromtimestamp(value, tz=timezone.utc)
