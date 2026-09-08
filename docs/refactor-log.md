@@ -869,4 +869,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `npm run lint:i18n-strings`, the full `npm run test` suite (567/567 passed),
   `npm run test:check-entry-chunk`, and `npm run build:bundle && npm run
   check:entry-chunk` (500.9 KiB entry static closure, MapLibre-free) — all
-  clean. (PR #pending)
+  clean. (PR #361)
