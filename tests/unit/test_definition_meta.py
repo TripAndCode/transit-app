@@ -130,8 +130,8 @@ def test_csv_line_dedup_rule_text_is_read_from_the_field_not_hardcoded():
 
 
 def test_council_summary_shares_on_time_tolerance_resolution():
-    """council_summary (item 102's report template) pools the same on-time
-    tolerance semantics as on_time -- both branches must resolve identically
+    """council_summary pools the same on-time tolerance semantics as
+    on_time -- both branches must resolve identically
     for identical params, so the template's footnotes can never disagree
     with what compute_council_summary actually pooled."""
     on_time_meta = resolve_definition_meta("on_time", 30, 120)

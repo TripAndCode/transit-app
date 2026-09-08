@@ -90,8 +90,8 @@ def resolve_definition_meta(
     compute the rows next to it.
     """
     if report_type in ("on_time", "council_summary"):
-        # council_summary (item 102's monthly/annual report template) reuses
-        # the exact same on-time tolerance semantics as on_time -- it pools
+        # council_summary (the monthly/annual report template) reuses the
+        # exact same on-time tolerance semantics as on_time -- it pools
         # the same underlying window into one whole-agency figure instead of
         # a per-route breakdown, so the two share this branch rather than a
         # second, independently-typed copy of the same resolution rule.

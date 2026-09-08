@@ -105,6 +105,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
     ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
     ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_threshold_footnote", "ja"): "遅延{threshold}秒超の便のみを掲載しています。",
+    ("delay_certificate_threshold_footnote", "en"): "Only trips exceeding the {threshold}s delay threshold are listed.",
 }
 
 
@@ -354,8 +356,8 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
 
 
 def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, locale: str = "ja") -> list[str]:
-    """Footnote lines for the monthly/annual council report template (item
-    102): item 91's definition metadata
+    """Footnote lines for the monthly/annual council report template:
+    the definition metadata
     (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
     freshness/quality caveats a council audience needs before trusting the
     numbers next to them. Every line is derived from *definition*/*payload*'s
@@ -386,10 +388,10 @@ def format_council_summary_text(
     locale: str = "ja",
 ) -> str:
     """Locale-aware prose body for the monthly/annual council report
-    template (item 102): a headline (on-time rate, average delay,
-    service-delivered rate) over ``[from_date, to_date]``, footnoted with
-    item 91's definition metadata and this agency's freshness/quality
-    caveats (:func:`format_council_summary_footnotes`). ``payload`` is
+    template: a headline (on-time rate, average delay, service-delivered
+    rate) over ``[from_date, to_date]``, footnoted with the definition
+    metadata and this agency's freshness/quality caveats
+    (:func:`format_council_summary_footnotes`). ``payload`` is
     ``pipeline.reports.council.compute_council_summary``'s own dict shape.
     """
     header = _t("council_header", locale, agency=agency_name, from_date=from_date, to_date=to_date)
@@ -407,6 +409,14 @@ def format_council_summary_text(
     footnote_mark = "※" if locale != "en" else "* "
     footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
     return f"{header}\n{body}\n{footnotes}"
+
+
+def format_delay_certificate_footnotes(threshold_sec: int, locale: str = "ja") -> list[str]:
+    """Single footnote line stating the exceeds-threshold used, mirroring
+    :func:`format_council_summary_footnotes`'s pattern -- the CSV export's
+    only caveat readers need before trusting which trips were excluded.
+    """
+    return [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
 
 
 def format_delay_certificate_text(rows: list, threshold_sec: int, locale: str = "ja") -> str:

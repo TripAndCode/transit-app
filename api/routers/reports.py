@@ -20,6 +20,7 @@ from api.range import RangeCtx, get_range_ctx
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
+    format_delay_certificate_footnotes,
     format_delay_certificate_text,
     format_dwell_run_text,
     format_result,
@@ -619,7 +620,10 @@ async def get_report(
         rows = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
         text = format_delay_certificate_text(rows, threshold, locale=locale)
         if format == "csv":
-            return _csv_response(report_type, rows, ctx, definition)
+            # Japanese-only preamble, matching council_summary's CSV branch
+            # and format_definition_csv_line's existing convention.
+            footnotes = format_delay_certificate_footnotes(threshold, locale="ja")
+            return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),

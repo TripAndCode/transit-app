@@ -1455,7 +1455,7 @@ async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, c
 
 
 # ---------------------------------------------------------------------------
-# council_summary / delay_certificate (item 102)
+# council_summary / delay_certificate
 # ---------------------------------------------------------------------------
 # The report list itself is covered by test_reports_list_returns_static_metadata
 # above (now asserting the full 11-type set), so no separate listing test here.
@@ -1698,6 +1698,75 @@ async def test_delay_certificate_csv_export(reports_client, ch_client, ch_async_
     data = [r for r in rows[header_idx + 1 :] if r and r[1] == "RCSV"]
     assert len(data) == 1
     assert data[0][6] == "400"
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_csv_export_includes_threshold_footnote(reports_client, ch_client, ch_async_client):
+    import csv
+    import io
+
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-26"
+    await _seed_route(pool, agency_id, "RFOOT", "平日", day, [400])
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300&format=csv"
+    )
+    assert resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    header_idx = rows.index(["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"])
+    footnote_cells = [r[0] for r in rows[1:header_idx]]
+    assert any("300" in c for c in footnote_cells)
+
+
+@pytest.mark.asyncio
+async def test_delay_certificate_uses_origin_stop_delay_per_trip(reports_client, ch_client, ch_async_client):
+    """A single trip_id spans many stop events; compute_delay_certificate
+    must collapse them to ONE row per (trip_id, date) using the origin
+    stop's (lowest stop_sequence) departure delay, not emit one row per
+    stop event."""
+    from datetime import datetime, time
+
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-27"
+    trip_id = f"RMULTI-{day}-trip-0"
+    async with pool.acquire() as conn:
+        # stop_sequence=1 (origin): dep_delay=400, exceeds the 300s threshold.
+        # stop_sequence=2 (a later stop on the same trip): dep_delay=100,
+        # which alone would NOT exceed the threshold.
+        for seq, delay in [(1, 400), (2, 100)]:
+            await conn.execute(
+                "INSERT INTO updates "
+                "(agency_id, trip_id, route_code, service_type, scheduled_time, "
+                " stop_sequence, dep_delay, captured_at, file_name) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                agency_id,
+                trip_id,
+                "RMULTI",
+                "平日",
+                time(10, 0),
+                seq,
+                delay,
+                datetime.fromisoformat(f"{day}T10:{seq:02d}:00"),
+                f"test/RMULTI/{day}/{seq}.pb",
+            )
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    resp = await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}&threshold_sec=300")
+    assert resp.status_code == 200
+    rows = [r for r in resp.json()["rows"] if r[1] == "RMULTI"]
+    assert len(rows) == 1
+    assert rows[0][6] == 400  # origin stop's dep_delay, not the later stop's
 
 
 @pytest.mark.asyncio
