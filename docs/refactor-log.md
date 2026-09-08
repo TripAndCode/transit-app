@@ -751,3 +751,18 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   an explicit re-confirmation that no stale reference to the removed
   symbols remains anywhere in code or docs. Both required `/review-branch`
   passes are now clean against the merged, fixed diff. (PR #355)
+- 2026-09-08: Item 102 — added a `council_summary` monthly/annual report
+  template (pooled whole-agency on-time rate + item 92's service-delivered
+  rate, footnoted from item 91's `DefinitionMeta` via a new
+  `pipeline.reports.definition.format_definition_footnotes`, plus
+  freshness/quality caveats) and a per-trip `delay_certificate` CSV/JSON
+  export (`pipeline.reports.council`, new), both wired into
+  `GET /api/{agency_id}/reports/{type}`. `format_definition_footnotes` is
+  locale-aware (unlike the existing Japanese-only CSV preamble line) and
+  reuses the same `DefinitionMeta`-keyed lookup dicts, so a non-default
+  tolerance/definition changes both renderings identically. The delay
+  certificate always live-scans ClickHouse (no aggregate stores per-trip
+  rows) and excludes a trip exactly AT its configurable threshold
+  (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
+  single second — the boundary this item's own verify criterion names.
+  (PR #356)

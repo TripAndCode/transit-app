@@ -85,6 +85,31 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   dow_weekend: DOW_COLS,
   dow_weekday: DOW_COLS,
+  // (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips,
+  // service_delivered_pct) -- a single pooled whole-agency row, not a
+  // per-route ranking (see pipeline.reports.council.compute_council_summary).
+  council_summary: [
+    { index: 0, labelKey: "reports.col.on_time_pct", align: "right", format: (v, t) => fmtPct(v, t) },
+    { index: 1, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 2, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+    { index: 3, labelKey: "reports.col.planned_trips", align: "right", format: (v, t) => fmtNum(v, t) },
+    { index: 4, labelKey: "reports.col.executed_trips", align: "right", format: (v, t) => fmtNum(v, t) },
+    { index: 5, labelKey: "reports.col.service_delivered_pct", align: "right", format: (v, t) => fmtPct(v, t) },
+  ],
+  // (agency_name, route_code, service_type, date, scheduled_time,
+  // actual_time, dep_delay_sec) -- one row per over-threshold departure
+  // observation (see pipeline.reports.council.compute_delay_certificate).
+  // No route-name lookup here (route is index 1, not 0 -- ROUTE_COL's
+  // useRouteNames formatting is keyed to index 0 by reference equality).
+  delay_certificate: [
+    { index: 0, labelKey: "reports.col.agency_name", align: "left" },
+    { index: 1, labelKey: "reports.col.route", align: "left" },
+    { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 3, labelKey: "reports.col.date", align: "left" },
+    { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
+    { index: 5, labelKey: "reports.col.actual_time", align: "left" },
+    { index: 6, labelKey: "reports.col.delay_sec", align: "right", format: (v, t) => fmtNum(v, t) },
+  ],
 };
 
 function fmtMin(v: unknown, t: TFunction): string {

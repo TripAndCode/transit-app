@@ -52,6 +52,8 @@ export function AnalysisTab() {
     dow_weekend: t("reports.type.dow_weekend"),
     dwell_run: t("reports.type.dwell_run"),
     route_forecast: t("reports.type.route_forecast"),
+    council_summary: t("reports.type.council_summary"),
+    delay_certificate: t("reports.type.delay_certificate"),
   };
 
   return (

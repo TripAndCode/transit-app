@@ -17,11 +17,22 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
-from pipeline.query.formatter import format_dwell_run_text, format_result, format_trend_text
+from pipeline.query.formatter import (
+    format_council_summary_footnotes,
+    format_council_summary_text,
+    format_delay_certificate_footnotes,
+    format_delay_certificate_text,
+    format_dwell_run_text,
+    format_result,
+    format_trend_text,
+)
 from pipeline.reports import (
+    DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
     ON_TIME_PRESETS,
     DefinitionMeta,
     compute_compare_ranking,
+    compute_council_summary,
+    compute_delay_certificate,
     compute_dow_ranking,
     compute_dwell_run_decomposition,
     compute_hourly_heatmap,
@@ -53,6 +64,8 @@ _REPORT_TYPES = (
     "dow_weekend",
     "dow_weekday",
     "dwell_run",
+    "council_summary",
+    "delay_certificate",
 )
 
 
@@ -347,6 +360,8 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "dow_weekday": ["系統コード", "種別", "曜日区分", "平均遅延(分)", "観測数"],
     "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
     "dwell_run": ["系統コード", "種別", "滞留観測数", "滞留平均(秒)", "走行観測数", "走行平均(秒)"],
+    "council_summary": ["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"],
+    "delay_certificate": ["事業者名", "系統コード", "種別", "日付", "定刻", "実績時刻", "遅延(秒)"],
 }
 
 
@@ -357,6 +372,7 @@ def _csv_response(
     definition: DefinitionMeta,
     *,
     unavailable_message: str | None = None,
+    extra_footnotes: list[str] | None = None,
 ) -> StreamingResponse:
     """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding).
 
@@ -364,7 +380,14 @@ def _csv_response(
     definition-metadata preamble (see
     ``pipeline.reports.definition.format_definition_csv_line``) so a CSV
     exported with non-default tolerances shows those exact values instead of
-    silently reading as the legacy_60s default.
+    silently reading as the legacy_60s default. `extra_footnotes`, when
+    given, adds one single-cell preamble row per string AFTER that line and
+    BEFORE the column header -- the council_summary report type's
+    freshness/quality caveats (see
+    ``pipeline.query.formatter.format_council_summary_footnotes``), kept
+    Japanese-only here (like the definition-metadata line itself) rather
+    than locale-switched, matching this CSV export's existing operator-facing
+    convention.
 
     `unavailable_message`, when given, replaces the (otherwise empty) data
     rows with a single explanatory row instead -- for a report type whose
@@ -379,6 +402,8 @@ def _csv_response(
     buf.write("﻿")  # BOM
     w = csv.writer(buf)
     w.writerow([format_definition_csv_line(definition)])
+    for line in extra_footnotes or []:
+        w.writerow([line])
     w.writerow(cols)
     if unavailable_message is not None:
         w.writerow([unavailable_message])
@@ -429,15 +454,22 @@ async def get_report(
     early_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time only: how many seconds early a departure may still be 'on time'. "
-        "Unset means unbounded (any early departure counts), matching legacy_60s.",
+        description="on_time/council_summary only: how many seconds early a departure may still be "
+        "'on time'. Unset means unbounded (any early departure counts), matching legacy_60s.",
     ),
     late_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/worst_5min: the late-side cutoff (default 60s for on_time, 300s for "
-        "worst_5min). Passing this opts into a query-time histogram estimate instead of the "
-        "exact legacy_60s column.",
+        description="on_time/worst_5min/council_summary: the late-side cutoff (default 60s for "
+        "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
+        "histogram estimate instead of the exact legacy_60s column.",
+    ),
+    threshold_sec: int | None = Query(
+        default=None,
+        ge=0,
+        description="delay_certificate only: a departure's dep_delay must STRICTLY EXCEED this "
+        "many seconds to be included. Defaults to "
+        "pipeline.reports.council.DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC.",
     ),
     agency_id: int = Depends(get_agency),
     conn=Depends(get_conn),
@@ -457,10 +489,16 @@ async def get_report(
         if preset not in ON_TIME_PRESETS:
             raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
-    if early_tolerance_sec is not None and report_type != "on_time":
-        raise HTTPException(status_code=400, detail="early_tolerance_sec only applies to the on_time report")
-    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min"):
-        raise HTTPException(status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min reports")
+    if early_tolerance_sec is not None and report_type not in ("on_time", "council_summary"):
+        raise HTTPException(
+            status_code=400, detail="early_tolerance_sec only applies to the on_time/council_summary reports"
+        )
+    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min", "council_summary"):
+        raise HTTPException(
+            status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min/council_summary reports"
+        )
+    if threshold_sec is not None and report_type != "delay_certificate":
+        raise HTTPException(status_code=400, detail="threshold_sec only applies to the delay_certificate report")
 
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
@@ -539,6 +577,58 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[payload],
+            ctx=_ctx_payload(ctx),
+            definition=definition,
+        )
+    elif report_type == "council_summary":
+        agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
+        agency_name = agency_row["agency_name"] if agency_row else str(agency_id)
+        payload = await compute_council_summary(
+            agency_id,
+            ctx,
+            conn,
+            ch,
+            early_tolerance_sec=early_tolerance_sec,
+            late_tolerance_sec=late_tolerance_sec,
+        )
+        row = (
+            payload["on_time_pct"],
+            payload["avg_delay_min"],
+            payload["samples"],
+            payload["planned_trips"],
+            payload["executed_trips"],
+            payload["service_delivered_pct"],
+        )
+        if format == "csv":
+            # The CSV preamble stays Japanese-only (see _csv_response's own
+            # docstring), matching format_definition_csv_line's existing
+            # convention -- unlike the JSON `text` body below, which honors
+            # the request's locale.
+            footnotes = format_council_summary_footnotes(definition, payload, locale="ja")
+            return _csv_response(report_type, [row], ctx, definition, extra_footnotes=footnotes)
+        text = format_council_summary_text(payload, definition, agency_name, ctx.from_date, ctx.to_date, locale=locale)
+        return ReportResponse(
+            report_type=report_type,
+            rendered_at=datetime.now(timezone.utc),
+            text=text,
+            rows=[row],
+            ctx=_ctx_payload(ctx),
+            definition=definition,
+        )
+    elif report_type == "delay_certificate":
+        threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
+        rows = await compute_delay_certificate(agency_id, ctx, conn, ch, threshold_sec=threshold, limit=n)
+        text = format_delay_certificate_text(rows, threshold, locale=locale)
+        if format == "csv":
+            # Japanese-only preamble, matching council_summary's CSV branch
+            # and format_definition_csv_line's existing convention.
+            footnotes = format_delay_certificate_footnotes(threshold, locale="ja")
+            return _csv_response(report_type, rows, ctx, definition, extra_footnotes=footnotes)
+        return ReportResponse(
+            report_type=report_type,
+            rendered_at=datetime.now(timezone.utc),
+            text=text,
+            rows=rows,
             ctx=_ctx_payload(ctx),
             definition=definition,
         )

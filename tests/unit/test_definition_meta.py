@@ -17,6 +17,7 @@ from pipeline.reports.definition import (
     DEDUP_RULE,
     MEASUREMENT_POINT,
     format_definition_csv_line,
+    format_definition_footnotes,
     resolve_definition_meta,
 )
 
@@ -126,3 +127,91 @@ def test_csv_line_dedup_rule_text_is_read_from_the_field_not_hardcoded():
     meta = resolve_definition_meta("on_time", None, None).model_copy(update={"dedup_rule": "some_other_dedup_rule"})
     with pytest.raises(KeyError):
         format_definition_csv_line(meta)
+
+
+def test_council_summary_shares_on_time_tolerance_resolution():
+    """council_summary pools the same on-time tolerance semantics as
+    on_time -- both branches must resolve identically
+    for identical params, so the template's footnotes can never disagree
+    with what compute_council_summary actually pooled."""
+    on_time_meta = resolve_definition_meta("on_time", 30, 120)
+    council_meta = resolve_definition_meta("council_summary", 30, 120)
+    assert council_meta.preset == on_time_meta.preset == "custom"
+    assert council_meta.early_tolerance_sec == on_time_meta.early_tolerance_sec == 30
+    assert council_meta.late_tolerance_sec == on_time_meta.late_tolerance_sec == 120
+
+
+def test_council_summary_no_params_resolves_to_legacy_preset():
+    meta = resolve_definition_meta("council_summary", None, None)
+    assert meta.preset == LEGACY_PRESET_NAME
+    assert meta.early_tolerance_sec is None
+    assert meta.late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC == 60
+
+
+def test_footnotes_reflect_custom_tolerance_not_legacy_defaults():
+    """A report template rendered with non-default tolerances must show
+    those exact values in its footnotes, not the legacy_60s defaults --
+    the same guarantee the CSV preamble already gives, split across
+    separate, locale-aware lines instead of one Japanese-only cell."""
+    meta = resolve_definition_meta("council_summary", 30, 120)
+    lines = format_definition_footnotes(meta, "ja")
+    joined = "\n".join(lines)
+    assert "30秒" in joined
+    assert "120秒" in joined
+    assert "custom" in joined
+    assert "legacy_60s" not in joined
+    assert "60秒" not in joined
+    assert str(MAX_PLAUSIBLE_DELAY_SEC) in joined
+
+
+def test_footnotes_default_shows_legacy_preset_and_unbounded_early():
+    meta = resolve_definition_meta("council_summary", None, None)
+    lines = format_definition_footnotes(meta, "ja")
+    joined = "\n".join(lines)
+    assert "legacy_60s" in joined
+    assert "無制限" in joined
+    assert "60秒" in joined
+
+
+def test_footnotes_are_locale_aware():
+    """The same DefinitionMeta renders different text per locale -- English
+    output must not leak the Japanese-only clause text (and vice versa)."""
+    meta = resolve_definition_meta("council_summary", 30, 120)
+    ja_lines = "\n".join(format_definition_footnotes(meta, "ja"))
+    en_lines = "\n".join(format_definition_footnotes(meta, "en"))
+    assert "30秒" in ja_lines and "定義" in ja_lines
+    assert "30s" in en_lines and "Definition" in en_lines
+    assert "定義" not in en_lines
+    assert "Definition" not in ja_lines
+
+
+def test_footnotes_omit_tolerance_line_for_report_types_without_one():
+    """ranking/trend/etc. have no on-time/late tolerance concept at all
+    (resolve_definition_meta returns preset=None, both tolerances None) --
+    the footnote list must skip the tolerance/preset line entirely rather
+    than render a hollow 'preset=n/a' line with nothing behind it."""
+    meta = resolve_definition_meta("ranking", None, None)
+    lines = format_definition_footnotes(meta, "ja")
+    assert not any("プリセット" in line for line in lines)
+    assert not any("定義" in line for line in lines)
+    # The dedup/exclusion/measurement-point lines still apply regardless.
+    assert any("集計範囲" in line for line in lines)
+    assert any("重複排除" in line for line in lines)
+    assert any(str(MAX_PLAUSIBLE_DELAY_SEC) in line for line in lines)
+
+
+def test_footnotes_measurement_point_text_is_read_from_the_field_not_hardcoded():
+    """Same guarantee as format_definition_csv_line's own test -- an
+    unrecognized measurement_point must fail loudly (KeyError), not silently
+    render stale text."""
+    meta = resolve_definition_meta("on_time", None, None).model_copy(
+        update={"measurement_point": "some_other_measurement_point"}
+    )
+    with pytest.raises(KeyError):
+        format_definition_footnotes(meta, "ja")
+
+
+def test_footnotes_dedup_rule_text_is_read_from_the_field_not_hardcoded():
+    meta = resolve_definition_meta("on_time", None, None).model_copy(update={"dedup_rule": "some_other_dedup_rule"})
+    with pytest.raises(KeyError):
+        format_definition_footnotes(meta, "ja")

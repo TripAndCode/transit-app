@@ -906,7 +906,9 @@
       "dow_weekday": "平日傾向",
       "dow_weekend": "週末傾向",
       "dwell_run": "滞留・走行時間",
-      "route_forecast": "路線別予測"
+      "route_forecast": "路線別予測",
+      "council_summary": "議会向け報告",
+      "delay_certificate": "遅延証明書"
     },
     "col": {
       "route": "路線",
@@ -922,7 +924,15 @@
       "weekend": "土日祝",
       "diff": "差",
       "direction": "向き",
-      "confidence": "確信度"
+      "confidence": "確信度",
+      "planned_trips": "計画本数",
+      "executed_trips": "運行本数",
+      "service_delivered_pct": "運行実績率",
+      "agency_name": "事業者名",
+      "date": "日付",
+      "scheduled_time": "定刻",
+      "actual_time": "実績時刻",
+      "delay_sec": "遅延(秒)"
     },
     "confidence_low_mark": "幅あり",
     "direction": {

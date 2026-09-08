@@ -16,6 +16,7 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import dow_label
+from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -86,6 +87,26 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("dwell_run_time_band_unsupported", "ja"): "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
+    ("council_header", "ja"): "【運行実績月次・年次報告（{agency}、{from_date} 〜 {to_date}）】",
+    ("council_header", "en"): "[Monthly/annual performance report ({agency}, {from_date} to {to_date})]",
+    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測{samples}件）、運行実績率 {delivered}%",
+    ("council_headline", "en"): (
+        "On-time rate {on_time}%, mean delay {avg} min ({samples} samples), service-delivered rate {delivered}%"
+    ),
+    ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
+    ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
+    ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
+    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of observations were excluded as implausible.",
+    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の生観測データがありません）。",
+    ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
+    ("council_service_delivered_unavailable", "ja"): "運行実績率: この事業者のフィードでは計測できません。",
+    ("council_service_delivered_unavailable", "en"): "Service-delivered rate: not available for this agency's feed.",
+    ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
+    ("delay_certificate_empty", "en"): "No trips exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_summary", "ja"): "遅延{threshold}秒超の便: {count}件",
+    ("delay_certificate_summary", "en"): "{count} trip(s) exceeded the {threshold}s delay threshold.",
+    ("delay_certificate_threshold_footnote", "ja"): "遅延{threshold}秒超の便のみを掲載しています。",
+    ("delay_certificate_threshold_footnote", "en"): "Only trips exceeding the {threshold}s delay threshold are listed.",
 }
 
 
@@ -332,3 +353,78 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
         for i, r in enumerate(routes, 1)
     ]
     return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
+
+
+def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, locale: str = "ja") -> list[str]:
+    """Footnote lines for the monthly/annual council report template:
+    the definition metadata
+    (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
+    freshness/quality caveats a council audience needs before trusting the
+    numbers next to them. Every line is derived from *definition*/*payload*'s
+    own fields, never a fixed string, so a non-default tolerance/definition,
+    a genuinely stale aggregate, or a low-quality feed each change the
+    rendered footnotes to match -- the same guarantee
+    ``format_definition_csv_line`` already gives the CSV export.
+    """
+    lines = list(format_definition_footnotes(definition, locale))
+    if payload.get("is_stale"):
+        lines.append(_t("council_stale_caveat", locale))
+    clamp_pct = payload.get("clamp_pct")
+    if clamp_pct is None:
+        lines.append(_t("council_quality_unavailable", locale))
+    elif clamp_pct > 0:
+        lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
+    if payload.get("service_delivered_pct") is None:
+        lines.append(_t("council_service_delivered_unavailable", locale))
+    return lines
+
+
+def format_council_summary_text(
+    payload: dict,
+    definition: DefinitionMeta,
+    agency_name: str,
+    from_date: Any,
+    to_date: Any,
+    locale: str = "ja",
+) -> str:
+    """Locale-aware prose body for the monthly/annual council report
+    template: a headline (on-time rate, average delay, service-delivered
+    rate) over ``[from_date, to_date]``, footnoted with the definition
+    metadata and this agency's freshness/quality caveats
+    (:func:`format_council_summary_footnotes`). ``payload`` is
+    ``pipeline.reports.council.compute_council_summary``'s own dict shape.
+    """
+    header = _t("council_header", locale, agency=agency_name, from_date=from_date, to_date=to_date)
+    if not payload.get("samples"):
+        body = _no_data(locale)
+    else:
+        body = _t(
+            "council_headline",
+            locale,
+            on_time=_r(payload.get("on_time_pct")),
+            avg=_r(payload.get("avg_delay_min")),
+            samples=payload.get("samples", 0),
+            delivered=_r(payload.get("service_delivered_pct")),
+        )
+    footnote_mark = "※" if locale != "en" else "* "
+    footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
+    return f"{header}\n{body}\n{footnotes}"
+
+
+def format_delay_certificate_footnotes(threshold_sec: int, locale: str = "ja") -> list[str]:
+    """Single footnote line stating the exceeds-threshold used, mirroring
+    :func:`format_council_summary_footnotes`'s pattern -- the CSV export's
+    only caveat readers need before trusting which trips were excluded.
+    """
+    return [_t("delay_certificate_threshold_footnote", locale, threshold=threshold_sec)]
+
+
+def format_delay_certificate_text(rows: list, threshold_sec: int, locale: str = "ja") -> str:
+    """Locale-aware summary line for the delay-certificate export -- a short
+    count + threshold statement, not a per-row transcript (this export can
+    run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
+    not this text body).
+    """
+    if not rows:
+        return _t("delay_certificate_empty", locale, threshold=threshold_sec)
+    return _t("delay_certificate_summary", locale, count=len(rows), threshold=threshold_sec)
