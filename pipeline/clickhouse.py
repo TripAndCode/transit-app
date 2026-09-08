@@ -16,11 +16,12 @@ import clickhouse_connect
 # file_name) -- insert_updates always passes column_names=UPDATE_COLUMNS
 # explicitly, so clickhouse-connect maps by name, not position.
 #
-# The last 5 entries (stop_id .. feed_timestamp) were added after the first
-# 9 -- a row tuple shorter than this list (the original 8-element parse_feed
-# shape, still used by plenty of tests/fixtures that predate these fields) is
-# right-padded with NULLs for them in insert_updates, rather than requiring
-# every caller to be rewritten just to add trailing, currently-unread columns.
+# The 5 entries stop_id .. feed_timestamp were added after the original 9,
+# and scheduled_sec / static_version_id after that -- a row tuple shorter
+# than this list (the original 8-element parse_feed shape, still used by
+# plenty of tests/fixtures that predate these fields) is right-padded with
+# NULLs for the trailing ones in insert_updates, rather than requiring every
+# caller to be rewritten just to add trailing, currently-unread columns.
 UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -36,6 +37,8 @@ UPDATE_COLUMNS = [
     "schedule_relationship_trip",
     "schedule_relationship_stop",
     "feed_timestamp",
+    "scheduled_sec",
+    "static_version_id",
 ]
 
 
@@ -92,6 +95,13 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     for argMax-based dedup reads, it silently double-counts every raw
     COUNT(*) consumer (agg_feed_health.raw_samples, describe_data's
     total_rows/observations) that Postgres never had to guard against.
+
+    A row shorter than `len(UPDATE_COLUMNS) - 1` (i.e. missing agency_id) is
+    padded with None for the trailing columns it doesn't supply -- lets a
+    strategy that predates a newly-added trailing column (and every
+    fixture/test row tuple built before it existed) keep working unchanged
+    instead of every call site having to grow its tuple in lockstep with
+    UPDATE_COLUMNS.
     """
     n_cols = len(UPDATE_COLUMNS) - 1  # excluding agency_id, which is prepended below
     seen: set[tuple] = set()

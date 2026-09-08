@@ -1,4 +1,5 @@
-"""DB-free coverage for pipeline.strategies._time.normalize_departure_time.
+"""DB-free coverage for pipeline.strategies._time.normalize_departure_time
+and parse_departure_time.
 
 Complements the Postgres-fixture tests in tests/pipeline/test_static_join.py
 (which exercise the full parse_feed path) with the full input space this
@@ -8,7 +9,7 @@ straight from an agency's own static feed.
 
 import pytest
 
-from pipeline.strategies._time import normalize_departure_time
+from pipeline.strategies._time import normalize_departure_time, parse_departure_time
 
 
 @pytest.mark.parametrize(
@@ -54,3 +55,33 @@ def test_normalize_departure_time_never_raises_on_pathological_input():
     own static feed)."""
     normalize_departure_time("9" * 10_000)
     normalize_departure_time(":" * 10_000)
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (None, (None, "empty", None)),
+        ("", (None, "empty", None)),
+        ("7:05:00", ("07:05:00", "ok", 7 * 3600 + 5 * 60)),
+        ("23:59:59", ("23:59:59", "ok", 23 * 3600 + 59 * 60 + 59)),
+        ("00:00:00", ("00:00:00", "ok", 0)),
+        # Extended (>=24) hours are GTFS's post-midnight-continuation
+        # convention -- unlike normalize_departure_time, scheduled_sec is
+        # populated here (well-defined arithmetic) even though the
+        # formatted string still can't represent it.
+        ("25:30:00", (None, "extended", 25 * 3600 + 30 * 60)),
+        ("24:00:00", (None, "extended", 24 * 3600)),
+        ("99:00:00", (None, "extended", 99 * 3600)),
+        ("ab:05:00", (None, "bad", None)),
+        ("125:30:00", (None, "bad", None)),
+    ],
+)
+def test_parse_departure_time(raw, expected):
+    assert parse_departure_time(raw) == expected
+
+
+def test_parse_departure_time_never_raises_on_pathological_input():
+    """Same resource-exhaustion guard as normalize_departure_time's --
+    parse_departure_time shares the exact same regex match."""
+    parse_departure_time("9" * 10_000)
+    parse_departure_time(":" * 10_000)

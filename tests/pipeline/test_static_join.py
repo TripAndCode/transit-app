@@ -243,6 +243,90 @@ def test_static_join_nulls_scheduled_time_on_non_numeric_departure_time_hour(pg_
     assert rows[0][7] == 0  # dep_delay observation is still kept
 
 
+def test_static_join_keeps_extended_hour_row_with_scheduled_sec(pg_conn):
+    """GTFS allows departure_time like "25:30:00" for a trip continuing past
+    midnight as the previous service day's schedule. scheduled_time
+    (Nullable(String), read everywhere as same-day HH:MM[:SS]) still can't
+    represent it, so that column stays NULL -- but the row itself must no
+    longer be dropped: scheduled_sec holds the raw seconds-since-service-
+    day-start value instead."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            ("static_join_extended_hour_test", "http://extended-hour-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+            (aid, "uuid-A", "R1", "平日"),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (aid, "uuid-A", 1, "S1", "25:30:00"),
+        )
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-A")
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert len(rows) == 1  # kept, not dropped
+    assert rows[0][4] is None  # scheduled_time still NULL (no same-day representation)
+    assert rows[0][13] == 25 * 3600 + 30 * 60  # scheduled_sec == 91800
+
+
+def test_static_join_populates_static_version_id_from_joined_static_trips(pg_conn):
+    """static_version_id (the loaded static zip's filename stem, set on
+    static_trips by pipeline.static_loader.load_static) must ride along with
+    every RT row the JOIN resolves against that static_trips row -- NULL
+    only when the JOIN itself misses, same as service_type/scheduled_time."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            ("static_join_version_id_test", "http://version-id-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id, static_version_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (aid, "uuid-A", "R1", "平日", "gtfs_static_20260101"),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (aid, "uuid-A", 1, "S1", "07:05:00"),
+        )
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-A")
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert len(rows) == 1
+    assert rows[0][14] == "gtfs_static_20260101"
+
+
+def test_static_join_nulls_static_version_id_on_join_miss(pg_conn):
+    """A trip_id with no matching static_trips row (JOIN miss) must leave
+    static_version_id NULL, not fall back to some other agency's/trip's
+    value."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES (%s, %s, 'static_join') RETURNING agency_id",
+            ("static_join_version_id_miss_test", "http://version-id-miss-test.example.com/feed.pb"),
+        )
+        aid = cur.fetchone()[0]
+    pg_conn.commit()
+
+    pb = _hex_pb_with_one_trip("uuid-unmatched")
+    rows = static_join.parse_feed(pb, "2026-05-09T12:00:00", "f1.bin", aid, pg_conn)
+
+    assert len(rows) == 1
+    assert rows[0][14] is None
+
+
 def test_static_join_nulls_scheduled_time_on_empty_departure_time(pg_conn):
     """An empty departure_time is legal GTFS for a non-timepoint stop -- must
     null scheduled_time (not pass the empty string through, which fails the
@@ -289,7 +373,7 @@ def _make_agency(conn, name: str, feed_url: str) -> int:
     return aid
 
 
-def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
+def _run_and_assert(conn, aid: int, pb_path: pathlib.Path, static_version_id: str | None = None):
     raw = pb_path.read_bytes()
     rows = static_join.parse_feed(raw, "2026-05-09T12:00:00", "test/sample.bin", aid, conn)
     assert rows, "static_join returned zero rows; pb may be empty or malformed"
@@ -332,6 +416,22 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
     cov_arr_delay = sum(1 for r in rows if r[9] is not None) / len(rows)
     assert 0.0 < cov_arr_delay < 0.5, f"arr_delay coverage {cov_arr_delay:.2%} (expected sparse, nonzero)"
 
+    # scheduled_sec is set whenever the static JOIN hits and departure_time
+    # parses (status "ok" or "extended" -- see parse_departure_time), so its
+    # coverage tracks scheduled_time's JOIN coverage budget above.
+    cov_scheduled_sec = sum(1 for r in rows if r[13] is not None) / len(rows)
+    assert cov_scheduled_sec >= 0.99, f"scheduled_sec coverage {cov_scheduled_sec:.2%}"
+
+    # static_version_id comes from the same static_trips row the JOIN
+    # matched, so it's present for every row with a resolved service_type,
+    # and (since load_static sets one fixed value per call) must be the
+    # loaded zip's own filename stem -- not just any non-NULL value.
+    cov_static_version_id = sum(1 for r in rows if r[14] is not None) / len(rows)
+    assert cov_static_version_id >= 0.99, f"static_version_id coverage {cov_static_version_id:.2%}"
+    if static_version_id is not None:
+        version_values = {r[14] for r in rows if r[14] is not None}
+        assert version_values == {static_version_id}, f"static_version_id mismatch: {version_values}"
+
 
 @pytest.mark.parametrize(
     "feed_url, pb_name, zip_name, agency_label",
@@ -359,4 +459,4 @@ def _run_and_assert(conn, aid: int, pb_path: pathlib.Path):
 def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
     aid = _make_agency(pg_conn, agency_label, feed_url)
     load_static(str(FIX / zip_name), aid, pg_conn)
-    _run_and_assert(pg_conn, aid, FIX / pb_name)
+    _run_and_assert(pg_conn, aid, FIX / pb_name, static_version_id=pathlib.Path(zip_name).stem)
