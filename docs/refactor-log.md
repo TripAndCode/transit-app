@@ -801,4 +801,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   verification (`poetry run ruff`/`mypy`/`pytest`) could not be run inside
   this dispatched-worker sandbox (no `poetry` permission available), so the
   diff was instead manually traced end-to-end against hand-computed
-  expected values for every new arithmetic path. (PR #pending)
+  expected values for every new arithmetic path. (PR #358)
