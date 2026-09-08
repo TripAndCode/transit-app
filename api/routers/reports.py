@@ -135,10 +135,13 @@ class HeadwayQualityRow(BaseModel):
     variation / long-gap rate over the request's range — see
     ``pipeline.reports.headway_quality.compute_headway_quality``.
 
-    Every field but ``route_code``/``samples`` is nullable together: a route
-    can appear here (it's classified high-frequency) yet still have no
-    resolvable metric for the requested range slice (e.g. its scheduled
-    schedule mean-wait predates this feature and hasn't been re-analyzed).
+    ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
+    nullable together: a route can appear here (it's classified
+    high-frequency) yet still have no resolvable metric for the requested
+    range slice (e.g. its scheduled mean-wait predates this feature and
+    hasn't been re-analyzed). ``cov`` alone additionally requires at least
+    two pooled samples, so a route pooled from a single-sample day can have
+    a resolvable ``ewt_sec``/``long_gap_rate`` with a null ``cov``.
     """
 
     route_code: str
