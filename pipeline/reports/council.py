@@ -1,21 +1,21 @@
 """Monthly/annual report template for a local public-transport council
 audience, plus a per-trip "delay certificate" export.
 
-``compute_council_summary`` pools item 90's on-time/late tolerance (resolved
-by :mod:`pipeline.reports.definition`, item 91) and item 92's
-service-delivered rate into ONE whole-agency figure for ``ctx``'s range --
-unlike :func:`pipeline.reports.rankings.compute_on_time`, which reports
-per-route, and unlike :func:`pipeline.reports.network.compute_network_summary`,
-whose on-time figure is always the ``legacy_60s`` exact column with no
-tolerance override. The fast path reuses
-``pipeline.reports.rankings``'s own ``_read_dist_scalars``/
-``_read_dist_with_hist`` SQL byte-for-byte, simply pooling every returned
-route/service group into one total instead of emitting one row per group
-(with no per-group minimum-sample gate -- that gate exists in
-``compute_on_time`` to keep a *ranking* free of thin-sample noise, which has
-no meaning for a single pooled total). Service-delivered numbers come
-straight from :func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`
-(item 92) -- this module never recomputes that ratio a second way.
+``compute_council_summary`` pools the on-time/late tolerance resolved by
+:mod:`pipeline.reports.definition` and the service-delivered rate from
+:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`
+into ONE whole-agency figure for ``ctx``'s range -- unlike
+:func:`pipeline.reports.rankings.compute_on_time`, which reports per-route,
+and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
+on-time figure is always the ``legacy_60s`` exact column with no tolerance
+override. The fast path reuses ``pipeline.reports.rankings``'s own
+``_read_dist_scalars``/``_read_dist_with_hist`` SQL byte-for-byte, simply
+pooling every returned route/service group into one total instead of
+emitting one row per group (with no per-group minimum-sample gate -- that
+gate exists in ``compute_on_time`` to keep a *ranking* free of thin-sample
+noise, which has no meaning for a single pooled total). Service-delivered
+numbers come straight from that same function -- this module never
+recomputes that ratio a second way.
 
 ``compute_delay_certificate`` lists every individual departure observation in
 ``ctx``'s range whose ``dep_delay`` STRICTLY EXCEEDS a configurable
@@ -53,9 +53,9 @@ _log = logging.getLogger(__name__)
 _JST = ZoneInfo("Asia/Tokyo")
 
 # The delay-certificate export's default "exceeds" threshold, in seconds.
-# Reuses the existing severe-late constant (item 90) rather than a new
-# independent literal -- it is not tied to that preset's own meaning (a
-# caller can override via the endpoint's `threshold_sec` query param), just a
+# Reuses the existing severe-late constant rather than a new independent
+# literal -- it is not tied to that preset's own meaning (a caller can
+# override via the endpoint's `threshold_sec` query param), just a
 # sensible, already-established default magnitude.
 DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC = LEGACY_SEVERE_LATE_TOLERANCE_SEC
 
@@ -149,7 +149,7 @@ async def compute_council_summary(
     late_tolerance_sec: int | None = None,
 ) -> dict:
     """Whole-agency monthly/annual figures for ``ctx``'s range: pooled
-    on-time rate + item 92's service-delivered rate + the freshness/quality
+    on-time rate + the agency's service-delivered rate + the freshness/quality
     signals a council audience needs before trusting either, all in ONE
     dict. This function only computes numbers -- footnote/headline TEXT is
     rendered separately by
@@ -250,11 +250,19 @@ async def compute_delay_certificate(
     threshold_sec: int = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
     limit: int = 100,
 ) -> list[tuple]:
-    """Every individual departure observation in ``ctx``'s range whose
-    ``dep_delay`` STRICTLY EXCEEDS ``threshold_sec`` (``dep_delay >
-    threshold_sec`` -- an observation exactly AT the threshold is excluded,
-    matching the "exceeds" wording exactly rather than a boundary rounding
-    artifact).
+    """Every physical trip-run in ``ctx``'s range whose departure delay
+    STRICTLY EXCEEDS ``threshold_sec`` (``dep_delay > threshold_sec`` -- a
+    trip exactly AT the threshold is excluded, matching the "exceeds"
+    wording exactly rather than a boundary rounding artifact).
+
+    ``deduped`` (see module docstring) is keyed one row per stop event, not
+    per trip -- a single trip touches many stops, so this first reduces it to
+    one representative row per ``(trip_id, date)`` via ``argMin(col,
+    stop_sequence)``, picking each trip-run's earliest (origin-stop)
+    observation, before applying the threshold filter. That origin-stop
+    departure delay is what "this trip's dep_delay" means throughout this
+    export. The grouping key is ``(trip_id, date)``, not `trip_id` alone,
+    because the same `trip_id` recurs across many service days.
 
     Returns rows shaped ``(agency_name, route_code, service_type, date,
     scheduled_time, actual_time, dep_delay)``. ``actual_time`` is
@@ -275,10 +283,26 @@ async def compute_delay_certificate(
 
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     result = await ch.query(
-        f"WITH {cte_sql}\n"
+        f"WITH {cte_sql},\n"
+        "filtered AS (\n"
+        "    SELECT *\n"
+        "    FROM deduped\n"
+        "    WHERE scheduled_time IS NOT NULL\n"
+        "),\n"
+        "per_trip AS (\n"
+        "    SELECT\n"
+        "        trip_id,\n"
+        "        date,\n"
+        "        argMin(route_code, stop_sequence) AS route_code,\n"
+        "        argMin(service_type, stop_sequence) AS service_type,\n"
+        "        argMin(scheduled_time, stop_sequence) AS scheduled_time,\n"
+        "        argMin(dep_delay, stop_sequence) AS dep_delay\n"
+        "    FROM filtered\n"
+        "    GROUP BY trip_id, date\n"
+        ")\n"
         "SELECT route_code, service_type, date, scheduled_time, dep_delay\n"
-        "FROM deduped\n"
-        "WHERE scheduled_time IS NOT NULL AND dep_delay > {dc_threshold:Int32}\n"
+        "FROM per_trip\n"
+        "WHERE dep_delay > {dc_threshold:Int32}\n"
         "ORDER BY date, route_code, scheduled_time\n"
         "LIMIT {dc_limit:UInt32}",
         parameters={
