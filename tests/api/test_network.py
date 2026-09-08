@@ -129,6 +129,25 @@ async def _set_ingest_strategy(pool, aid, strategy):
         await c.execute("UPDATE agencies SET ingest_strategy = $1 WHERE agency_id = $2", strategy, aid)
 
 
+async def _seed_static_version_summary(pool, aid, version, trip_count, vehicle_km=None, computed_at=None):
+    """Seed one `agg_static_version_summary` row directly (bypassing
+    `pipeline.analyze.analyze()`, same "seed the precomputed aggregate
+    directly" convention as `_seed_service_delivered_daily` below) --
+    `computed_at` lets a test control which of several rows for one agency
+    is "most recently computed" (the read path's tie-break)."""
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO agg_static_version_summary "
+            "(agency_id, static_version_id, trip_count, vehicle_km, computed_at) "
+            "VALUES ($1,$2,$3,$4,COALESCE($5, now()))",
+            aid,
+            version,
+            trip_count,
+            vehicle_km,
+            computed_at,
+        )
+
+
 async def _seed_service_delivered_daily(pool, aid, rows):
     """rows: list of (date_iso, non_executed_trips)."""
     async with pool.acquire() as c:
@@ -216,6 +235,83 @@ async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(n
     assert row["planned_trips"] == 2
     assert row["executed_trips"] == 0
     assert row["service_delivered_pct"] == 0.0
+
+
+async def test_compute_supply_metrics_vehicle_km_delivered_uses_service_delivered_ratio(net_pool, ch_async_client):
+    """Item 98: vehicle_km_delivered_pct is item 92's executed/planned trip
+    ratio applied to the current static-version's planned vehicle-km, once
+    BOTH are available."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_version_summary(pool, a, "v1", trip_count=10, vehicle_km=100.0)
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])  # 4/5 executed -> 80%
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["static_version_id"] == "v1"
+    assert row["planned_trip_count"] == 10
+    assert row["planned_vehicle_km"] == 100.0
+    assert row["vehicle_km_delivered_pct"] == 80.0
+
+
+async def test_compute_supply_metrics_falls_back_to_trip_count_only_without_shapes(net_pool, ch_async_client):
+    """No shapes.txt loaded for this static version (vehicle_km NULL) ->
+    vehicle_km_delivered_pct reads None (trip-count-only fallback) even
+    though item 92's ratio IS available -- planned_trip_count alone still
+    carries the headline."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_version_summary(pool, a, "v1", trip_count=10, vehicle_km=None)
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trip_count"] == 10
+    assert row["planned_vehicle_km"] is None
+    assert row["vehicle_km_delivered_pct"] is None
+
+
+async def test_compute_supply_metrics_not_available_without_any_recorded_version(net_pool, ch_async_client):
+    """No agg_static_version_summary row at all for this agency -> every
+    supply field reads None, never a misleading 0/100%."""
+    pool, a, _b, _cc = net_pool
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["static_version_id"] is None
+    assert row["planned_trip_count"] is None
+    assert row["planned_vehicle_km"] is None
+    assert row["vehicle_km_delivered_pct"] is None
+
+
+async def test_compute_supply_metrics_reads_most_recently_computed_version(net_pool, ch_async_client):
+    """Two versions recorded for one agency (a past reload's row persists
+    alongside the current one -- see pipeline.reports.supply) -> the network
+    summary headline reads the MOST RECENTLY COMPUTED one, not the
+    alphabetically- or numerically-first static_version_id."""
+    pool, a, _b, _cc = net_pool
+    await _seed_static_version_summary(
+        pool, a, "v1_old", trip_count=5, vehicle_km=50.0, computed_at=datetime(2026, 3, 1, tzinfo=timezone.utc)
+    )
+    await _seed_static_version_summary(
+        pool, a, "v2_new", trip_count=8, vehicle_km=80.0, computed_at=datetime(2026, 4, 1, tzinfo=timezone.utc)
+    )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["static_version_id"] == "v2_new"
+    assert row["planned_trip_count"] == 8
+    assert row["planned_vehicle_km"] == 80.0
 
 
 async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_async_client):

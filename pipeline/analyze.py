@@ -23,6 +23,9 @@ Aggregation tables produced:
 - agg_route_headway    — scheduled-headway median + high-frequency classification per route (static GTFS only)
 - agg_route_headway_daily — per-day reconstructed ACTUAL headway median per route (static_join agencies only)
 - agg_route_daily_dwell_run — per-day dwell/running-time distribution (decomposition view; static_join agencies only)
+- agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
+- agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
+  section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
 - agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
 
 None of the builders below gate a group out at insert time by its sample
@@ -128,8 +131,14 @@ _AGG_TABLES_ORDERED = (
     "agg_route_headway",
     "agg_route_headway_daily",
     "agg_route_daily_dwell_run",
+    "agg_schedule_revision_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
+# agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
+# (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
+# survives `static_loader.load_static()` overwriting the raw static_* tables
+# on the next reload — see the migration's own docstring and the dedicated
+# section below for why deleting it every run would defeat its purpose.
 
 
 def _run_query(sql: str, params: dict, conn) -> list:
@@ -1008,6 +1017,48 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         else:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
 
+        # ── agg_schedule_revision_daily (per-day dominant static_version_id) ──
+        # Powers pipeline.reports.schedule_revision's boundary-date detection
+        # so a metric change coinciding with a timetable revision isn't
+        # misread as a service-quality change. Independent of ingest_strategy
+        # (unlike agg_service_delivered_daily) -- any agency whose strategy
+        # joins static data at all (today: static_join) can populate this;
+        # an agency that never does (aomori_regex) or a day predating item
+        # 88's rollout simply has every row's static_version_id NULL, which
+        # the inner GROUP BY collapses to its own NULL-keyed group -- the
+        # outer HAVING drops that group's day entirely rather than inserting
+        # a NULL-version row, since a NULL isn't a "version" a boundary can
+        # be drawn against.
+        #
+        # `argMax(version, cnt)` picks the version stamped on the MOST rows
+        # that day (mode), not the version of the latest single observation
+        # -- a reload happening mid-day should attribute that day to whichever
+        # version actually served most of it, not to whichever the last poll
+        # happened to see.
+        ch_schedule_revision = ch_client.query(
+            """
+            SELECT svc_date, argMax(version, cnt) AS static_version_id
+            FROM (
+                SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date,
+                       static_version_id AS version,
+                       count() AS cnt
+                FROM updates WHERE agency_id = {agency_id:UInt16}
+                GROUP BY svc_date, version
+            )
+            GROUP BY svc_date
+            HAVING static_version_id IS NOT NULL
+            """,
+            parameters={"agency_id": agency_id},
+        )
+        with conn.cursor() as cur:
+            if ch_schedule_revision.result_rows:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES %s",
+                    [(agency_id, *r) for r in ch_schedule_revision.result_rows],
+                )
+            logger.info(f"  agg_schedule_revision_daily: {len(ch_schedule_revision.result_rows)} rows")
+
         # ── agg_route_daily_dwell_run (per-day dwell/running-time distribution) ──
         # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
         # visit's departure minus its own arrival) and running time (this
@@ -1234,6 +1285,71 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             logger.info(f"  agg_route_headway_daily: {len(headway_rows)} rows")
         else:
             logger.info("  agg_route_headway_daily: 0 rows (ingest_strategy != static_join)")
+        # ── agg_static_version_summary (per-static-version planned trip count / vehicle-km) ──
+        # UPSERTed only for the CURRENTLY loaded static_version_id — see the
+        # migration's docstring and _AGG_TABLES_ORDERED's comment above for
+        # why this table is deliberately exempt from the wipe-and-rewrite
+        # loop every other agg_* table follows: a past version's row must
+        # survive `static_loader.load_static()` overwriting the raw
+        # static_trips/static_shapes rows on its next reload, or a
+        # schedule-revision boundary could never be explained by a real
+        # before/after change in planned trips/vehicle-km.
+        #
+        # trip_count is a plain COUNT of static_trips rows (mirrors
+        # trips.txt) — deliberately NOT scaled by calendar_dates service
+        # days (unlike pipeline.reports.service_delivered's date-range
+        # planned_trips): this table describes the schedule DEFINITION
+        # itself, comparable across versions independent of any date range.
+        # vehicle_km sums each trip's shape length (via PostGIS geography,
+        # so units are correct on a sphere, not planar degrees) once per
+        # trip; a trip whose shape_id doesn't resolve in static_shapes is
+        # excluded from the SUM (undercounts rather than aborting), and the
+        # whole figure is NULL (not 0) when this agency has no shapes loaded
+        # for any trip at all — see the migration's own docstring.
+        if has_static:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        MAX(t.static_version_id) AS static_version_id,
+                        COUNT(*) AS trip_count,
+                        COUNT(s.geom) AS trips_with_shape,
+                        SUM(CASE WHEN s.geom IS NOT NULL THEN ST_Length(s.geom::geography) END) / 1000.0 AS vehicle_km
+                    FROM static_trips t
+                    LEFT JOIN static_shapes s
+                      ON s.agency_id = t.agency_id AND s.shape_id = t.shape_id
+                    WHERE t.agency_id = %(agency_id)s
+                    """,
+                    p,
+                )
+                version_row = cur.fetchone()
+            static_version_id, trip_count, trips_with_shape, vehicle_km = version_row or (None, 0, 0, None)
+            # No backfill: a trip row inserted before migration 0036 (or by an
+            # ingest strategy that never sets static_version_id at all) has a
+            # NULL static_version_id, and MAX(...) over an all-NULL column is
+            # NULL — there is no version key to upsert a row under, so this
+            # agency simply gets no row here yet, same "not available until a
+            # real value exists" convention as every other nullable column
+            # added by item 88.
+            if static_version_id is not None:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO agg_static_version_summary "
+                        "(agency_id, static_version_id, trip_count, vehicle_km, computed_at) "
+                        "VALUES (%s, %s, %s, %s, now()) "
+                        "ON CONFLICT (agency_id, static_version_id) DO UPDATE SET "
+                        "trip_count = EXCLUDED.trip_count, vehicle_km = EXCLUDED.vehicle_km, "
+                        "computed_at = EXCLUDED.computed_at",
+                        (agency_id, static_version_id, trip_count, vehicle_km),
+                    )
+                logger.info(
+                    f"  agg_static_version_summary: version={static_version_id} trip_count={trip_count} "
+                    f"vehicle_km={vehicle_km} ({trips_with_shape}/{trip_count} trips shaped)"
+                )
+            else:
+                logger.info("  agg_static_version_summary: 0 rows (static_version_id not populated)")
+        else:
+            logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
         # ── agg_meta: audit record of this build (NOT load-bearing) ──────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.

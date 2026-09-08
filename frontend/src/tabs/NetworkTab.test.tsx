@@ -14,7 +14,9 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
-    has_ridership_weights: false, weighted_on_time_pct: null, ...over,
+    has_ridership_weights: false, weighted_on_time_pct: null,
+    static_version_id: null, planned_trip_count: null, planned_vehicle_km: null,
+    vehicle_km_delivered_pct: null, ...over,
   };
 }
 
@@ -89,6 +91,42 @@ describe("NetworkTab", () => {
     expect(screen.getByText("96.7%")).toBeInTheDocument();
     const aomoriCard = screen.getByText("Aomori").closest(".network-card");
     expect(aomoriCard).toHaveTextContent("—");
+  });
+
+  it("shows vehicle-km delivered %, falls back to planned trip count, and shows a dash otherwise", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({
+            agency_id: 1, agency_name: "Hiroden",
+            static_version_id: "gtfs_static_20260101", planned_trip_count: 300,
+            planned_vehicle_km: 1234.5, vehicle_km_delivered_pct: 91.2,
+          }),
+          // No shapes.txt loaded -> vehicle_km_delivered_pct is None; falls
+          // back to the plain planned trip count, never a dash that hides
+          // real supply data the backend does have.
+          row({
+            agency_id: 2, agency_name: "HiroBus",
+            static_version_id: "gtfs_static_20260101", planned_trip_count: 150,
+            planned_vehicle_km: null, vehicle_km_delivered_pct: null,
+          }),
+          // No static-feed version recorded at all -> dash.
+          row({
+            agency_id: 3, agency_name: "Aomori",
+            static_version_id: null, planned_trip_count: null,
+            planned_vehicle_km: null, vehicle_km_delivered_pct: null,
+          }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByText("91.2%")).toBeInTheDocument();
+    const hiroBusCard = screen.getByText("HiroBus").closest(".network-card");
+    expect(hiroBusCard).toHaveTextContent("150");
+    const aomoriCard2 = screen.getByText("Aomori").closest(".network-card");
+    expect(aomoriCard2).toHaveTextContent("—");
   });
 
   it("links each agency name to its overview, carrying the current range", () => {

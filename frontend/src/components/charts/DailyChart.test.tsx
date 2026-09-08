@@ -38,4 +38,24 @@ describe("DailyChart", () => {
     );
     expect(screen.getByText(i18n.t("reports.daily.smoothed_label"))).toBeInTheDocument();
   });
+
+  it("marks a schedule-revision boundary date that appears in days", () => {
+    renderWithProviders(
+      <DailyChart
+        days={[day({ date: "2026-05-18" }), day({ date: "2026-05-19" }), day({ date: "2026-05-20" })]}
+        revisionBoundaries={["2026-05-19"]}
+      />,
+    );
+    expect(screen.getByText(i18n.t("reports.daily.revision_boundary_label"))).toBeInTheDocument();
+  });
+
+  it("skips a boundary date absent from days without crashing", () => {
+    renderWithProviders(
+      <DailyChart
+        days={[day({ date: "2026-05-18" }), day({ date: "2026-05-19" })]}
+        revisionBoundaries={["2099-01-01"]}
+      />,
+    );
+    expect(screen.queryByText(i18n.t("reports.daily.revision_boundary_label"))).not.toBeInTheDocument();
+  });
 });

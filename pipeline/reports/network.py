@@ -21,6 +21,15 @@ see that module for the manually-populated `ridership_weights` table and why
 an agency with no rows there reads `has_ridership_weights=False` and
 `weighted_on_time_pct=None`, never a value computed with an implicit uniform
 weight.
+
+``static_version_id``/``planned_trip_count``/``planned_vehicle_km``/
+``vehicle_km_delivered_pct`` come from
+`pipeline.reports.supply.compute_supply_metrics_by_agency` — see that module
+for why these describe the current static-feed version's schedule
+definition rather than a date-range total, and why
+``vehicle_km_delivered_pct`` reads `None` ("trip-count-only" — fall back to
+`planned_trip_count`) whenever either the vehicle-km figure or item 92's
+executed/planned ratio isn't available for this agency.
 """
 
 import logging
@@ -33,6 +42,7 @@ from pipeline.cache import async_lru_cache
 from pipeline.freshness import is_stale
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
+from pipeline.reports.supply import compute_supply_metrics_by_agency
 
 _log = logging.getLogger(__name__)
 
@@ -101,6 +111,12 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # on this request path; see compute_service_delivered_by_agency.
     delivered = await compute_service_delivered_by_agency(conn, [a["agency_id"] for a in agencies], from_date, to_date)
 
+    # static_version_id/planned_trip_count/planned_vehicle_km/
+    # vehicle_km_delivered_pct: see pipeline.reports.supply — reuses
+    # `delivered` (computed just above, over this SAME range) as the source
+    # of the executed/planned trip ratio rather than recomputing it.
+    supply = await compute_supply_metrics_by_agency(conn, [a["agency_id"] for a in agencies], delivered)
+
     # weighted_on_time_pct keyed by agency_id; an agency absent from this dict
     # (per compute_ridership_weighted_on_time_by_agency) has no
     # ridership_weights rows configured at all. Read via a sentinel default so
@@ -123,6 +139,15 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         d = delivered.get(aid, {"planned_trips": 0, "executed_trips": None, "service_delivered_pct": None})
+        s = supply.get(
+            aid,
+            {
+                "static_version_id": None,
+                "planned_trip_count": None,
+                "planned_vehicle_km": None,
+                "vehicle_km_delivered_pct": None,
+            },
+        )
         agency_weighted = weighted_on_time.get(aid, _NOT_CONFIGURED)
         rows.append(
             {
@@ -147,6 +172,10 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 # says that).
                 "has_ridership_weights": agency_weighted is not _NOT_CONFIGURED,
                 "weighted_on_time_pct": None if agency_weighted is _NOT_CONFIGURED else agency_weighted,
+                "static_version_id": s["static_version_id"],
+                "planned_trip_count": s["planned_trip_count"],
+                "planned_vehicle_km": s["planned_vehicle_km"],
+                "vehicle_km_delivered_pct": s["vehicle_km_delivered_pct"],
             }
         )
     # None (no data yet) sorts last; among real values, worst delay first.
