@@ -10,7 +10,7 @@ the same stop on the same route. This module has two independent halves:
   as different stops and miss the true gap between vehicles that actually
   call at the same platform). Only available for an agency whose ingest
   strategy is confirmed to populate `stop_id` (today: `static_join`;
-  `aomori_regex` always leaves it NULL -- see item 89 /
+  `aomori_regex` always leaves it NULL -- see
   `pipeline.strategies.static_join`'s module docstring).
 - Deriving the SCHEDULED headway median from the static GTFS `stop_times`
   table (`static_stop_times` in Postgres), independent of any RT data, used

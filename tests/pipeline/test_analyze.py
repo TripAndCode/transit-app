@@ -1097,6 +1097,7 @@ def _ch_headway_row(
     dep_delay=0,
     file_name="f.pb",
     route_code="R1",
+    stop_sequence=1,
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields agg_route_headway_daily reads
@@ -1108,7 +1109,7 @@ def _ch_headway_row(
         "平日",
         scheduled_time,
         route_code,
-        1,  # stop_sequence
+        stop_sequence,
         dep_delay,
         stop_id,
         None,  # arr_delay
@@ -1144,6 +1145,52 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     median_sec, samples = row
     assert samples == 2  # 3 events -> 2 consecutive gaps
     assert abs(median_sec - 480) <= 3
+
+
+def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(
+    pg_conn, agency_id, ch_client
+):
+    """A looping/branching route can visit the same physical stop_id twice
+    within one trip, at two different stop_sequence values. The per-event
+    dedup must key on (trip_id, stop_sequence), not trip_id alone, so both
+    visits survive as distinct events -- collapsing them via argMax on
+    trip_id alone would silently discard one real departure."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    rows = [
+        # T1 revisits stop s1 twice within its own trip (stop_sequence 1 and 5),
+        # ten minutes apart -- two distinct real events sharing the same trip_id.
+        _ch_headway_row(
+            "T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0,
+            file_name="a.pb", stop_sequence=1,
+        ),
+        _ch_headway_row(
+            "T1", day, stop_id="s1", scheduled_time="08:10:00", dep_delay=0,
+            file_name="b.pb", stop_sequence=5,
+        ),
+        # T2 makes a single, ordinary visit to the same stop.
+        _ch_headway_row(
+            "T2", day, stop_id="s1", scheduled_time="08:20:00", dep_delay=0,
+            file_name="c.pb", stop_sequence=1,
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
+            "WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    median_sec, samples = row
+    # 3 distinct events (08:00, 08:10, 08:20) -> 2 consecutive gaps. A buggy
+    # dedup that collapses T1's two stop_sequence values into one event would
+    # only see 2 events -> 1 sample.
+    assert samples == 2
+    assert abs(median_sec - 600) <= 3
 
 
 def test_analyze_skips_agg_route_headway_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):

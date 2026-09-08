@@ -814,8 +814,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
             # ── agg_route_headway (scheduled-headway classification) ─────
-            # Powers item 94's high-frequency route filter. Derived purely
-            # from the static GTFS schedule (static_stop_times/static_trips/
+            # Supports classifying routes by scheduled frequency for later
+            # filtering. Derived purely from the static GTFS schedule
+            # (static_stop_times/static_trips/
             # static_routes), independent of any RT history -- unlike
             # agg_route_headway_daily below, this needs no ingest_strategy
             # gate; every agency with a static feed loaded (has_static) gets
@@ -999,14 +1000,15 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
 
         # ── agg_route_headway_daily (per-day reconstructed ACTUAL headway) ──
-        # Powers item 94's Excess Waiting Time computation. Reconstructed
-        # straight from ClickHouse `updates.stop_id` (not stop_sequence --
-        # see pipeline/headways.py's module docstring for why the physical
-        # stop is the correct grouping), so -- like agg_service_delivered_daily
-        # above -- only an agency confirmed to populate stop_id (today:
-        # static_join; aomori_regex always leaves it NULL) gets any rows
-        # here. Skipped entirely (zero rows) for any other ingest_strategy,
-        # same "row presence keyed off ingest_strategy" convention.
+        # Supports a later excess-wait-time computation (actual vs. scheduled
+        # headway). Pooled at the physical stop level, from ClickHouse
+        # `updates.stop_id` (see pipeline/headways.py's module docstring for
+        # why the physical stop is the correct grouping for pooling across
+        # trips), so -- like agg_service_delivered_daily above -- only an
+        # agency confirmed to populate stop_id (today: static_join;
+        # aomori_regex always leaves it NULL) gets any rows here. Skipped
+        # entirely (zero rows) for any other ingest_strategy, same "row
+        # presence keyed off ingest_strategy" convention.
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
@@ -1019,9 +1021,14 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # `_analyze_deduped` needs) even though the pre-aggregation
             # GROUP BY underneath it scans the agency's full `updates`
             # history. `argMax(..., (captured_at, file_name))` per
-            # (route_code, stop_id, date, trip_id) is the SAME
-            # latest-observation-wins dedup rule as build_dedup_ch_sql, just
-            # keyed by stop_id instead of stop_sequence.
+            # (route_code, stop_id, date, trip_id, stop_sequence) is the SAME
+            # latest-observation-wins dedup rule as build_dedup_ch_sql --
+            # stop_sequence stays in this per-event key (matching
+            # build_dedup_ch_sql and agg_service_delivered_daily's own
+            # stop-level subquery) so a route that revisits the same
+            # physical stop_id twice within one trip keeps both visits as
+            # distinct events; only the outer SELECT below pools across
+            # stop_sequence (and across trips) at the physical-stop level.
             #
             # scheduled_time is normalized "HH:MM[:SS]" text (see
             # pipeline.strategies._time.normalize_departure_time) -- seconds
@@ -1046,11 +1053,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 """
                 WITH per_event AS (
                     SELECT route_code, stop_id, toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
+                           stop_sequence,
                            argMax(dep_delay, (captured_at, file_name)) AS dep_delay,
                            argMax(scheduled_time, (captured_at, file_name)) AS scheduled_time
                     FROM updates
                     WHERE agency_id = {agency_id:UInt16} AND stop_id IS NOT NULL AND route_code IS NOT NULL
-                    GROUP BY route_code, stop_id, svc_date, trip_id
+                    GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
                 ),
                 filtered AS (
                     SELECT route_code, stop_id, svc_date, dep_delay,
