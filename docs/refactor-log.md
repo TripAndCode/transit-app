@@ -804,23 +804,45 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (dedup-by-feed_url, idempotent `--write`, unsupported-platform exclusion,
   and the coverage-threshold assessment) without a DB or network dependency.
 
-  What's left, and why the item's Verify line still isn't satisfied: a later
-  commit on this branch (`feat(agencies): onboard Hiroshima Bus Association
+  What's left, and where the item's Verify line stands now: a later commit
+  on this branch (`feat(agencies): onboard Hiroshima Bus Association
   operators`) appended the 10 confirmed `mcapps.jp`/`static_join`/`direct_url`
   rows (agency_id 11, 12, 13, 14, 15, 17, 18, 19, 53, 54) to `agencies.csv`,
-  so it no longer lists only agencies 8/9/10. But none of these 10
-  newly-added agencies has had
-  `scripts/probe_rt_field_coverage.py --url <realtime_url>` run against its
-  live feed, and no `make analyze-all` run has been done for any of them —
-  both still require network egress this environment doesn't have. So this
-  item's Verify line ("at least one newly-onboarded agency ingests
-  successfully end-to-end ... and its per-field RT capability is correctly
-  reported") remains NOT satisfied by this diff: live-feed verification
-  against a real feed for one of the 10 is the concrete remaining blocker,
-  not something this branch's code alone can claim. Backend verification of
-  the diff itself (`make test`,
-  `ruff`, `mypy`) also could not be run in this sandbox, per the same
-  `transit-app-gotchas`-documented dispatched-worker execution gap other
-  items have hit; the new code was instead checked by tracing it against the
-  already-passing `test_static_join_per_op` fixtures and by hand-checking
-  the new tests' own assertions. (PR #pending)
+  so it no longer lists only agencies 8/9/10. A further commit
+  (`feat(fixtures): vendor real GTFS static+RT data for agency 11 (Geiyo
+  Bus)`) vendored real `tests/fixtures/geiyo_static.zip`/`geiyo_tu.bin` and
+  verified, against the throwaway test DB, that `load_static` against
+  `geiyo_static.zip` inserts 1682 stops / 64 routes / 1593 trips / 44152
+  stop_times and that `gtfs_pipeline.py analyze --agency-id 11` completes
+  with no error — static ingestion is now verified end-to-end for agency 11,
+  not just a config edit, and `tests/pipeline/test_static_join.py::
+  test_load_static_geiyo_fixture_row_counts` now reproduces those row counts
+  as a real assertion instead of only a commit-message claim. `geiyo_tu.bin`
+  was captured overnight with zero active service, so
+  `probe_rt_field_coverage.py` correctly reports it as an empty feed (0
+  stop_time_updates) — that confirms the wire format decodes, not that RT
+  fields are populated the way 8/9/10's confirmed feeds are. So RT
+  field-coverage remains unconfirmed for agency 11 and for all 10
+  newly-onboarded agencies: none has had
+  `scripts/probe_rt_field_coverage.py --url <realtime_url>` run against a
+  live, in-service feed, which needs network egress this environment
+  doesn't have. Because of that,
+  `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+  still lists only 8/9/10; `pipeline.reports.service_delivered` and
+  `pipeline.reports.dwell_run` now intersect against that explicit set
+  (alongside the real `ingest_strategy` check) instead of trusting
+  `ingest_strategy == 'static_join'` alone, so none of the 10 newly-onboarded
+  agencies (nor agency 11) silently reports a misleading
+  `service_delivered_pct`/dwell availability — each correctly reads "not
+  available" until a live probe confirms real coverage and earns it a spot
+  in that set. This item's Verify line's "per-field RT capability is
+  correctly reported" clause is satisfied in the "correctly reported as
+  unconfirmed" sense; live-feed verification proving actual positive
+  coverage for at least one of the 10 remains the concrete remaining
+  blocker, still gated on network egress this environment lacks. Backend
+  verification of the diff itself (`make test`, `ruff`, `mypy`) also could
+  not be run in this sandbox, per the same `transit-app-gotchas`-documented
+  dispatched-worker execution gap other items have hit; the new code was
+  instead checked by tracing it against the already-passing
+  `test_static_join_per_op` fixtures and by hand-checking the new tests' own
+  assertions. (PR #pending)

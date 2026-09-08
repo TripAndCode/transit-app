@@ -362,6 +362,38 @@ def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
     _run_and_assert(pg_conn, aid, FIX / pb_name)
 
 
+def test_load_static_geiyo_fixture_row_counts(pg_conn):
+    """geiyo_static.zip is a real vendored GTFS static feed for agency 11
+    (Geiyo Bus). Unlike hiroden/hirobus/hirokoh's fixtures above, nothing
+    loaded it before this test -- the row counts a prior session reported
+    seeing (1682 stops, 64 routes, 1593 trips, 44152 stop_times) were only a
+    commit-message claim, not something the suite reproduced. Assert them
+    here so a future change to `load_static` or a re-vendored fixture that
+    silently drops rows gets caught.
+
+    geiyo_tu.bin (the paired RT capture) is a known-empty overnight snapshot
+    (0 stop_time_updates -- see
+    pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES's
+    comment) that proves nothing about per-field RT coverage, so unlike
+    `test_static_join_per_op` this only exercises the static load, not
+    parse_feed/field_coverage.
+    """
+    aid = _make_agency(
+        pg_conn, "芸陽バス_test", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin"
+    )
+    load_static(str(FIX / "geiyo_static.zip"), aid, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM static_stops WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 1682
+        cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 64
+        cur.execute("SELECT count(*) FROM static_trips WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 1593
+        cur.execute("SELECT count(*) FROM static_stop_times WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 44152
+
+
 # ---------------------------------------------------------------------------
 # field_coverage() -- the per-field coverage check, usable without a DB
 # connection or static schedule (see pipeline/strategies/static_join.py's

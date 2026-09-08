@@ -7,9 +7,18 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.reports import dwell_run as dwell_run_module
+from pipeline.reports import service_delivered as service_delivered_module
 from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+
+
+def _trust_dwell_run(monkeypatch, *agency_ids):
+    """See tests/api/test_network.py's `_trust_service_delivered` docstring --
+    same reasoning, for the dwell_run report's independent confirmed-set
+    gate."""
+    monkeypatch.setattr(dwell_run_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
 
 
 @pytest.fixture
@@ -1352,11 +1361,30 @@ async def test_dwell_run_not_available_for_non_static_join_agency(reports_client
 
 
 @pytest.mark.asyncio
-async def test_dwell_run_time_band_filter_is_explicitly_unsupported(reports_client):
-    """Even for an available (static_join) agency, a time_band filter isn't
-    servable by this decomposition (no live-scan fallback) -- must say so
-    explicitly rather than silently ignoring the filter."""
+async def test_dwell_run_not_available_for_unconfirmed_static_join_agency(reports_client, monkeypatch):
+    """`ingest_strategy == 'static_join'` alone is not sufficient trust for
+    arr_delay-derived dwell/running times: an agency outside
+    `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` must still render 'not available'
+    even though its ingest_strategy matches. Explicitly empties the confirmed
+    set so this holds regardless of which real agency_ids happen to be in
+    it."""
     client, agency_id, pool = reports_client
+    _trust_dwell_run(monkeypatch)  # empty set -- no agency_id is trusted
+    await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/dwell_run")
+    assert resp.status_code == 200
+    payload = resp.json()["rows"][0]
+    assert payload["available"] is False
+    assert payload["routes"] == []
+
+
+@pytest.mark.asyncio
+async def test_dwell_run_time_band_filter_is_explicitly_unsupported(reports_client, monkeypatch):
+    """Even for an available (static_join, confirmed-set) agency, a time_band
+    filter isn't servable by this decomposition (no live-scan fallback) --
+    must say so explicitly rather than silently ignoring the filter."""
+    client, agency_id, pool = reports_client
+    _trust_dwell_run(monkeypatch, agency_id)
     await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
     resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning")
     assert resp.status_code == 200
@@ -1386,13 +1414,14 @@ async def test_dwell_run_csv_export_not_available_says_so_instead_of_empty(repor
 
 
 @pytest.mark.asyncio
-async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_empty(reports_client):
+async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_empty(reports_client, monkeypatch):
     """Same as the not-available case, but for the time_band_supported=False
-    state (still an available static_join agency)."""
+    state (still an available static_join, confirmed-set agency)."""
     import csv
     import io
 
     client, agency_id, pool = reports_client
+    _trust_dwell_run(monkeypatch, agency_id)
     await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
     resp = await client.get(f"/api/{agency_id}/reports/dwell_run?time_band=morning&format=csv")
     assert resp.status_code == 200
@@ -1402,7 +1431,7 @@ async def test_dwell_run_csv_export_time_band_unsupported_says_so_instead_of_emp
 
 
 @pytest.mark.asyncio
-async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client):
+async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, ch_client, monkeypatch):
     """End-to-end: seed a static schedule + ClickHouse `arr_delay`/`dep_delay`
     for a 3-stop trip (same hand-computed fixture as
     tests/unit/test_dwell_run.py and tests/pipeline/test_analyze.py's
@@ -1413,6 +1442,7 @@ async def test_dwell_run_reads_agg_with_known_synthetic_values(reports_client, c
     from pipeline.clickhouse import insert_updates
 
     client, agency_id, pool = reports_client
+    _trust_dwell_run(monkeypatch, agency_id)
     await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
     await pool.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", agency_id
@@ -1547,8 +1577,11 @@ async def test_council_summary_service_delivered_not_available_footnote(reports_
 
 
 @pytest.mark.asyncio
-async def test_council_summary_service_delivered_available_when_static_join_and_scheduled(reports_client, ch_client):
+async def test_council_summary_service_delivered_available_when_static_join_and_scheduled(
+    reports_client, ch_client, monkeypatch
+):
     client, agency_id, pool = reports_client
+    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset({agency_id}))
     day = "2026-06-14"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 25)
     _run_analyze(agency_id, ch_client)

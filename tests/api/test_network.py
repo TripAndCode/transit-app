@@ -8,6 +8,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.reports import service_delivered as service_delivered_module
 from pipeline.reports.network import compute_network_summary
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -129,6 +130,16 @@ async def _set_ingest_strategy(pool, aid, strategy):
         await c.execute("UPDATE agencies SET ingest_strategy = $1 WHERE agency_id = $2", strategy, aid)
 
 
+def _trust_service_delivered(monkeypatch, *agency_ids):
+    """Simulate `scripts/probe_rt_field_coverage.py` having already confirmed
+    real (non-empty) RT field coverage for these dynamically-created test
+    agencies -- production only trusts agency_ids that are actually in
+    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    (currently 8/9/10), which a freshly-inserted test agency_id won't
+    coincidentally match."""
+    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
+
+
 async def _seed_service_delivered_daily(pool, aid, rows):
     """rows: list of (date_iso, non_executed_trips)."""
     async with pool.acquire() as c:
@@ -141,11 +152,12 @@ async def _seed_service_delivered_daily(pool, aid, rows):
             )
 
 
-async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client):
+async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client, monkeypatch):
     """The read path sums agg_service_delivered_daily over the range and
     divides against the static schedule's planned count -- no ClickHouse
     access. 5 planned trips, 1 non-executed trip-day precomputed -> 80%."""
     pool, a, b, _cc = net_pool
+    _trust_service_delivered(monkeypatch, a, b)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
@@ -183,6 +195,31 @@ async def test_compute_service_delivered_not_available_when_not_static_join(net_
     assert row["service_delivered_pct"] is None
 
 
+async def test_compute_service_delivered_not_available_for_unconfirmed_static_join_agency(
+    net_pool, ch_async_client, monkeypatch
+):
+    """`ingest_strategy == 'static_join'` alone is not sufficient trust: an
+    agency outside `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` must still read
+    "not available" even with real planned trips and precomputed
+    non-executed data -- only `scripts/probe_rt_field_coverage.py` confirming
+    a live feed's real coverage (never an empty/overnight capture) earns a
+    spot in that set. Explicitly empties the confirmed set so this holds
+    regardless of which real agency_ids happen to be in it."""
+    pool, a, _b, _cc = net_pool
+    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset())
+    await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["planned_trips"] == 2
+    assert row["executed_trips"] is None
+    assert row["service_delivered_pct"] is None
+
+
 async def test_compute_service_delivered_no_static_schedule_is_not_available(net_pool, ch_async_client):
     """No static schedule loaded (planned_trips == 0) reads "not available",
     never a divide-by-zero 100%, even for a static_join agency with
@@ -200,11 +237,12 @@ async def test_compute_service_delivered_no_static_schedule_is_not_available(net
     assert row["service_delivered_pct"] is None
 
 
-async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client):
+async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client, monkeypatch):
     """A non_executed_trips total exceeding planned_trips (feed drift, or a
     RT-only ADDED trip marked CANCELED) must clamp executed_trips at 0, never
     go negative."""
     pool, a, _b, _cc = net_pool
+    _trust_service_delivered(monkeypatch, a)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 5)])

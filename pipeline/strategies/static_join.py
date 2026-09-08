@@ -17,6 +17,24 @@ from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
+# Agencies whose RT-sourced optional fields (stop_id, arr_delay,
+# schedule_relationship_trip, schedule_relationship_stop) have actually been
+# observed populated on a real, non-empty live feed -- not merely agencies
+# that share this strategy's opaque-trip_id JOIN mechanism. `ingest_strategy
+# == 'static_join'` alone means a feed's wire shape matches; it does NOT mean
+# the feed populates these optional fields the way 8/9/10 do (see
+# `field_coverage`'s docstring). Reports that trust these fields
+# (`pipeline.reports.service_delivered`, `pipeline.reports.dwell_run`) must
+# intersect against this explicit set rather than trusting `ingest_strategy`
+# alone.
+#
+# Add an agency_id here only after running
+# `scripts/probe_rt_field_coverage.py --url <realtime_url>` against that
+# agency's own live feed during active service hours and confirming real
+# (non-empty) per-field coverage -- an empty/overnight capture (no
+# stop_time_updates at all) confirms nothing and does not qualify.
+RT_FIELD_COVERAGE_CONFIRMED_AGENCIES = frozenset({8, 9, 10})
+
 
 def _decode_rows(pb_bytes: bytes):
     """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
@@ -75,14 +93,16 @@ def field_coverage(pb_bytes: bytes) -> dict:
     feed itself sends stop_id/arr_delay/schedule_relationship_*/feed_timestamp.
     That makes this usable to check a feed BEFORE an agency row for it even
     exists, which is the point: ``pipeline.reports.service_delivered`` and
-    ``pipeline.reports.dwell_run`` both key "is this optional field
-    populated" off ``ingest_strategy == 'static_join'`` alone, an assumption
-    empirically confirmed for agencies 8/9/10 (see
+    ``pipeline.reports.dwell_run`` both gate "is this optional field
+    populated" on membership in ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``
+    (this module), not on ``ingest_strategy == 'static_join'`` alone --
+    sharing this strategy's opaque-trip_id JOIN mechanism only means a feed's
+    wire shape matches 8/9/10's, empirically confirmed for those three (see
     ``tests/pipeline/test_static_join.py::test_static_join_per_op``'s real-
-    fixture coverage assertions) but NOT automatically true for every feed
-    that merely happens to need the same opaque-trip_id JOIN mechanism.
-    Run this (see ``scripts/probe_rt_field_coverage.py``) against a new
-    agency's live feed before assuming its coverage matches.
+    fixture coverage assertions), NOT that every feed needing the same JOIN
+    also populates these fields the same way. Run this (see
+    ``scripts/probe_rt_field_coverage.py``) against a new agency's live feed
+    before adding it to ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``.
 
     Returns ``{"stop_time_updates": int, "feed_timestamp": int | None}``
     plus, only when ``stop_time_updates > 0`` (an empty poll says nothing

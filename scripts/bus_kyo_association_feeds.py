@@ -2,15 +2,16 @@
 feed list.
 
 The association (公益社団法人広島県バス協会, https://www.bus-kyo.or.jp/gtfs-open-data)
-lists 17 operators; only 3 (agency_id 8/9/10 -- 広島電鉄/広島バス/広島交通) are
-configured in ``agencies.csv`` today. This module holds the rest of that
-list as data (fetched by a human session with network access -- an
-autonomous session here has none, see ``docs/refactor-log.md``) and turns it
-into new ``agencies.csv`` rows, so a future association update only needs a
-data-table edit here rather than hand-typing CSV rows again.
+lists 17 operators. This module holds that full list as data (fetched by a
+human session with network access -- an autonomous session here has none,
+see ``docs/refactor-log.md``) and ``pending_feeds()`` dynamically computes
+which of them are both supported (see ``BusKyoFeed.supported``) and not yet
+present in ``agencies.csv`` (matched by ``feed_url``), so a future
+association update only needs a data-table edit here rather than hand-typing
+CSV rows again.
 
-Most of the remaining operators share the same ``mcapps.jp`` platform as
-8/9/10 (same URL shape, same protobuf producer) and can reuse the existing
+Most of these operators share the same ``mcapps.jp`` platform as 8/9/10
+(same URL shape, same protobuf producer) and can reuse the existing
 ``static_join``/``direct_url`` strategies unchanged. A few use a different
 platform (``busit.jp``, ``bus-vision.jp``) whose fetch/wire shape hasn't been
 confirmed against ``pipeline/strategies/`` -- those are recorded for
@@ -144,6 +145,21 @@ def _read_existing_feed_urls(agencies_csv_path: pathlib.Path) -> set[str]:
         return {row["feed_url"].strip() for row in reader if row.get("feed_url")}
 
 
+# Matches agencies.csv's own header exactly -- written once, only when
+# --write's target file doesn't already exist, so a subsequent --write run
+# against the same file never lets csv.DictReader (in
+# _read_existing_feed_urls) treat a data row as the header.
+_CSV_HEADER = [
+    "agency_id",
+    "agency_name",
+    "feed_url",
+    "static_url",
+    "ingest_strategy",
+    "static_strategy",
+    "trip_id_pattern",
+]
+
+
 def _to_csv_row(feed: BusKyoFeed) -> list[str]:
     return [
         str(feed.agency_id) if feed.agency_id is not None else "",
@@ -184,8 +200,16 @@ def main() -> None:
         if not pending:
             print("Nothing to add.")
             return
+        # Written only when the target file doesn't already exist, so a
+        # second --write run against the same file appends under the header
+        # this run just wrote -- never a headerless file that would make a
+        # later _read_existing_feed_urls() call (via csv.DictReader) consume
+        # the first data row as field names.
+        write_header = not csv_path.exists()
         with csv_path.open("a", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
+            if write_header:
+                writer.writerow(_CSV_HEADER)
             for feed in pending:
                 writer.writerow(_to_csv_row(feed))
         print(f"Appended {len(pending)} row(s) to {csv_path}.")

@@ -128,3 +128,29 @@ def test_write_appends_only_pending_rows_and_is_idempotent(tmp_path, monkeypatch
     out = capsys.readouterr().out
     assert "Nothing to add." in out
     assert len(csv_path.read_text(encoding="utf-8").splitlines()) == len(lines)
+
+
+def test_write_creates_header_when_target_file_does_not_exist_and_stays_idempotent(tmp_path, monkeypatch, capsys):
+    """A first --write against a path with no existing agencies.csv must
+    write the header row before appending -- otherwise a second --write run
+    would open the headerless file with csv.DictReader (via
+    _read_existing_feed_urls), consume the first data row as field names,
+    and silently duplicate every entry instead of adding nothing."""
+    csv_path = tmp_path / "agencies.csv"
+    assert not csv_path.exists()
+
+    monkeypatch.setattr("sys.argv", ["prog", "--agencies-csv", str(csv_path), "--write"])
+    main()
+
+    lines = csv_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == ",".join(_HEADER)
+    supported = [f for f in ALL_FEEDS if f.supported]
+    assert len(lines) == 1 + len(supported)
+
+    # Re-running --write against the now-populated file must add nothing
+    # further -- this is exactly the idempotency the header write protects.
+    monkeypatch.setattr("sys.argv", ["prog", "--agencies-csv", str(csv_path), "--write"])
+    main()
+    out = capsys.readouterr().out
+    assert "Nothing to add." in out
+    assert csv_path.read_text(encoding="utf-8").splitlines() == lines

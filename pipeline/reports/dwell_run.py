@@ -1,12 +1,17 @@
 """Read side for the dwell-time / running-time decomposition report.
 
 Reads `agg_route_daily_dwell_run` (built by `pipeline.analyze.analyze()`,
-only for agencies whose `ingest_strategy` is confirmed to send `arr_delay` --
-see that builder and `pipeline.dwell_run`'s module docstring for why: only
-those agencies' RT feed ever sends `StopTimeUpdate.arrival`, so `arr_delay`
--- and therefore an actual arrival timestamp -- exists to derive dwell time
-(this stop's departure minus its own arrival) and running time (this stop's
-arrival minus the PREVIOUS stop's departure) from.
+only for agencies in
+`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` --
+see that module's docstring for why `ingest_strategy` alone isn't sufficient
+trust: sharing the static_join JOIN mechanism doesn't imply a feed actually
+populates `arr_delay`, only that its wire shape matches an agency that's
+been confirmed to. See that builder and `pipeline.dwell_run`'s module
+docstring for why `arr_delay` matters: only a confirmed agency's RT feed is
+known to ever send `StopTimeUpdate.arrival`, so `arr_delay` -- and therefore
+an actual arrival timestamp -- exists to derive dwell time (this stop's
+departure minus its own arrival) and running time (this stop's arrival minus
+the PREVIOUS stop's departure) from.
 
 Unlike ranking/on_time/worst_5min, this report has no live ClickHouse
 fallback for a time_band-filtered query: reconstructing dwell/running time
@@ -25,16 +30,28 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter
+from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
 
-# Ingest strategies confirmed to ever populate `arr_delay` (see
+# Ingest strategies that CAN ever populate `arr_delay` (see
 # pipeline/strategies/static_join.py's parse_feed docstring); mirrors
 # pipeline.reports.service_delivered's identical `_POPULATED_AGENCIES_SQL`
-# gate for the same underlying reason (both need schedule_relationship_*/
-# arr_delay, RT fields only static_join's Hiroshima-style feeds send).
+# real-strategy check for the same underlying reason (both need
+# schedule_relationship_*/arr_delay, RT fields only static_join's
+# Hiroshima-style feeds send). This alone is NOT sufficient trust -- see
+# RT_FIELD_COVERAGE_CONFIRMED_AGENCIES below, which _agency_available also
+# requires.
 _AVAILABLE_STRATEGIES = frozenset({"static_join"})
 
 
 async def _agency_available(agency_id: int, conn) -> bool:
+    """True only when this agency both uses an ingest strategy that can send
+    `arr_delay` AND is in the explicit confirmed-set gate
+    (`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`)
+    -- an `ingest_strategy` match alone means a feed's wire shape merely
+    matches a confirmed agency's, not that this agency's own live feed has
+    been probed and found to actually populate the field."""
+    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
+        return False
     row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
     return bool(row and row["ingest_strategy"] in _AVAILABLE_STRATEGIES)
 
