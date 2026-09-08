@@ -766,3 +766,58 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
   single second — the boundary this item's own verify criterion names.
   (PR #356)
+- 2026-09-08: Built the tooling half of bulk-onboarding the Hiroshima Bus
+  Association's remaining GTFS operators (item 103); the actual `agencies.csv`
+  update is a follow-up step, not included here (see below). New
+  `pipeline.strategies.static_join.field_coverage(pb_bytes)` generalizes item
+  87's per-field coverage check (stop_id/arr_delay/schedule_relationship_trip/
+  schedule_relationship_stop/feed_timestamp) into a reusable function that
+  needs no DB connection or configured `agencies` row — it decodes a raw
+  feed sample the same way `parse_feed` does, minus the static-schedule JOIN,
+  so it can check a feed before onboarding decides to trust it.
+  `tests/pipeline/test_static_join.py` gained
+  `test_field_coverage_matches_known_fixture_stats`, which reruns this
+  against the existing real hiroden/hirobus/hirokoh fixtures and confirms it
+  reproduces the same coverage the full parse_feed path already asserts —
+  proving the standalone probe agrees with production decoding rather than
+  drifting from it. New `scripts/probe_rt_field_coverage.py` wraps this in a
+  CLI (`--url`/`--file`) that fetches (via `pipeline.url_guard.safe_urlopen`)
+  and reports whether a feed's coverage matches the thresholds already
+  confirmed for agencies 8/9/10, flagging (not silently accepting) a feed
+  that, say, never populates `schedule_relationship_trip` — exactly the case
+  `pipeline.reports.service_delivered`/`pipeline.reports.dwell_run` would
+  otherwise misreport for, since both key "is this field populated" off
+  `ingest_strategy == 'static_join'` alone (item 92's design), not a live
+  per-agency check. New `scripts/bus_kyo_association_feeds.py` holds the
+  association's published feed list as data (the 14 operators not yet in
+  `agencies.csv`, fetched by a human session with network access per this
+  item's own text) and a generator (`pending_feeds`) that computes new CSV
+  rows for whichever aren't already configured, restricted to the 10
+  operators confirmed to share 8/9/10's exact `mcapps.jp` URL shape
+  (`ingest_strategy=static_join`, `static_strategy=direct_url`); the other 4
+  (`busit.jp`'s Etajima Bus, `bus-vision.jp`'s Chugoku Bus/Tomo Tetsudo
+  Bus/Ikasa Bus Company) are recorded but marked unsupported pending a new
+  ingest/static strategy for their platforms, per this repo's rule against
+  guessing an unconfirmed fetch shape.
+  `tests/unit/test_bus_kyo_association_feeds.py` and
+  `tests/unit/test_probe_rt_field_coverage.py` cover both scripts' pure logic
+  (dedup-by-feed_url, idempotent `--write`, unsupported-platform exclusion,
+  and the coverage-threshold assessment) without a DB or network dependency.
+
+  What's left, and why it isn't done here: this session's sandbox allows
+  editing/creating files under subdirectories but denies both `Edit` and
+  `Write` (and any Bash-based file mutation) against repository-root files,
+  including `agencies.csv` and `gtfs_pipeline.py` themselves — a hard
+  tooling boundary distinct from (and encountered in addition to) this
+  item's already-documented network-access-unavailable constraint. So
+  `agencies.csv` itself still lists only agencies 8/9/10; running
+  `scripts/bus_kyo_association_feeds.py --write` to actually append the 10
+  new rows, then `scripts/probe_rt_field_coverage.py --url <realtime_url>`
+  against each one's live feed (both need permissions this session doesn't
+  have), then `make analyze-all`, is the concrete remaining path to this
+  item's Verify line. Backend verification of the diff itself (`make test`,
+  `ruff`, `mypy`) also could not be run in this sandbox, per the same
+  `transit-app-gotchas`-documented dispatched-worker execution gap other
+  items have hit; the new code was instead checked by tracing it against the
+  already-passing `test_static_join_per_op` fixtures and by hand-checking
+  the new tests' own assertions. (PR #pending)

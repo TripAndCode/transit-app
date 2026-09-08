@@ -360,3 +360,41 @@ def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
     aid = _make_agency(pg_conn, agency_label, feed_url)
     load_static(str(FIX / zip_name), aid, pg_conn)
     _run_and_assert(pg_conn, aid, FIX / pb_name)
+
+
+# ---------------------------------------------------------------------------
+# field_coverage() -- item 87's field-verification method, made reusable
+# (see pipeline/strategies/static_join.py's docstring and
+# scripts/probe_rt_field_coverage.py, which runs this against a live feed).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pb_name", ["hiroden_tu.bin", "hirobus_tu.bin", "hirokoh_tu.bin"])
+def test_field_coverage_matches_known_fixture_stats(pb_name):
+    """field_coverage() needs no DB connection or static schedule, and must
+    reproduce the same per-field coverage `_run_and_assert` already confirms
+    for these captured fixtures via the full parse_feed + JOIN path -- proving
+    the standalone probe agrees with the production decode path rather than
+    silently drifting from it.
+    """
+    raw = (FIX / pb_name).read_bytes()
+    cov = static_join.field_coverage(raw)
+
+    assert cov["stop_time_updates"] > 0
+    assert cov["feed_timestamp"] is not None
+    assert cov["feed_timestamp"] > 1_600_000_000
+
+    assert cov["stop_id_coverage"] >= 0.99
+    assert cov["schedule_relationship_trip_coverage"] >= 0.99
+    assert cov["schedule_relationship_stop_coverage"] >= 0.99
+    # Sparse-by-design (only sent when a StopTimeUpdate carries an `arrival`
+    # submessage), not a bug -- same bound _run_and_assert checks.
+    assert 0.0 < cov["arr_delay_coverage"] < 0.5
+
+
+def test_field_coverage_empty_feed_reports_zero_without_coverage_keys():
+    """An empty/undecodable feed says nothing about a field's population
+    habits -- coverage keys must be omitted, not misreported as 0.0 (which
+    would look identical to "confirmed always absent")."""
+    cov = static_join.field_coverage(b"")
+    assert cov == {"stop_time_updates": 0, "feed_timestamp": None}

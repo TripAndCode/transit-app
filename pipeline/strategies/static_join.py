@@ -65,6 +65,47 @@ def _decode_rows(pb_bytes: bytes):
             yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
 
 
+def field_coverage(pb_bytes: bytes) -> dict:
+    """Item 87's field-verification method, generalized for reuse.
+
+    Decodes a raw GTFS-RT FeedMessage exactly as ``parse_feed`` does, but
+    with no static-schedule JOIN (no DB connection needed) -- the JOIN only
+    matters for ``service_type``/``scheduled_time``, not for whether the RT
+    feed itself sends stop_id/arr_delay/schedule_relationship_*/feed_timestamp.
+    That makes this usable to check a feed BEFORE an agency row for it even
+    exists, which is the point: ``pipeline.reports.service_delivered`` and
+    ``pipeline.reports.dwell_run`` both key "is this optional field
+    populated" off ``ingest_strategy == 'static_join'`` alone, an assumption
+    empirically confirmed for agencies 8/9/10 (see
+    ``tests/pipeline/test_static_join.py::test_static_join_per_op``'s real-
+    fixture coverage assertions) but NOT automatically true for every feed
+    that merely happens to need the same opaque-trip_id JOIN mechanism.
+    Run this (see ``scripts/probe_rt_field_coverage.py``) against a new
+    agency's live feed before assuming its coverage matches.
+
+    Returns ``{"stop_time_updates": int, "feed_timestamp": int | None}``
+    plus, only when ``stop_time_updates > 0`` (an empty poll says nothing
+    about a feed's field-population habits, good or bad),
+    ``{"stop_id_coverage", "arr_delay_coverage",
+    "schedule_relationship_trip_coverage",
+    "schedule_relationship_stop_coverage"}`` as fractions in ``[0.0, 1.0]``
+    of stop_time_updates carrying that field non-NULL.
+    """
+    raw_rows = list(_decode_rows(pb_bytes))
+    result: dict = {
+        "stop_time_updates": len(raw_rows),
+        "feed_timestamp": decode_feed_timestamp(pb_bytes),
+    }
+    if not raw_rows:
+        return result
+    n = len(raw_rows)
+    result["stop_id_coverage"] = sum(1 for r in raw_rows if r[4] is not None) / n
+    result["arr_delay_coverage"] = sum(1 for r in raw_rows if r[5] is not None) / n
+    result["schedule_relationship_trip_coverage"] = sum(1 for r in raw_rows if r[6] is not None) / n
+    result["schedule_relationship_stop_coverage"] = sum(1 for r in raw_rows if r[7] is not None) / n
+    return result
+
+
 def parse_feed(
     pb_bytes: bytes,
     captured_at: str,
