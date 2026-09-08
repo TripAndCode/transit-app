@@ -1179,9 +1179,7 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     assert abs(median_sec - 480) <= 3
 
 
-def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(
-    pg_conn, agency_id, ch_client
-):
+def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
     """A looping/branching route can visit the same physical stop_id twice
     within one trip, at two different stop_sequence values. The per-event
     dedup must key on (trip_id, stop_sequence), not trip_id alone, so both
@@ -1193,17 +1191,32 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
         # T1 revisits stop s1 twice within its own trip (stop_sequence 1 and 5),
         # ten minutes apart -- two distinct real events sharing the same trip_id.
         _ch_headway_row(
-            "T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0,
-            file_name="a.pb", stop_sequence=1,
+            "T1",
+            day,
+            stop_id="s1",
+            scheduled_time="08:00:00",
+            dep_delay=0,
+            file_name="a.pb",
+            stop_sequence=1,
         ),
         _ch_headway_row(
-            "T1", day, stop_id="s1", scheduled_time="08:10:00", dep_delay=0,
-            file_name="b.pb", stop_sequence=5,
+            "T1",
+            day,
+            stop_id="s1",
+            scheduled_time="08:10:00",
+            dep_delay=0,
+            file_name="b.pb",
+            stop_sequence=5,
         ),
         # T2 makes a single, ordinary visit to the same stop.
         _ch_headway_row(
-            "T2", day, stop_id="s1", scheduled_time="08:20:00", dep_delay=0,
-            file_name="c.pb", stop_sequence=1,
+            "T2",
+            day,
+            stop_id="s1",
+            scheduled_time="08:20:00",
+            dep_delay=0,
+            file_name="c.pb",
+            stop_sequence=1,
         ),
     ]
     insert_updates(ch_client, agency_id, rows)

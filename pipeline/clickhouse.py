@@ -216,8 +216,7 @@ def latest_feed_timestamp(client, agency_id: int) -> datetime | None:
     (monotonically increasing) feed behavior.
     """
     result = client.query(
-        "SELECT feed_timestamp FROM updates WHERE agency_id = {agency_id:UInt16} "
-        "ORDER BY captured_at DESC LIMIT 1",
+        "SELECT feed_timestamp FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
     if not result.result_rows:

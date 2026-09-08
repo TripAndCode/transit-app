@@ -35,7 +35,15 @@ _STATIC_FILE_MAP = [
 
 _DB_COLS = {
     "static_stop_times": ["agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
-    "static_trips": ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id", "service_id", "static_version_id"],
+    "static_trips": [
+        "agency_id",
+        "trip_id",
+        "route_id",
+        "trip_headsign",
+        "shape_id",
+        "service_id",
+        "static_version_id",
+    ],
     "static_routes": ["agency_id", "route_id", "route_short_name", "route_long_name"],
     "static_calendar_dates": ["agency_id", "service_id", "date", "exception_type"],
 }

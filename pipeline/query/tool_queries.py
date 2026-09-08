@@ -499,9 +499,7 @@ async def schedule_realism_padding(
         p50_sec = linear_percentile(actual, 0.5)
         p85_sec = linear_percentile(actual, 0.85)
         scheduled_avg_sec = sum(scheduled) / len(scheduled) if scheduled else None
-        padding_min = (
-            float(_round2((scheduled_avg_sec - p50_sec) / 60.0)) if scheduled_avg_sec is not None else None
-        )
+        padding_min = float(_round2((scheduled_avg_sec - p50_sec) / 60.0)) if scheduled_avg_sec is not None else None
         dt = dwell_total.get(key, 0)
         de = dwell_excess.get(key, 0)
         time_adjustment_rate = float(_round2(de / dt)) if dt > 0 else None

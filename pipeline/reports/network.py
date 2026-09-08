@@ -99,9 +99,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # precomputed Postgres aggregate (agg_service_delivered_daily, built by
     # pipeline.analyze.analyze()) summed over the range -- no ClickHouse scan
     # on this request path; see compute_service_delivered_by_agency.
-    delivered = await compute_service_delivered_by_agency(
-        conn, [a["agency_id"] for a in agencies], from_date, to_date
-    )
+    delivered = await compute_service_delivered_by_agency(conn, [a["agency_id"] for a in agencies], from_date, to_date)
 
     # weighted_on_time_pct keyed by agency_id; an agency absent from this dict
     # (per compute_ridership_weighted_on_time_by_agency) has no

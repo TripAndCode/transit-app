@@ -203,9 +203,7 @@ async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
     from api.range import RangeCtx
 
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools(
-        "遅延はどう？", ctx, conn=None, agency_id=1, model=None, locale="ja"
-    )
+    await chat.chat_with_tools("遅延はどう？", ctx, conn=None, agency_id=1, model=None, locale="ja")
 
     system = captured["messages"][0]["content"]
     assert "currently viewing" not in system
