@@ -48,6 +48,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.stats import annotate_on_time_pct_confidence
 
@@ -551,12 +552,22 @@ async def get_report(
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx, definition)
+        # Schedule-revision boundary dates (item 98) — dates within this
+        # range where the static feed version running that day changed —
+        # so the Trend chart can mark a timetable revision instead of
+        # letting a metric shift there be misread as a service-quality
+        # change. Empty (not missing) when this agency has no
+        # agg_schedule_revision_daily coverage at all (its ingest strategy
+        # never joins static data, or no reload has happened since item 88).
+        # Skipped entirely for the CSV export above, which has no chart to
+        # annotate.
+        revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
             text=text,
-            rows=[{"days": days, "hourly": hourly, "dow_band": dow_band}],
+            rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
             ctx=_ctx_payload(ctx),
             definition=definition,
         )

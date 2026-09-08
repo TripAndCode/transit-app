@@ -1,5 +1,7 @@
 from datetime import datetime, time, timezone
 
+import pytest
+
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from tests.conftest import mirror_updates_to_ch
@@ -1254,3 +1256,174 @@ def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_ne
     assert dwell_sum_sec == 0
     assert run_samples == 0
     assert run_sum_sec == 0
+
+
+def _seed_static_version(pg_conn, agency_id, version, trip_shape_pairs):
+    """Load one static-feed "version" fixture: `static_trips` rows (all
+    stamped `static_version_id=version`, mirroring `static_loader.
+    load_static()`'s one-value-per-load convention) from
+    `trip_shape_pairs` -- a list of `(trip_id, shape_id_or_None)`.
+
+    Also requires `static_stops` to have a row (has_static's gate) -- callers
+    that already seeded one elsewhere don't need to call this twice.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Test Stop') "
+            "ON CONFLICT DO NOTHING",
+            (agency_id,),
+        )
+        for trip_id, shape_id in trip_shape_pairs:
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id, static_version_id) "
+                "VALUES (%s, %s, 'R1', %s, %s)",
+                (agency_id, trip_id, shape_id, version),
+            )
+    pg_conn.commit()
+
+
+def _seed_static_shape(pg_conn, agency_id, shape_id, points):
+    """points: list of (lon, lat) in sequence order."""
+    placeholders = ",".join("ST_MakePoint(%s, %s)" for _ in points)
+    flat = [v for lon, lat in points for v in (lon, lat)]
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO static_shapes (agency_id, shape_id, geom) "
+            f"VALUES (%s, %s, ST_SetSRID(ST_MakeLine(ARRAY[{placeholders}]), 4326))",
+            [agency_id, shape_id, *flat],
+        )
+    pg_conn.commit()
+
+
+def test_analyze_builds_agg_static_version_summary_with_trip_count_and_vehicle_km(pg_conn, agency_id, ch_client):
+    """trip_count counts every static_trips row regardless of shape
+    presence; vehicle_km sums only the trips whose shape_id resolves in
+    static_shapes (T3 has none -- excluded from the sum, not aborting it)."""
+    _seed_static_shape(pg_conn, agency_id, "SH1", [(139.0, 35.0), (139.0, 35.01)])
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", "SH1"), ("T2", "SH1"), ("T3", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_count, vehicle_km FROM agg_static_version_summary "
+            "WHERE agency_id = %s AND static_version_id = 'v1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+        cur.execute(
+            "SELECT ST_Length(ST_SetSRID(ST_MakeLine(ST_MakePoint(139.0, 35.0), "
+            "ST_MakePoint(139.0, 35.01)), 4326)::geography) / 1000.0"
+        )
+        (one_shape_km,) = cur.fetchone()
+    assert row is not None
+    trip_count, vehicle_km = row
+    assert trip_count == 3
+    assert vehicle_km == pytest.approx(one_shape_km * 2, rel=1e-9)
+
+
+def test_analyze_static_version_summary_vehicle_km_null_without_any_shapes(pg_conn, agency_id, ch_client):
+    """No shapes.txt loaded at all -> vehicle_km reads NULL (not 0), so a
+    reader can distinguish "not computable" from "zero planned distance"."""
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_count, vehicle_km FROM agg_static_version_summary WHERE agency_id = %s",
+            (agency_id,),
+        )
+        trip_count, vehicle_km = cur.fetchone()
+    assert trip_count == 1
+    assert vehicle_km is None
+
+
+def test_analyze_static_version_summary_preserves_history_across_reload(pg_conn, agency_id, ch_client):
+    """A static reload (static_loader.load_static() DELETEs + replaces
+    static_trips for the agency) must not erase the PRIOR version's row
+    here -- this table is UPSERT-only, exempt from the wipe-and-rewrite loop
+    every other agg_* table follows, specifically so a schedule-revision
+    boundary can be explained by a real before/after change in planned
+    trips. Two different static GTFS versions with a known change in total
+    scheduled trips (2 -> 3) must produce two different, both-still-present
+    planned-trip-count rows."""
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", None), ("T2", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    # Simulate static_loader.load_static() reloading a new version: wipe and
+    # replace static_trips for this agency, same as its own DELETE-then-INSERT.
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM static_trips WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    _seed_static_version(pg_conn, agency_id, "v2", [("T3", None), ("T4", None), ("T5", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT static_version_id, trip_count FROM agg_static_version_summary "
+            "WHERE agency_id = %s ORDER BY static_version_id",
+            (agency_id,),
+        )
+        rows = {v: n for v, n in cur.fetchall()}
+    assert rows == {"v1": 2, "v2": 3}
+
+
+def _ch_schedule_revision_row(trip_id, captured_at, static_version_id, *, file_name):
+    """One ClickHouse `updates` row stamped with a given static_version_id
+    (agency_id excluded, shaped for `pipeline.clickhouse.insert_updates`) --
+    everything else is a plausible-but-unused filler."""
+    return (
+        file_name,
+        captured_at,
+        trip_id,
+        "平日",
+        "11:00:00",
+        "R1",
+        1,
+        60,
+        None,  # stop_id
+        None,  # arr_delay
+        None,  # schedule_relationship_trip
+        None,  # schedule_relationship_stop
+        None,  # feed_timestamp
+        None,  # scheduled_sec
+        static_version_id,
+    )
+
+
+def test_analyze_builds_agg_schedule_revision_daily_dominant_version_per_day(pg_conn, agency_id, ch_client):
+    """Per-day dominant static_version_id is the version stamped on the MOST
+    rows that day (mode), not the latest single observation -- day2 mixes 1
+    'v1' row with 2 'v2' rows (simulating a mid-day reload), so 'v2' wins."""
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)  # 2026-05-01 11:00 JST
+    day2 = datetime(2026, 5, 2, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_schedule_revision_row("T1", day1, "v1", file_name="d1t1.pb"),
+        _ch_schedule_revision_row("T2", day2, "v1", file_name="d2t1.pb"),
+        _ch_schedule_revision_row("T3", day2, "v2", file_name="d2t2.pb"),
+        _ch_schedule_revision_row("T4", day2, "v2", file_name="d2t3.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, static_version_id FROM agg_schedule_revision_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): v for d, v in cur.fetchall()}
+    assert by_date == {"2026-05-01": "v1", "2026-05-02": "v2"}
+
+
+def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always_null(pg_conn, agency_id, ch_client):
+    """An ingest strategy that never sets static_version_id (e.g.
+    aomori_regex) -- or any day predating item 88's rollout -- must get NO
+    row here, never a NULL-version row a boundary could be misdrawn against."""
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [_ch_schedule_revision_row("T1", day1, None, file_name="d1t1.pb")]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM agg_schedule_revision_daily WHERE agency_id = %s", (agency_id,))
+        count = cur.fetchone()[0]
+    assert count == 0

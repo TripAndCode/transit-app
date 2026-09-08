@@ -146,7 +146,11 @@
     "ridership_weighted_toggle": "Weight by ridership",
     "col_on_time_weighted": "On-time % (ridership-weighted)",
     "on_time_weighted_suffix": " (weighted)",
-    "help_ridership_weighted": "When a manually-configured ridership weight exists for this agency, pools each route's on-time contribution by that weight instead of counting every route equally."
+    "help_ridership_weighted": "When a manually-configured ridership weight exists for this agency, pools each route's on-time contribution by that weight instead of counting every route equally.",
+    "col_vehicle_km_delivered": "Vehicle-km delivered %",
+    "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
+    "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
+    "schedule_version_title": "Static schedule version: {{version}}"
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
@@ -991,7 +995,9 @@
       "smoothed_tooltip": "7-day avg {{min}} min",
       "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
-      "offender": "Route {{code}} ({{min}} min)"
+      "offender": "Route {{code}} ({{min}} min)",
+      "revision_boundary_label": "Schedule change",
+      "revision_boundary_aria": "Static schedule revision took effect on {{date}}"
     },
     "dwell_run": {
       "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",

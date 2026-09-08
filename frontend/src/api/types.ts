@@ -217,6 +217,13 @@ export type TrendDay = {
   top_offenders: { route_code: string; service_type: string; avg_min: number; samples: number }[];
 };
 
+/** ISO dates (within the trend's requested range) where the static feed
+ *  version running that day changed from the previous calendar day's --
+ *  see pipeline.reports.schedule_revision. Rendered as a boundary marker on
+ *  the Trend chart so a metric shift there isn't misread as a
+ *  service-quality change. */
+export type RevisionBoundaries = string[];
+
 export type DwellRunRoute = {
   route_code: string;
   service_type: string | null;
@@ -513,6 +520,21 @@ export type NetworkAgencyRow = {
    * in range is also null there, but is still configured). */
   has_ridership_weights: boolean;
   weighted_on_time_pct: number | null;
+  /** The currently-loaded static-feed version this agency's headline supply
+   *  figures below describe -- null when no static_version_id has been
+   *  recorded for this agency yet (see pipeline.reports.supply). */
+  static_version_id: string | null;
+  /** Trips defined by the CURRENT static schedule (one full run of it), not
+   *  a date-range total -- always present once any static schedule has ever
+   *  been analyzed for this agency, independent of planned_vehicle_km. */
+  planned_trip_count: number | null;
+  /** Vehicle-km one full run of the current static schedule represents;
+   *  null when this agency has no shapes.txt loaded (never 0). */
+  planned_vehicle_km: number | null;
+  /** "Vehicle-km delivered" rate -- null (fall back to planned_trip_count
+   *  alone) whenever planned_vehicle_km or service_delivered_pct isn't
+   *  available. */
+  vehicle_km_delivered_pct: number | null;
 };
 
 export type NetworkSummary = {
