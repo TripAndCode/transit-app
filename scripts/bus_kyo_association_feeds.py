@@ -23,12 +23,12 @@ sharing confirmed optional-field coverage (see
 ``pipeline/strategies/static_join.py: field_coverage`` and
 ``scripts/probe_rt_field_coverage.py``) -- run the probe against each new
 feed's live realtime_url before treating its ``service_delivered``/
-``dwell_run`` numbers as trustworthy, the same way item 87 did for 8/9/10
-before item 89 wired those columns up.
+``dwell_run`` numbers as trustworthy, the same way that check was applied to
+8/9/10 before their optional-field-dependent report columns were trusted.
 
 Usage:
     poetry run python scripts/bus_kyo_association_feeds.py --check
-    poetry run python scripts/bus_kyo_association_feeds.py --write agencies.csv
+    poetry run python scripts/bus_kyo_association_feeds.py --write --agencies-csv agencies.csv
 """
 
 from __future__ import annotations
@@ -37,10 +37,8 @@ import argparse
 import csv
 import dataclasses
 import pathlib
-import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -66,9 +64,8 @@ class BusKyoFeed:
 
 
 # Already configured in agencies.csv -- listed here too so `pending_feeds`
-# can skip them by agency_id as well as by feed_url (a defensive second
-# check; feed_url is the real dedup key gtfs_pipeline.py's seed_agencies
-# uses, matching its ON CONFLICT(feed_url) semantics).
+# can skip them by feed_url, the same dedup key gtfs_pipeline.py's
+# seed_agencies uses via its ON CONFLICT(feed_url) semantics.
 _MCAPPS_BASE = "https://ajt-mobusta-gtfs.mcapps.jp"
 
 ALL_FEEDS: tuple[BusKyoFeed, ...] = (

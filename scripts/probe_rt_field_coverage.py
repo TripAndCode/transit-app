@@ -1,12 +1,12 @@
-"""Run item 87's field-verification method against a GTFS-RT feed.
+"""Run the per-field coverage check against a GTFS-RT feed.
 
 Fetches (or reads a locally-captured) trip_updates protobuf and reports, per
 optional field, what fraction of stop_time_updates carry it -- the same
 check ``tests/pipeline/test_static_join.py::test_static_join_per_op``
-already applies to agencies 8/9/10's captured fixtures (item 87's original
-findings, which item 89's ``pipeline/reports/service_delivered.py`` and
+already applies to agencies 8/9/10's captured fixtures, whose confirmed
+coverage ``pipeline/reports/service_delivered.py`` and
 ``pipeline/reports/dwell_run.py`` both trust via a blanket
-``ingest_strategy == 'static_join'`` check -- not a live per-agency check).
+``ingest_strategy == 'static_join'`` check -- not a live per-agency check.
 
 Run this against a NEW agency's live feed before assigning it
 ``ingest_strategy=static_join`` in ``agencies.csv`` and trusting that its

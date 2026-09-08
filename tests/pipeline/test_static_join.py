@@ -363,9 +363,10 @@ def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
 
 
 # ---------------------------------------------------------------------------
-# field_coverage() -- item 87's field-verification method, made reusable
-# (see pipeline/strategies/static_join.py's docstring and
-# scripts/probe_rt_field_coverage.py, which runs this against a live feed).
+# field_coverage() -- the per-field coverage check, usable without a DB
+# connection or static schedule (see pipeline/strategies/static_join.py's
+# docstring and scripts/probe_rt_field_coverage.py, which runs this
+# against a live feed).
 # ---------------------------------------------------------------------------
 
 

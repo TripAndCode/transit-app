@@ -66,7 +66,8 @@ def _decode_rows(pb_bytes: bytes):
 
 
 def field_coverage(pb_bytes: bytes) -> dict:
-    """Item 87's field-verification method, generalized for reuse.
+    """Report what fraction of stop_time_updates in a feed populate each
+    optional field, independent of any static-schedule JOIN or DB state.
 
     Decodes a raw GTFS-RT FeedMessage exactly as ``parse_feed`` does, but
     with no static-schedule JOIN (no DB connection needed) -- the JOIN only
