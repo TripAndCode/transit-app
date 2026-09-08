@@ -27,9 +27,7 @@ async def validate_provider_key(provider: str, api_key: str) -> bool:
     if provider not in ALLOWED_PROVIDERS:
         return False
     defaults = _PROVIDER_DEFAULTS[provider]  # plain dict: {"key_env", "base_url", "model"}
-    client = openai.AsyncOpenAI(
-        api_key=api_key, base_url=defaults["base_url"], max_retries=0, timeout=10.0
-    )
+    client = openai.AsyncOpenAI(api_key=api_key, base_url=defaults["base_url"], max_retries=0, timeout=10.0)
     try:
         await client.chat.completions.create(
             model=defaults["model"],

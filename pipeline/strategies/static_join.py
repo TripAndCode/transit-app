@@ -197,7 +197,10 @@ def parse_feed(
     if miss:
         _log.info(f"[static_join] agency={agency_id} {miss}/{len(rows)} rows missed JOIN (logged)")
     if extended:
-        _log.info(f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time (kept, scheduled_sec set)")
+        _log.info(
+            f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time "
+            "(kept, scheduled_sec set)"
+        )
     if bad_sched:
         _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
     return rows

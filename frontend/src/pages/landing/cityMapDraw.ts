@@ -1,7 +1,7 @@
 import type { CityScene, VehiclePose } from "./cityMapScene";
 import { drawVehicleIcon, MAKI_VIEWBOX_SIZE, type VehicleMode } from "./vehicleIcons";
 
-export type RouteColors = { onTime: string; delayed: string };
+type RouteColors = { onTime: string; delayed: string };
 export type VehicleDraw = {
   pose: VehiclePose;
   colorVar: "--accent" | "--color-warning";

@@ -683,8 +683,7 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
     pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT numeric_guard_triggered FROM ask_query_log "
-            "WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
+            "SELECT numeric_guard_triggered FROM ask_query_log WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
             agency_id,
         )
     await pool.close()

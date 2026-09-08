@@ -496,9 +496,7 @@ async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_ra
 
 
 @pytest.mark.asyncio
-async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(
-    aagency_id, aconn, ch_client, ch_async_client
-):
+async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(aagency_id, aconn, ch_client, ch_async_client):
     """A vehicle that arrives at an intermediate stop exactly on schedule but
     then dwells far longer than its scheduled dwell (holding to avoid an
     early departure, not boarding/alighting) must be flagged by
