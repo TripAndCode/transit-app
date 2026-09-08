@@ -454,8 +454,8 @@ async def get_report(
     early_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time only: how many seconds early a departure may still be 'on time'. "
-        "Unset means unbounded (any early departure counts), matching legacy_60s.",
+        description="on_time/council_summary only: how many seconds early a departure may still be "
+        "'on time'. Unset means unbounded (any early departure counts), matching legacy_60s.",
     ),
     late_tolerance_sec: int | None = Query(
         default=None,

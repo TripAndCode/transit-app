@@ -420,10 +420,10 @@ def format_delay_certificate_footnotes(threshold_sec: int, locale: str = "ja") -
 
 
 def format_delay_certificate_text(rows: list, threshold_sec: int, locale: str = "ja") -> str:
-    """Locale-aware summary line for the delay-certificate export (item
-    102) -- a short count + threshold statement, not a per-row transcript
-    (this export can run to hundreds of rows; the full detail belongs in the
-    CSV/JSON rows, not this text body).
+    """Locale-aware summary line for the delay-certificate export -- a short
+    count + threshold statement, not a per-row transcript (this export can
+    run to hundreds of rows; the full detail belongs in the CSV/JSON rows,
+    not this text body).
     """
     if not rows:
         return _t("delay_certificate_empty", locale, threshold=threshold_sec)

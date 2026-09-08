@@ -34,7 +34,9 @@ async def _seed_trip_with_multiple_stops(pg_conn, agency_id, route_code, service
 
 
 @pytest.mark.asyncio
-async def test_delay_certificate_uses_origin_stop_only_for_each_trip(client, agency_id, pg_conn, ch_client, ch_async_client):
+async def test_delay_certificate_uses_origin_stop_only_for_each_trip(
+    client, agency_id, pg_conn, ch_client, ch_async_client
+):
     """A later stop on the same trip must not create a duplicate export row.
 
     If the origin-stop delay is under threshold and a later stop is above it,

@@ -35,7 +35,7 @@ import logging
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before
+from api.clickhouse import max_captured_at_before_by_agency
 from api.range import RangeCtx
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
@@ -182,19 +182,14 @@ async def compute_council_summary(
     today_jst_midnight_utc = (
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
-    try:
-        live_max_ts = await max_captured_at_before(ch, agency_id, today_jst_midnight_utc)
-        live_max_day = None if live_max_ts is None else live_max_ts.astimezone(_JST).date()
-    except Exception:
-        # This probe backs ONLY is_stale below -- every other field here comes
-        # from Postgres. A ClickHouse hiccup must degrade is_stale (via a None
-        # live_max -- is_stale(agg_day, None) is "not stale": no completed day
-        # / can't determine -> nothing owed), not fail the whole report.
-        # Same degrade shape as pipeline.reports.network.compute_network_summary.
-        _log.warning(
-            "ClickHouse freshness probe failed for agency %s — degrading is_stale to False", agency_id, exc_info=True
-        )
-        live_max_day = None
+    # This probe backs ONLY is_stale below -- every other field here comes
+    # from Postgres. `max_captured_at_before_by_agency` already degrades a
+    # failing probe to None rather than raising (is_stale(agg_day, None) is
+    # "not stale": no completed day / can't determine -> nothing owed), the
+    # same shared degrade shape pipeline.reports.network.compute_network_summary
+    # relies on for its own per-agency probes.
+    live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
+    live_max_day = None if live_max_ts is None else live_max_ts.astimezone(_JST).date()
     agency_is_stale = is_stale(agg_max_day, live_max_day)
 
     feed_row = await conn.fetchrow(

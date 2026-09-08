@@ -1796,7 +1796,7 @@ async def test_delay_certificate_requires_a_clickhouse_client():
 
 @pytest.mark.asyncio
 async def test_council_summary_degrades_is_stale_when_clickhouse_freshness_probe_fails(reports_client, ch_client):
-    """Fix 8a's same degrade shape (pipeline.reports.network.compute_network_summary):
+    """Same degrade shape as pipeline.reports.network.compute_network_summary:
     a ClickHouse hiccup on the freshness-only probe must not fail the whole
     report -- is_stale degrades to False (agg_day, None) rather than 500ing
     the on-time/service-delivered numbers, which come entirely from Postgres."""
