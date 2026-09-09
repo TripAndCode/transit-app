@@ -107,9 +107,16 @@ def _group(rows_by_wet: Mapping[bool, Mapping[str, Any]], is_wet: bool) -> dict[
     return {
         "days": days,
         "samples": samples,
-        # Pooled over every measurement on those days (exact: a sum of raw
-        # seconds over a sum of samples), never an average of per-day averages,
-        # which would weight a quiet day the same as a busy one.
+        # Pooled over every measurement on those days -- a sum of raw seconds
+        # over a sum of samples, never an average of per-day averages, which
+        # would weight a quiet day the same as a busy one. The sum is exact
+        # wherever `agg_route_daily.sum_delay_sec` is populated; for a route-day
+        # predating that column it is reconstructed as `avg_delay_sec *
+        # samples`, so such a day is approximate to within the rounding of an
+        # integer average. Other reports FILTER those rows out of the pooled
+        # average instead; this one keeps them because a wet/dry comparison
+        # needs both sides to span the same service days, and dropping the
+        # unbackfilled ones can empty one side entirely on an older range.
         "avg_delay_sec": (None if not samples or sum_delay_sec is None else round(float(sum_delay_sec) / samples, 1)),
         # Each matched day contributes its rainfall once, regardless of how
         # many routes ran that day (the SQL de-duplicates to day grain first).
