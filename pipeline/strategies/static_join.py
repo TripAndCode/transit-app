@@ -13,10 +13,11 @@ schedule_relationship_stop) have actually been observed populated on a real,
 non-empty live feed -- not merely agencies that share this strategy's
 opaque-trip_id JOIN mechanism. ``ingest_strategy == 'static_join'`` alone
 means a feed's wire shape matches; it does NOT mean the feed populates these
-optional fields the way 8/9/10 do (see ``field_coverage``'s docstring).
-Reports that trust these fields (``pipeline.reports.service_delivered``,
-``pipeline.reports.dwell_run``) must intersect against this explicit set
-rather than trusting ``ingest_strategy`` alone.
+optional fields the way 8/9/10 do (see ``field_coverage``'s docstring). Every
+reader that trusts these fields must intersect against this explicit set
+rather than trusting ``ingest_strategy`` alone -- use ``rt_field_coverage_
+confirmed`` below rather than re-deriving this check inline, so a newly added
+reader can't silently skip the confirmed-set half of the gate.
 
 Add an agency_id to that set only after running
 ``scripts/probe_rt_field_coverage.py --url <realtime_url>`` against that
@@ -37,12 +38,32 @@ _log = logging.getLogger(__name__)
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
 # trust; see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES below for the additional
-# per-agency confirmation gate. Shared by every reader that needs this check
-# (pipeline.reports.service_delivered, pipeline.reports.dwell_run) so they
-# can't drift apart if a second ingest strategy is ever confirmed.
+# per-agency confirmation gate. Shared (via this module, and via
+# rt_field_coverage_confirmed below) by every reader that needs this check
+# so they can't drift apart if a second ingest strategy is ever confirmed.
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
 
 RT_FIELD_COVERAGE_CONFIRMED_AGENCIES = frozenset({8, 9, 10})
+
+
+async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
+    """True only when *agency_id* both uses an ingest strategy that CAN
+    populate the RT-optional fields (``RT_INGEST_STRATEGIES``) AND is in
+    the explicit confirmed-set gate (``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``)
+    -- an ``ingest_strategy`` match alone means a feed's wire shape merely
+    matches a confirmed agency's, not that this agency's own live feed has
+    been probed and found to actually populate these fields.
+
+    The single canonical home for this per-agency check -- every reader that
+    needs it (e.g. dwell time/running time, schedule-realism padding, headway
+    quality) imports and calls this directly rather than re-implementing it,
+    so a newly added reader can't accidentally trust ``ingest_strategy``
+    alone.
+    """
+    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
+        return False
+    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
+    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
 
 
 def _decode_rows(pb_bytes: bytes):
@@ -101,11 +122,12 @@ def field_coverage(pb_bytes: bytes) -> dict:
     matters for ``service_type``/``scheduled_time``, not for whether the RT
     feed itself sends stop_id/arr_delay/schedule_relationship_*/feed_timestamp.
     That makes this usable to check a feed BEFORE an agency row for it even
-    exists, which is the point: ``pipeline.reports.service_delivered`` and
-    ``pipeline.reports.dwell_run`` both gate "is this optional field
-    populated" on membership in ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``
-    (this module), not on ``ingest_strategy == 'static_join'`` alone --
-    sharing this strategy's opaque-trip_id JOIN mechanism only means a feed's
+    exists, which is the point: every reader that trusts an RT-optional
+    field gates "is this optional field populated" on membership in
+    ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`` (this module, via
+    ``rt_field_coverage_confirmed``), not on ``ingest_strategy ==
+    'static_join'`` alone -- sharing this strategy's opaque-trip_id JOIN
+    mechanism only means a feed's
     wire shape matches 8/9/10's, empirically confirmed for those three (see
     ``tests/pipeline/test_static_join.py::test_static_join_per_op``'s real-
     fixture coverage assertions), NOT that every feed needing the same JOIN

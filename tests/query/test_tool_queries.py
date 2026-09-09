@@ -5,12 +5,12 @@ from datetime import date, datetime, time, timedelta, timezone
 import pytest
 
 from api.range import RangeCtx
-from pipeline.query import tool_queries as tool_queries_module
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
     route_info,
 )
+from pipeline.strategies import static_join as static_join_module
 
 
 def _trust_schedule_padding(monkeypatch, *agency_ids):
@@ -19,8 +19,11 @@ def _trust_schedule_padding(monkeypatch, *agency_ids):
     gate: production only trusts agency_ids actually in
     `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
     (currently 8/9/10), which a freshly-inserted test agency_id won't
-    coincidentally match."""
-    monkeypatch.setattr(tool_queries_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
+    coincidentally match. `schedule_realism_padding` calls the shared
+    `pipeline.strategies.static_join.rt_field_coverage_confirmed`, so the
+    confirmed set to patch lives on that module, not on `tool_queries`
+    itself."""
+    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
 
 
 @pytest.mark.asyncio
@@ -592,7 +595,7 @@ async def test_schedule_realism_padding_unavailable_for_unconfirmed_static_join_
     holds regardless of which real agency_ids happen to be in it."""
     from pipeline.query.tool_queries import schedule_realism_padding
 
-    monkeypatch.setattr(tool_queries_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset())
+    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset())
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
 
     ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())

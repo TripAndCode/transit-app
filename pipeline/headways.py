@@ -9,10 +9,15 @@ the same stop on the same route. This module has three independent pieces:
   branching route can visit the same physical stop at more than one
   `stop_sequence`, and grouping by `stop_sequence` instead would treat those
   as different stops and miss the true gap between vehicles that actually
-  call at the same platform). Only available for an agency whose ingest
-  strategy is confirmed to populate `stop_id` (today: `static_join`;
-  `aomori_regex` always leaves it NULL -- see
-  `pipeline.strategies.static_join`'s module docstring).
+  call at the same platform). `pipeline.analyze`'s `agg_route_headway_daily`
+  builder materializes this for any ingest strategy that CAN populate
+  `stop_id` (today: `static_join`; `aomori_regex` always leaves it NULL),
+  which is necessary but not sufficient trust; `pipeline.reports.
+  headway_quality` additionally gates on the per-agency confirmed-set check
+  (`pipeline.strategies.static_join.rt_field_coverage_confirmed`) before
+  reading these rows -- see that module's docstring for why sharing the
+  wire shape doesn't by itself confirm a given agency's feed populates
+  `stop_id`.
 - Deriving the SCHEDULED headway median from the static GTFS `stop_times`
   table (`static_stop_times` in Postgres), independent of any RT data, used
   to classify a route as "high-frequency".

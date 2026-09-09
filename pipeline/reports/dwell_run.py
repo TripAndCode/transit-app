@@ -30,20 +30,7 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter
-from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
-
-
-async def _agency_available(agency_id: int, conn) -> bool:
-    """True only when this agency both uses an ingest strategy that can send
-    `arr_delay` AND is in the explicit confirmed-set gate
-    (`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`)
-    -- an `ingest_strategy` match alone means a feed's wire shape merely
-    matches a confirmed agency's, not that this agency's own live feed has
-    been probed and found to actually populate the field."""
-    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
-        return False
-    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
+from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
 @perf.timed("reports.dwell_run")
@@ -69,7 +56,7 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     thin, so every route is returned with its own transparent sample count
     for the caller to weigh, rather than being hidden below a threshold.
     """
-    if not await _agency_available(agency_id, conn):
+    if not await rt_field_coverage_confirmed(agency_id, conn):
         return {"available": False, "time_band_supported": ctx.time_band == "all", "routes": []}
     if ctx.time_band != "all":
         return {"available": True, "time_band_supported": False, "routes": []}

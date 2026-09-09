@@ -1204,14 +1204,19 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # `updates.stop_id` (see pipeline/headways.py's module docstring for
         # why the physical stop is the correct grouping for pooling across
         # trips), so -- like agg_service_delivered_daily above -- only an
-        # agency confirmed to populate stop_id (today: static_join;
+        # ingest strategy that CAN populate stop_id (today: static_join;
         # aomori_regex always leaves it NULL) gets any rows here. Skipped
         # entirely (zero rows) for any other ingest_strategy, same "row
-        # presence keyed off ingest_strategy" convention.
+        # presence is not the availability signal, ingest_strategy is"
+        # convention as agg_service_delivered_daily. Same read-side-only
+        # caveat applies: sharing ingest_strategy doesn't imply confirmed
+        # field coverage, so pipeline.reports.headway_quality's reader
+        # additionally intersects against RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+        # before trusting these rows.
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
-        if row and row[0] == "static_join":
+        if row and row[0] in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
             # that group's actual event times (seconds-of-day, scheduled_time
             # parsed + dep_delay) -- cardinality is bounded by routes × stops

@@ -7,8 +7,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from pipeline.reports import dwell_run as dwell_run_module
 from pipeline.reports import service_delivered as service_delivered_module
+from pipeline.strategies import static_join as static_join_module
 from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
@@ -17,8 +17,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 def _trust_dwell_run(monkeypatch, *agency_ids):
     """See tests/api/test_network.py's `_trust_service_delivered` docstring --
     same reasoning, for the dwell_run report's independent confirmed-set
-    gate."""
-    monkeypatch.setattr(dwell_run_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
+    gate. dwell_run.py calls the shared
+    `pipeline.strategies.static_join.rt_field_coverage_confirmed`, so the
+    confirmed set to patch lives on that module, not on `dwell_run` itself."""
+    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
 
 
 @pytest.fixture

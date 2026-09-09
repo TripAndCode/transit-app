@@ -38,21 +38,7 @@ from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
 from pipeline.stats import linear_percentile
-from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
-
-
-async def _schedule_padding_available(agency_id: int, conn) -> bool:
-    """True only when this agency both uses an ingest strategy that can send
-    `StopTimeUpdate.arrival` AND is in the explicit confirmed-set gate
-    (`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`)
-    -- mirrors `pipeline.reports.dwell_run._agency_available`: an
-    `ingest_strategy` match alone means a feed's wire shape merely matches a
-    confirmed agency's, not that this agency's own live feed has been probed
-    and found to actually populate `arr_delay`/`scheduled_sec`."""
-    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
-        return False
-    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
+from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
 async def route_dow_breakdown(
@@ -347,9 +333,9 @@ async def schedule_realism_padding(
     when this returns ``available: False`` or no rows.
 
     Only agencies confirmed to send `StopTimeUpdate.arrival`
-    (`_schedule_padding_available` — same
-    `RT_INGEST_STRATEGIES` ∩ `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` gate as
-    `pipeline.reports.dwell_run._agency_available`) ever populate
+    (`pipeline.strategies.static_join.rt_field_coverage_confirmed` — the
+    shared `RT_INGEST_STRATEGIES` ∩ `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    gate every such reader uses) ever populate
     `arr_delay`/`scheduled_sec`, which this decomposition needs for both the
     actual-vs-scheduled running time comparison and the hour-of-day bucket
     (an hour parsed from `scheduled_time` would silently drop every
@@ -396,7 +382,7 @@ async def schedule_realism_padding(
     empty: dict = {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
     if ch is None:
         return empty
-    if not await _schedule_padding_available(agency_id, conn):
+    if not await rt_field_coverage_confirmed(agency_id, conn):
         return empty
 
     cte_sql, ch_params = _dedup_cte_ch(ctx, include_arr_delay=True, include_scheduled_sec=True)
