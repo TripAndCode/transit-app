@@ -42,13 +42,17 @@ def test_all_feeds_have_unique_realtime_urls_where_present():
 
 
 def test_supported_requires_ingest_strategy_and_realtime_url():
-    supported = BusKyoFeed(1, "テスト", "mcapps.jp", "http://x/static.zip", "http://x/rt.bin", "static_join", "direct_url")
+    supported = BusKyoFeed(
+        1, "テスト", "mcapps.jp", "http://x/static.zip", "http://x/rt.bin", "static_join", "direct_url"
+    )
     assert supported.supported
 
     no_strategy = BusKyoFeed(None, "テスト2", "bus-vision.jp", "http://y/static.zip", None, None, None)
     assert not no_strategy.supported
 
-    no_url_known = BusKyoFeed(None, "テスト3", "bus-vision.jp", "http://z/static.zip", None, "static_join", "direct_url")
+    no_url_known = BusKyoFeed(
+        None, "テスト3", "bus-vision.jp", "http://z/static.zip", None, "static_join", "direct_url"
+    )
     assert not no_url_known.supported
 
 

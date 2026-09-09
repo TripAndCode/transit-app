@@ -206,8 +206,8 @@ def main() -> None:
         # later _read_existing_feed_urls() call (via csv.DictReader) consume
         # the first data row as field names.
         write_header = not csv_path.exists()
-        with csv_path.open("a", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
+        with csv_path.open("a", encoding="utf-8", newline="") as csv_file:
+            writer = csv.writer(csv_file)
             if write_header:
                 writer.writerow(_CSV_HEADER)
             for feed in pending:

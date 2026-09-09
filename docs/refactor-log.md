@@ -846,3 +846,24 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   instead checked by tracing it against the already-passing
   `test_static_join_per_op` fixtures and by hand-checking the new tests' own
   assertions. (PR #pending)
+- 2026-09-09: Closed the backend verification gap the prior entry left open
+  (coordinator-run, from the main checkout's cwd pointed at this worktree's
+  file paths, per `transit-app-gotchas`'s documented pattern for this
+  sandbox's env-var-prefixed-command gap): `poetry run pytest` on this
+  branch's full changed test surface (`tests/pipeline/test_static_join.py`,
+  `tests/unit/test_bus_kyo_association_feeds.py`,
+  `tests/unit/test_probe_rt_field_coverage.py`, `tests/api/test_network.py`,
+  `tests/api/test_reports.py`) against the real throwaway Postgres/ClickHouse
+  stack — 120 passed, 0 skipped-for-missing-integration-flag. `poetry run
+  ruff check` on the changed files surfaced two real `E501` line-too-long
+  violations in `test_bus_kyo_association_feeds.py`, fixed by wrapping the
+  two offending `BusKyoFeed(...)` constructor calls. `poetry run mypy` on
+  the changed `pipeline`/`scripts` files (mypy's configured scope excludes
+  `tests/`) surfaced one real error in
+  `scripts/bus_kyo_association_feeds.py`: the `--write` path's `with
+  csv_path.open(...) as f:` shadowed the outer `for f in pending`/`for f in
+  unsupported` loop variable's inferred `BusKyoFeed` type, so mypy rejected
+  passing the reassigned `f` (now a file handle) to `csv.writer`; renamed
+  the file-handle binding to `csv_file` to remove the collision. Both fixes
+  re-verified clean (`ruff check` on the touched test file, `mypy` on the
+  touched script, full test rerun). (PR #pending)
