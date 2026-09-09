@@ -239,6 +239,53 @@ export type PerformanceStandardsResponse = {
   disclaimer: string;
 };
 
+/** The one documented representative observation station an agency's weather
+ *  comparison is keyed to. `note` is the operator's own record of WHY this
+ *  station represents this service area -- surface it so the figure states
+ *  what it is actually keyed to rather than implying service-area-wide
+ *  weather. */
+export type WeatherStation = {
+  station_id: string;
+  station_name: string;
+  note: string | null;
+};
+
+/** One side of the rain-vs-dry comparison. `avg_delay_sec` is pooled over
+ *  every delay measurement on that side's days, and is null exactly when the
+ *  side has no days/samples. `avg_precip_mm` counts each day once, however
+ *  many routes ran on it. */
+export type WeatherDelayGroup = {
+  days: number;
+  samples: number;
+  avg_delay_sec: number | null;
+  avg_precip_mm: number | null;
+};
+
+/** Observed rainfall matched to service days -- see
+ *  pipeline/reports/weather.py's compute_rain_delay. NOT a forecast and NOT a
+ *  causal claim: `disclaimer` says both in plain language and must always be
+ *  rendered alongside these figures, and `attribution` (the observation source
+ *  plus the fact that the daily figures are the server's own aggregation of
+ *  it) must travel with them too.
+ *
+ *  `available` is false when the agency has no representative station, or when
+ *  no in-range service day could be matched to an observation -- render
+ *  nothing at all in that case. `delta_sec` (rainy minus non-rainy, seconds)
+ *  is null when either side has no days, e.g. a window with no rainy days,
+ *  which is a real answer rather than missing data. */
+export type WeatherDelayResponse = {
+  available: boolean;
+  station: WeatherStation | null;
+  wet_day_threshold_mm: number;
+  wet: WeatherDelayGroup;
+  dry: WeatherDelayGroup;
+  delta_sec: number | null;
+  low_confidence: boolean;
+  ctx: ResponseCtx;
+  disclaimer: string;
+  attribution: string;
+};
+
 export type Suggestion = {
   report_type: string;
   route_code: string;

@@ -469,6 +469,21 @@ def cmd_prune_query_log(args):
     asyncio.run(run())
 
 
+def cmd_ingest_weather(args):
+    """Fetch observed daily weather for every configured representative station."""
+    from pipeline.weather import ingest_weather
+
+    conn = _get_conn()
+    try:
+        written, considered, failed = ingest_weather(conn, days=int(args.days))
+    finally:
+        conn.close()
+    if failed:
+        logger.error(f"ingest_weather: {len(failed)} station(s) failed: {failed}")
+        sys.exit(1)
+    logger.info(f"ingest_weather: wrote {written} station-day(s) of {considered} examined.")
+
+
 def main():
     """Parse CLI arguments and dispatch to the appropriate command handler."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -527,6 +542,20 @@ def main():
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
     p_prune.add_argument("--days", type=int, default=90)
 
+    p_weather = sub.add_parser(
+        "ingest_weather",
+        help="Fetch observed daily weather for each agency's representative station",
+    )
+    p_weather.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help=(
+            "How many whole days back from yesterday to cover (default: 7). Today is never "
+            "fetched -- a day in progress cannot be aggregated whole"
+        ),
+    )
+
     args = parser.parse_args()
     if args.command == "add_agency":
         cmd_add_agency(args)
@@ -556,6 +585,8 @@ def main():
         cmd_build_rag_index(args)
     elif args.command == "prune_query_log":
         cmd_prune_query_log(args)
+    elif args.command == "ingest_weather":
+        cmd_ingest_weather(args)
     else:
         parser.print_help()
 

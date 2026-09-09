@@ -33,6 +33,7 @@ from pipeline.reports.rankings import (
     compute_trend_series,
     compute_worst_5min,
 )
+from pipeline.reports.weather import compute_rain_delay, observation_disclaimer
 
 __all__ = [
     "DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC",
@@ -48,11 +49,13 @@ __all__ = [
     "compute_on_time",
     "compute_overview_summary",
     "compute_performance_standards",
+    "compute_rain_delay",
     "compute_ranking",
     "compute_trend_series",
     "compute_worst_5min",
     "format_definition_csv_line",
     "format_definition_footnotes",
+    "observation_disclaimer",
     "resolve_definition_meta",
     "simulation_disclaimer",
 ]

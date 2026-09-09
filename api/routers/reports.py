@@ -39,10 +39,12 @@ from pipeline.reports import (
     compute_hourly_heatmap,
     compute_on_time,
     compute_performance_standards,
+    compute_rain_delay,
     compute_ranking,
     compute_trend_series,
     compute_worst_5min,
     format_definition_csv_line,
+    observation_disclaimer,
     resolve_definition_meta,
     simulation_disclaimer,
 )
@@ -54,6 +56,7 @@ from pipeline.reports.forecast import (
 from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.stats import annotate_on_time_pct_confidence
+from pipeline.weather import attribution as weather_attribution
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -244,6 +247,86 @@ async def get_performance_standards(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_ctx_payload(ctx),
         disclaimer=simulation_disclaimer(locale),
+    )
+
+
+class WeatherStation(BaseModel):
+    """The one documented representative observation station an agency's
+    weather comparison is keyed to (`agency_weather_stations`). `note` is the
+    operator's own record of WHY this station represents this service area, so
+    the figure can state what it is actually keyed to instead of implying
+    service-area-wide weather."""
+
+    station_id: str
+    station_name: str
+    note: str | None
+
+
+class WeatherDelayGroup(BaseModel):
+    """One side of the rain-vs-dry comparison.
+
+    `avg_delay_sec` is pooled over every delay measurement on that side's days
+    (exact raw-seconds sum over sample count), and is `None` exactly when the
+    side has no days/samples. `avg_precip_mm` counts each matched day once,
+    however many routes ran on it."""
+
+    days: int
+    samples: int
+    avg_delay_sec: float | None
+    avg_precip_mm: float | None
+
+
+class WeatherDelayResponse(BaseModel):
+    """Payload for `GET /weather_delay` -- observed rainfall matched to service
+    days, NOT a forecast and NOT a causal claim; `disclaimer` says both in
+    plain language and MUST be surfaced verbatim wherever these figures are.
+    `attribution` carries the observation source AND the fact that the daily
+    figures are this application's own aggregation of it, which the source's
+    public-data terms require to travel with any derived figure.
+
+    `available` is False when the agency has no representative station
+    configured, or when no in-range service day could be matched to an
+    observation -- callers render nothing at all in that case. `delta_sec`
+    (rainy minus non-rainy, seconds) is `None` when either side has no days,
+    e.g. a window with no rainy days, which is a real answer rather than
+    missing data; `low_confidence` is set whenever either side is thin enough
+    that the difference should not be read as a stable effect.
+    """
+
+    available: bool
+    station: WeatherStation | None
+    wet_day_threshold_mm: float
+    wet: WeatherDelayGroup
+    dry: WeatherDelayGroup
+    delta_sec: float | None
+    low_confidence: bool
+    ctx: ReportCtx
+    disclaimer: str
+    attribution: str
+
+
+@router.get("/weather_delay", response_model=WeatherDelayResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def get_weather_delay(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ctx: RangeCtx = Depends(get_range_ctx),
+    locale: str = Depends(get_locale),
+):
+    """Average delay on observed-rainy service days vs non-rainy ones.
+
+    Like `/headway_quality` and `/performance_standards`, a dedicated endpoint
+    rather than a `/reports/{report_type}` dispatcher entry: it joins an
+    external observation table to the daily aggregates and answers with a
+    two-group comparison, not a route ranking with tolerance/CSV semantics.
+    """
+    result = await compute_rain_delay(agency_id, ctx, conn)
+    return WeatherDelayResponse(
+        **result,
+        ctx=_ctx_payload(ctx),
+        disclaimer=observation_disclaimer(locale),
+        attribution=weather_attribution(locale),
     )
 
 

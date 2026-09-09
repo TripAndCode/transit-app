@@ -50,6 +50,7 @@ def _run_ingest_and_analyze() -> None:
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
+    from pipeline.weather import ingest_weather
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -104,6 +105,18 @@ def _run_ingest_and_analyze() -> None:
                 analyze(aid, conn, ch_client)
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
+
+        # Observed daily weather for each agency's representative station.
+        # Agency-independent (it is keyed by station, and several agencies may
+        # share one), so a single pass after the per-agency loop rather than
+        # inside it. `ingest_weather` checks its own kill switch and skips
+        # every fetch when it is off, so no flag test belongs here; a failure
+        # is logged and never allowed to affect the delay aggregates above or
+        # the freshness check below.
+        try:
+            ingest_weather(conn)
+        except Exception:
+            _log.exception("cron: weather ingest failed")
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.

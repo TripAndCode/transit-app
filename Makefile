@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down git-cleanup git-cleanup-apply
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -199,6 +199,15 @@ check-migrations:
 
 digest:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py digest $(if $(DAY),--day $(DAY),) $(if $(LOCALE),--locale $(LOCALE),)
+
+# Observed daily weather for each agency's representative station. Idempotent:
+# re-runnable, upserts on (station_id, obs_date), and only fetches the
+# station-days it doesn't already have a current copy of. No-op unless
+# WEATHER_INGEST_ENABLED is set (see .env.example); meant to be scheduled
+# daily, since the source publishes its point observations for a short rolling
+# window only.
+ingest-weather:
+	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
 
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:
