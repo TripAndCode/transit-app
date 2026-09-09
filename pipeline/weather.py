@@ -38,6 +38,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from pipeline.url_guard import FeedURLError, safe_urlopen
@@ -258,7 +259,10 @@ def _fetch_block(station_id: str, day: date, hour: int, max_bytes: int) -> tuple
     an ordinary, expected outcome for an ingest pass, and the caller turns a
     missing block into "this day isn't ready" rather than an error.
     """
-    url = _POINT_URL.format(station_id=station_id, ymd=day.strftime("%Y%m%d"), hour=hour)
+    # station_id is percent-encoded because it comes from a hand-populated table
+    # and lands in the URL's path: an unencoded `/`, `?` or `#` in it would point
+    # the fetch at a different document on the host than this template names.
+    url = _POINT_URL.format(station_id=quote(station_id, safe=""), ymd=day.strftime("%Y%m%d"), hour=hour)
     try:
         with safe_urlopen(url, timeout=_FETCH_TIMEOUT_SEC, max_bytes=max_bytes) as resp:
             raw = resp.read()
@@ -393,7 +397,7 @@ def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[i
     skipped and picked up by a later pass.
     """
     if not weather_ingest_enabled():
-        logger.warning("weather: WEATHER_INGEST_ENABLED is not set; skipping weather ingest")
+        logger.debug("weather: WEATHER_INGEST_ENABLED is not set; skipping weather ingest")
         return (0, 0, [])
     if days < 1:
         return (0, 0, [])
@@ -421,6 +425,10 @@ def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[i
     considered = 0
     failed: list[str] = []
     for station_id in station_ids:
+        # Counted per station and folded into the total only after that station's
+        # commit succeeds: the whole station's batch shares one transaction, so a
+        # failure on a later day rolls back every day already upserted for it.
+        station_written = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(_STORED_SQL, (station_id, from_date, to_date))
@@ -446,8 +454,9 @@ def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[i
                             WEATHER_SOURCE,
                         ),
                     )
-                written += 1
+                station_written += 1
             conn.commit()
+            written += station_written
         except Exception:
             logger.exception("weather: ingest failed for station %s", station_id)
             conn.rollback()

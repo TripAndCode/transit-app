@@ -310,3 +310,114 @@ def test_observation_disclaimer_denies_forecast_and_causation_in_both_locales():
     assert "予測" in ja and "原因" in ja
     assert "forecast" in en.lower() and "caused" in en.lower()
     assert observation_disclaimer("fr") == ja
+
+
+class _FakeCursor:
+    """Just enough of psycopg2's cursor for `ingest_weather`'s three statements."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._rows: list[tuple] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        if "agency_weather_stations" in sql:
+            self._rows = [(s,) for s in self._conn.stations]
+        elif "SELECT obs_date" in sql:
+            self._rows = []  # nothing stored yet, so every day needs a fetch
+        else:
+            if (params[0], params[1]) in self._conn.poison:
+                raise RuntimeError("simulated upsert failure")
+            self._conn.pending.append(params[:2])
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, stations, poison=()):
+        self.stations = stations
+        self.poison = set(poison)
+        self.pending: list[tuple] = []
+        self.persisted: list[tuple] = []
+
+    def cursor(self):
+        return _FakeCursor(self)
+
+    def commit(self):
+        self.persisted.extend(self.pending)
+        self.pending.clear()
+
+    def rollback(self):
+        self.pending.clear()
+
+
+def test_ingest_weather_counts_only_station_days_a_commit_persisted(monkeypatch):
+    """A station's whole batch of days shares one transaction, so a failure on a
+    later day discards the days already upserted for it. The returned count has
+    to follow the rollback -- an operator reading "wrote N" and finding fewer
+    rows than that would have no way to tell the difference."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    monkeypatch.setattr(
+        weather,
+        "fetch_daily_observation",
+        lambda station_id, obs_date: weather.DailyObservation(
+            station_id=station_id,
+            obs_date=obs_date,
+            precip_mm=1.0,
+            temp_avg_c=20.0,
+            temp_max_c=25.0,
+            temp_min_c=15.0,
+        ),
+    )
+
+    # Station 22222's second day fails, after its first day was already upserted.
+    conn = _FakeConn(["11111", "22222"], poison={("22222", date(2026, 4, 2))})
+    written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4))
+
+    assert failed == ["22222"]
+    # 11111's three days, then 22222's first two -- its loop aborts on the second.
+    assert considered == 5
+    assert written == 3  # only 11111's, none of 22222's rolled-back days
+    assert written == len(conn.persisted)
+    assert all(station_id == "11111" for station_id, _ in conn.persisted)
+
+
+def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
+    """`station_id` is hand-populated and lands in the URL's path, so a value
+    carrying a `/` or `?` must not be able to steer the fetch at a different
+    document on the source host."""
+    import pipeline.weather as weather
+
+    seen: list[str] = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def _fake_urlopen(url, *, timeout, max_bytes):
+        seen.append(url)
+        return _Resp()
+
+    monkeypatch.setattr(weather, "safe_urlopen", _fake_urlopen)
+    weather._fetch_block("47765/../../forecast", _DAY, 0, 1024)
+
+    assert len(seen) == 1
+    url = seen[0]
+    assert "47765%2F..%2F..%2Fforecast" in url
+    # The path still resolves to the point-observation file the template names.
+    assert url.startswith("https://www.jma.go.jp/bosai/amedas/data/point/")
+    assert url.endswith("/20260401_00.json")
