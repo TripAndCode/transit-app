@@ -243,6 +243,30 @@ async def test_not_high_frequency_route_standard_yields_none_actual_value(perf_c
     assert row["estimated_bonus_deduction"] is None
 
 
+async def test_route_filter_excluding_configured_route_still_resolves_actual_value(perf_client):
+    """The page-level `routes` filter (the Analysis tab's route dropdown,
+    forwarded unchanged into ctx.routes) must not blank a configured
+    standard's actual_value to None just because that route happens to be
+    excluded from the filter -- that's a different state than genuinely
+    insufficient data (see test_not_high_frequency_route_standard_yields_
+    none_actual_value above) and must stay distinguishable from it.
+
+    R_BELOW has real ewt_sec data (150.0, see module docstring). Filtering
+    `routes` down to only R_AT (excluding R_BELOW) must still resolve
+    R_BELOW's actual_value/achievement_rate/estimated_bonus_deduction from
+    its own real data, not None."""
+    client, aid, pool = perf_client
+    await _seed_standard(pool, aid, "R_BELOW", "ewt_sec", 100.0, 1000.0)
+
+    r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01&routes=R_AT")
+    assert r.status_code == 200
+    row = next(x for x in r.json()["rows"] if x["route_code"] == "R_BELOW")
+
+    assert row["actual_value"] == pytest.approx(150.0, abs=1e-6)
+    assert row["achievement_rate"] == pytest.approx(0.5, abs=1e-9)
+    assert row["estimated_bonus_deduction"] == pytest.approx(-500.0, abs=1e-6)
+
+
 async def test_empty_agency_returns_empty_rows(perf_client):
     client, _aid, pool = perf_client
     row = await pool.fetchrow(

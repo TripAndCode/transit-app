@@ -45,6 +45,7 @@ precise number whenever a ratio isn't computable (see
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, Literal
 
 from api.range import RangeCtx
@@ -103,6 +104,13 @@ async def compute_performance_standards(agency_id: int, ctx: RangeCtx, conn) -> 
     headway data yet) is still returned, with ``actual_value``,
     ``achievement_rate`` and ``estimated_bonus_deduction`` all ``None`` --
     "insufficient data", not a silent zero.
+
+    ``ctx.routes`` (the page-level route filter shared with every other
+    Analysis-tab panel) never changes WHICH configured rows come back, nor
+    whether a given row's actual value resolves -- every configured route
+    is always fully evaluated. Restricting the visible standards to a page
+    filter is the caller's job (e.g. the frontend may choose to hide rows
+    for routes outside the current filter), not this function's.
     """
     rows = await conn.fetch(_STANDARDS_SQL, agency_id)
     if not rows:
@@ -112,9 +120,20 @@ async def compute_performance_standards(agency_id: int, ctx: RangeCtx, conn) -> 
     # up front -- one pass per metric_type family rather than a query per
     # row, mirroring compute_headway_quality/compute_supply_metrics_by_agency's
     # own per-agency batching.
+    #
+    # _STANDARDS_SQL above is deliberately unfiltered by ctx.routes -- every
+    # configured standard is always a candidate row. compute_headway_quality,
+    # however, applies ctx.routes as a page-level filter (it's shared with
+    # every other Analysis-tab panel). Resolving ewt_sec with the caller's
+    # ctx as-is would silently blank out a configured route's actual value
+    # to None whenever the page's route filter happens to exclude it --
+    # indistinguishable from genuinely insufficient data. A route-filter-free
+    # copy of ctx keeps a configured standard's actual value resolved
+    # regardless of the page filter.
     ewt_by_route: dict[str, float | None] = {}
     if any(r["metric_type"] == "ewt_sec" for r in rows):
-        quality_rows = await compute_headway_quality(agency_id, ctx, conn)
+        unfiltered_ctx = dataclasses.replace(ctx, routes=())
+        quality_rows = await compute_headway_quality(agency_id, unfiltered_ctx, conn)
         ewt_by_route = {q["route_code"]: q["ewt_sec"] for q in quality_rows}
 
     vehicle_km_delivered_pct: float | None = None
