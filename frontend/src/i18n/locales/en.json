@@ -1024,6 +1024,24 @@
         "long_gap_rate": "Long-gap rate",
         "samples": "Samples"
       }
+    },
+    "performance_standard": {
+      "title": "Minimum performance standard",
+      "simulation_badge": "Internal simulation — not an invoice",
+      "subtitle": "Estimated achievement rate and bonus/deduction against each route's configured minimum performance standard.",
+      "col": {
+        "route": "Route",
+        "metric": "Metric",
+        "threshold": "Threshold",
+        "actual": "Actual",
+        "achievement_rate": "Achievement rate",
+        "estimate": "Estimated bonus/deduction"
+      },
+      "metric_label": {
+        "ewt_sec": "Excess wait (sec)",
+        "vehicle_km_delivered_pct": "Vehicle-km delivered (%)"
+      },
+      "scope_agency_note": "Agency-wide figure (no per-route breakdown available)"
     }
   },
   "insight_panel": {

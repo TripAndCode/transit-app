@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.deps import get_conn
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.security import User, csrf_guard, require_user
 from pipeline.query.llm_key_validation import validate_provider_key
 from pipeline.query.user_llm_keys import (
@@ -236,6 +237,7 @@ async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connecti
 
 
 @router.put("/me/llm-key", response_model=LLMKeyStatus)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def put_llm_key(
     body: LLMKeyPut,
     request: Request,

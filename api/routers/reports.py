@@ -38,11 +38,13 @@ from pipeline.reports import (
     compute_headway_quality,
     compute_hourly_heatmap,
     compute_on_time,
+    compute_performance_standards,
     compute_ranking,
     compute_trend_series,
     compute_worst_5min,
     format_definition_csv_line,
     resolve_definition_meta,
+    simulation_disclaimer,
 )
 from pipeline.reports.forecast import (
     hourly_cells_to_dow_band,
@@ -177,6 +179,72 @@ async def get_headway_quality(
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
     return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_ctx_payload(ctx))
+
+
+class PerformanceStandardRow(BaseModel):
+    """One configured `route_performance_standards` row (item 104), joined
+    against the current actual value of its `metric_type` and the resulting
+    achievement rate / estimated bonus-or-deduction -- see
+    `pipeline.reports.performance_standard.compute_performance_standards`
+    for the exact formula.
+
+    `actual_value`/`achievement_rate`/`estimated_bonus_deduction` are always
+    `None` together: a route can be configured (it has a row here) yet still
+    have no resolvable actual figure for the requested range (e.g. an
+    `ewt_sec` standard on a route not classified high-frequency), or a
+    `threshold_value` of exactly 0 makes the relative-deviation ratio
+    undefined. `metric_scope` is `"agency"` for `vehicle_km_delivered_pct`
+    (that figure has no per-route breakdown -- every route configured with
+    it is compared against its own agency's rate) and `"route"` for
+    `ewt_sec`; the frontend must label an `"agency"`-scoped row accordingly
+    rather than implying a route-specific figure.
+    """
+
+    route_code: str
+    metric_type: str
+    metric_scope: str
+    threshold_value: float
+    bonus_malus_rate: float
+    actual_value: float | None
+    achievement_rate: float | None
+    estimated_bonus_deduction: float | None
+
+
+class PerformanceStandardsResponse(BaseModel):
+    """Payload for `GET /performance_standards`. `disclaimer` is a
+    server-rendered, already-localized caveat that MUST be surfaced
+    verbatim wherever these figures are shown -- this is an internal
+    simulation/estimate, never an actual invoice or contractual output."""
+
+    rows: list[PerformanceStandardRow]
+    ctx: ReportCtx
+    disclaimer: str
+
+
+@router.get("/performance_standards", response_model=PerformanceStandardsResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def get_performance_standards(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ctx: RangeCtx = Depends(get_range_ctx),
+    locale: str = Depends(get_locale),
+):
+    """Per-route minimum-performance-standard achievement rate and
+    estimated bonus/deduction -- an internal simulation only (see
+    `PerformanceStandardsResponse.disclaimer`), never a real invoice.
+
+    Like `/headway_quality`, a dedicated endpoint rather than a
+    `/reports/{report_type}` dispatcher entry: this reads a manually
+    populated config table joined against other reports' own compute
+    functions, not a single `agg_*` table scan.
+    """
+    rows = await compute_performance_standards(agency_id, ctx, conn)
+    return PerformanceStandardsResponse(
+        rows=[PerformanceStandardRow(**r) for r in rows],
+        ctx=_ctx_payload(ctx),
+        disclaimer=simulation_disclaimer(locale),
+    )
 
 
 class SuggestionResponse(BaseModel):

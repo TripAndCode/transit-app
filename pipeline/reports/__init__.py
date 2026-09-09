@@ -22,6 +22,7 @@ from pipeline.reports.definition import (
 from pipeline.reports.dwell_run import compute_dwell_run_decomposition
 from pipeline.reports.headway_quality import compute_headway_quality
 from pipeline.reports.overview import compute_overview_summary
+from pipeline.reports.performance_standard import compute_performance_standards, simulation_disclaimer
 from pipeline.reports.rankings import (
     ON_TIME_PRESETS,
     compute_compare_ranking,
@@ -46,10 +47,12 @@ __all__ = [
     "compute_hourly_heatmap",
     "compute_on_time",
     "compute_overview_summary",
+    "compute_performance_standards",
     "compute_ranking",
     "compute_trend_series",
     "compute_worst_5min",
     "format_definition_csv_line",
     "format_definition_footnotes",
     "resolve_definition_meta",
+    "simulation_disclaimer",
 ]
