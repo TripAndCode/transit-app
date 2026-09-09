@@ -113,11 +113,13 @@ _MAX_BLOCK_BYTES = 8 * 1024 * 1024
 # than truncating it, since a partial day is never written anyway.
 _MAX_DAY_BYTES = 16 * 1024 * 1024
 
-# Per-socket-operation timeout, NOT a budget for a run: it bounds one connect
+# Per-socket-operation ceiling, NOT a budget for a run: it bounds one connect
 # or one read, so a source trickling its bodies can keep every one of a
 # station-day's nine blocks inside its own timeout and still take minutes, and
-# a pass multiplies that by station-days and by stations. `ingest_weather`'s
-# `max_seconds` is what bounds a whole pass.
+# a pass multiplies that by station-days and by stations. A caller with a
+# deadline (`ingest_weather`'s `max_seconds`) is what bounds a run: it is
+# threaded down to every block fetch, which both refuses to start past the
+# deadline and clamps this ceiling to whatever is left of it.
 _FETCH_TIMEOUT_SEC = 20.0
 
 # How long the source keeps a day's point observations published. This single
@@ -269,13 +271,24 @@ def aggregate_daily(
     )
 
 
-def _fetch_block(station_id: str, day: date, hour: int, max_bytes: int) -> tuple[dict[str, Any], int] | None:
+def _fetch_block(
+    station_id: str,
+    day: date,
+    hour: int,
+    max_bytes: int,
+    timeout: float = _FETCH_TIMEOUT_SEC,
+) -> tuple[dict[str, Any], int] | None:
     """Fetch one published 3-hour block as ``(payload, bytes_read)``, or ``None``.
 
     *max_bytes* is the caller's remaining budget for this station-day, already
     clamped to `_MAX_BLOCK_BYTES`; a body over it raises inside `safe_urlopen`
     and degrades to ``None`` like any other unreadable block. The byte count
     is returned so the caller can debit its running total.
+
+    *timeout* is the per-socket-operation ceiling, which a caller working
+    against a wall-clock deadline passes clamped to the time it has left, so a
+    trickling source cannot carry the call past that deadline by a further
+    `_FETCH_TIMEOUT_SEC`.
 
     Every failure mode degrades to ``None`` rather than raising: a block that
     isn't published yet (or has aged out of the source's rolling retention) is
@@ -287,7 +300,7 @@ def _fetch_block(station_id: str, day: date, hour: int, max_bytes: int) -> tuple
     # the fetch at a different document on the host than this template names.
     url = _POINT_URL.format(station_id=quote(station_id, safe=""), ymd=day.strftime("%Y%m%d"), hour=hour)
     try:
-        with safe_urlopen(url, timeout=_FETCH_TIMEOUT_SEC, max_bytes=max_bytes) as resp:
+        with safe_urlopen(url, timeout=timeout, max_bytes=max_bytes) as resp:
             raw = resp.read()
             payload = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -307,7 +320,12 @@ def _fetch_block(station_id: str, day: date, hour: int, max_bytes: int) -> tuple
     return payload, len(raw)
 
 
-def fetch_daily_observation(station_id: str, obs_date: date) -> DailyObservation | None:
+def fetch_daily_observation(
+    station_id: str,
+    obs_date: date,
+    *,
+    deadline: float | None = None,
+) -> DailyObservation | None:
     """Fetch and aggregate one station-day, or ``None`` if it isn't fully available.
 
     Reads *obs_date*'s own eight 3-hour blocks plus the next day's first block
@@ -319,12 +337,23 @@ def fetch_daily_observation(station_id: str, obs_date: date) -> DailyObservation
     combined size: each block is fetched with whatever is left of that budget
     (never more than `_MAX_BLOCK_BYTES`), and a station-day that would exceed
     it is abandoned rather than accumulated.
+
+    *deadline* is an optional `time.monotonic` instant this call must not run
+    past. It is checked before every block and clamps each block's socket
+    timeout to the time remaining, because nine blocks each entitled to a full
+    `_FETCH_TIMEOUT_SEC` would otherwise let one station-day overrun its
+    caller's whole budget several times over. Expiry aborts the day exactly
+    like a block the source has not published: ``None``, nothing stored, the
+    day left for a later pass -- never a partially aggregated day, whose
+    rainfall sum would read as drier than the day actually was. Omitting it
+    leaves the call unbounded, which is what a standalone CLI run wants.
     """
     blocks: list[tuple[date, int]] = [(obs_date, h) for h in _BLOCK_HOURS]
     blocks.append((obs_date + timedelta(days=1), 0))
 
     readings: dict[str, Any] = {}
     remaining = _MAX_DAY_BYTES
+    timeout = _FETCH_TIMEOUT_SEC
     for day, hour in blocks:
         if remaining <= 0:
             logger.warning(
@@ -334,7 +363,17 @@ def fetch_daily_observation(station_id: str, obs_date: date) -> DailyObservation
                 _MAX_DAY_BYTES,
             )
             return None
-        fetched = _fetch_block(station_id, day, hour, min(_MAX_BLOCK_BYTES, remaining))
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                logger.debug(
+                    "weather: station %s %s ran out of time mid-day; leaving it for a later pass",
+                    station_id,
+                    obs_date,
+                )
+                return None
+            timeout = min(_FETCH_TIMEOUT_SEC, left)
+        fetched = _fetch_block(station_id, day, hour, min(_MAX_BLOCK_BYTES, remaining), timeout)
         if fetched is None:
             return None
         payload, n_bytes = fetched
@@ -434,9 +473,12 @@ def ingest_weather(
     bad station doesn't starve the others.
 
     *max_seconds* bounds the whole pass's wall clock, checked before each
-    station and before each station-day's fetch; on expiry the pass stops and
-    returns what it has already committed. Any caller sharing this connection,
-    and therefore its session-level locks, with other work must pass one (see
+    station, before each station-day's fetch, and -- threaded down as a
+    deadline -- before each of the nine blocks that fetch reads, so a slow
+    source stops the pass mid-day instead of only at the next day or station
+    boundary. On expiry the pass stops and returns what it has already
+    committed. Any caller sharing this connection, and therefore its
+    session-level locks, with other work must pass one (see
     `CRON_INGEST_BUDGET_SEC`): `_FETCH_TIMEOUT_SEC` bounds a single socket
     operation, not a run, so an unbounded pass can hold those locks for far
     longer than any per-request timeout suggests.
@@ -510,7 +552,7 @@ def ingest_weather(
                     out_of_budget = True
                     break
                 considered += 1
-                obs = fetch_daily_observation(station_id, obs_date)
+                obs = fetch_daily_observation(station_id, obs_date, deadline=deadline)
                 if obs is None:
                     continue
                 with conn.cursor() as cur:

@@ -119,7 +119,7 @@ def test_fetch_daily_observation_bounds_the_merged_blocks(monkeypatch):
 
     caps: list[int] = []
 
-    def _fake_block(station_id, day, hour, max_bytes):
+    def _fake_block(station_id, day, hour, max_bytes, timeout=None):
         caps.append(max_bytes)
         # Each block consumes its whole allowance.
         return ({}, max_bytes)
@@ -130,6 +130,52 @@ def test_fetch_daily_observation_bounds_the_merged_blocks(monkeypatch):
     assert caps and caps[0] == min(_MAX_BLOCK_BYTES, _MAX_DAY_BYTES)
     # Fewer than the nine blocks a day would otherwise read: the budget ran out.
     assert len(caps) < 9
+
+
+def test_fetch_daily_observation_abandons_a_day_that_exhausts_the_deadline(monkeypatch):
+    """A station-day reads nine blocks, each otherwise entitled to its own full
+    socket timeout, so a caller's deadline has to reach inside the day: a slow
+    source must stop the day where it stands rather than overrun by another
+    eight timeouts. What it stops is an unavailable day, not a partial one --
+    no observation comes back, so nothing is stored and a later pass retries."""
+    import pipeline.weather as weather
+
+    clock = _FakeClock(cost_sec=20.0)
+    monkeypatch.setattr(weather, "time", clock)
+    timeouts: list[float] = []
+
+    def _slow_block(station_id, day, hour, max_bytes, timeout=weather._FETCH_TIMEOUT_SEC):
+        timeouts.append(timeout)
+        clock.spend()
+        # A whole, usable day's readings: what stops this day is the deadline,
+        # not anything missing from the source.
+        return (_readings(_DAY, precip_per_slot=0.5), 1024)
+
+    monkeypatch.setattr(weather, "_fetch_block", _slow_block)
+
+    # 50s of budget against blocks that each burn a full 20s timeout.
+    assert fetch_daily_observation("99999", _DAY, deadline=clock.monotonic() + 50.0) is None
+    # Three blocks, not the nine a whole day needs: the third leaves 10s, and
+    # the fourth's check finds the deadline already spent.
+    assert timeouts == [20.0, 20.0, 10.0]
+
+
+def test_fetch_daily_observation_without_a_deadline_reads_the_whole_day(monkeypatch):
+    """The deadline is optional -- a standalone CLI run passes none, and then
+    every block is fetched with the full per-socket ceiling."""
+    import pipeline.weather as weather
+
+    timeouts: list[float] = []
+
+    def _block(station_id, day, hour, max_bytes, timeout=weather._FETCH_TIMEOUT_SEC):
+        timeouts.append(timeout)
+        return (_readings(_DAY, precip_per_slot=0.5), 1024)
+
+    monkeypatch.setattr(weather, "_fetch_block", _block)
+
+    obs = fetch_daily_observation("99999", _DAY)
+    assert obs is not None
+    assert timeouts == [weather._FETCH_TIMEOUT_SEC] * 9
 
 
 def test_aggregate_daily_ignores_readings_outside_the_day_window():
@@ -404,12 +450,14 @@ class _FakeClock:
         self._now += self._cost
 
 
-def _patch_fetch(monkeypatch, weather, conn, *, clock=None, fetched=None):
+def _patch_fetch(monkeypatch, weather, conn, *, clock=None, fetched=None, deadlines=None):
     """Replace the outbound fetch with an always-successful local stand-in."""
 
-    def _fetch(station_id, obs_date):
+    def _fetch(station_id, obs_date, *, deadline=None):
         # No transaction may be open while the pass is out on the network.
         assert conn.in_txn is False
+        if deadlines is not None:
+            deadlines.append(deadline)
         if clock is not None:
             clock.spend()
         if fetched is not None:
@@ -467,13 +515,18 @@ def test_ingest_weather_stops_once_the_wall_clock_budget_is_spent(monkeypatch):
     clock = _FakeClock(cost_sec=50.0)
     monkeypatch.setattr(weather, "time", clock)
     fetched: list[tuple] = []
-    _patch_fetch(monkeypatch, weather, conn, clock=clock, fetched=fetched)
+    deadlines: list[float | None] = []
+    _patch_fetch(monkeypatch, weather, conn, clock=clock, fetched=fetched, deadlines=deadlines)
+    started_at = clock.monotonic()
 
     written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4), max_seconds=90.0)
 
     # Two fetches spend 100s of the 90s budget, so the third day's check stops
     # the pass mid-station and the second station is never begun.
     assert failed == []
+    # The same budget is handed down into each station-day, so a slow source
+    # stops a day mid-way instead of overrunning it by nine socket timeouts.
+    assert deadlines == [started_at + 90.0, started_at + 90.0]
     assert considered == 2
     assert written == 2
     assert fetched == [("11111", date(2026, 4, 1)), ("11111", date(2026, 4, 2))]
