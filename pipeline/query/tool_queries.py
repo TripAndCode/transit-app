@@ -38,14 +38,21 @@ from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
 from pipeline.stats import linear_percentile
+from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
 
-# Ingest strategies confirmed to ever populate `arr_delay`/`scheduled_sec`
-# (see pipeline/strategies/static_join.py's parse_feed docstring); mirrors
-# pipeline.reports.dwell_run's identical `_AVAILABLE_STRATEGIES` gate for the
-# same underlying reason (both need RT fields only static_join's
-# Hiroshima-style feeds send) -- duplicated per module rather than shared,
-# matching that module's own established convention.
-_SCHEDULE_PADDING_STRATEGIES = frozenset({"static_join"})
+
+async def _schedule_padding_available(agency_id: int, conn) -> bool:
+    """True only when this agency both uses an ingest strategy that can send
+    `StopTimeUpdate.arrival` AND is in the explicit confirmed-set gate
+    (`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`)
+    -- mirrors `pipeline.reports.dwell_run._agency_available`: an
+    `ingest_strategy` match alone means a feed's wire shape merely matches a
+    confirmed agency's, not that this agency's own live feed has been probed
+    and found to actually populate `arr_delay`/`scheduled_sec`."""
+    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
+        return False
+    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
+    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
 
 
 async def route_dow_breakdown(
@@ -339,17 +346,18 @@ async def schedule_realism_padding(
     which falls back to the dep_delay-only `schedule_realism_segments` view
     when this returns ``available: False`` or no rows.
 
-    Only agencies whose ingest strategy is confirmed to send
-    `StopTimeUpdate.arrival` (`static_join` — same gate as
-    `pipeline.reports.dwell_run`) ever populate `arr_delay`/`scheduled_sec`,
-    which this decomposition needs for both the actual-vs-scheduled running
-    time comparison and the hour-of-day bucket (an hour parsed from
-    `scheduled_time` would silently drop every after-midnight extended-hour
-    trip, whose `scheduled_time` is NULL by design — see
-    `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec` docstring).
-    Returns ``{"available": False, "rows": [], "terminus_early_rate": None,
-    "terminus_samples": 0}`` for any other ingest strategy, or when `ch` is
-    not attached.
+    Only agencies confirmed to send `StopTimeUpdate.arrival`
+    (`_schedule_padding_available` — same
+    `RT_INGEST_STRATEGIES` ∩ `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` gate as
+    `pipeline.reports.dwell_run._agency_available`) ever populate
+    `arr_delay`/`scheduled_sec`, which this decomposition needs for both the
+    actual-vs-scheduled running time comparison and the hour-of-day bucket
+    (an hour parsed from `scheduled_time` would silently drop every
+    after-midnight extended-hour trip, whose `scheduled_time` is NULL by
+    design — see `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec`
+    docstring). Returns ``{"available": False, "rows": [],
+    "terminus_early_rate": None, "terminus_samples": 0}`` for any
+    unconfirmed agency, or when `ch` is not attached.
 
     Each ``rows`` entry is a tuple ``(stop_sequence, next_stop_sequence,
     hour, scheduled_run_min, actual_run_p50_min, actual_run_p85_min,
@@ -388,8 +396,7 @@ async def schedule_realism_padding(
     empty: dict = {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
     if ch is None:
         return empty
-    agency_row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    if not agency_row or agency_row["ingest_strategy"] not in _SCHEDULE_PADDING_STRATEGIES:
+    if not await _schedule_padding_available(agency_id, conn):
         return empty
 
     cte_sql, ch_params = _dedup_cte_ch(ctx, include_arr_delay=True, include_scheduled_sec=True)

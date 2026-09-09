@@ -81,6 +81,7 @@ from pipeline.histogram import (
     bucket_case_sql,
     hist_array_sql,
 )
+from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
@@ -982,7 +983,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
-        if row and row[0] == "static_join":
+        if row and row[0] in RT_INGEST_STRATEGIES:
             # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`
             # is NULL when picking the max -- it does not return NULL just
             # because the true latest (captured_at, file_name) row happens to
@@ -1099,7 +1100,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # coverage, so pipeline.reports.dwell_run's reader additionally
         # intersects against RT_FIELD_COVERAGE_CONFIRMED_AGENCIES before
         # trusting these rows.
-        if has_static and row and row[0] == "static_join":
+        if has_static and row and row[0] in RT_INGEST_STRATEGIES:
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)

@@ -97,7 +97,18 @@ def main() -> None:
             print(f"READ FAILED: {e}", file=sys.stderr)
             sys.exit(1)
 
-    cov = field_coverage(raw)
+    try:
+        cov = field_coverage(raw)
+    except Exception as e:
+        # field_coverage's own top-level _fields(pb_bytes) call already
+        # swallows a malformed top-level message, but a per-field _dec()
+        # (protobuf-bytes -> str) has no such guard -- an HTML error page or
+        # a redirect target masquerading as a feed response can still
+        # produce bytes that parse as *some* length-delimited field but
+        # aren't valid UTF-8, raising well past that guard. Surface that as
+        # a normal "malformed feed" report instead of a raw traceback.
+        print(f"DECODE FAILED: response does not decode as GTFS-RT ({e})", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(_assess(cov), indent=2, ensure_ascii=False))
 
 

@@ -1031,3 +1031,43 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `npm run test:check-entry-chunk`, and `npm run build:bundle && npm run
   check:entry-chunk` (500.9 KiB entry static closure, MapLibre-free) — all
   clean. (PR #361)
+- 2026-09-09: A third `/review-branch` Pass 1, run against item 103's branch
+  after merging `main` (which brought in item 97's `pipeline.query.tool_queries.
+  schedule_realism_padding`, a third reader of `arr_delay`/`scheduled_sec`
+  this branch's earlier two review passes never saw), found that reader still
+  gated on its own hardcoded `_SCHEDULE_PADDING_STRATEGIES = frozenset({"static_
+  join"})` instead of intersecting against `RT_FIELD_COVERAGE_CONFIRMED_
+  AGENCIES` the way `service_delivered.py`/`dwell_run.py` now do — a
+  `static_join` agency outside that confirmed set would have read `available:
+  True` with fabricated-looking padding numbers. Fixed by importing
+  `RT_INGEST_STRATEGIES`/`RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` from
+  `pipeline.strategies.static_join` and adding `_schedule_padding_available`,
+  mirroring `pipeline.reports.dwell_run._agency_available` exactly, in place of
+  the module's own separate constant. Two related Minors from the same review:
+  `scripts/probe_rt_field_coverage.py`'s `main()` had no exception handling
+  around `field_coverage(raw)`, so a malformed/non-protobuf feed response (an
+  HTML error page, a redirect target) hitting `pipeline/strategies/_pb.py`'s
+  `_dec()`'s bare `bytes.decode("utf-8")` raised a raw traceback instead of the
+  script's own designed "malformed feed" report — wrapped in a try/except that
+  now prints a clear decode-failure message and exits non-zero; and
+  `pipeline/analyze.py`'s two write-side gates for `agg_service_delivered_daily`
+  and `agg_route_daily_dwell_run` still compared against the hardcoded
+  `"static_join"` literal instead of the `RT_INGEST_STRATEGIES` constant this
+  branch introduced on the read side, changed to `row[0] in RT_INGEST_
+  STRATEGIES` (the pre-existing, out-of-scope `agg_route_headway_daily` gate
+  a few hundred lines below was left untouched, per the review's own
+  instruction). Added `tests/query/test_tool_queries.py::test_schedule_
+  realism_padding_unavailable_for_unconfirmed_static_join_agency` (mirrors
+  `test_network.py`'s confirmed-set-emptied pattern) and monkeypatched the two
+  existing positive `schedule_realism_padding` tests to trust their synthetic
+  test agency via a new `_trust_schedule_padding` helper, since they'd
+  otherwise now correctly read unavailable. Verified: `ruff check`/`mypy`
+  clean on every touched file; `tests/query/test_tool_queries.py` (23 passed),
+  `tests/pipeline/test_analyze.py` (44 passed), `tests/api/test_reports.py`
+  (76 passed), and `tests/pipeline/test_static_join.py` (17 passed) all green
+  against the real throwaway Postgres/ClickHouse stack — the latter two only
+  after discovering and waiting out an unrelated, independently-running full
+  suite from a different worktree that was concurrently truncating the same
+  shared tables (each test file's teardown does an unfiltered `TRUNCATE ...
+  CASCADE`, which cross-worktree concurrency turns into spurious failures
+  independent of any diff); re-run alone, both were clean. (PR #363)
