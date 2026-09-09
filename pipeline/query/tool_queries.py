@@ -38,14 +38,7 @@ from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
 from pipeline.reports.rankings import _round2, compute_trend_series
 from pipeline.stats import linear_percentile
-
-# Ingest strategies confirmed to ever populate `arr_delay`/`scheduled_sec`
-# (see pipeline/strategies/static_join.py's parse_feed docstring); mirrors
-# pipeline.reports.dwell_run's identical `_AVAILABLE_STRATEGIES` gate for the
-# same underlying reason (both need RT fields only static_join's
-# Hiroshima-style feeds send) -- duplicated per module rather than shared,
-# matching that module's own established convention.
-_SCHEDULE_PADDING_STRATEGIES = frozenset({"static_join"})
+from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
 async def route_dow_breakdown(
@@ -339,17 +332,18 @@ async def schedule_realism_padding(
     which falls back to the dep_delay-only `schedule_realism_segments` view
     when this returns ``available: False`` or no rows.
 
-    Only agencies whose ingest strategy is confirmed to send
-    `StopTimeUpdate.arrival` (`static_join` — same gate as
-    `pipeline.reports.dwell_run`) ever populate `arr_delay`/`scheduled_sec`,
-    which this decomposition needs for both the actual-vs-scheduled running
-    time comparison and the hour-of-day bucket (an hour parsed from
-    `scheduled_time` would silently drop every after-midnight extended-hour
-    trip, whose `scheduled_time` is NULL by design — see
-    `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec` docstring).
-    Returns ``{"available": False, "rows": [], "terminus_early_rate": None,
-    "terminus_samples": 0}`` for any other ingest strategy, or when `ch` is
-    not attached.
+    Only agencies confirmed to send `StopTimeUpdate.arrival`
+    (`pipeline.strategies.static_join.rt_field_coverage_confirmed` — the
+    shared `RT_INGEST_STRATEGIES` ∩ `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    gate every such reader uses) ever populate
+    `arr_delay`/`scheduled_sec`, which this decomposition needs for both the
+    actual-vs-scheduled running time comparison and the hour-of-day bucket
+    (an hour parsed from `scheduled_time` would silently drop every
+    after-midnight extended-hour trip, whose `scheduled_time` is NULL by
+    design — see `pipeline.db.build_dedup_ch_sql`'s `include_scheduled_sec`
+    docstring). Returns ``{"available": False, "rows": [],
+    "terminus_early_rate": None, "terminus_samples": 0}`` for any
+    unconfirmed agency, or when `ch` is not attached.
 
     Each ``rows`` entry is a tuple ``(stop_sequence, next_stop_sequence,
     hour, scheduled_run_min, actual_run_p50_min, actual_run_p85_min,
@@ -388,8 +382,7 @@ async def schedule_realism_padding(
     empty: dict = {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
     if ch is None:
         return empty
-    agency_row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    if not agency_row or agency_row["ingest_strategy"] not in _SCHEDULE_PADDING_STRATEGIES:
+    if not await rt_field_coverage_confirmed(agency_id, conn):
         return empty
 
     cte_sql, ch_params = _dedup_cte_ch(ctx, include_arr_delay=True, include_scheduled_sec=True)

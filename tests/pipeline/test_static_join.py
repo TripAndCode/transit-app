@@ -460,3 +460,64 @@ def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
     aid = _make_agency(pg_conn, agency_label, feed_url)
     load_static(str(FIX / zip_name), aid, pg_conn)
     _run_and_assert(pg_conn, aid, FIX / pb_name, static_version_id=pathlib.Path(zip_name).stem)
+
+
+def test_load_static_geiyo_fixture_row_counts(pg_conn):
+    """geiyo_static.zip is a real vendored GTFS static feed for agency 11
+    (Geiyo Bus). Asserts fixed row counts (1682 stops, 64 routes, 1593 trips,
+    44152 stop_times) for this checked-in, immutable fixture zip so a future
+    `load_static` regression or accidental re-vendoring is caught.
+
+    geiyo_tu.bin (the paired RT capture) is a known-empty overnight snapshot
+    (0 stop_time_updates) that proves nothing about per-field RT coverage --
+    an agency only earns a spot in
+    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    once a live, in-service probe confirms real coverage -- so unlike
+    `test_static_join_per_op` this only exercises the static load, not
+    parse_feed/field_coverage.
+    """
+    aid = _make_agency(pg_conn, "芸陽バス_test", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin")
+    load_static(str(FIX / "geiyo_static.zip"), aid, pg_conn)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM static_stops WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 1682
+        cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 64
+        cur.execute("SELECT count(*) FROM static_trips WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 1593
+        cur.execute("SELECT count(*) FROM static_stop_times WHERE agency_id = %s", (aid,))
+        assert cur.fetchone()[0] == 44152
+
+
+@pytest.mark.parametrize("pb_name", ["hiroden_tu.bin", "hirobus_tu.bin", "hirokoh_tu.bin"])
+def test_field_coverage_matches_known_fixture_stats(pb_name):
+    """field_coverage() -- the per-field coverage check used by
+    scripts/probe_rt_field_coverage.py to vet a live feed -- needs no DB
+    connection or static schedule, and must reproduce the same per-field
+    coverage `_run_and_assert` already confirms for these captured fixtures
+    via the full parse_feed + JOIN path -- proving the standalone probe
+    agrees with the production decode path rather than silently drifting
+    from it.
+    """
+    raw = (FIX / pb_name).read_bytes()
+    cov = static_join.field_coverage(raw)
+
+    assert cov["stop_time_updates"] > 0
+    assert cov["feed_timestamp"] is not None
+    assert cov["feed_timestamp"] > 1_600_000_000
+
+    assert cov["stop_id_coverage"] >= 0.99
+    assert cov["schedule_relationship_trip_coverage"] >= 0.99
+    assert cov["schedule_relationship_stop_coverage"] >= 0.99
+    # Sparse-by-design (only sent when a StopTimeUpdate carries an `arrival`
+    # submessage), not a bug -- same bound _run_and_assert checks.
+    assert 0.0 < cov["arr_delay_coverage"] < 0.5
+
+
+def test_field_coverage_empty_feed_reports_zero_without_coverage_keys():
+    """An empty/undecodable feed says nothing about a field's population
+    habits -- coverage keys must be omitted, not misreported as 0.0 (which
+    would look identical to "confirmed always absent")."""
+    cov = static_join.field_coverage(b"")
+    assert cov == {"stop_time_updates": 0, "feed_timestamp": None}

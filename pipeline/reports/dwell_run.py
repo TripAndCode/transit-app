@@ -1,12 +1,17 @@
 """Read side for the dwell-time / running-time decomposition report.
 
 Reads `agg_route_daily_dwell_run` (built by `pipeline.analyze.analyze()`,
-only for agencies whose `ingest_strategy` is confirmed to send `arr_delay` --
-see that builder and `pipeline.dwell_run`'s module docstring for why: only
-those agencies' RT feed ever sends `StopTimeUpdate.arrival`, so `arr_delay`
--- and therefore an actual arrival timestamp -- exists to derive dwell time
-(this stop's departure minus its own arrival) and running time (this stop's
-arrival minus the PREVIOUS stop's departure) from.
+only for agencies in
+`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` --
+see that module's docstring for why `ingest_strategy` alone isn't sufficient
+trust: sharing the static_join JOIN mechanism doesn't imply a feed actually
+populates `arr_delay`, only that its wire shape matches an agency that's
+been confirmed to. See that builder and `pipeline.dwell_run`'s module
+docstring for why `arr_delay` matters: only a confirmed agency's RT feed is
+known to ever send `StopTimeUpdate.arrival`, so `arr_delay` -- and therefore
+an actual arrival timestamp -- exists to derive dwell time (this stop's
+departure minus its own arrival) and running time (this stop's arrival minus
+the PREVIOUS stop's departure) from.
 
 Unlike ranking/on_time/worst_5min, this report has no live ClickHouse
 fallback for a time_band-filtered query: reconstructing dwell/running time
@@ -25,18 +30,7 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter
-
-# Ingest strategies confirmed to ever populate `arr_delay` (see
-# pipeline/strategies/static_join.py's parse_feed docstring); mirrors
-# pipeline.reports.service_delivered's identical `_POPULATED_AGENCIES_SQL`
-# gate for the same underlying reason (both need schedule_relationship_*/
-# arr_delay, RT fields only static_join's Hiroshima-style feeds send).
-_AVAILABLE_STRATEGIES = frozenset({"static_join"})
-
-
-async def _agency_available(agency_id: int, conn) -> bool:
-    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    return bool(row and row["ingest_strategy"] in _AVAILABLE_STRATEGIES)
+from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
 @perf.timed("reports.dwell_run")
@@ -62,7 +56,7 @@ async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -
     thin, so every route is returned with its own transparent sample count
     for the caller to weigh, rather than being hidden below a threshold.
     """
-    if not await _agency_available(agency_id, conn):
+    if not await rt_field_coverage_confirmed(agency_id, conn):
         return {"available": False, "time_band_supported": ctx.time_band == "all", "routes": []}
     if ctx.time_band != "all":
         return {"available": True, "time_band_supported": False, "routes": []}

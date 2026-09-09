@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from api.range import RangeCtx, dow_clause
 from pipeline.headways import coefficient_of_variation_from_pooled, mean_wait_from_pooled
+from pipeline.strategies.static_join import rt_field_coverage_confirmed
 
 
 def _daily_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
@@ -73,7 +74,21 @@ async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[d
     range (no RT-reconstructed headway data has accumulated yet) is omitted
     entirely rather than returned with null metrics -- there is nothing yet
     to report for it.
+
+    `agg_route_headway_daily` is materialized (see `pipeline.analyze`'s
+    builder) for any `ingest_strategy` that CAN populate `stop_id`, which is
+    a necessary but not sufficient condition -- an agency sharing that wire
+    shape without being confirmed to actually populate `stop_id` on its own
+    live feed would otherwise get its rows pooled here as if trustworthy.
+    This additionally intersects against
+    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    (via `rt_field_coverage_confirmed`) before returning anything, returning
+    an empty list for an unconfirmed agency rather than a possibly-empty-but-
+    still-queried result.
     """
+    if not await rt_field_coverage_confirmed(agency_id, conn):
+        return []
+
     frag, params, _ = _daily_filter(ctx, 2)
     sql = f"""
         SELECT h.route_code,

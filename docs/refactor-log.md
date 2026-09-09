@@ -769,6 +769,167 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   (`dep_delay > threshold_sec`, strict), including one that exceeds it by a
   single second — the boundary this item's own verify criterion names.
   (PR #356)
+- 2026-09-08: Built the tooling half of bulk-onboarding the Hiroshima Bus
+  Association's remaining GTFS operators (item 103); a later commit on this
+  branch applied the actual `agencies.csv` update (see below). New
+  `pipeline.strategies.static_join.field_coverage(pb_bytes)` generalizes item
+  87's per-field coverage check (stop_id/arr_delay/schedule_relationship_trip/
+  schedule_relationship_stop/feed_timestamp) into a reusable function that
+  needs no DB connection or configured `agencies` row — it decodes a raw
+  feed sample the same way `parse_feed` does, minus the static-schedule JOIN,
+  so it can check a feed before onboarding decides to trust it.
+  `tests/pipeline/test_static_join.py` gained
+  `test_field_coverage_matches_known_fixture_stats`, which reruns this
+  against the existing real hiroden/hirobus/hirokoh fixtures and confirms it
+  reproduces the same coverage the full parse_feed path already asserts —
+  proving the standalone probe agrees with production decoding rather than
+  drifting from it. New `scripts/probe_rt_field_coverage.py` wraps this in a
+  CLI (`--url`/`--file`) that fetches (via `pipeline.url_guard.safe_urlopen`)
+  and reports whether a feed's coverage matches the thresholds already
+  confirmed for agencies 8/9/10, flagging (not silently accepting) a feed
+  that, say, never populates `schedule_relationship_trip` — exactly the case
+  `pipeline.reports.service_delivered`/`pipeline.reports.dwell_run` would
+  otherwise misreport for, since both key "is this field populated" off
+  `ingest_strategy == 'static_join'` alone (item 92's design), not a live
+  per-agency check. New `scripts/bus_kyo_association_feeds.py` holds the
+  association's published feed list as data (the 14 operators not yet in
+  `agencies.csv`, fetched by a human session with network access per this
+  item's own text) and a generator (`pending_feeds`) that computes new CSV
+  rows for whichever aren't already configured, restricted to the 10
+  operators confirmed to share 8/9/10's exact `mcapps.jp` URL shape
+  (`ingest_strategy=static_join`, `static_strategy=direct_url`); the other 4
+  (`busit.jp`'s Etajima Bus, `bus-vision.jp`'s Chugoku Bus/Tomo Tetsudo
+  Bus/Ikasa Bus Company) are recorded but marked unsupported pending a new
+  ingest/static strategy for their platforms, per this repo's rule against
+  guessing an unconfirmed fetch shape.
+  `tests/unit/test_bus_kyo_association_feeds.py` and
+  `tests/unit/test_probe_rt_field_coverage.py` cover both scripts' pure logic
+  (dedup-by-feed_url, idempotent `--write`, unsupported-platform exclusion,
+  and the coverage-threshold assessment) without a DB or network dependency.
+
+  What's left, and where the item's Verify line stands now: a later commit
+  on this branch (`feat(agencies): onboard Hiroshima Bus Association
+  operators`) appended the 10 confirmed `mcapps.jp`/`static_join`/`direct_url`
+  rows (agency_id 11, 12, 13, 14, 15, 17, 18, 19, 53, 54) to `agencies.csv`,
+  so it no longer lists only agencies 8/9/10. A further commit
+  (`feat(fixtures): vendor real GTFS static+RT data for agency 11 (Geiyo
+  Bus)`) vendored real `tests/fixtures/geiyo_static.zip`/`geiyo_tu.bin` and
+  verified, against the throwaway test DB, that `load_static` against
+  `geiyo_static.zip` inserts 1682 stops / 64 routes / 1593 trips / 44152
+  stop_times and that `gtfs_pipeline.py analyze --agency-id 11` completes
+  with no error — static ingestion is now verified end-to-end for agency 11,
+  not just a config edit, and `tests/pipeline/test_static_join.py::
+  test_load_static_geiyo_fixture_row_counts` now reproduces those row counts
+  as a real assertion instead of only a commit-message claim. `geiyo_tu.bin`
+  was captured overnight with zero active service, so
+  `probe_rt_field_coverage.py` correctly reports it as an empty feed (0
+  stop_time_updates) — that confirms the wire format decodes, not that RT
+  fields are populated the way 8/9/10's confirmed feeds are. So RT
+  field-coverage remains unconfirmed for agency 11 and for all 10
+  newly-onboarded agencies: none has had
+  `scripts/probe_rt_field_coverage.py --url <realtime_url>` run against a
+  live, in-service feed, which needs network egress this environment
+  doesn't have. Because of that,
+  `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+  still lists only 8/9/10; `pipeline.reports.service_delivered` and
+  `pipeline.reports.dwell_run` now intersect against that explicit set
+  (alongside the real `ingest_strategy` check) instead of trusting
+  `ingest_strategy == 'static_join'` alone, so none of the 10 newly-onboarded
+  agencies (nor agency 11) silently reports a misleading
+  `service_delivered_pct`/dwell availability — each correctly reads "not
+  available" until a live probe confirms real coverage and earns it a spot
+  in that set. This item's Verify line's "per-field RT capability is
+  correctly reported" clause is satisfied in the "correctly reported as
+  unconfirmed" sense; live-feed verification proving actual positive
+  coverage for at least one of the 10 remains the concrete remaining
+  blocker, still gated on network egress this environment lacks. Backend
+  verification of the diff itself (`make test`, `ruff`, `mypy`) also could
+  not be run in this sandbox, per the same `transit-app-gotchas`-documented
+  dispatched-worker execution gap other items have hit; the new code was
+  instead checked by tracing it against the already-passing
+  `test_static_join_per_op` fixtures and by hand-checking the new tests' own
+  assertions. (PR #363)
+- 2026-09-09: Closed the backend verification gap the prior entry left open
+  (coordinator-run, from the main checkout's cwd pointed at this worktree's
+  file paths, per `transit-app-gotchas`'s documented pattern for this
+  sandbox's env-var-prefixed-command gap): `poetry run pytest` on this
+  branch's full changed test surface (`tests/pipeline/test_static_join.py`,
+  `tests/unit/test_bus_kyo_association_feeds.py`,
+  `tests/unit/test_probe_rt_field_coverage.py`, `tests/api/test_network.py`,
+  `tests/api/test_reports.py`) against the real throwaway Postgres/ClickHouse
+  stack — 120 passed, 0 skipped-for-missing-integration-flag. `poetry run
+  ruff check` on the changed files surfaced two real `E501` line-too-long
+  violations in `test_bus_kyo_association_feeds.py`, fixed by wrapping the
+  two offending `BusKyoFeed(...)` constructor calls. `poetry run mypy` on
+  the changed `pipeline`/`scripts` files (mypy's configured scope excludes
+  `tests/`) surfaced one real error in
+  `scripts/bus_kyo_association_feeds.py`: the `--write` path's `with
+  csv_path.open(...) as f:` shadowed the outer `for f in pending`/`for f in
+  unsupported` loop variable's inferred `BusKyoFeed` type, so mypy rejected
+  passing the reassigned `f` (now a file handle) to `csv.writer`; renamed
+  the file-handle binding to `csv_file` to remove the collision. Both fixes
+  re-verified clean (`ruff check` on the touched test file, `mypy` on the
+  touched script, full test rerun). (PR #363)
+- 2026-09-09: `/review-branch` Pass 1 (standard tier, 2 reviewer groups) found
+  zero Major findings. `bugs+logic+consistency+security` was clean outright.
+  `perf+practices+comments+alternatives` found 7 Minors, no Major: 5
+  comment-lint-shaped issues (two positional "see the note above"-style
+  cross-references that should name the referenced symbol directly instead;
+  a comment block above `dwell_run.py`'s `_AVAILABLE_STRATEGIES` that grew
+  past the file's block-length convention; a new 16-line `#` block above
+  `static_join.py`'s `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` that belongs in
+  the module docstring instead; a new section-banner comment in
+  `test_static_join.py`) — fixed all 5 directly (reworded the two
+  cross-references to name symbols, split/shrank the two long blocks,
+  moved the confirmed-set rationale into `static_join.py`'s module
+  docstring, dropped the banner). Re-verified `ruff check`/`mypy` clean on
+  every touched file. Left 2 Minors as documented, non-blocking follow-up
+  (design tradeoffs, not defects): `service_delivered.py` and
+  `dwell_run.py` each independently hard-code which `ingest_strategy`
+  values can ever send these RT fields rather than sharing one constant —
+  worth consolidating next to `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` if a
+  second ingest strategy is ever confirmed; and `agg_service_delivered_
+  daily`/`agg_route_daily_dwell_run` materialization in `analyze.py` isn't
+  itself gated on `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` (only on
+  `ingest_strategy`), relying on every reader to re-apply that
+  intersection — both existing readers do, but this is a "every future
+  reader must remember" invariant rather than an enforced one. (PR
+  #pending)
+- 2026-09-09: `/review-branch` Pass 2 (fresh independent manifest+dispatch,
+  same standard-tier 2-group split) found zero Major findings on either
+  group. `bugs+logic+consistency+security` re-confirmed the gating change's
+  correctness end-to-end (confirmed `service_delivered.py`/`dwell_run.py`
+  are the only two readers of the two gated aggregate tables repo-wide, and
+  every test setting `ingest_strategy='static_join'` on a synthetic agency
+  correctly monkeypatches the confirmed-set where it expects `available:
+  true`). `perf+practices+comments+alternatives` found 6 Minors, no Major:
+  4 more comment-lint-shaped issues introduced or left behind by Pass 1's
+  own fixes (a two-hop "see this comment which itself just points
+  elsewhere" chain across `analyze.py`/`static_join.py`; a bare pointer
+  comment in `static_join.py` left over after its rationale moved into the
+  docstring; a free-floating section-banner comment reintroduced in
+  `test_static_join.py`; a comment on `_MCAPPS_BASE` that actually
+  describes the 8/9/10 feed entries a few lines below, not the constant it
+  sits above), one comment citing "a prior session['s] claim" instead of
+  stating the invariant directly (violates this repo's durable-content
+  rule), and a repeat of Pass 1's alternatives Minor #6 (the
+  `service_delivered.py`/`dwell_run.py` duplicated `ingest_strategy`
+  literal) — flagged independently on both passes, so fixed for real this
+  time instead of deferring further: added
+  `pipeline.strategies.static_join.RT_INGEST_STRATEGIES` as the single
+  shared constant, `dwell_run.py` now imports and uses it directly (no more
+  local `_AVAILABLE_STRATEGIES`), and `service_delivered.py`'s
+  `_POPULATED_AGENCIES_SQL` changed from a hardcoded `= 'static_join'`
+  literal to `= ANY($1::text[])` parameterized against
+  `list(RT_INGEST_STRATEGIES)`. Fixed all 6 directly; re-verified
+  `ruff check`/`mypy` clean on every touched file and the full 120-test
+  affected suite (`tests/pipeline/test_static_join.py`,
+  `tests/unit/test_bus_kyo_association_feeds.py`,
+  `tests/unit/test_probe_rt_field_coverage.py`, `tests/api/test_network.py`,
+  `tests/api/test_reports.py`) against the real throwaway Postgres/
+  ClickHouse stack, since the `RT_INGEST_STRATEGIES` change touches real
+  SQL/logic, not just comments. Both mandatory `/review-branch` passes are
+  now clean of Major findings. (PR #363)
 - 2026-09-08: Item 97 — extended the `schedule_realism` Ask tool with a
   per-segment, per-hour-of-day schedule-padding decomposition
   (`pipeline.query.tool_queries.schedule_realism_padding`), for `static_join`
@@ -871,4 +1032,44 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `npm run test:check-entry-chunk`, and `npm run build:bundle && npm run
   check:entry-chunk` (500.9 KiB entry static closure, MapLibre-free) — all
   clean. (PR #361)
+- 2026-09-09: A third `/review-branch` Pass 1, run against item 103's branch
+  after merging `main` (which brought in item 97's `pipeline.query.tool_queries.
+  schedule_realism_padding`, a third reader of `arr_delay`/`scheduled_sec`
+  this branch's earlier two review passes never saw), found that reader still
+  gated on its own hardcoded `_SCHEDULE_PADDING_STRATEGIES = frozenset({"static_
+  join"})` instead of intersecting against `RT_FIELD_COVERAGE_CONFIRMED_
+  AGENCIES` the way `service_delivered.py`/`dwell_run.py` now do — a
+  `static_join` agency outside that confirmed set would have read `available:
+  True` with fabricated-looking padding numbers. Fixed by importing
+  `RT_INGEST_STRATEGIES`/`RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` from
+  `pipeline.strategies.static_join` and adding `_schedule_padding_available`,
+  mirroring `pipeline.reports.dwell_run._agency_available` exactly, in place of
+  the module's own separate constant. Two related Minors from the same review:
+  `scripts/probe_rt_field_coverage.py`'s `main()` had no exception handling
+  around `field_coverage(raw)`, so a malformed/non-protobuf feed response (an
+  HTML error page, a redirect target) hitting `pipeline/strategies/_pb.py`'s
+  `_dec()`'s bare `bytes.decode("utf-8")` raised a raw traceback instead of the
+  script's own designed "malformed feed" report — wrapped in a try/except that
+  now prints a clear decode-failure message and exits non-zero; and
+  `pipeline/analyze.py`'s two write-side gates for `agg_service_delivered_daily`
+  and `agg_route_daily_dwell_run` still compared against the hardcoded
+  `"static_join"` literal instead of the `RT_INGEST_STRATEGIES` constant this
+  branch introduced on the read side, changed to `row[0] in RT_INGEST_
+  STRATEGIES` (the pre-existing, out-of-scope `agg_route_headway_daily` gate
+  a few hundred lines below was left untouched, per the review's own
+  instruction). Added `tests/query/test_tool_queries.py::test_schedule_
+  realism_padding_unavailable_for_unconfirmed_static_join_agency` (mirrors
+  `test_network.py`'s confirmed-set-emptied pattern) and monkeypatched the two
+  existing positive `schedule_realism_padding` tests to trust their synthetic
+  test agency via a new `_trust_schedule_padding` helper, since they'd
+  otherwise now correctly read unavailable. Verified: `ruff check`/`mypy`
+  clean on every touched file; `tests/query/test_tool_queries.py` (23 passed),
+  `tests/pipeline/test_analyze.py` (44 passed), `tests/api/test_reports.py`
+  (76 passed), and `tests/pipeline/test_static_join.py` (17 passed) all green
+  against the real throwaway Postgres/ClickHouse stack — the latter two only
+  after discovering and waiting out an unrelated, independently-running full
+  suite from a different worktree that was concurrently truncating the same
+  shared tables (each test file's teardown does an unfiltered `TRUNCATE ...
+  CASCADE`, which cross-worktree concurrency turns into spurious failures
+  independent of any diff); re-run alone, both were clean. (PR #363)
 - 2026-09-09: Item 104: added a per-route "minimum performance standard" bonus/malus simulation on top of item 94's Excess Waiting Time and item 98's vehicle-km-delivered rate. Migration `0041_route_performance_standards` adds a manually-populated `route_performance_standards` table (agency_id, route_code, metric_type in `ewt_sec`/`vehicle_km_delivered_pct`, threshold_value, bonus_malus_rate), following the same operator-populated-table convention as `ridership_weights`. `pipeline/reports/performance_standard.py`'s `compute_performance_standards` joins each configured row against `pipeline.reports.headway_quality`'s per-route EWT (`ewt_sec`, route-scoped) or `pipeline.reports.supply`'s vehicle-km-delivered rate (agency-scoped only, since no per-route breakdown exists — surfaced via a `metric_scope` field), and derives a signed relative deviation (`1.0` = exactly at standard, positive = bonus, negative = deduction) that's `None` for an unresolvable actual value or a zero threshold rather than a fabricated number. A new `GET /api/{agency_id}/performance_standards` endpoint and `PerformanceStandardPanel` frontend component (mounted alongside `HeadwayQualityPanel` on the `on_time` report tab) surface this, both carrying a server-rendered localized disclaimer plus a client-side i18n badge (`reports.performance_standard.simulation_badge`) making clear this is an internal simulation/estimate, never an actual invoice or contractual output. Verified: a synthetic route exactly at its EWT threshold and one exactly at its vehicle-km-delivered threshold both yield a zero estimate; routes below either threshold yield the expected signed deduction; a zero threshold and a route with no resolvable actual value both degrade to `None` rather than crashing. Backend: `poetry run ruff check`/`format --check`, `poetry run mypy` on all touched files, and the full `make test` suite against the throwaway `:5544` Postgres DB. Frontend: `npm run typecheck`, `npm run lint` (0 errors), `npm run lint:i18n`, `npm run lint:i18n-strings`, the full `npm run test` suite (571/571 passed), `npm run test:check-entry-chunk`, and `npm run build:bundle && npm run check:entry-chunk` (502.5 KiB entry static closure, MapLibre-free) — all clean. Resumed and shipped by a later `/vps-loop-run` tick after a human reconciled several stale stashes left on this worktree from an interrupted prior resume; both required `/review-branch` passes are now clean (one Minor perf finding — the `ewt_sec` resolution path recomputes headway quality over every high-frequency route instead of just the configured ones — and one Minor practices finding — an unused `MetricType` type alias — both non-blocking). (PR #366)

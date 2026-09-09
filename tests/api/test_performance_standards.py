@@ -19,11 +19,14 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.reports import service_delivered as service_delivered_module
+from pipeline.strategies import static_join as static_join_module
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture
-async def perf_client(apply_schema):
+async def perf_client(apply_schema, monkeypatch):
     from api.main import app
 
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -34,6 +37,10 @@ async def perf_client(apply_schema):
         "http://performance-standard-test.example.com",
     )
     aid = row["agency_id"]
+    # This fixture represents a feed already confirmed by the RT probe; the
+    # production set remains limited to agencies with observed live coverage.
+    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset({aid}))
+    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset({aid}))
 
     # ewt_sec fixtures: two high-frequency routes, both scheduled_wait_mean_sec
     # = 200.0, differing only in their pooled actual headway so the resulting

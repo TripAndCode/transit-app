@@ -16,16 +16,22 @@ this reads from, which lives against raw `updates`, not this module).
 
 Both ``executed_trips`` and ``service_delivered_pct`` are ``None`` ("not
 available") rather than a misleadingly perfect 100% whenever the ratio isn't
-computable: only feeds confirmed to send it populate
-``schedule_relationship_trip`` (today: the ``static_join`` ingest strategy;
-``aomori_regex`` always leaves it NULL), or there is no static schedule to
-plan against (``planned_trips == 0``).
+computable: only agencies in
+``pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``
+have been confirmed to actually populate ``schedule_relationship_trip`` on
+their live feed (``aomori_regex`` always leaves it NULL, and an
+``ingest_strategy == 'static_join'`` agency outside that confirmed set is
+untrusted until probed -- sharing the JOIN mechanism doesn't imply sharing
+field coverage, see that module's docstring), or there is no static schedule
+to plan against (``planned_trips == 0``).
 """
 
 from __future__ import annotations
 
 from datetime import date
 from typing import Any
+
+from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
 
 _PLANNED_TRIPS_SQL = """
     SELECT cd.agency_id, COUNT(*) AS planned
@@ -43,7 +49,12 @@ _NON_EXECUTED_TRIPS_SQL = """
     GROUP BY agency_id
 """
 
-_POPULATED_AGENCIES_SQL = "SELECT agency_id FROM agencies WHERE ingest_strategy = 'static_join'"
+# Real ingest_strategy check, kept as defense in depth alongside the
+# RT_FIELD_COVERAGE_CONFIRMED_AGENCIES intersection below -- an agency must
+# satisfy both: the ingest strategy that CAN send this field (RT_INGEST_
+# STRATEGIES), and the explicit confirmed-set gate that says it actually
+# DOES on its live feed.
+_POPULATED_AGENCIES_SQL = "SELECT agency_id FROM agencies WHERE ingest_strategy = ANY($1::text[])"
 
 
 async def compute_service_delivered_by_agency(
@@ -77,8 +88,12 @@ async def compute_service_delivered_by_agency(
     non_executed_rows = await conn.fetch(_NON_EXECUTED_TRIPS_SQL, from_date, to_date)
     non_executed = {r["agency_id"]: int(r["non_executed"]) for r in non_executed_rows}
 
-    populated_rows = await conn.fetch(_POPULATED_AGENCIES_SQL)
-    populated_ids = {r["agency_id"] for r in populated_rows}
+    # Intersect the real ingest_strategy check against the explicit
+    # pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+    # confirmed-set gate -- an agency must satisfy both, not just the ingest
+    # strategy that merely makes this field possible to send.
+    populated_rows = await conn.fetch(_POPULATED_AGENCIES_SQL, list(RT_INGEST_STRATEGIES))
+    populated_ids = {r["agency_id"] for r in populated_rows} & RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
 
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:

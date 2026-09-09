@@ -81,6 +81,7 @@ from pipeline.histogram import (
     bucket_case_sql,
     hist_array_sql,
 )
+from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
@@ -971,10 +972,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # other ingest_strategy is skipped entirely (zero rows here), which the
         # read path distinguishes from "confirmed zero cancellations" via
         # agencies.ingest_strategy, never via row presence in this table.
+        # Materialization here is gated on ingest_strategy alone, not on
+        # pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+        # -- sharing an ingest strategy does not by itself prove a given agency's
+        # feed actually populates these fields. Today this is safe because every
+        # reader of this table (pipeline.reports.service_delivered) re-applies
+        # that confirmed-agency intersection before returning data; any new
+        # direct reader of agg_service_delivered_daily must do the same or it
+        # will treat an unconfirmed agency's rows as trustworthy.
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
-        if row and row[0] == "static_join":
+        if row and row[0] in RT_INGEST_STRATEGIES:
             # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`
             # is NULL when picking the max -- it does not return NULL just
             # because the true latest (captured_at, file_name) row happens to
@@ -1086,8 +1095,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # (today: static_join; reuses `row` from the agg_service_delivered_daily
         # check just above) -- either missing means zero rows here, same
         # "row presence is not the availability signal, ingest_strategy is"
-        # convention as agg_service_delivered_daily.
-        if has_static and row and row[0] == "static_join":
+        # convention as agg_service_delivered_daily. Same read-side-only caveat
+        # applies: sharing ingest_strategy doesn't imply confirmed field
+        # coverage, so pipeline.reports.dwell_run's reader additionally
+        # intersects against RT_FIELD_COVERAGE_CONFIRMED_AGENCIES before
+        # trusting these rows.
+        if has_static and row and row[0] in RT_INGEST_STRATEGIES:
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
@@ -1191,14 +1204,19 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # `updates.stop_id` (see pipeline/headways.py's module docstring for
         # why the physical stop is the correct grouping for pooling across
         # trips), so -- like agg_service_delivered_daily above -- only an
-        # agency confirmed to populate stop_id (today: static_join;
+        # ingest strategy that CAN populate stop_id (today: static_join;
         # aomori_regex always leaves it NULL) gets any rows here. Skipped
         # entirely (zero rows) for any other ingest_strategy, same "row
-        # presence keyed off ingest_strategy" convention.
+        # presence is not the availability signal, ingest_strategy is"
+        # convention as agg_service_delivered_daily. Same read-side-only
+        # caveat applies: sharing ingest_strategy doesn't imply confirmed
+        # field coverage, so pipeline.reports.headway_quality's reader
+        # additionally intersects against RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+        # before trusting these rows.
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
-        if row and row[0] == "static_join":
+        if row and row[0] in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
             # that group's actual event times (seconds-of-day, scheduled_time
             # parsed + dep_delay) -- cardinality is bounded by routes × stops
