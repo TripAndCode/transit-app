@@ -21,7 +21,7 @@ _TRUNCATE_SQL = (
 
 
 @pytest.fixture
-async def net_pool(apply_schema):
+async def net_pool(apply_schema, monkeypatch):
     # In-process compute cache is keyed on (from_date, to_date) only, so two
     # tests sharing a date range would leak results — clear it per test.
     compute_network_summary.cache_clear()
@@ -32,6 +32,7 @@ async def net_pool(apply_schema):
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
         cc = await c.fetchrow(ins, "C", "http://nc")
+    _trust_service_delivered(monkeypatch, a["agency_id"], b["agency_id"], cc["agency_id"])
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
         await c.execute(_TRUNCATE_SQL)

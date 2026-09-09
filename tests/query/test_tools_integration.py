@@ -456,7 +456,7 @@ async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_cli
 
 @pytest.mark.asyncio
 async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_agency(
-    aconn, aagency_id, ch_client, ch_async_client
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
 ):
     """dispatch('schedule_realism', ...) for a `static_join` agency with a
     static schedule must return the richer padding view (scheduled vs
@@ -472,6 +472,9 @@ async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_ag
     itself.
     """
     from pipeline.clickhouse import insert_updates
+    from pipeline.strategies import static_join as static_join_module
+
+    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset({aagency_id}))
 
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
     await aconn.execute(
