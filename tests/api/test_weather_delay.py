@@ -45,8 +45,7 @@ async def weather_client(apply_schema):
         yield client, aid, pool
     async with pool.acquire() as conn:
         await conn.execute(
-            "TRUNCATE agencies, agg_route_daily, agency_weather_stations, "
-            "weather_daily_observations CASCADE"
+            "TRUNCATE agencies, agg_route_daily, agency_weather_stations, weather_daily_observations CASCADE"
         )
     await pool.close()
 

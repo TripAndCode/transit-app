@@ -255,7 +255,9 @@ class WeatherStation(BaseModel):
     weather comparison is keyed to (`agency_weather_stations`). `note` is the
     operator's own record of WHY this station represents this service area, so
     the figure can state what it is actually keyed to instead of implying
-    service-area-wide weather."""
+    service-area-wide weather. Like the rest of this response it is public --
+    returned verbatim to unauthenticated callers -- which is what the column's
+    contract states it is for; it never carries internal-only content."""
 
     station_id: str
     station_name: str

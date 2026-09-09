@@ -13,8 +13,8 @@
 -- Attribution travels with the derived figures, not just with the raw rows:
 -- the source (JMA / 気象庁) AND the fact that the daily totals/averages are
 -- computed here from its sub-hourly observations must both be stated
--- wherever the metric is shown (see pipeline.weather.JMA_ATTRIBUTION, which
--- the report response carries to the client).
+-- wherever the metric is shown (see pipeline.weather.attribution, which the
+-- report response carries to the client).
 
 -- One representative station per agency (PK on agency_id), populated by an
 -- operator -- the same convention as ridership_weights (0035) and
@@ -25,10 +25,15 @@
 -- agency with no row here has no weather metric at all (the report reads
 -- "not available"), never a silently guessed nearest station.
 --
--- `note` records WHY this station represents this agency, so the choice
--- stays auditable and the metric can honestly describe what it is keyed to.
--- Several agencies may share one station_id; that is expected for operators
--- covering the same city.
+-- `note` records WHY this station represents this agency, so the metric can
+-- honestly describe what it is keyed to. It is PUBLIC, not an internal audit
+-- field: the unauthenticated report endpoint returns it verbatim to every
+-- caller, because the whole point of the column is to let the rendered figure
+-- say which point it speaks for. Write it as operator-facing prose meant to be
+-- read by anyone who can see the report -- never internal-only content
+-- (contract or contact details, staff names, incident references). Several
+-- agencies may share one station_id; that is expected for operators covering
+-- the same city.
 CREATE TABLE IF NOT EXISTS agency_weather_stations (
     agency_id    INTEGER PRIMARY KEY REFERENCES agencies(agency_id),
     station_id   TEXT NOT NULL,

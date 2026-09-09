@@ -11,9 +11,12 @@ from pipeline.reports.weather import (
     summarize_rain_delay,
 )
 from pipeline.weather import (
+    _MAX_BLOCK_BYTES,
+    _MAX_DAY_BYTES,
     REVISION_RECHECK_DAYS,
     aggregate_daily,
     attribution,
+    fetch_daily_observation,
     needs_fetch,
 )
 
@@ -75,6 +78,57 @@ def test_aggregate_daily_rejects_a_day_with_a_non_normal_quality_flag():
     last = max(readings)
     readings[last] = {"precipitation10m": [None, 5], "temp": [20.0, 0]}
     assert aggregate_daily("99999", _DAY, readings) is None
+
+
+def test_aggregate_daily_rejects_non_finite_readings():
+    """NaN/Infinity must never reach storage: Postgres evaluates both
+    `'NaN'::float8 >= 0` and `'Infinity'::float8 >= 0` as true, so the CHECK on
+    precip_mm cannot stop them, and one such reading makes the day's sum
+    non-finite -- a permanently wrong total that mis-files the day as rainy and
+    poisons the wet side's rainfall average. Rejecting them here fails the day
+    like any other unusable slot."""
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        readings = _readings(_DAY, precip_per_slot=0.5)
+        readings[max(readings)] = {"precipitation10m": [bad, 0], "temp": [20.0, 0]}
+        assert aggregate_daily("99999", _DAY, readings) is None
+
+
+def test_aggregate_daily_drops_a_non_finite_temperature_without_losing_the_day():
+    """Temperature is optional, so a non-finite one is dropped like any other
+    unusable temperature reading rather than failing the day -- but it must not
+    leak into the mean/extrema either."""
+    readings = _readings(_DAY, precip_per_slot=0.5)
+    for fields in readings.values():
+        fields["temp"] = [float("inf"), 0]
+    obs = aggregate_daily("99999", _DAY, readings)
+    assert obs is not None
+    assert obs.precip_mm == 72.0
+    assert obs.temp_avg_c is None
+    assert obs.temp_max_c is None
+    assert obs.temp_min_c is None
+
+
+def test_fetch_daily_observation_bounds_the_merged_blocks(monkeypatch):
+    """A station-day merges nine blocks into one dict, in a process that is
+    long-lived on the cron path, so the per-block cap alone is not the bound
+    that matters: the remaining day budget must shrink as blocks are read and
+    the day be abandoned once it is spent, rather than accumulating nine
+    per-block-sized bodies."""
+    import pipeline.weather as weather
+
+    caps: list[int] = []
+
+    def _fake_block(station_id, day, hour, max_bytes):
+        caps.append(max_bytes)
+        # Each block consumes its whole allowance.
+        return ({}, max_bytes)
+
+    monkeypatch.setattr(weather, "_fetch_block", _fake_block)
+    assert fetch_daily_observation("99999", _DAY) is None
+    assert sum(caps) <= _MAX_DAY_BYTES
+    assert caps and caps[0] == min(_MAX_BLOCK_BYTES, _MAX_DAY_BYTES)
+    # Fewer than the nine blocks a day would otherwise read: the budget ran out.
+    assert len(caps) < 9
 
 
 def test_aggregate_daily_ignores_readings_outside_the_day_window():
@@ -204,8 +258,8 @@ def test_summarize_rain_delay_unavailable_when_no_day_could_be_matched():
 
 
 def test_summarize_rain_delay_available_with_no_delta_when_no_rainy_days():
-    """"No rainy days in this period" is a real answer, not missing data: the
-    dry side is still reported, the difference is not invented."""
+    """A window containing no rainy days is a real answer, not missing data:
+    the dry side is still reported, the difference is not invented."""
     out = summarize_rain_delay(
         [_bucket(False, days=30, samples=6000, sum_delay_sec=180_000, avg_precip_mm=0.0)],
         _STATION,

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import urllib.error
 from collections.abc import Mapping
@@ -97,6 +98,15 @@ _NORMAL_QUALITY_FLAG = 0
 # unbounded body into memory (url_guard's own default cap is sized for GTFS
 # static zips, far too generous for a small JSON document).
 _MAX_BLOCK_BYTES = 8 * 1024 * 1024
+
+# Bound on the SUM of the nine blocks a single station-day merges into one
+# dict. A per-block cap alone lets an endpoint serving nine merely-large
+# bodies hold nine times that much at once, and this ingest also runs inside
+# the long-lived API process (the cron path in api.routers.internal), so the
+# peak that matters is the merged total, not any one response. Still orders of
+# magnitude above a real day's payload; exceeding it aborts the day rather
+# than truncating it, since a partial day is never written anyway.
+_MAX_DAY_BYTES = 16 * 1024 * 1024
 _FETCH_TIMEOUT_SEC = 20.0
 
 # How far back a stored day is still re-fetched to pick up source revisions.
@@ -140,7 +150,17 @@ def _usable(entry: Any) -> float | None:
         return None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        # NaN/Infinity are rejected here rather than left to the storage
+        # layer: Postgres evaluates both `'NaN'::float8 >= 0` and
+        # `'Infinity'::float8 >= 0` as true, so the CHECK on precip_mm cannot
+        # catch them. One such reading in a day's sum makes the whole daily
+        # total non-finite, which stores as a permanently wrong precip_mm,
+        # mis-files the day as rainy, and turns the entire wet side's rainfall
+        # average into a non-finite value.
+        return None
+    return number
 
 
 def _day_window(obs_date: date) -> tuple[str, str]:
@@ -225,8 +245,13 @@ def aggregate_daily(
     )
 
 
-def _fetch_block(station_id: str, day: date, hour: int) -> dict[str, Any] | None:
-    """Fetch one published 3-hour block, or ``None`` if it can't be read.
+def _fetch_block(station_id: str, day: date, hour: int, max_bytes: int) -> tuple[dict[str, Any], int] | None:
+    """Fetch one published 3-hour block as ``(payload, bytes_read)``, or ``None``.
+
+    *max_bytes* is the caller's remaining budget for this station-day, already
+    clamped to `_MAX_BLOCK_BYTES`; a body over it raises inside `safe_urlopen`
+    and degrades to ``None`` like any other unreadable block. The byte count
+    is returned so the caller can debit its running total.
 
     Every failure mode degrades to ``None`` rather than raising: a block that
     isn't published yet (or has aged out of the source's rolling retention) is
@@ -235,8 +260,9 @@ def _fetch_block(station_id: str, day: date, hour: int) -> dict[str, Any] | None
     """
     url = _POINT_URL.format(station_id=station_id, ymd=day.strftime("%Y%m%d"), hour=hour)
     try:
-        with safe_urlopen(url, timeout=_FETCH_TIMEOUT_SEC, max_bytes=_MAX_BLOCK_BYTES) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        with safe_urlopen(url, timeout=_FETCH_TIMEOUT_SEC, max_bytes=max_bytes) as resp:
+            raw = resp.read()
+            payload = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 404:
             logger.debug("weather: no published block for station %s %s hour %02d", station_id, day, hour)
@@ -251,7 +277,7 @@ def _fetch_block(station_id: str, day: date, hour: int) -> dict[str, Any] | None
     if not isinstance(payload, dict):
         logger.warning("weather: unexpected payload shape for station %s %s hour %02d", station_id, day, hour)
         return None
-    return payload
+    return payload, len(raw)
 
 
 def fetch_daily_observation(station_id: str, obs_date: date) -> DailyObservation | None:
@@ -261,15 +287,31 @@ def fetch_daily_observation(station_id: str, obs_date: date) -> DailyObservation
     (see `_BLOCK_HOURS`). A missing block short-circuits to ``None`` instead of
     aggregating what did arrive -- the day is either wholly available or left
     for a later pass.
+
+    The blocks are merged into one dict, so `_MAX_DAY_BYTES` bounds their
+    combined size: each block is fetched with whatever is left of that budget
+    (never more than `_MAX_BLOCK_BYTES`), and a station-day that would exceed
+    it is abandoned rather than accumulated.
     """
     blocks: list[tuple[date, int]] = [(obs_date, h) for h in _BLOCK_HOURS]
     blocks.append((obs_date + timedelta(days=1), 0))
 
     readings: dict[str, Any] = {}
+    remaining = _MAX_DAY_BYTES
     for day, hour in blocks:
-        payload = _fetch_block(station_id, day, hour)
-        if payload is None:
+        if remaining <= 0:
+            logger.warning(
+                "weather: station %s %s exceeded the %d-byte per-day fetch budget; skipping the day",
+                station_id,
+                obs_date,
+                _MAX_DAY_BYTES,
+            )
             return None
+        fetched = _fetch_block(station_id, day, hour, min(_MAX_BLOCK_BYTES, remaining))
+        if fetched is None:
+            return None
+        payload, n_bytes = fetched
+        remaining -= n_bytes
         readings.update(payload)
     return aggregate_daily(station_id, obs_date, readings)
 
