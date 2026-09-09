@@ -1,5 +1,7 @@
 from datetime import datetime, time, timezone
 
+import pytest
+
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from tests.conftest import mirror_updates_to_ch
@@ -1018,6 +1020,111 @@ def test_analyze_service_delivered_daily_latest_stop_observation_wins_over_stale
     assert row[0] == 1  # only T2; T1's correction must not resurrect the stale SKIPPED flag
 
 
+def _seed_route_headway_schedule(pg_conn, agency_id, route_id, service_id, stop_id, departure_times):
+    """Seed one route's static schedule: one trip per entry in
+    *departure_times* (GTFS "HH:MM:SS" text), all under *service_id*, all
+    calling at *stop_id* -- gives pipeline.analyze's agg_route_headway
+    builder consecutive departures to diff. Also seeds a matching
+    static_stops row so `_static_loaded` (has_static) sees this agency."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (agency_id, stop_id, stop_id),
+        )
+        cur.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES (%s, %s, %s) "
+            "ON CONFLICT DO NOTHING",
+            (agency_id, route_id, route_id),
+        )
+        for i, dep in enumerate(departure_times):
+            trip_id = f"{route_id}_T{i}"
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+                (agency_id, trip_id, route_id, service_id),
+            )
+            cur.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                "VALUES (%s, %s, 1, %s, %s)",
+                (agency_id, trip_id, stop_id, dep),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, agency_id, ch_client):
+    """An ~8-minute scheduled-headway route is classified high-frequency; a
+    30-minute one is not. Purely static-schedule-derived -- no RT `updates`
+    data is seeded at all, confirming agg_route_headway doesn't depend on
+    ClickHouse history."""
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R_FREQ",
+        "WD",
+        "s1",
+        ["08:00:00", "08:08:00", "08:16:00", "08:24:00", "08:32:00"],
+    )
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R_SLOW",
+        "WD",
+        "s1",
+        ["08:00:00", "08:30:00", "09:00:00"],
+    )
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency, scheduled_wait_mean_sec "
+            "FROM agg_route_headway WHERE agency_id = %s ORDER BY route_code",
+            (agency_id,),
+        )
+        by_route = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+
+    freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
+    assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
+    assert freq_hf is True
+    # Perfectly regular headway -> mean wait reduces to headway/2 (item 94's
+    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
+    assert abs(freq_wait - 240) < 1
+
+    slow_median, slow_hf, slow_wait = by_route["R_SLOW"]
+    assert abs(slow_median - 1800) < 1  # hand-computed: 1800s (30 min) between every pair
+    assert slow_hf is False
+    assert abs(slow_wait - 900) < 1
+
+
+def _ch_headway_row(
+    trip_id,
+    captured_at,
+    *,
+    stop_id,
+    scheduled_time="08:00:00",
+    dep_delay=0,
+    file_name="f.pb",
+    route_code="R1",
+    stop_sequence=1,
+):
+    """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
+    (agency_id excluded), with only the fields agg_route_headway_daily reads
+    populated."""
+    return (
+        file_name,
+        captured_at,
+        trip_id,
+        "平日",
+        scheduled_time,
+        route_code,
+        stop_sequence,
+        dep_delay,
+        stop_id,
+        None,  # arr_delay
+        None,  # schedule_relationship_trip
+        None,  # schedule_relationship_stop
+        None,  # feed_timestamp
+    )
+
+
 def _ch_dwell_run_row(
     trip_id,
     captured_at,
@@ -1048,6 +1155,160 @@ def _ch_dwell_run_row(
         None,  # schedule_relationship_stop
         None,  # feed_timestamp
     )
+
+
+def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, agency_id, ch_client):
+    """Three trips at the same stop_id on the same route, actual (scheduled
+    + dep_delay) departures 8 minutes apart -- a low-noise fixture whose
+    reconstructed median headway must land within a few seconds of the
+    hand-computed 480s value."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:03", dep_delay=-3, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
+            "actual_headway_sumsq_sec2, long_gap_count FROM agg_route_headway_daily "
+            "WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    median_sec, samples, sum_sec, sumsq_sec2, long_gap_count = row
+    assert samples == 2  # 3 events -> 2 consecutive gaps
+    assert abs(median_sec - 480) <= 3
+    # Both gaps land exactly on 480s -- sum/sumsq are the item 94 sufficient
+    # statistics behind that same median, additive across days (see
+    # pipeline.headways module docstring).
+    assert abs(sum_sec - 960) <= 6
+    assert abs(sumsq_sec2 - 460800) <= 6000
+    # No static schedule seeded for R1 in this fixture -> no scheduled
+    # median to compare against -> nothing is countable as "long" yet.
+    assert long_gap_count == 0
+
+
+def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_route(pg_conn, agency_id, ch_client):
+    """A looping/branching route can visit the same physical stop_id twice
+    within one trip, at two different stop_sequence values. The per-event
+    dedup must key on (trip_id, stop_sequence), not trip_id alone, so both
+    visits survive as distinct events -- collapsing them via argMax on
+    trip_id alone would silently discard one real departure."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    rows = [
+        # T1 revisits stop s1 twice within its own trip (stop_sequence 1 and 5),
+        # ten minutes apart -- two distinct real events sharing the same trip_id.
+        _ch_headway_row(
+            "T1",
+            day,
+            stop_id="s1",
+            scheduled_time="08:00:00",
+            dep_delay=0,
+            file_name="a.pb",
+            stop_sequence=1,
+        ),
+        _ch_headway_row(
+            "T1",
+            day,
+            stop_id="s1",
+            scheduled_time="08:10:00",
+            dep_delay=0,
+            file_name="b.pb",
+            stop_sequence=5,
+        ),
+        # T2 makes a single, ordinary visit to the same stop.
+        _ch_headway_row(
+            "T2",
+            day,
+            stop_id="s1",
+            scheduled_time="08:20:00",
+            dep_delay=0,
+            file_name="c.pb",
+            stop_sequence=1,
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_headway_median_sec, actual_samples FROM agg_route_headway_daily "
+            "WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    median_sec, samples = row
+    # 3 distinct events (08:00, 08:10, 08:20) -> 2 consecutive gaps. A buggy
+    # dedup that collapses T1's two stop_sequence values into one event would
+    # only see 2 events -> 1 sample.
+    assert samples == 2
+    assert abs(median_sec - 600) <= 3
+
+
+def test_analyze_reconstructs_actual_headway_long_gap_count_against_scheduled_median(pg_conn, agency_id, ch_client):
+    """A route classified high-frequency by its static schedule (8-minute /
+    480s scheduled headway) whose RT-reconstructed gaps for one day show a
+    bunched pair (30s) followed by a compensating long gap (900s, over
+    1.75 * 480s = 840s) -- long_gap_count must count only the 900s gap,
+    read back from agg_route_headway (inserted earlier in the SAME
+    analyze() transaction) as the scheduled reference."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_route_headway_schedule(
+        pg_conn,
+        agency_id,
+        "R1",
+        "WD",
+        "s1",
+        ["08:00:00", "08:08:00", "08:16:00", "08:24:00", "08:32:00"],
+    )
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:00:30", dep_delay=0, file_name="b.pb"),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:15:30", dep_delay=0, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT actual_samples, actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count "
+            "FROM agg_route_headway_daily WHERE agency_id = %s AND route_code = 'R1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    samples, sum_sec, sumsq_sec2, long_gap_count = row
+    assert samples == 2  # gaps: 30s, 900s
+    assert abs(sum_sec - 930) <= 3
+    assert abs(sumsq_sec2 - (30 * 30 + 900 * 900)) <= 3000
+    assert long_gap_count == 1  # only the 900s gap exceeds 1.75 * 480 = 840
+
+
+def test_analyze_skips_agg_route_headway_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
+    """Mirrors agg_service_delivered_daily's equivalent guard: an agency
+    whose ingest_strategy isn't static_join never gets a row here, since
+    stop_id is only confirmed populated for static_join feeds."""
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)  # agency_id fixture leaves ingest_strategy NULL
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM agg_route_headway_daily WHERE agency_id = %s", (agency_id,))
+        count = cur.fetchone()[0]
+    assert count == 0
 
 
 def _seed_dwell_run_schedule(pg_conn, agency_id, trip_id):
@@ -1254,3 +1515,174 @@ def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_ne
     assert dwell_sum_sec == 0
     assert run_samples == 0
     assert run_sum_sec == 0
+
+
+def _seed_static_version(pg_conn, agency_id, version, trip_shape_pairs):
+    """Load one static-feed "version" fixture: `static_trips` rows (all
+    stamped `static_version_id=version`, mirroring `static_loader.
+    load_static()`'s one-value-per-load convention) from
+    `trip_shape_pairs` -- a list of `(trip_id, shape_id_or_None)`.
+
+    Also requires `static_stops` to have a row (has_static's gate) -- callers
+    that already seeded one elsewhere don't need to call this twice.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Test Stop') "
+            "ON CONFLICT DO NOTHING",
+            (agency_id,),
+        )
+        for trip_id, shape_id in trip_shape_pairs:
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id, static_version_id) "
+                "VALUES (%s, %s, 'R1', %s, %s)",
+                (agency_id, trip_id, shape_id, version),
+            )
+    pg_conn.commit()
+
+
+def _seed_static_shape(pg_conn, agency_id, shape_id, points):
+    """points: list of (lon, lat) in sequence order."""
+    placeholders = ",".join("ST_MakePoint(%s, %s)" for _ in points)
+    flat = [v for lon, lat in points for v in (lon, lat)]
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO static_shapes (agency_id, shape_id, geom) "
+            f"VALUES (%s, %s, ST_SetSRID(ST_MakeLine(ARRAY[{placeholders}]), 4326))",
+            [agency_id, shape_id, *flat],
+        )
+    pg_conn.commit()
+
+
+def test_analyze_builds_agg_static_version_summary_with_trip_count_and_vehicle_km(pg_conn, agency_id, ch_client):
+    """trip_count counts every static_trips row regardless of shape
+    presence; vehicle_km sums only the trips whose shape_id resolves in
+    static_shapes (T3 has none -- excluded from the sum, not aborting it)."""
+    _seed_static_shape(pg_conn, agency_id, "SH1", [(139.0, 35.0), (139.0, 35.01)])
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", "SH1"), ("T2", "SH1"), ("T3", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_count, vehicle_km FROM agg_static_version_summary "
+            "WHERE agency_id = %s AND static_version_id = 'v1'",
+            (agency_id,),
+        )
+        row = cur.fetchone()
+        cur.execute(
+            "SELECT ST_Length(ST_SetSRID(ST_MakeLine(ST_MakePoint(139.0, 35.0), "
+            "ST_MakePoint(139.0, 35.01)), 4326)::geography) / 1000.0"
+        )
+        (one_shape_km,) = cur.fetchone()
+    assert row is not None
+    trip_count, vehicle_km = row
+    assert trip_count == 3
+    assert vehicle_km == pytest.approx(one_shape_km * 2, rel=1e-9)
+
+
+def test_analyze_static_version_summary_vehicle_km_null_without_any_shapes(pg_conn, agency_id, ch_client):
+    """No shapes.txt loaded at all -> vehicle_km reads NULL (not 0), so a
+    reader can distinguish "not computable" from "zero planned distance"."""
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT trip_count, vehicle_km FROM agg_static_version_summary WHERE agency_id = %s",
+            (agency_id,),
+        )
+        trip_count, vehicle_km = cur.fetchone()
+    assert trip_count == 1
+    assert vehicle_km is None
+
+
+def test_analyze_static_version_summary_preserves_history_across_reload(pg_conn, agency_id, ch_client):
+    """A static reload (static_loader.load_static() DELETEs + replaces
+    static_trips for the agency) must not erase the PRIOR version's row
+    here -- this table is UPSERT-only, exempt from the wipe-and-rewrite loop
+    every other agg_* table follows, specifically so a schedule-revision
+    boundary can be explained by a real before/after change in planned
+    trips. Two different static GTFS versions with a known change in total
+    scheduled trips (2 -> 3) must produce two different, both-still-present
+    planned-trip-count rows."""
+    _seed_static_version(pg_conn, agency_id, "v1", [("T1", None), ("T2", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    # Simulate static_loader.load_static() reloading a new version: wipe and
+    # replace static_trips for this agency, same as its own DELETE-then-INSERT.
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM static_trips WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    _seed_static_version(pg_conn, agency_id, "v2", [("T3", None), ("T4", None), ("T5", None)])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT static_version_id, trip_count FROM agg_static_version_summary "
+            "WHERE agency_id = %s ORDER BY static_version_id",
+            (agency_id,),
+        )
+        rows = {v: n for v, n in cur.fetchall()}
+    assert rows == {"v1": 2, "v2": 3}
+
+
+def _ch_schedule_revision_row(trip_id, captured_at, static_version_id, *, file_name):
+    """One ClickHouse `updates` row stamped with a given static_version_id
+    (agency_id excluded, shaped for `pipeline.clickhouse.insert_updates`) --
+    everything else is a plausible-but-unused filler."""
+    return (
+        file_name,
+        captured_at,
+        trip_id,
+        "平日",
+        "11:00:00",
+        "R1",
+        1,
+        60,
+        None,  # stop_id
+        None,  # arr_delay
+        None,  # schedule_relationship_trip
+        None,  # schedule_relationship_stop
+        None,  # feed_timestamp
+        None,  # scheduled_sec
+        static_version_id,
+    )
+
+
+def test_analyze_builds_agg_schedule_revision_daily_dominant_version_per_day(pg_conn, agency_id, ch_client):
+    """Per-day dominant static_version_id is the version stamped on the MOST
+    rows that day (mode), not the latest single observation -- day2 mixes 1
+    'v1' row with 2 'v2' rows (simulating a mid-day reload), so 'v2' wins."""
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)  # 2026-05-01 11:00 JST
+    day2 = datetime(2026, 5, 2, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_schedule_revision_row("T1", day1, "v1", file_name="d1t1.pb"),
+        _ch_schedule_revision_row("T2", day2, "v1", file_name="d2t1.pb"),
+        _ch_schedule_revision_row("T3", day2, "v2", file_name="d2t2.pb"),
+        _ch_schedule_revision_row("T4", day2, "v2", file_name="d2t3.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, static_version_id FROM agg_schedule_revision_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): v for d, v in cur.fetchall()}
+    assert by_date == {"2026-05-01": "v1", "2026-05-02": "v2"}
+
+
+def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always_null(pg_conn, agency_id, ch_client):
+    """An ingest strategy that never sets static_version_id (e.g.
+    aomori_regex) -- or any day predating item 88's rollout -- must get NO
+    row here, never a NULL-version row a boundary could be misdrawn against."""
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [_ch_schedule_revision_row("T1", day1, None, file_name="d1t1.pb")]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM agg_schedule_revision_daily WHERE agency_id = %s", (agency_id,))
+        count = cur.fetchone()[0]
+    assert count == 0

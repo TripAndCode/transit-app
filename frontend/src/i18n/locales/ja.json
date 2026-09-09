@@ -146,7 +146,11 @@
     "ridership_weighted_toggle": "利用者数で重み付け",
     "col_on_time_weighted": "定時率（利用者数で重み付け）",
     "on_time_weighted_suffix": "（重み付け）",
-    "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。"
+    "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。",
+    "col_vehicle_km_delivered": "走行キロ達成率",
+    "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行達成率」も参照）。",
+    "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
+    "schedule_version_title": "静的ダイヤバージョン: {{version}}"
   },
   "definitionMeta": {
     "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
@@ -613,6 +617,11 @@
       "hour": "時",
       "next_stop_sequence": "次の停留所順",
       "avg_added_min": "追加遅延(分)",
+      "scheduled_run_min": "所要時間(時刻表・分)",
+      "actual_run_p50_min": "所要時間(実績中央値・分)",
+      "actual_run_p85_min": "所要時間(実績p85・分)",
+      "padding_min": "余裕時間(分)",
+      "time_adjustment_rate": "調整停車率",
       "low_confidence": "確信度"
     },
     "low_confidence_mark": "幅あり",
@@ -986,7 +995,9 @@
       "smoothed_tooltip": "7日移動平均{{min}}分",
       "smoothed_label": "- - - 7日移動平均",
       "worst_label": "悪化:",
-      "offender": "路線{{code}}({{min}}分)"
+      "offender": "路線{{code}}({{min}}分)",
+      "revision_boundary_label": "ダイヤ改正",
+      "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました"
     },
     "dwell_run": {
       "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",
@@ -1000,6 +1011,18 @@
         "run_p50": "走行p50",
         "run_p90": "走行p90",
         "run_samples": "走行観測数"
+      }
+    },
+    "headway_quality": {
+      "title": "運行間隔の質",
+      "subtitle": "この事業者の高頻度路線（計画運行間隔12分以内）について、超過待ち時間・間隔のばらつき・大きな間隔あきの発生率を表示します。",
+      "empty": "この期間で十分なデータがある高頻度路線がありません。",
+      "col": {
+        "route": "路線",
+        "ewt": "超過待ち時間",
+        "cov": "間隔のばらつき(CoV)",
+        "long_gap_rate": "大きな間隔あきの発生率",
+        "samples": "観測数"
       }
     }
   },

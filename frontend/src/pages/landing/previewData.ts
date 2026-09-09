@@ -7,7 +7,7 @@
 
 export type PreviewAgencyKey = "riverside" | "harborline" | "hillcrest";
 
-export type PreviewAgency = {
+type PreviewAgency = {
   key: PreviewAgencyKey;
   /** i18n key for the display name -- kept as translated copy (not a raw
    *  string in source) purely for consistency with every other user-facing
@@ -23,7 +23,7 @@ export const PREVIEW_AGENCIES: PreviewAgency[] = [
   { key: "hillcrest", nameKey: "landing.preview.agency.hillcrest", avgDelayMin: 3.9, onTimePct: 78 },
 ];
 
-export type PreviewRoute = { code: string; delayMin: number; onTime: boolean };
+type PreviewRoute = { code: string; delayMin: number; onTime: boolean };
 
 // One route pair per agency (on-time/at-risk) so the Overview panel's filter
 // chips ("all" / "on-time" / "delayed") always have at least one match in
@@ -71,7 +71,7 @@ export const PREVIEW_HOURLY = [
   { hour: 21, delayMin: 1.0 },
 ] as const;
 
-export type PreviewObservation = {
+type PreviewObservation = {
   routeCode: string;
   stopN: number;
   delayMin: number;
@@ -88,7 +88,7 @@ export const PREVIEW_OBSERVATIONS: PreviewObservation[] = [
   { routeCode: "R1", stopN: 7, delayMin: 1.1, minutesAgo: 14 },
 ];
 
-export type PreviewAskExchange = { questionKey: string; answerKey: string };
+type PreviewAskExchange = { questionKey: string; answerKey: string };
 
 // Canned question/answer pairs for the Ask preview's suggestion chips. Real
 // Ask routing (rules -> embedding nearest-neighbour -> RAG LLM, per

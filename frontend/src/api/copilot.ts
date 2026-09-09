@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import type { RangeCtx } from "./rangeContext";
 
-export type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
+type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
 export const DEBOUNCE_MS = 800;
 

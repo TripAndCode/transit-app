@@ -677,6 +677,71 @@ async def test_reports_trend_reads_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client, ch_client):
+    """Item 98: a static feed reload visible in `updates.static_version_id`
+    surfaces as a `revision_boundaries` date on the trend report, so a
+    metric shift there isn't misread as a service-quality change.
+
+    2026-05-01/02 are stamped 'v1', 2026-05-03 is stamped 'v2' -> the only
+    boundary in range is 2026-05-03. Rows carry no delay content beyond what
+    the static_version_id builder needs (that builder doesn't depend on
+    agg_daily_trend's own >5-samples-per-group gate at all)."""
+    import os
+    from datetime import datetime, timezone
+
+    import psycopg2
+
+    from pipeline.clickhouse import insert_updates
+
+    client, agency_id, _pool = reports_client
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)  # 2026-05-01 11:00 JST
+    day2 = datetime(2026, 5, 2, 2, 0, tzinfo=timezone.utc)
+    day3 = datetime(2026, 5, 3, 2, 0, tzinfo=timezone.utc)
+
+    def _row(trip_id, captured_at, version, file_name):
+        return (
+            file_name,
+            captured_at,
+            trip_id,
+            "平日",
+            "11:00:00",
+            "R_REV",
+            1,
+            60,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            version,
+        )
+
+    rows = [
+        _row("T1", day1, "v1", "r1.pb"),
+        _row("T2", day2, "v1", "r2.pb"),
+        _row("T3", day3, "v2", "r3.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        from pipeline.analyze import analyze
+
+        analyze(agency_id, conn, ch_client)
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = await client.get(f"/api/{agency_id}/reports/trend?from=2026-05-01&to=2026-05-03")
+    assert resp.status_code == 200
+    rows_out = resp.json()["rows"]
+    assert rows_out[0]["revision_boundaries"] == ["2026-05-03"]
+
+
+@pytest.mark.asyncio
 async def test_reports_dow_keeps_null_service_routes(reports_client, ch_client):
     """NULL-service routes (広島's unmatched rows) must still appear in dow —
     agg_daily_trend keeps them via the '' sentinel, mapped back to None. Guards

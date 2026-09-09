@@ -22,7 +22,9 @@ def _round2(x: float) -> Decimal:
     return Decimal(str(x)).quantize(_MIN, rounding=ROUND_HALF_UP)
 
 
-def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
+def _dedup_cte_ch(
+    ctx: RangeCtx, *, include_arr_delay: bool = False, include_scheduled_sec: bool = False
+) -> tuple[str, dict]:
     """ClickHouse-dialect dedup CTE builder.
 
     Wraps the shared latest-by-captured_at dedup SQL (`build_dedup_ch_sql`)
@@ -31,6 +33,14 @@ def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
     helper that needs the live (non-aggregated) `updates` table goes
     through this one builder so the dedup+filter shape can't drift between
     call sites.
+
+    ``include_arr_delay``/``include_scheduled_sec`` forward straight to
+    `build_dedup_ch_sql` — pass ``include_arr_delay`` when the caller needs
+    the `arr_delay` column (e.g. a live dwell/running-time decomposition) and
+    ``include_scheduled_sec`` when it needs an hour-of-day bucket that
+    doesn't silently drop after-midnight extended-hour trips (see that
+    function's own docstring). Both default to omitted since most callers
+    only ever read `dep_delay`.
 
     Returns ``(cte_sql, parameters)`` instead of a bare CTE fragment string,
     because ClickHouse parameters are a ``{name: value}`` dict passed to
@@ -42,7 +52,13 @@ def _dedup_cte_ch(ctx: RangeCtx) -> tuple[str, dict]:
     ``pipeline.reports.rankings._route_wd_we_avg_ch``).
     """
     where, params = build_updates_filter_ch(ctx)
-    cte_sql = f"deduped AS ({build_dedup_ch_sql(extra_where=where, include_captured_at=False)})"
+    body = build_dedup_ch_sql(
+        extra_where=where,
+        include_captured_at=False,
+        include_arr_delay=include_arr_delay,
+        include_scheduled_sec=include_scheduled_sec,
+    )
+    cte_sql = f"deduped AS ({body})"
     return cte_sql, params
 
 

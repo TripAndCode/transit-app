@@ -25,11 +25,11 @@ ingest strategies can produce a row with no resolvable route. A non-nullable
 column here would reject those rows outright (DataError on insert), silently
 losing whole files instead of the row-level gap Postgres tolerated.
 
-Adding a brand-new nullable column (e.g. stop_id, arr_delay,
-schedule_relationship_trip, schedule_relationship_stop, feed_timestamp) is
-different from the type-migration case above: apply_schema runs an
-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for each entry in
-_NEW_NULLABLE_COLUMNS on every call, unconditionally, alongside the
+Adding a brand-new nullable column (e.g. scheduled_sec, stop_id, arr_delay,
+schedule_relationship_trip, schedule_relationship_stop, feed_timestamp,
+static_version_id) is different from the type-migration case above:
+apply_schema runs an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for each
+entry in _NEW_NULLABLE_COLUMNS on every call, unconditionally, alongside the
 CREATE TABLE IF NOT EXISTS. That statement is idempotent (a no-op once the
 column exists) and metadata-only against ClickHouse's MergeTree engine (it
 does not rewrite existing parts, unlike the MODIFY COLUMN migration above),
@@ -54,11 +54,13 @@ SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
 # added; a table created fresh from CREATE TABLE IF NOT EXISTS already has
 # every column schema.sql declares.
 _NEW_NULLABLE_COLUMNS = [
+    ("scheduled_sec", "Nullable(Int32)"),
     ("stop_id", "LowCardinality(Nullable(String))"),
     ("arr_delay", "Nullable(Int32)"),
     ("schedule_relationship_trip", "Nullable(UInt8)"),
     ("schedule_relationship_stop", "Nullable(UInt8)"),
     ("feed_timestamp", "Nullable(UInt64)"),
+    ("static_version_id", "LowCardinality(Nullable(String))"),
 ]
 
 

@@ -19,6 +19,7 @@ import type {
   FilterCtx,
   ForecastHeatmap,
   ForecastOverview,
+  HeadwayQualityResponse,
   HeatmapCollection,
   NetworkSummary,
   OverviewSummary,
@@ -106,6 +107,23 @@ export function useReport(
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
+  });
+}
+
+/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data
+ *  (item 94) — meant to render alongside the `on_time` report, so callers
+ *  gate `enabled` on that report actually being the one in view rather than
+ *  fetching this on every report tab. */
+export function useHeadwayQuality(
+  agencyId: number | null,
+  ctx: RangeCtx,
+  enabled: boolean,
+): UseQueryResult<HeadwayQualityResponse> {
+  return useQuery({
+    queryKey: ["headway-quality", agencyId, ...ctxKey(ctx)],
+    queryFn: ({ signal }) =>
+      apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${ctxToQueryString(ctx)}`, { signal }),
+    enabled: agencyId != null && enabled,
   });
 }
 

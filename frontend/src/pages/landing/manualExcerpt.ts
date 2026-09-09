@@ -20,7 +20,7 @@ const HEADING_NUMBER: Record<TabManualKey, number> = {
   ask: 8,
 };
 
-export async function fetchManualText(locale: Locale, signal?: AbortSignal): Promise<string> {
+async function fetchManualText(locale: Locale, signal?: AbortSignal): Promise<string> {
   const r = await fetch(`${MANUAL_BASE}/${locale}.md`, { signal });
   if (!r.ok) {
     throw new Error(`Failed to load user manual (${r.status})`);

@@ -122,6 +122,17 @@ export function NetworkTab() {
             <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
               {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
             </div>
+            <div
+              style={onTimeStyle}
+              aria-label={t("network.col_vehicle_km_delivered")}
+              title={a.static_version_id ? t("network.schedule_version_title", { version: a.static_version_id }) : undefined}
+            >
+              {a.vehicle_km_delivered_pct != null
+                ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
+                : a.planned_trip_count != null
+                  ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
+                  : "—"}
+            </div>
           </div>
         </div>
         <div style={barRow}>
@@ -183,6 +194,7 @@ export function NetworkTab() {
             <li><strong>{t("network.ridership_weighted_toggle")}</strong> — {t("network.help_ridership_weighted")}</li>
           )}
           <li><strong>{t("network.col_delivered")}</strong> — {t("network.help_delivered")}</li>
+          <li><strong>{t("network.col_vehicle_km_delivered")}</strong> — {t("network.help_vehicle_km_delivered")}</li>
           <li><strong>{t("network.col_samples")}</strong> — {t("network.help_samples")}</li>
           <li><strong>{t("network.col_feed")}</strong> — {t("network.help_feed")}</li>
           <li><strong>{t("network.col_freshness")}</strong> — {t("network.help_freshness")}</li>

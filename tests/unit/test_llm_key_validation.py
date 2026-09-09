@@ -41,9 +41,7 @@ async def test_permission_denied_returns_false():
             pass
 
     with patch("openai.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(
-            side_effect=_FakePermissionDeniedError()
-        )
+        mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakePermissionDeniedError())
         mock_openai.return_value.close = AsyncMock()
         assert await validate_provider_key("groq", "gsk_revoked") is False
 
@@ -57,9 +55,7 @@ async def test_connection_error_propagates_instead_of_reporting_valid():
             pass
 
     with patch("openai.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(
-            side_effect=_FakeAPIConnectionError()
-        )
+        mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakeAPIConnectionError())
         mock_openai.return_value.close = AsyncMock()
         with pytest.raises(openai.APIConnectionError):
             await validate_provider_key("groq", "gsk_valid")
@@ -74,9 +70,7 @@ async def test_other_api_error_returns_true():
             pass
 
     with patch("openai.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(
-            side_effect=_FakeRateLimitError()
-        )
+        mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakeRateLimitError())
         mock_openai.return_value.close = AsyncMock()
         assert await validate_provider_key("groq", "gsk_valid") is True
 

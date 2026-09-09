@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
-import type { TrendDay } from "../../api/types";
+import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
-type Props = { days: TrendDay[]; height?: number };
+type Props = { days: TrendDay[]; height?: number; revisionBoundaries?: RevisionBoundaries };
 
-export function DailyChart({ days, height = 240 }: Props) {
+export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Props) {
   const { t } = useTranslation();
   const [rawHover, setHover] = useState<number | null>(null);
 
@@ -61,6 +61,18 @@ export function DailyChart({ days, height = 240 }: Props) {
     .filter((p): p is [number, number] => p !== null);
   const hasSmoothed = smoothedPts.length > 0;
 
+  // Schedule-revision boundary markers (item 98) — a date within `days`
+  // where the static feed version changed from the previous calendar day.
+  // Drawn as a vertical line spanning the full plot so a metric shift at
+  // that x position reads as "a timetable revision happened here", not a
+  // service-quality change. A boundary date absent from `days` (shouldn't
+  // happen — the backend derives both from the same range — but a stale
+  // cached response could disagree) is silently skipped rather than
+  // crashing on a -1 index.
+  const boundaryIndices = revisionBoundaries
+    .map((bd) => days.findIndex((d) => d.date === bd))
+    .filter((i) => i >= 0);
+
   return (
     <div style={{ position: "relative", width: "100%", overflowX: "auto" }}>
       <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
@@ -92,6 +104,30 @@ export function DailyChart({ days, height = 240 }: Props) {
               fill="var(--accent-soft)"
               opacity={0.7}
             />
+          );
+        })}
+        {/* Schedule-revision boundaries — drawn under the data lines/bars so
+            they read as background context, not a foreground data series. */}
+        {boundaryIndices.map((i) => {
+          const x = padL + i * stepX;
+          return (
+            <g key={`rev-${i}`}>
+              <line
+                x1={x}
+                x2={x}
+                y1={padT}
+                y2={padT + innerH}
+                stroke="var(--text-tertiary)"
+                strokeWidth="1"
+                strokeDasharray="1 3"
+                opacity={0.7}
+              >
+                <title>{t("reports.daily.revision_boundary_aria", { date: days[i].date })}</title>
+              </line>
+              <text x={x + 3} y={padT + 9} fontSize="9" fill="var(--text-tertiary)">
+                {t("reports.daily.revision_boundary_label")}
+              </text>
+            </g>
           );
         })}
         {/* Trailing 7-day average — drawn under the raw line so the raw
