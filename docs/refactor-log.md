@@ -845,7 +845,7 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   dispatched-worker execution gap other items have hit; the new code was
   instead checked by tracing it against the already-passing
   `test_static_join_per_op` fixtures and by hand-checking the new tests' own
-  assertions. (PR #pending)
+  assertions. (PR #363)
 - 2026-09-09: Closed the backend verification gap the prior entry left open
   (coordinator-run, from the main checkout's cwd pointed at this worktree's
   file paths, per `transit-app-gotchas`'s documented pattern for this
@@ -866,7 +866,7 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   passing the reassigned `f` (now a file handle) to `csv.writer`; renamed
   the file-handle binding to `csv_file` to remove the collision. Both fixes
   re-verified clean (`ruff check` on the touched test file, `mypy` on the
-  touched script, full test rerun). (PR #pending)
+  touched script, full test rerun). (PR #363)
 - 2026-09-09: `/review-branch` Pass 1 (standard tier, 2 reviewer groups) found
   zero Major findings. `bugs+logic+consistency+security` was clean outright.
   `perf+practices+comments+alternatives` found 7 Minors, no Major: 5
@@ -926,4 +926,4 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   `tests/api/test_reports.py`) against the real throwaway Postgres/
   ClickHouse stack, since the `RT_INGEST_STRATEGIES` change touches real
   SQL/logic, not just comments. Both mandatory `/review-branch` passes are
-  now clean of Major findings. (PR #pending)
+  now clean of Major findings. (PR #363)
