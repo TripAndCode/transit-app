@@ -16,6 +16,6 @@
     ]
   },
   "permissions": {
-    "allow": ["Edit(.claude/skills/**)", "Write(.claude/skills/**)"]
+    "allow": ["Edit(.claude/skills/**)"]
   }
 }
