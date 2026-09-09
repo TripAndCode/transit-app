@@ -9,11 +9,13 @@ opendata index page consumed by the `aomori_index_scrape` strategy in the
 Python pipeline. The v3 VM collector therefore does NOT fetch Aomori static
 (empty `static_url` column in `agencies.tsv`). After cutover, Aomori static is
 collected workstation-side by `gtfs_pipeline.py refresh-static` /
-`make fetch-ingest`, which scrape the source directly. Hiroshima (8/9/10)
-static IS collected on the VM via `direct_url` curl.
+`make fetch-ingest`, which scrape the source directly. Hiroshima (8/9/10 and
+the additional mcapps.jp operators 11-15, 17-19, 53-54) static GTFS is
+collected on the VM via `direct_url` curl.
 
 ## 0. Prereqs
-- [ ] Create 4 checks at https://healthchecks.io (period 10 min, grace 5 min); note ping URLs.
+- [ ] Create one healthchecks.io check per enabled poller (period 10 min,
+  grace 5 min); put the resulting ping URLs in `etc/agencies.tsv`.
 - [ ] `feat/collector-v3` merged; `oracle_cloud/v3/` present on workstation.
 
 ## 1. Install tree (no impact on running v1)
@@ -54,7 +56,9 @@ static IS collected on the VM via `direct_url` curl.
     crontab /home/opc/crontab.snippet   # prune line stays commented
 
 ## 6. Start Hiroshima
-    sudo systemctl enable --now rt-poller@8 rt-poller@9 rt-poller@10
+    sudo systemctl enable --now rt-poller@8 rt-poller@9 rt-poller@10 \
+        rt-poller@11 rt-poller@12 rt-poller@13 rt-poller@14 rt-poller@15 \
+        rt-poller@17 rt-poller@18 rt-poller@19 rt-poller@53 rt-poller@54
     journalctl -u rt-poller@8 -n 5
 
 ## 7. Workstation: v3 fetch + parity gate
@@ -97,7 +101,9 @@ GTFS still needs its own refresh path if that gap matters.
     rm -rf /home/opc/app/transportation_analysis/{poller.sh,poller_static.sh,cron.log,poller.log,static_poller.log,static_cron.log,archive,static_archive}
 
 ## Rollback (any point before step 10)
-    sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10'
+    sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10' \
+        'rt-poller@11' 'rt-poller@12' 'rt-poller@13' 'rt-poller@14' 'rt-poller@15' \
+        'rt-poller@17' 'rt-poller@18' 'rt-poller@19' 'rt-poller@53' 'rt-poller@54'
     crontab /tmp/crontab.backup.*    # restores @reboot v1 line
     mv /home/opc/collector/data/1/rt/*.tar.gz /home/opc/app/transportation_analysis/archive/ 2>/dev/null
     nohup nice -n 10 /home/opc/app/transportation_analysis/poller.sh >> /home/opc/app/transportation_analysis/cron.log 2>&1 & disown

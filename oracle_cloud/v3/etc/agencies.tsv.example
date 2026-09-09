@@ -1,9 +1,19 @@
 # interval tuned per-agency from real dep_delay-change rates (2026-08-20):
 # aomori's upstream feed changes ~58% of the time within 30s (30s justified);
-# the mcapps.jp feeds (8/9/10) change only ~20% within 30s, so 60s loses
-# almost no real signal while roughly halving RT archive volume.
+# the mcapps.jp feeds (8-15, 17-19, 53-54) change only ~20% within 30s,
+# so 60s loses almost no real signal while roughly halving RT archive volume.
 # id	name	interval	feed_url	static_url	ping_url
 1	aomori	30	https://aomoricitybus.com/TripUpdate.pb		https://hc-ping.com/FILL-ME-1
 8	hiroden	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/8/current_data.zip	https://hc-ping.com/FILL-ME-8
 9	hirobus	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/9/current_data.zip	https://hc-ping.com/FILL-ME-9
 10	hiroko	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/10/current_data.zip	https://hc-ping.com/FILL-ME-10
+11	geiyo	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/11/current_data.zip	https://hc-ping.com/FILL-ME-11
+12	bihoku	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/12/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/12/current_data.zip	https://hc-ping.com/FILL-ME-12
+13	hd-nishihiroshima	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/13/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/13/current_data.zip	https://hc-ping.com/FILL-ME-13
+14	foble	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/14/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/14/current_data.zip	https://hc-ping.com/FILL-ME-14
+15	jr-bus-chugoku	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/15/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/15/current_data.zip	https://hc-ping.com/FILL-ME-15
+17	sasaki-kanko	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/17/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/17/current_data.zip	https://hc-ping.com/FILL-ME-17
+18	kure-community	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/18/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/18/current_data.zip	https://hc-ping.com/FILL-ME-18
+19	hatsukaichi-community	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/19/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/19/current_data.zip	https://hc-ping.com/FILL-ME-19
+53	nomichi	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/53/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/53/current_data.zip	https://hc-ping.com/FILL-ME-53
+54	asahi	60	https://ajt-mobusta-gtfs.mcapps.jp/realtime/54/trip_updates.bin	https://ajt-mobusta-gtfs.mcapps.jp/static/54/current_data.zip	https://hc-ping.com/FILL-ME-54
