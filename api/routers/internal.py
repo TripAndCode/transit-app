@@ -50,7 +50,7 @@ def _run_ingest_and_analyze() -> None:
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
-    from pipeline.weather import ingest_weather
+    from pipeline.weather import CRON_INGEST_BUDGET_SEC, ingest_weather
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -113,8 +113,18 @@ def _run_ingest_and_analyze() -> None:
         # every fetch when it is off, so no flag test belongs here; a failure
         # is logged and never allowed to affect the delay aggregates above or
         # the freshness check below.
+        #
+        # `max_seconds` is mandatory here, not a tuning knob: this call runs
+        # inside the advisory lock taken above, which is released only when
+        # the connection closes in the finally block, and it is the only work
+        # in this job that waits on a third party outside the agencies' own
+        # feeds. Without a total budget a slow source would keep the lock
+        # long after the ingest+analyze work finished, and every poke that
+        # arrives meanwhile takes the "already in flight" path -- dropping
+        # live GTFS-RT polls, which are unrecoverable once their moment has
+        # passed. Whatever the budget cuts short is picked up by a later run.
         try:
-            ingest_weather(conn)
+            ingest_weather(conn, max_seconds=CRON_INGEST_BUDGET_SEC)
         except Exception:
             _log.exception("cron: weather ingest failed")
 

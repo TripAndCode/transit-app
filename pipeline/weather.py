@@ -17,10 +17,13 @@ Three properties are load-bearing and deliberate:
   no row. A day still in progress, or one the source hasn't finished
   publishing, is therefore simply absent and picked up by a later pass; that
   is what tolerating the source's availability lag means here.
-* **Revisions are expected.** The source revises recently published
-  observations, so `needs_fetch` re-fetches an already-stored day while it is
-  still inside the revision window and the upsert overwrites in place,
-  refreshing `retrieved_at`.
+* **Revisions are expected, but only inside the publication window.** The
+  source revises recently published observations, so `needs_fetch` re-fetches
+  an already-stored day while it is still inside `PUBLICATION_WINDOW_DAYS` and
+  the upsert overwrites in place, refreshing `retrieved_at`. Past that window
+  nothing is requested at all -- neither a revision of a stored day nor a
+  first copy of a day that was never stored, because the source no longer
+  publishes it and the request could only 404.
 
 Attribution (`attribution`) states both the source and the fact that the daily
 figures are computed here from its sub-hourly readings; it must travel with any
@@ -33,6 +36,7 @@ import json
 import logging
 import math
 import os
+import time
 import urllib.error
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -108,13 +112,32 @@ _MAX_BLOCK_BYTES = 8 * 1024 * 1024
 # magnitude above a real day's payload; exceeding it aborts the day rather
 # than truncating it, since a partial day is never written anyway.
 _MAX_DAY_BYTES = 16 * 1024 * 1024
+
+# Per-socket-operation timeout, NOT a budget for a run: it bounds one connect
+# or one read, so a source trickling its bodies can keep every one of a
+# station-day's nine blocks inside its own timeout and still take minutes, and
+# a pass multiplies that by station-days and by stations. `ingest_weather`'s
+# `max_seconds` is what bounds a whole pass.
 _FETCH_TIMEOUT_SEC = 20.0
 
-# How far back a stored day is still re-fetched to pick up source revisions.
-# Past this, the copy on hand is treated as final -- the source's point files
-# age out of publication after a short rolling window anyway, so an older day
-# could not be re-fetched even if it had been revised.
-REVISION_RECHECK_DAYS = 5
+# How long the source keeps a day's point observations published. This single
+# window decides every fetch: inside it a stored day is still re-fetched to
+# pick up the source's revisions and a never-stored day is still worth a first
+# attempt, while outside it the copy on hand is final and a day that was never
+# stored can never be filled -- so asking for it would 404 on every pass,
+# forever. It is therefore also the ceiling on how many days back a pass may
+# walk, since days beyond it are unfetchable by construction.
+PUBLICATION_WINDOW_DAYS = 5
+
+# Wall-clock budget for a weather pass that shares its connection -- and so
+# its session-level advisory locks -- with other work. The cron path in
+# api.routers.internal holds the ingest+analyze lock for as long as its
+# `ingest_weather` call runs, and every cron poke arriving meanwhile is
+# dropped, losing live GTFS-RT polls that cannot be recovered after the fact.
+# Sized to stay small next to the cron interval rather than to fit a whole
+# pass: a station-day the budget cuts short is an ordinary "not ready yet"
+# outcome that a later pass picks up.
+CRON_INGEST_BUDGET_SEC = 90.0
 
 # Minimum age of a stored copy before it is re-fetched for revisions. Keeps a
 # frequently-invoked ingest pass (the cron path pokes far more often than the
@@ -329,16 +352,22 @@ def needs_fetch(
 ) -> bool:
     """Should this station-day be fetched? Pure.
 
-    Never stored -> yes. Stored and older than `REVISION_RECHECK_DAYS` -> no
-    (treated as final; the source no longer publishes it anyway). Stored and
-    recent -> only once the copy on hand is at least `_RECHECK_AFTER` old, so
-    an ingest pass that runs far more often than the source revises doesn't
-    re-fetch the same days every time.
+    Outside `PUBLICATION_WINDOW_DAYS` -> no, whatever is or isn't stored: the
+    source has stopped publishing the day, so a stored copy is final and a
+    missing one can never be filled. The age floor matters as much as the
+    staleness ceiling -- without it a day the source never published while it
+    was fetchable would be re-requested by every pass for as long as it stayed
+    in range, and 404 every time.
+
+    Inside the window: never stored -> yes; stored -> only once the copy on
+    hand is at least `_RECHECK_AFTER` old, so an ingest pass that runs far
+    more often than the source revises doesn't re-fetch the same days on every
+    run.
     """
+    if (today - obs_date).days > PUBLICATION_WINDOW_DAYS:
+        return False
     if stored_retrieved_at is None:
         return True
-    if (today - obs_date).days > REVISION_RECHECK_DAYS:
-        return False
     return now - stored_retrieved_at >= _RECHECK_AFTER
 
 
@@ -382,35 +411,74 @@ _UPSERT_SQL = """
 """
 
 
-def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[int, int, list[str]]:
+def ingest_weather(
+    conn,
+    *,
+    days: int = PUBLICATION_WINDOW_DAYS,
+    today: date | None = None,
+    max_seconds: float | None = None,
+) -> tuple[int, int, list[str]]:
     """Fetch observed daily weather for every configured representative station.
 
     Walks the *days* whole days ending yesterday -- today is never fetched,
     since a day in progress cannot be aggregated whole -- for each distinct
     station referenced by a live agency, fetching only the station-days
-    `needs_fetch` asks for. Returns ``(n_written, n_considered, failed)``:
-    *n_considered* counts station-days examined, *failed* the station_ids that
-    raised, following `pipeline.static_fetcher.refresh_all`'s
-    run-all-then-report shape so one bad station doesn't starve the others.
+    `needs_fetch` asks for. *days* is clamped to `PUBLICATION_WINDOW_DAYS`,
+    which is what makes an operator-supplied backfill window harmless: a day
+    beyond it is unfetchable, so walking back further would only issue
+    requests that must 404.
 
-    A station-day the source hasn't fully published is not a failure; it is
-    skipped and picked up by a later pass.
+    Returns ``(n_written, n_considered, failed)``: *n_considered* counts
+    station-days examined, *failed* the station_ids that raised, following
+    `pipeline.static_fetcher.refresh_all`'s run-all-then-report shape so one
+    bad station doesn't starve the others.
+
+    *max_seconds* bounds the whole pass's wall clock, checked before each
+    station and before each station-day's fetch; on expiry the pass stops and
+    returns what it has already committed. Any caller sharing this connection,
+    and therefore its session-level locks, with other work must pass one (see
+    `CRON_INGEST_BUDGET_SEC`): `_FETCH_TIMEOUT_SEC` bounds a single socket
+    operation, not a run, so an unbounded pass can hold those locks for far
+    longer than any per-request timeout suggests.
+
+    A station-day the source hasn't fully published, or that the budget cut
+    short, is not a failure; it is skipped and picked up by a later pass.
+
+    No transaction is ever left open across a fetch. The reads are committed
+    before any outbound request and each written station-day is committed on
+    its own, because a session idling in a transaction across dozens of
+    network calls pins its `xmin` -- keeping autovacuum from reclaiming the
+    `agg_*` churn the cron path produces right before this runs -- and holds
+    `(station_id, obs_date)` row locks that a concurrent pass would block on.
+    Per-day commits give up nothing: each row is an independently valid whole
+    day, so a station that raises part-way keeps the days it already
+    committed, rolls back only the one in flight, and the loop moves on.
     """
     if not weather_ingest_enabled():
-        logger.debug("weather: WEATHER_INGEST_ENABLED is not set; skipping weather ingest")
+        # Info, not debug: this is the documented behavior of the default-off
+        # switch, and the CLI configures logging at info level, so an operator
+        # who has not turned it on must be able to tell "skipped, switch off"
+        # from "ran, nothing to do".
+        logger.info("weather: WEATHER_INGEST_ENABLED is not set; skipping weather ingest")
         return (0, 0, [])
     if days < 1:
         return (0, 0, [])
+    days = min(days, PUBLICATION_WINDOW_DAYS)
 
     today = today or datetime.now(timezone.utc).astimezone(_JST).date()
     to_date = today - timedelta(days=1)
     from_date = to_date - timedelta(days=days - 1)
     now = datetime.now(timezone.utc)
+    # Monotonic: a wall-clock jump (NTP step, DST) must not extend or truncate
+    # a budget whose whole job is bounding how long a lock is held.
+    deadline = None if max_seconds is None else time.monotonic() + max_seconds
 
     try:
         with conn.cursor() as cur:
             cur.execute(_STATIONS_SQL, (WEATHER_SOURCE,))
             station_ids = [r[0] for r in cur.fetchall()]
+        # Ends this read's transaction before the first outbound request.
+        conn.commit()
     except Exception:
         # Roll back before re-raising so the caller's session stays usable: the
         # cron path runs an aggregate-freshness check on this same connection
@@ -424,19 +492,23 @@ def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[i
     written = 0
     considered = 0
     failed: list[str] = []
+    out_of_budget = False
     for station_id in station_ids:
-        # Counted per station and folded into the total only after that station's
-        # commit succeeds: the whole station's batch shares one transaction, so a
-        # failure on a later day rolls back every day already upserted for it.
-        station_written = 0
+        if deadline is not None and time.monotonic() >= deadline:
+            out_of_budget = True
+            break
         try:
             with conn.cursor() as cur:
                 cur.execute(_STORED_SQL, (station_id, from_date, to_date))
                 stored = {r[0]: r[1] for r in cur.fetchall()}
+            conn.commit()
             for offset in range((to_date - from_date).days + 1):
                 obs_date = from_date + timedelta(days=offset)
                 if not needs_fetch(obs_date, stored.get(obs_date), today=today, now=now):
                     continue
+                if deadline is not None and time.monotonic() >= deadline:
+                    out_of_budget = True
+                    break
                 considered += 1
                 obs = fetch_daily_observation(station_id, obs_date)
                 if obs is None:
@@ -454,14 +526,23 @@ def ingest_weather(conn, *, days: int = 7, today: date | None = None) -> tuple[i
                             WEATHER_SOURCE,
                         ),
                     )
-                station_written += 1
-            conn.commit()
-            written += station_written
+                conn.commit()
+                # Counted only once the commit that persisted it succeeded: an
+                # operator reading "wrote N" and finding fewer rows than that
+                # would have no way to tell the difference.
+                written += 1
         except Exception:
             logger.exception("weather: ingest failed for station %s", station_id)
             conn.rollback()
             failed.append(station_id)
+        if out_of_budget:
+            break
 
+    if out_of_budget:
+        logger.warning(
+            "weather: ran out of the %s-second budget; the station-days not reached are left for a later pass",
+            max_seconds,
+        )
     logger.info(
         "weather: wrote %d of %d station-days examined (%s..%s, %d station(s))",
         written,

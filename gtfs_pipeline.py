@@ -471,11 +471,12 @@ def cmd_prune_query_log(args):
 
 def cmd_ingest_weather(args):
     """Fetch observed daily weather for every configured representative station."""
-    from pipeline.weather import ingest_weather
+    from pipeline.weather import PUBLICATION_WINDOW_DAYS, ingest_weather
 
+    days = PUBLICATION_WINDOW_DAYS if args.days is None else int(args.days)
     conn = _get_conn()
     try:
-        written, considered, failed = ingest_weather(conn, days=int(args.days))
+        written, considered, failed = ingest_weather(conn, days=days)
     finally:
         conn.close()
     if failed:
@@ -549,9 +550,10 @@ def main():
     p_weather.add_argument(
         "--days",
         type=int,
-        default=7,
+        default=None,
         help=(
-            "How many whole days back from yesterday to cover (default: 7). Today is never "
+            "How many whole days back from yesterday to cover (default and maximum: the "
+            "source's publication window, since a day past it is unfetchable). Today is never "
             "fetched -- a day in progress cannot be aggregated whole"
         ),
     )

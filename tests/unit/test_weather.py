@@ -13,7 +13,8 @@ from pipeline.reports.weather import (
 from pipeline.weather import (
     _MAX_BLOCK_BYTES,
     _MAX_DAY_BYTES,
-    REVISION_RECHECK_DAYS,
+    PUBLICATION_WINDOW_DAYS,
+    DailyObservation,
     aggregate_daily,
     attribution,
     fetch_daily_observation,
@@ -173,8 +174,26 @@ def test_aggregate_daily_temperature_mean_max_min():
     assert obs.temp_avg_c == 10.0
 
 
-def test_needs_fetch_true_when_never_stored():
+def test_needs_fetch_true_when_never_stored_inside_the_window():
     assert needs_fetch(_DAY, None, today=_DAY + timedelta(days=1), now=datetime.now(timezone.utc)) is True
+
+
+def test_needs_fetch_true_for_a_never_stored_day_on_the_last_day_of_the_window():
+    """The window is inclusive at its edge: the oldest day the source still
+    publishes is exactly `PUBLICATION_WINDOW_DAYS` old, and a pass walking back
+    that far must still try it."""
+    today = _DAY + timedelta(days=PUBLICATION_WINDOW_DAYS)
+    now = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    assert needs_fetch(_DAY, None, today=today, now=now) is True
+
+
+def test_needs_fetch_false_for_a_never_stored_day_past_the_publication_window():
+    """A day that was never stored while it was fetchable can never be filled:
+    the source has stopped publishing it, so asking again would 404 on this pass
+    and on every pass after it. Age decides on its own, before storage does."""
+    today = _DAY + timedelta(days=PUBLICATION_WINDOW_DAYS + 1)
+    now = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    assert needs_fetch(_DAY, None, today=today, now=now) is False
 
 
 def test_needs_fetch_false_for_a_recently_retrieved_copy():
@@ -184,15 +203,15 @@ def test_needs_fetch_false_for_a_recently_retrieved_copy():
     assert needs_fetch(_DAY, now - timedelta(hours=1), today=date(2026, 4, 2), now=now) is False
 
 
-def test_needs_fetch_true_for_a_stale_copy_inside_the_revision_window():
+def test_needs_fetch_true_for_a_stale_copy_inside_the_publication_window():
     now = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
     assert needs_fetch(_DAY, now - timedelta(days=2), today=date(2026, 4, 3), now=now) is True
 
 
-def test_needs_fetch_false_once_past_the_revision_window():
+def test_needs_fetch_false_for_a_stored_day_past_the_publication_window():
     """Past the window the copy on hand is final -- the source no longer
     publishes that day, so re-fetching could only ever fail."""
-    today = _DAY + timedelta(days=REVISION_RECHECK_DAYS + 1)
+    today = _DAY + timedelta(days=PUBLICATION_WINDOW_DAYS + 1)
     now = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
     assert needs_fetch(_DAY, now - timedelta(days=30), today=today, now=now) is False
 
@@ -326,9 +345,13 @@ class _FakeCursor:
         return False
 
     def execute(self, sql, params=None):
+        # A statement opens a transaction, and a statement that raises leaves it
+        # open and aborted -- only a commit or a rollback ends it.
+        self._conn.in_txn = True
         if "agency_weather_stations" in sql:
             self._rows = [(s,) for s in self._conn.stations]
         elif "SELECT obs_date" in sql:
+            self._conn.stored_ranges.append(tuple(params))
             self._rows = []  # nothing stored yet, so every day needs a fetch
         else:
             if (params[0], params[1]) in self._conn.poison:
@@ -340,11 +363,17 @@ class _FakeCursor:
 
 
 class _FakeConn:
+    """Tracks what each commit actually persisted, so a test can tell a row that
+    reached the database from one that was only ever upserted into a
+    transaction that later rolled back."""
+
     def __init__(self, stations, poison=()):
         self.stations = stations
         self.poison = set(poison)
         self.pending: list[tuple] = []
         self.persisted: list[tuple] = []
+        self.stored_ranges: list[tuple] = []
+        self.in_txn = False
 
     def cursor(self):
         return _FakeCursor(self)
@@ -352,42 +381,168 @@ class _FakeConn:
     def commit(self):
         self.persisted.extend(self.pending)
         self.pending.clear()
+        self.in_txn = False
 
     def rollback(self):
         self.pending.clear()
+        self.in_txn = False
 
 
-def test_ingest_weather_counts_only_station_days_a_commit_persisted(monkeypatch):
-    """A station's whole batch of days shares one transaction, so a failure on a
-    later day discards the days already upserted for it. The returned count has
-    to follow the rollback -- an operator reading "wrote N" and finding fewer
-    rows than that would have no way to tell the difference."""
-    import pipeline.weather as weather
+class _FakeClock:
+    """Stands in for `pipeline.weather`'s `time`: a monotonic clock that moves
+    only when a simulated fetch spends from it, so a budget test asserts the
+    budget's logic rather than how fast the machine running it happens to be."""
 
-    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
-    monkeypatch.setattr(
-        weather,
-        "fetch_daily_observation",
-        lambda station_id, obs_date: weather.DailyObservation(
+    def __init__(self, *, cost_sec: float):
+        self._now = 1000.0
+        self._cost = cost_sec
+
+    def monotonic(self) -> float:
+        return self._now
+
+    def spend(self) -> None:
+        self._now += self._cost
+
+
+def _patch_fetch(monkeypatch, weather, conn, *, clock=None, fetched=None):
+    """Replace the outbound fetch with an always-successful local stand-in."""
+
+    def _fetch(station_id, obs_date):
+        # No transaction may be open while the pass is out on the network.
+        assert conn.in_txn is False
+        if clock is not None:
+            clock.spend()
+        if fetched is not None:
+            fetched.append((station_id, obs_date))
+        return DailyObservation(
             station_id=station_id,
             obs_date=obs_date,
             precip_mm=1.0,
             temp_avg_c=20.0,
             temp_max_c=25.0,
             temp_min_c=15.0,
-        ),
-    )
+        )
 
-    # Station 22222's second day fails, after its first day was already upserted.
+    monkeypatch.setattr(weather, "fetch_daily_observation", _fetch)
+
+
+def test_ingest_weather_keeps_the_days_a_failing_station_already_committed(monkeypatch):
+    """Every station-day is committed on its own, so a station that raises
+    part-way through keeps the days it already persisted and loses only the one
+    in flight. The returned count has to follow what committed -- an operator
+    reading "wrote N" and finding a different number of rows would have no way
+    to tell the difference."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
     conn = _FakeConn(["11111", "22222"], poison={("22222", date(2026, 4, 2))})
+    _patch_fetch(monkeypatch, weather, conn)
+
+    # Station 22222's second day fails, after its first day was already committed.
     written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4))
 
     assert failed == ["22222"]
     # 11111's three days, then 22222's first two -- its loop aborts on the second.
     assert considered == 5
-    assert written == 3  # only 11111's, none of 22222's rolled-back days
+    assert written == 4
     assert written == len(conn.persisted)
-    assert all(station_id == "11111" for station_id, _ in conn.persisted)
+    assert conn.persisted == [
+        ("11111", date(2026, 4, 1)),
+        ("11111", date(2026, 4, 2)),
+        ("11111", date(2026, 4, 3)),
+        ("22222", date(2026, 4, 1)),
+    ]
+    # The failure was rolled back, so the caller's session is left usable.
+    assert conn.in_txn is False
+
+
+def test_ingest_weather_stops_once_the_wall_clock_budget_is_spent(monkeypatch):
+    """The budget bounds the whole pass, not one request: checked before each
+    station-day, it can stop a station part-way, and what it cuts short is left
+    for a later pass rather than reported as a failure."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    conn = _FakeConn(["11111", "22222"])
+    clock = _FakeClock(cost_sec=50.0)
+    monkeypatch.setattr(weather, "time", clock)
+    fetched: list[tuple] = []
+    _patch_fetch(monkeypatch, weather, conn, clock=clock, fetched=fetched)
+
+    written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4), max_seconds=90.0)
+
+    # Two fetches spend 100s of the 90s budget, so the third day's check stops
+    # the pass mid-station and the second station is never begun.
+    assert failed == []
+    assert considered == 2
+    assert written == 2
+    assert fetched == [("11111", date(2026, 4, 1)), ("11111", date(2026, 4, 2))]
+    # Everything reached before the cutoff is still committed and reported.
+    assert conn.persisted == fetched
+    assert conn.in_txn is False
+
+
+def test_ingest_weather_budget_stops_before_the_next_station_is_read(monkeypatch):
+    """The budget is also checked before each station, so a pass that spent it
+    finishing one station doesn't even read the next station's stored days --
+    the check has to come ahead of the work, not just ahead of the fetch."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    conn = _FakeConn(["11111", "22222"])
+    clock = _FakeClock(cost_sec=40.0)
+    monkeypatch.setattr(weather, "time", clock)
+    _patch_fetch(monkeypatch, weather, conn, clock=clock)
+
+    written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4), max_seconds=90.0)
+
+    # 11111's three days spend 120s of the 90s budget; 22222 is never started.
+    assert (written, considered, failed) == (3, 3, [])
+    assert [station_id for station_id, _ in conn.persisted] == ["11111"] * 3
+    assert [station_id for station_id, *_ in conn.stored_ranges] == ["11111"]
+
+
+def test_ingest_weather_without_a_budget_covers_every_station_day(monkeypatch):
+    """`max_seconds=None` is unbounded: the same pass that the budget cut short
+    walks all of it when no budget is imposed."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    conn = _FakeConn(["11111", "22222"])
+    clock = _FakeClock(cost_sec=50.0)
+    monkeypatch.setattr(weather, "time", clock)
+    fetched: list[tuple] = []
+    _patch_fetch(monkeypatch, weather, conn, clock=clock, fetched=fetched)
+
+    written, considered, failed = weather.ingest_weather(conn, days=3, today=date(2026, 4, 4))
+
+    assert failed == []
+    assert considered == 6
+    assert written == 6
+    assert len(conn.persisted) == 6
+    assert sorted({station_id for station_id, _ in fetched}) == ["11111", "22222"]
+
+
+def test_ingest_weather_clamps_days_to_the_publication_window(monkeypatch):
+    """An operator-supplied backfill window wider than the source's publication
+    window is harmless: the walk itself is clamped, so no request is issued for
+    a day that could only 404, and the stored-day lookup is narrowed with it."""
+    import pipeline.weather as weather
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    conn = _FakeConn(["11111"])
+    fetched: list[tuple] = []
+    _patch_fetch(monkeypatch, weather, conn, fetched=fetched)
+
+    written, considered, failed = weather.ingest_weather(conn, days=30, today=date(2026, 4, 10))
+
+    assert failed == []
+    assert considered == PUBLICATION_WINDOW_DAYS
+    assert written == PUBLICATION_WINDOW_DAYS
+    # Yesterday back through the oldest day the source still publishes, no further.
+    oldest = date(2026, 4, 9) - timedelta(days=PUBLICATION_WINDOW_DAYS - 1)
+    assert [obs_date for _, obs_date in fetched] == [oldest + timedelta(days=i) for i in range(PUBLICATION_WINDOW_DAYS)]
+    assert conn.stored_ranges == [("11111", oldest, date(2026, 4, 9))]
 
 
 def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
