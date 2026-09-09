@@ -128,9 +128,9 @@ fi
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   {
     echo "== poetry run ruff format --check (changed files) =="
-    run_with_timeout 60 poetry run ruff format --check "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run -- ruff format --check -- "${PY_FILES[@]}" || FAIL=1
     echo "== poetry run ruff check (changed files) =="
-    run_with_timeout 60 poetry run ruff check -- "${PY_FILES[@]}" || FAIL=1
+    run_with_timeout 60 poetry run -- ruff check -- "${PY_FILES[@]}" || FAIL=1
   } >>"$LOG" 2>&1
 fi
 
