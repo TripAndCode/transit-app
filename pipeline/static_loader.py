@@ -35,7 +35,15 @@ _STATIC_FILE_MAP = [
 
 _DB_COLS = {
     "static_stop_times": ["agency_id", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
-    "static_trips": ["agency_id", "trip_id", "route_id", "trip_headsign", "shape_id", "service_id"],
+    "static_trips": [
+        "agency_id",
+        "trip_id",
+        "route_id",
+        "trip_headsign",
+        "shape_id",
+        "service_id",
+        "static_version_id",
+    ],
     "static_routes": ["agency_id", "route_id", "route_short_name", "route_long_name"],
     "static_calendar_dates": ["agency_id", "service_id", "date", "exception_type"],
 }
@@ -70,6 +78,13 @@ def load_static(path: str, agency_id: int, conn) -> None:
         logger.info(f"Using: {p.name}")
     if not p.exists():
         raise FileNotFoundError(f"File not found: {p}")
+
+    # The loaded zip's filename stem (e.g. "gtfs_static_20260101" or the
+    # legacy "hiroden_static") is the only identifier that survives past this
+    # function as a durable marker of which static feed version an RT row's
+    # static_join matched against -- static_trips.static_version_id gets this
+    # same value for every row loaded in this one call.
+    static_version_id = p.stem
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
         names_in_zip = set(zf.namelist())
@@ -141,7 +156,10 @@ def load_static(path: str, agency_id: int, conn) -> None:
             else:
                 db_cols = _DB_COLS[table]
                 col_list = ", ".join(db_cols)
-                pg_rows = [[agency_id, *row] for row in raw_rows]
+                if table == "static_trips":
+                    pg_rows = [[agency_id, *row, static_version_id] for row in raw_rows]
+                else:
+                    pg_rows = [[agency_id, *row] for row in raw_rows]
                 # RETURNING lets us count how many rows actually landed vs were deduped
                 inserted = execute_values(
                     cur,

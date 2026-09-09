@@ -13,4 +13,10 @@ paths = [
     # Placeholder values only (gsk_..., empty strings). gitleaks would
     # otherwise flag the variable names + placeholder shape.
     '''\.env\.example$''',
+    # Test fixtures for BYOK / key-storage flows intentionally mention
+    # secret-shaped strings in assertions and docstrings.
+    '''tests/api/test_api_copilot\.py$''',
+    '''tests/api/test_api_me_llm_key\.py$''',
+    '''tests/db/test_user_llm_keys_db\.py$''',
+    '''tests/unit/test_user_llm_keys\.py$''',
 ]

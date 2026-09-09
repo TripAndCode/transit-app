@@ -91,9 +91,7 @@ TEMPLATES: dict[str, Template] = {
 }
 
 
-def render_template(
-    template_id: str, params: dict, view_payload: dict, locale: str = "ja"
-) -> RenderedInsight:
+def render_template(template_id: str, params: dict, view_payload: dict, locale: str = "ja") -> RenderedInsight:
     return TEMPLATES[template_id].render(params, view_payload, locale)
 
 

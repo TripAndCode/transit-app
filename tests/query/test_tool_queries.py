@@ -410,6 +410,162 @@ async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency
 
 
 @pytest.mark.asyncio
+async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_rate(
+    aagency_id, aconn, ch_client, ch_async_client
+):
+    """A 3-stop trip ("T_PAD", route R9) recurring on two calendar days, with
+    a deliberately padded schedule on the intermediate-stop-to-terminus
+    segment (stop 2 -> stop 3, scheduled 540s/9.0 min) and a genuinely
+    early-arriving vehicle at the terminus on one of the two days.
+
+    `arr_delay`/`scheduled_sec` only exist in ClickHouse's `updates` schema
+    (Postgres `updates` has zero production readers -- see
+    tests/api/test_reports.py's `_run_analyze_from_ch` docstring), so this
+    seeds ClickHouse directly via `insert_updates` instead of the
+    Postgres-then-mirror pattern most other fixtures in this file use.
+
+    Day A: stop 3 (terminus) arr_delay=-300 (5 min early) -> actual running
+    time stop2->stop3 = (36900 - 300) - (36360 + 0) = 240s = 4.0 min.
+    Day B: stop 3 arr_delay=0 (on schedule, not early) -> actual running
+    time = (36900 + 0) - (36360 + 0) = 540s = 9.0 min (matches schedule
+    exactly).
+
+    Expected for the (stop_sequence=2, next_stop_sequence=3) row:
+      - scheduled_run_min = 9.0 (540s / 60, both days share the same schedule)
+      - actual_run_p50_min = 6.5 (median of [240, 540]s = 390s)
+      - actual_run_p85_min = 8.25 (linear-interpolated 85th percentile of
+        [240, 540]s = 240 + 0.85*(540-240) = 495s)
+      - samples = 2
+      - padding_min = 9.0 - 6.5 = 2.5 (the schedule allows 2.5 min more than
+        vehicles actually need on this segment -- the padding visualization)
+      - time_adjustment_rate = 0.0 (stop 2's dwell exactly matches its
+        scheduled dwell on both days, no held-for-schedule pattern here)
+
+    Expected terminus_early_rate = 0.5 (1 of 2 days' terminus arrivals was
+    at least 60s early), terminus_samples = 2.
+    """
+    from pipeline.clickhouse import insert_updates
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+    )
+    for seq, arr, dep in [(1, None, "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:15:00", "10:15:00")]:
+        await aconn.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T_PAD', $2, 'S1', $3, $4)",
+            aagency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day_a = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
+    day_b = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
+    # (file_name, captured_at, trip_id, service_type, scheduled_time, route_code,
+    #  stop_sequence, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop,
+    #  feed_timestamp, scheduled_sec, static_version_id)
+    rows = [
+        ("pad_a1", day_a, "T_PAD", "平日", "10:00:00", "R9", 1, 0, "S1", None, None, None, None, 36000, None),
+        ("pad_a2", day_a, "T_PAD", "平日", "10:06:00", "R9", 2, 0, "S1", 0, None, None, None, 36360, None),
+        ("pad_a3", day_a, "T_PAD", "平日", "10:15:00", "R9", 3, -300, "S1", -300, None, None, None, 36900, None),
+        ("pad_b1", day_b, "T_PAD", "平日", "10:00:00", "R9", 1, 0, "S1", None, None, None, None, 36000, None),
+        ("pad_b2", day_b, "T_PAD", "平日", "10:06:00", "R9", 2, 0, "S1", 0, None, None, None, 36360, None),
+        ("pad_b3", day_b, "T_PAD", "平日", "10:15:00", "R9", 3, 0, "S1", 0, None, None, None, 36900, None),
+    ]
+    insert_updates(ch_client, aagency_id, rows)
+
+    ctx = RangeCtx(from_date=day_a.date() - timedelta(days=1), to_date=day_b.date() + timedelta(days=1))
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, ch_async_client, route="R9")
+
+    assert result["available"] is True
+    row = next(r for r in result["rows"] if r[0] == 2 and r[1] == 3)
+    _stop_sequence, _next_stop_sequence, hour, scheduled_run_min, p50_min, p85_min, samples, padding_min, tar = row
+    assert hour == 10
+    assert scheduled_run_min == pytest.approx(9.0)
+    assert p50_min == pytest.approx(6.5)
+    assert p85_min == pytest.approx(8.25)
+    assert samples == 2
+    assert padding_min == pytest.approx(2.5)
+    assert tar == pytest.approx(0.0)
+
+    assert result["terminus_early_rate"] == pytest.approx(0.5)
+    assert result["terminus_samples"] == 2
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(aagency_id, aconn, ch_client, ch_async_client):
+    """A vehicle that arrives at an intermediate stop exactly on schedule but
+    then dwells far longer than its scheduled dwell (holding to avoid an
+    early departure, not boarding/alighting) must be flagged by
+    `time_adjustment_rate`.
+
+    Stop 2's scheduled dwell is 30s (10:05:00 arrival, 10:05:30 departure).
+    The observed dwell is arr_delay=0 (arrives exactly on time) then
+    dep_delay=+200 (departs 200s late relative to its OWN scheduled
+    departure) -> actual dwell = 230s, 200s beyond the 30s scheduled dwell,
+    comfortably over the default 60s hold_allowance_sec.
+    """
+    from pipeline.clickhouse import insert_updates
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+    )
+    for seq, arr, dep in [(1, None, "10:00:00"), (2, "10:05:00", "10:05:30"), (3, "10:10:00", "10:10:00")]:
+        await aconn.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T_HOLD', $2, 'S1', $3, $4)",
+            aagency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        ("hold_1", day, "T_HOLD", "平日", "10:00:00", "R10", 1, 0, "S1", None, None, None, None, 36000, None),
+        ("hold_2", day, "T_HOLD", "平日", "10:05:30", "R10", 2, 200, "S1", 0, None, None, None, 36330, None),
+        ("hold_3", day, "T_HOLD", "平日", "10:10:00", "R10", 3, 0, "S1", 0, None, None, None, 36600, None),
+    ]
+    insert_updates(ch_client, aagency_id, rows)
+
+    ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, ch_async_client, route="R10")
+
+    assert result["available"] is True
+    row = next(r for r in result["rows"] if r[0] == 2 and r[1] == 3)
+    assert row[8] == pytest.approx(1.0)  # time_adjustment_rate
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_padding_returns_empty_without_ch(aagency_id, aconn):
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, None, route="R1")
+    assert result == {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
+
+
+@pytest.mark.asyncio
+async def test_schedule_realism_padding_unavailable_for_non_static_join_agency(aagency_id, aconn, ch_async_client):
+    """`agencies.ingest_strategy` defaults to NULL (never set to
+    'static_join' by this fixture) -- `arr_delay`/`scheduled_sec` are only
+    ever sent by that strategy, so this must degrade to `available: False`
+    even with a real ClickHouse client attached, not attempt (and
+    mis-report) a decomposition with data that was never populated."""
+    from pipeline.query.tool_queries import schedule_realism_padding
+
+    ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())
+    result = await schedule_realism_padding(aagency_id, ctx, aconn, ch_async_client, route="R1")
+    assert result == {"available": False, "rows": [], "terminus_early_rate": None, "terminus_samples": 0}
+
+
+@pytest.mark.asyncio
 async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
     from pipeline.query.tool_queries import route_hour_dow_pattern
 

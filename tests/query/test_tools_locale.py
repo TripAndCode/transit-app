@@ -83,6 +83,22 @@ def test_summary_suggest_reason_on_time_fallback_exact_strings():
     )
 
 
+def test_summary_schedule_realism_padding_exact_strings():
+    assert (
+        _summary("schedule_realism_padding_summary", lang="ja", route="16012")
+        == "路線16012 時刻表の妥当性（余裕時間の可視化）"
+    )
+    assert (
+        _summary("schedule_realism_padding_summary", lang="en", route="16012")
+        == "Schedule realism — route 16012 (padding view)"
+    )
+    assert _summary("schedule_realism_terminus_suffix", lang="ja", pct=40, n=5) == "／終点早着率 40%（5件中）"
+    assert (
+        _summary("schedule_realism_terminus_suffix", lang="en", pct=40, n=5)
+        == " — terminus early-arrival rate 40% (n=5)"
+    )
+
+
 def test_dispatch_unknown_tool_returns_en_message():
     """The dispatcher's bottom-of-the-funnel error is locale-aware too."""
     result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1, locale="en"))

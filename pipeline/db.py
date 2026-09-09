@@ -49,6 +49,7 @@ def build_dedup_ch_sql(
     extra_where: str = "",
     include_captured_at: bool = False,
     include_arr_delay: bool = False,
+    include_scheduled_sec: bool = False,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -109,11 +110,28 @@ def build_dedup_ch_sql(
 
     Column order/count in the SELECT list must stay exactly
     `route_code, service_type, scheduled_time, trip_id, date,
-    stop_sequence, dep_delay[, last_captured_at][, arr_delay]` —
-    `pipeline/analyze.py` consumes the result by tuple position (`r[-1]` for
+    stop_sequence, dep_delay[, last_captured_at][, scheduled_sec][, arr_delay]`
+    — `pipeline/analyze.py` consumes the result by tuple position (`r[-1]` for
     `last_captured_at` when `include_captured_at`; `arr_delay`, when
-    requested, is always the LAST column regardless of `include_captured_at`,
-    so a caller combining both flags still finds it at `r[-1]`).
+    requested, is always the LAST column regardless of which other optional
+    columns are also requested, so a caller combining every flag still finds
+    it at `r[-1]`). A caller that wants positionally-stable access to
+    `scheduled_sec` too (not just `arr_delay`) should read the result by
+    column name instead (e.g. `pipeline.reports.filters._ch_rows`), since its
+    own position shifts depending on `include_captured_at`.
+
+    `include_scheduled_sec` projects the raw seconds-since-service-day-start
+    schedule value ingest stored alongside `scheduled_time` (see
+    `pipeline.strategies._time.parse_departure_time`) — populated for BOTH
+    normal and GTFS's after-midnight extended-hour (`hour >= 24`) departures,
+    unlike `scheduled_time` itself, which is NULL for the latter (no same-day
+    "HH:MM[:SS]" string can hold it). A caller deriving an hour-of-day bucket
+    that must not silently drop every extended-hour trip should read
+    `scheduled_sec` instead of parsing `scheduled_time`'s first two
+    characters. `scheduled_sec` never legitimately differs between re-polls
+    of the same stop event (it is derived once from the static schedule at
+    ingest time, not refined like `dep_delay`/`arr_delay`), so a plain
+    `any()` resolves it correctly and more cheaply than `argMax`.
 
     `include_arr_delay` additionally clamps `arr_delay` to the same
     plausibility window as `dep_delay` (`MAX_PLAUSIBLE_DELAY_SEC`) whenever
@@ -160,6 +178,7 @@ def build_dedup_ch_sql(
     # Wrap in parens so a fragment containing a top-level OR composes correctly.
     extra = f" AND ({extra_where})" if extra_where else ""
     captured = ", max(u.captured_at) AS last_captured_at" if include_captured_at else ""
+    scheduled_sec = ", any(u.scheduled_sec) AS scheduled_sec" if include_scheduled_sec else ""
     arr = (
         ", NULLIF(argMax(coalesce(CASE WHEN u.arr_delay BETWEEN "
         f"-{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC} THEN u.arr_delay END, "
@@ -171,12 +190,42 @@ def build_dedup_ch_sql(
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
-        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{arr} "
+        f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
         "FROM updates AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo'), u.stop_sequence"
+    )
+
+
+def hms_to_sec_sql(column: str) -> str:
+    """Return a SQL expression parsing a static-schedule HH:MM:SS (or H:MM)
+    text field into seconds since the service day's midnight.
+
+    Tolerates GTFS's after-midnight extended-hour notation (e.g. "25:30:00")
+    since this is plain integer arithmetic, not a cast into a Postgres TIME
+    column (which can't represent hour >= 24 -- see
+    pipeline/strategies/_time.py's normalize_departure_time, which is why the
+    INGEST-time `scheduled_time` column drops such trips instead). A value
+    that doesn't match the expected shape (missing/malformed static data)
+    resolves to NULL rather than raising and aborting the caller for the
+    whole agency -- the same "degrade the one row, don't abort the batch"
+    convention `pipeline.reports.rankings.compute_hourly_heatmap`'s live
+    ClickHouse fallback already uses for its own
+    `toUInt8OrNull(substring(scheduled_time, 1, 2))` hour extraction.
+
+    Lives here (not in `pipeline.analyze`, its original caller) so any
+    Postgres-side reader needing a static `arrival_time`/`departure_time` in
+    seconds -- not just the `analyze()` batch builders -- can share the exact
+    same parse instead of re-deriving it.
+    """
+    return (
+        f"CASE WHEN {column} ~ '^[0-9]{{1,3}}:[0-9]{{2}}(:[0-9]{{2}})?$' THEN "
+        f"split_part({column}, ':', 1)::int * 3600 "
+        f"+ split_part({column}, ':', 2)::int * 60 "
+        f"+ COALESCE(NULLIF(split_part({column}, ':', 3), ''), '0')::int "
+        f"ELSE NULL END"
     )
 
 

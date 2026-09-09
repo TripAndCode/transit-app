@@ -455,6 +455,71 @@ async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_cli
 
 
 @pytest.mark.asyncio
+async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_agency(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """dispatch('schedule_realism', ...) for a `static_join` agency with a
+    static schedule must return the richer padding view (scheduled vs
+    actual running time, terminus early-arrival rate), not the dep_delay-
+    only `avg_added_min` table `test_dispatch_schedule_realism_returns_table`
+    covers for every other ingest strategy.
+
+    Single-observation version of
+    tests/query/test_tool_queries.py's
+    `test_schedule_realism_padding_reproduces_padding_and_terminus_early_rate`
+    fixture (one trip, one day) -- this test only needs to confirm dispatch
+    wires the richer view through end-to-end, not re-verify the padding math
+    itself.
+    """
+    from pipeline.clickhouse import insert_updates
+
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+    )
+    for seq, arr, dep in [(1, None, "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:15:00", "10:15:00")]:
+        await aconn.execute(
+            "INSERT INTO static_stop_times "
+            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T_PAD', $2, 'S1', $3, $4)",
+            aagency_id,
+            seq,
+            arr,
+            dep,
+        )
+
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
+    rows = [
+        ("dpad_1", day, "T_PAD", "平日", "10:00:00", "R1", 1, 0, "S1", None, None, None, None, 36000, None),
+        ("dpad_2", day, "T_PAD", "平日", "10:06:00", "R1", 2, 0, "S1", 0, None, None, None, 36360, None),
+        ("dpad_3", day, "T_PAD", "平日", "10:15:00", "R1", 3, -300, "S1", -300, None, None, None, 36900, None),
+    ]
+    insert_updates(ch_client, aagency_id, rows)
+
+    ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
+    result = await dispatch(
+        "schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    )
+    assert result.kind == "table"
+    assert result.columns == [
+        "stop_sequence",
+        "next_stop_sequence",
+        "hour",
+        "scheduled_run_min",
+        "actual_run_p50_min",
+        "actual_run_p85_min",
+        "samples",
+        "padding_min",
+        "time_adjustment_rate",
+    ]
+    row = next(r for r in result.rows if r[0] == 2 and r[1] == 3)
+    assert row[3] == pytest.approx(9.0)  # scheduled_run_min
+    assert row[4] == pytest.approx(4.0)  # actual_run_p50_min (single sample)
+    assert row[7] == pytest.approx(5.0)  # padding_min
+    assert "終点早着率" in result.summary
+
+
+@pytest.mark.asyncio
 async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     """dispatch('time_pattern', ...) reads agg_route_hour_dow directly (pure
     Postgres, no ClickHouse involved) and must sort the worst hour x

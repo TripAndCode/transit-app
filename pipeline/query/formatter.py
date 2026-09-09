@@ -72,8 +72,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_header", "ja"): "【滞留・走行時間の内訳】",
     ("dwell_run_header", "en"): "[Dwell/running time decomposition]",
     ("dwell_run_row", "ja"): (
-        "{rank}位: 路線{route}（{service}）滞留平均{dwell}分（{dwell_samples}件）、"
-        "走行平均{run}分（{run_samples}件）"
+        "{rank}位: 路線{route}（{service}）滞留平均{dwell}分（{dwell_samples}件）、走行平均{run}分（{run_samples}件）"
     ),
     ("dwell_run_row", "en"): (
         "#{rank} route {route} ({service}) dwell avg {dwell} min ({dwell_samples} samples), "

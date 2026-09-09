@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { DwellRunPayload, TrendDay } from "../api/types";
+import type { DwellRunPayload, RevisionBoundaries, TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -15,6 +15,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
+import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
@@ -213,6 +214,7 @@ export function AnalysisTab() {
                     days: TrendDay[];
                     hourly: HourlyCell[];
                     dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
+                    revision_boundaries?: RevisionBoundaries;
                   }[]
                 }
                 ctx={ctx}
@@ -230,6 +232,13 @@ export function AnalysisTab() {
                 hint={t("reports.no_data.hint")}
                 action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
               />
+            )}
+            {/* Second, narrower metric panel (item 94) -- high-frequency
+                routes only, rendered alongside (never instead of) the
+                on_time table above. Every other report_type is completely
+                unaffected. */}
+            {detail.data.report_type === "on_time" && id != null && (
+              <HeadwayQualityPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
@@ -273,10 +282,15 @@ function TrendBlock({
   data,
   ctx,
 }: {
-  data: { days: TrendDay[]; hourly: HourlyCell[]; dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null } }[];
+  data: {
+    days: TrendDay[];
+    hourly: HourlyCell[];
+    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
+    revision_boundaries?: RevisionBoundaries;
+  }[];
   ctx: RangeCtx;
 }) {
-  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null } };
+  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null }, revision_boundaries: [] };
   const rangeDays = Math.max(
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
@@ -284,7 +298,7 @@ function TrendBlock({
   return (
     <div>
       <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-      <DailyChart days={payload.days} />
+      <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
       <HourlyHeatmap cells={payload.hourly} />
     </div>
   );

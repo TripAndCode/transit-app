@@ -35,6 +35,7 @@ from pipeline.reports import (
     compute_delay_certificate,
     compute_dow_ranking,
     compute_dwell_run_decomposition,
+    compute_headway_quality,
     compute_hourly_heatmap,
     compute_on_time,
     compute_ranking,
@@ -48,6 +49,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.stats import annotate_on_time_pct_confidence
 
@@ -126,6 +128,55 @@ async def list_reports(
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
+
+
+class HeadwayQualityRow(BaseModel):
+    """One high-frequency route's pooled Excess Waiting Time / coefficient of
+    variation / long-gap rate over the request's range — see
+    ``pipeline.reports.headway_quality.compute_headway_quality``.
+
+    ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
+    nullable together: a route can appear here (it's classified
+    high-frequency) yet still have no resolvable metric for the requested
+    range slice (e.g. its scheduled mean-wait predates this feature and
+    hasn't been re-analyzed). ``cov`` alone additionally requires at least
+    two pooled samples, so a route pooled from a single-sample day can have
+    a resolvable ``ewt_sec``/``long_gap_rate`` with a null ``cov``.
+    """
+
+    route_code: str
+    ewt_sec: float | None
+    cov: float | None
+    long_gap_rate: float | None
+    samples: int
+
+
+class HeadwayQualityResponse(BaseModel):
+    """Payload for ``GET /headway_quality`` — a second, narrower metric
+    panel restricted to high-frequency routes, meant to render alongside
+    (not instead of) the ``on_time`` report for the same range (item 94)."""
+
+    rows: list[HeadwayQualityRow]
+    ctx: ReportCtx
+
+
+@router.get("/headway_quality", response_model=HeadwayQualityResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def get_headway_quality(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ctx: RangeCtx = Depends(get_range_ctx),
+):
+    """Excess Waiting Time / CoV / long-gap rate, high-frequency routes only.
+
+    Not part of the generic ``/reports/{report_type}`` dispatcher above
+    (no CSV/definition-metadata concept applies to a route subset filtered
+    server-side by classification, not by a ranking/threshold the caller
+    chose) — a dedicated endpoint, like ``/forecast/overview`` above.
+    """
+    rows = await compute_headway_quality(agency_id, ctx, conn)
+    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_ctx_payload(ctx))
 
 
 class SuggestionResponse(BaseModel):
@@ -551,12 +602,22 @@ async def get_report(
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx, definition)
+        # Schedule-revision boundary dates (item 98) — dates within this
+        # range where the static feed version running that day changed —
+        # so the Trend chart can mark a timetable revision instead of
+        # letting a metric shift there be misread as a service-quality
+        # change. Empty (not missing) when this agency has no
+        # agg_schedule_revision_daily coverage at all (its ingest strategy
+        # never joins static data, or no reload has happened since item 88).
+        # Skipped entirely for the CSV export above, which has no chart to
+        # annotate.
+        revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
             text=text,
-            rows=[{"days": days, "hourly": hourly, "dow_band": dow_band}],
+            rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
             ctx=_ctx_payload(ctx),
             definition=definition,
         )

@@ -60,9 +60,7 @@ def _pct(
     return round(float(weighted_on_time or 0) / float(weighted_samples) * 100, 1)
 
 
-async def compute_ridership_weighted_on_time_by_agency(
-    conn, from_date: date, to_date: date
-) -> dict[int, float | None]:
+async def compute_ridership_weighted_on_time_by_agency(conn, from_date: date, to_date: date) -> dict[int, float | None]:
     """Per-agency ridership-weighted on-time percentage over [from_date,
     to_date], for every agency that has at least one ridership_weights row.
 

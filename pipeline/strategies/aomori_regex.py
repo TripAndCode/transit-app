@@ -50,8 +50,11 @@ def parse_feed(
     Row shape: (file_name, captured_at, trip_id, service_type, scheduled_time,
                 route_code, stop_sequence, dep_delay, stop_id, arr_delay,
                 schedule_relationship_trip, schedule_relationship_stop,
-                feed_timestamp).
-    The 14-tuple consumed by INSERT prepends agency_id at insert time.
+                feed_timestamp). A 13-tuple, 2 short of
+                pipeline.clickhouse.UPDATE_COLUMNS' full 15 (excluding
+                agency_id) -- insert_updates right-pads the trailing
+                scheduled_sec/static_version_id with None, since this
+                strategy neither derives scheduled_sec nor joins static_trips.
 
     Aomori's feed does not populate stop_id, arrival, or either
     schedule_relationship field (confirmed absent, not merely unread), so

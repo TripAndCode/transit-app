@@ -297,9 +297,7 @@ async def compute_on_time(
             samples = r["samples"]
             if samples <= 20:
                 continue
-            on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(
-                Decimal("0.1"), rounding=ROUND_HALF_UP
-            )
+            on_time_pct = (Decimal(r["on_time_count"]) * 100 / samples).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
             out.append(
                 (
                     r["route_code"],
