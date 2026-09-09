@@ -867,3 +867,28 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   the file-handle binding to `csv_file` to remove the collision. Both fixes
   re-verified clean (`ruff check` on the touched test file, `mypy` on the
   touched script, full test rerun). (PR #pending)
+- 2026-09-09: `/review-branch` Pass 1 (standard tier, 2 reviewer groups) found
+  zero Major findings. `bugs+logic+consistency+security` was clean outright.
+  `perf+practices+comments+alternatives` found 7 Minors, no Major: 5
+  comment-lint-shaped issues (two positional "see the note above"-style
+  cross-references that should name the referenced symbol directly instead;
+  a comment block above `dwell_run.py`'s `_AVAILABLE_STRATEGIES` that grew
+  past the file's block-length convention; a new 16-line `#` block above
+  `static_join.py`'s `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` that belongs in
+  the module docstring instead; a new section-banner comment in
+  `test_static_join.py`) — fixed all 5 directly (reworded the two
+  cross-references to name symbols, split/shrank the two long blocks,
+  moved the confirmed-set rationale into `static_join.py`'s module
+  docstring, dropped the banner). Re-verified `ruff check`/`mypy` clean on
+  every touched file. Left 2 Minors as documented, non-blocking follow-up
+  (design tradeoffs, not defects): `service_delivered.py` and
+  `dwell_run.py` each independently hard-code which `ingest_strategy`
+  values can ever send these RT fields rather than sharing one constant —
+  worth consolidating next to `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` if a
+  second ingest strategy is ever confirmed; and `agg_service_delivered_
+  daily`/`agg_route_daily_dwell_run` materialization in `analyze.py` isn't
+  itself gated on `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` (only on
+  `ingest_strategy`), relying on every reader to re-apply that
+  intersection — both existing readers do, but this is a "every future
+  reader must remember" invariant rather than an enforced one. (PR
+  #pending)

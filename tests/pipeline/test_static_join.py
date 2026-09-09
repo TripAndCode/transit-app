@@ -394,12 +394,10 @@ def test_load_static_geiyo_fixture_row_counts(pg_conn):
         assert cur.fetchone()[0] == 44152
 
 
-# ---------------------------------------------------------------------------
 # field_coverage() -- the per-field coverage check, usable without a DB
 # connection or static schedule (see pipeline/strategies/static_join.py's
 # docstring and scripts/probe_rt_field_coverage.py, which runs this
 # against a live feed).
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("pb_name", ["hiroden_tu.bin", "hirobus_tu.bin", "hirokoh_tu.bin"])

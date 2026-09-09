@@ -35,11 +35,10 @@ from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
 # Ingest strategies that CAN ever populate `arr_delay` (see
 # pipeline/strategies/static_join.py's parse_feed docstring); mirrors
 # pipeline.reports.service_delivered's identical `_POPULATED_AGENCIES_SQL`
-# real-strategy check for the same underlying reason (both need
-# schedule_relationship_*/arr_delay, RT fields only static_join's
-# Hiroshima-style feeds send). This alone is NOT sufficient trust -- see
-# RT_FIELD_COVERAGE_CONFIRMED_AGENCIES below, which _agency_available also
-# requires.
+# real-strategy check for the same underlying reason.
+
+# This alone is NOT sufficient trust -- see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+# below, which _agency_available also requires.
 _AVAILABLE_STRATEGIES = frozenset({"static_join"})
 
 

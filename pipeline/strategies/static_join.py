@@ -6,6 +6,23 @@ on (agency_id, trip_id, stop_sequence).
 
 Rows where the JOIN misses get NULLs in service_type / scheduled_time;
 route_code is taken straight from the RT trip.route_id and is always non-null.
+
+``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`` lists agencies whose RT-sourced
+optional fields (stop_id, arr_delay, schedule_relationship_trip,
+schedule_relationship_stop) have actually been observed populated on a real,
+non-empty live feed -- not merely agencies that share this strategy's
+opaque-trip_id JOIN mechanism. ``ingest_strategy == 'static_join'`` alone
+means a feed's wire shape matches; it does NOT mean the feed populates these
+optional fields the way 8/9/10 do (see ``field_coverage``'s docstring).
+Reports that trust these fields (``pipeline.reports.service_delivered``,
+``pipeline.reports.dwell_run``) must intersect against this explicit set
+rather than trusting ``ingest_strategy`` alone.
+
+Add an agency_id to that set only after running
+``scripts/probe_rt_field_coverage.py --url <realtime_url>`` against that
+agency's own live feed during active service hours and confirming real
+(non-empty) per-field coverage -- an empty/overnight capture (no
+stop_time_updates at all) confirms nothing and does not qualify.
 """
 
 import logging
@@ -17,22 +34,7 @@ from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
-# Agencies whose RT-sourced optional fields (stop_id, arr_delay,
-# schedule_relationship_trip, schedule_relationship_stop) have actually been
-# observed populated on a real, non-empty live feed -- not merely agencies
-# that share this strategy's opaque-trip_id JOIN mechanism. `ingest_strategy
-# == 'static_join'` alone means a feed's wire shape matches; it does NOT mean
-# the feed populates these optional fields the way 8/9/10 do (see
-# `field_coverage`'s docstring). Reports that trust these fields
-# (`pipeline.reports.service_delivered`, `pipeline.reports.dwell_run`) must
-# intersect against this explicit set rather than trusting `ingest_strategy`
-# alone.
-#
-# Add an agency_id here only after running
-# `scripts/probe_rt_field_coverage.py --url <realtime_url>` against that
-# agency's own live feed during active service hours and confirming real
-# (non-empty) per-field coverage -- an empty/overnight capture (no
-# stop_time_updates at all) confirms nothing and does not qualify.
+# See this module's docstring for what qualifies an agency_id for this set.
 RT_FIELD_COVERAGE_CONFIRMED_AGENCIES = frozenset({8, 9, 10})
 
 
