@@ -30,16 +30,7 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.dwell_run import percentile_from_dwell_hist, percentile_from_run_hist
 from pipeline.reports.filters import _dist_filter
-from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
-
-# Ingest strategies that CAN ever populate `arr_delay` (see
-# pipeline/strategies/static_join.py's parse_feed docstring); mirrors
-# pipeline.reports.service_delivered's identical `_POPULATED_AGENCIES_SQL`
-# real-strategy check for the same underlying reason.
-
-# This alone is NOT sufficient trust -- see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
-# below, which _agency_available also requires.
-_AVAILABLE_STRATEGIES = frozenset({"static_join"})
+from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
 
 
 async def _agency_available(agency_id: int, conn) -> bool:
@@ -52,7 +43,7 @@ async def _agency_available(agency_id: int, conn) -> bool:
     if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
         return False
     row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    return bool(row and row["ingest_strategy"] in _AVAILABLE_STRATEGIES)
+    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
 
 
 @perf.timed("reports.dwell_run")

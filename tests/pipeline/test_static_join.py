@@ -364,17 +364,15 @@ def test_static_join_per_op(pg_conn, feed_url, pb_name, zip_name, agency_label):
 
 def test_load_static_geiyo_fixture_row_counts(pg_conn):
     """geiyo_static.zip is a real vendored GTFS static feed for agency 11
-    (Geiyo Bus). Unlike hiroden/hirobus/hirokoh's fixtures above, nothing
-    loaded it before this test -- the row counts a prior session reported
-    seeing (1682 stops, 64 routes, 1593 trips, 44152 stop_times) were only a
-    commit-message claim, not something the suite reproduced. Assert them
-    here so a future change to `load_static` or a re-vendored fixture that
-    silently drops rows gets caught.
+    (Geiyo Bus). Asserts fixed row counts (1682 stops, 64 routes, 1593 trips,
+    44152 stop_times) for this checked-in, immutable fixture zip so a future
+    `load_static` regression or accidental re-vendoring is caught.
 
     geiyo_tu.bin (the paired RT capture) is a known-empty overnight snapshot
-    (0 stop_time_updates -- see
-    pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES's
-    comment) that proves nothing about per-field RT coverage, so unlike
+    (0 stop_time_updates) that proves nothing about per-field RT coverage --
+    an agency only earns a spot in
+    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
+    once a live, in-service probe confirms real coverage -- so unlike
     `test_static_join_per_op` this only exercises the static load, not
     parse_feed/field_coverage.
     """
@@ -394,19 +392,15 @@ def test_load_static_geiyo_fixture_row_counts(pg_conn):
         assert cur.fetchone()[0] == 44152
 
 
-# field_coverage() -- the per-field coverage check, usable without a DB
-# connection or static schedule (see pipeline/strategies/static_join.py's
-# docstring and scripts/probe_rt_field_coverage.py, which runs this
-# against a live feed).
-
-
 @pytest.mark.parametrize("pb_name", ["hiroden_tu.bin", "hirobus_tu.bin", "hirokoh_tu.bin"])
 def test_field_coverage_matches_known_fixture_stats(pb_name):
-    """field_coverage() needs no DB connection or static schedule, and must
-    reproduce the same per-field coverage `_run_and_assert` already confirms
-    for these captured fixtures via the full parse_feed + JOIN path -- proving
-    the standalone probe agrees with the production decode path rather than
-    silently drifting from it.
+    """field_coverage() -- the per-field coverage check used by
+    scripts/probe_rt_field_coverage.py to vet a live feed -- needs no DB
+    connection or static schedule, and must reproduce the same per-field
+    coverage `_run_and_assert` already confirms for these captured fixtures
+    via the full parse_feed + JOIN path -- proving the standalone probe
+    agrees with the production decode path rather than silently drifting
+    from it.
     """
     raw = (FIX / pb_name).read_bytes()
     cov = static_join.field_coverage(raw)

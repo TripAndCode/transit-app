@@ -935,10 +935,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # check just above) -- either missing means zero rows here, same
         # "row presence is not the availability signal, ingest_strategy is"
         # convention as agg_service_delivered_daily. Same read-side-only caveat
-        # applies: this gate doesn't re-check RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
-        # either, relying on pipeline.reports.dwell_run's reader to intersect
-        # against that set (see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES's
-        # module-level comment in pipeline/strategies/static_join.py).
+        # applies: sharing ingest_strategy doesn't imply confirmed field
+        # coverage, so pipeline.reports.dwell_run's reader additionally
+        # intersects against RT_FIELD_COVERAGE_CONFIRMED_AGENCIES before
+        # trusting these rows.
         if has_static and row and row[0] == "static_join":
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)

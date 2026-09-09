@@ -892,3 +892,38 @@ Format: `- YYYY-MM-DD: <one-line summary of what was done> (PR #NNN)`
   intersection — both existing readers do, but this is a "every future
   reader must remember" invariant rather than an enforced one. (PR
   #pending)
+- 2026-09-09: `/review-branch` Pass 2 (fresh independent manifest+dispatch,
+  same standard-tier 2-group split) found zero Major findings on either
+  group. `bugs+logic+consistency+security` re-confirmed the gating change's
+  correctness end-to-end (confirmed `service_delivered.py`/`dwell_run.py`
+  are the only two readers of the two gated aggregate tables repo-wide, and
+  every test setting `ingest_strategy='static_join'` on a synthetic agency
+  correctly monkeypatches the confirmed-set where it expects `available:
+  true`). `perf+practices+comments+alternatives` found 6 Minors, no Major:
+  4 more comment-lint-shaped issues introduced or left behind by Pass 1's
+  own fixes (a two-hop "see this comment which itself just points
+  elsewhere" chain across `analyze.py`/`static_join.py`; a bare pointer
+  comment in `static_join.py` left over after its rationale moved into the
+  docstring; a free-floating section-banner comment reintroduced in
+  `test_static_join.py`; a comment on `_MCAPPS_BASE` that actually
+  describes the 8/9/10 feed entries a few lines below, not the constant it
+  sits above), one comment citing "a prior session['s] claim" instead of
+  stating the invariant directly (violates this repo's durable-content
+  rule), and a repeat of Pass 1's alternatives Minor #6 (the
+  `service_delivered.py`/`dwell_run.py` duplicated `ingest_strategy`
+  literal) — flagged independently on both passes, so fixed for real this
+  time instead of deferring further: added
+  `pipeline.strategies.static_join.RT_INGEST_STRATEGIES` as the single
+  shared constant, `dwell_run.py` now imports and uses it directly (no more
+  local `_AVAILABLE_STRATEGIES`), and `service_delivered.py`'s
+  `_POPULATED_AGENCIES_SQL` changed from a hardcoded `= 'static_join'`
+  literal to `= ANY($1::text[])` parameterized against
+  `list(RT_INGEST_STRATEGIES)`. Fixed all 6 directly; re-verified
+  `ruff check`/`mypy` clean on every touched file and the full 120-test
+  affected suite (`tests/pipeline/test_static_join.py`,
+  `tests/unit/test_bus_kyo_association_feeds.py`,
+  `tests/unit/test_probe_rt_field_coverage.py`, `tests/api/test_network.py`,
+  `tests/api/test_reports.py`) against the real throwaway Postgres/
+  ClickHouse stack, since the `RT_INGEST_STRATEGIES` change touches real
+  SQL/logic, not just comments. Both mandatory `/review-branch` passes are
+  now clean of Major findings. (PR #pending)

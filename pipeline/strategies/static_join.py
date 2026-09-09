@@ -34,7 +34,14 @@ from pipeline.strategies._time import normalize_departure_time
 
 _log = logging.getLogger(__name__)
 
-# See this module's docstring for what qualifies an agency_id for this set.
+# Ingest strategies that CAN ever populate stop_id/arr_delay/
+# schedule_relationship_*/feed_timestamp -- necessary but not sufficient
+# trust; see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES below for the additional
+# per-agency confirmation gate. Shared by every reader that needs this check
+# (pipeline.reports.service_delivered, pipeline.reports.dwell_run) so they
+# can't drift apart if a second ingest strategy is ever confirmed.
+RT_INGEST_STRATEGIES = frozenset({"static_join"})
+
 RT_FIELD_COVERAGE_CONFIRMED_AGENCIES = frozenset({8, 9, 10})
 
 

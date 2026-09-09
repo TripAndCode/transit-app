@@ -31,7 +31,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
+from pipeline.strategies.static_join import RT_FIELD_COVERAGE_CONFIRMED_AGENCIES, RT_INGEST_STRATEGIES
 
 _PLANNED_TRIPS_SQL = """
     SELECT cd.agency_id, COUNT(*) AS planned
@@ -51,9 +51,10 @@ _NON_EXECUTED_TRIPS_SQL = """
 
 # Real ingest_strategy check, kept as defense in depth alongside the
 # RT_FIELD_COVERAGE_CONFIRMED_AGENCIES intersection below -- an agency must
-# satisfy both: the ingest strategy that CAN send this field, and the
-# explicit confirmed-set gate that says it actually DOES on its live feed.
-_POPULATED_AGENCIES_SQL = "SELECT agency_id FROM agencies WHERE ingest_strategy = 'static_join'"
+# satisfy both: the ingest strategy that CAN send this field (RT_INGEST_
+# STRATEGIES), and the explicit confirmed-set gate that says it actually
+# DOES on its live feed.
+_POPULATED_AGENCIES_SQL = "SELECT agency_id FROM agencies WHERE ingest_strategy = ANY($1::text[])"
 
 
 async def compute_service_delivered_by_agency(
@@ -91,7 +92,7 @@ async def compute_service_delivered_by_agency(
     # pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
     # confirmed-set gate -- an agency must satisfy both, not just the ingest
     # strategy that merely makes this field possible to send.
-    populated_rows = await conn.fetch(_POPULATED_AGENCIES_SQL)
+    populated_rows = await conn.fetch(_POPULATED_AGENCIES_SQL, list(RT_INGEST_STRATEGIES))
     populated_ids = {r["agency_id"] for r in populated_rows} & RT_FIELD_COVERAGE_CONFIRMED_AGENCIES
 
     result: dict[int, dict[str, Any]] = {}

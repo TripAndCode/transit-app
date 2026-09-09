@@ -64,12 +64,13 @@ class BusKyoFeed:
         return self.ingest_strategy is not None and self.realtime_url is not None
 
 
-# Already configured in agencies.csv -- listed here too so `pending_feeds`
-# can skip them by feed_url, the same dedup key gtfs_pipeline.py's
-# seed_agencies uses via its ON CONFLICT(feed_url) semantics.
 _MCAPPS_BASE = "https://ajt-mobusta-gtfs.mcapps.jp"
 
 ALL_FEEDS: tuple[BusKyoFeed, ...] = (
+    # 8/9/10 are already configured in agencies.csv -- listed here too so
+    # `pending_feeds` can skip them by feed_url, the same dedup key
+    # gtfs_pipeline.py's seed_agencies uses via its ON CONFLICT(feed_url)
+    # semantics.
     BusKyoFeed(8, "広島電鉄", "mcapps.jp", f"{_MCAPPS_BASE}/static/8/current_data.zip",
                f"{_MCAPPS_BASE}/realtime/8/trip_updates.bin", "static_join", "direct_url"),
     BusKyoFeed(9, "広島バス", "mcapps.jp", f"{_MCAPPS_BASE}/static/9/current_data.zip",
