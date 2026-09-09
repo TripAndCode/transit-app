@@ -476,9 +476,7 @@ def test_load_static_geiyo_fixture_row_counts(pg_conn):
     `test_static_join_per_op` this only exercises the static load, not
     parse_feed/field_coverage.
     """
-    aid = _make_agency(
-        pg_conn, "芸陽バス_test", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin"
-    )
+    aid = _make_agency(pg_conn, "芸陽バス_test", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin")
     load_static(str(FIX / "geiyo_static.zip"), aid, pg_conn)
 
     with pg_conn.cursor() as cur:
