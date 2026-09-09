@@ -24,6 +24,7 @@ import type {
   NetworkSummary,
   OverviewSummary,
   PeakHourBreakdown,
+  PerformanceStandardsResponse,
   ReportMeta,
   ReportResponse,
   Route,
@@ -123,6 +124,25 @@ export function useHeadwayQuality(
     queryKey: ["headway-quality", agencyId, ...ctxKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${ctxToQueryString(ctx)}`, { signal }),
+    enabled: agencyId != null && enabled,
+  });
+}
+
+/** Per-route minimum-performance-standard achievement rate / estimated
+ *  bonus-or-deduction panel data (item 104) -- an internal simulation only
+ *  (see `PerformanceStandardsResponse.disclaimer`), meant to render
+ *  alongside the `on_time` report the same way `useHeadwayQuality` does. */
+export function usePerformanceStandards(
+  agencyId: number | null,
+  ctx: RangeCtx,
+  enabled: boolean,
+): UseQueryResult<PerformanceStandardsResponse> {
+  return useQuery({
+    queryKey: ["performance-standards", agencyId, ...ctxKey(ctx)],
+    queryFn: ({ signal }) =>
+      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${ctxToQueryString(ctx)}`, {
+        signal,
+      }),
     enabled: agencyId != null && enabled,
   });
 }

@@ -1024,6 +1024,24 @@
         "long_gap_rate": "大きな間隔あきの発生率",
         "samples": "観測数"
       }
+    },
+    "performance_standard": {
+      "title": "最低パフォーマンス基準",
+      "simulation_badge": "内部シミュレーション（試算） — 請求書ではありません",
+      "subtitle": "路線ごとに設定された最低パフォーマンス基準に対する、達成率と概算のボーナス/減額の試算です。",
+      "col": {
+        "route": "路線",
+        "metric": "指標",
+        "threshold": "基準値",
+        "actual": "実績値",
+        "achievement_rate": "達成率",
+        "estimate": "概算ボーナス/減額"
+      },
+      "metric_label": {
+        "ewt_sec": "超過待ち時間（秒）",
+        "vehicle_km_delivered_pct": "走行キロ達成率（%）"
+      },
+      "scope_agency_note": "事業者全体の値（路線別の内訳はありません）"
     }
   },
   "insight_panel": {

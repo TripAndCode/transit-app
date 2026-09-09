@@ -209,6 +209,36 @@ export type HeadwayQualityResponse = {
   ctx: ResponseCtx;
 };
 
+/** One configured per-route "minimum performance standard" (item 104),
+ *  joined against the current actual value of its `metric_type` -- see
+ *  pipeline/reports/performance_standard.py's compute_performance_standards
+ *  for the achievement-rate / bonus-or-deduction formula. This is an
+ *  INTERNAL SIMULATION ONLY -- see PerformanceStandardsResponse.disclaimer,
+ *  which must always be rendered alongside these figures.
+ *
+ *  `actual_value`/`achievement_rate`/`estimated_bonus_deduction` are always
+ *  null together (insufficient data, or a zero threshold_value making the
+ *  ratio undefined). `metric_scope` is `"agency"` for
+ *  `vehicle_km_delivered_pct` (no per-route breakdown exists -- every route
+ *  configured with it reads its own agency's rate) and `"route"` for
+ *  `ewt_sec`. */
+export type PerformanceStandardRow = {
+  route_code: string;
+  metric_type: "ewt_sec" | "vehicle_km_delivered_pct";
+  metric_scope: "route" | "agency";
+  threshold_value: number;
+  bonus_malus_rate: number;
+  actual_value: number | null;
+  achievement_rate: number | null;
+  estimated_bonus_deduction: number | null;
+};
+
+export type PerformanceStandardsResponse = {
+  rows: PerformanceStandardRow[];
+  ctx: ResponseCtx;
+  disclaimer: string;
+};
+
 export type Suggestion = {
   report_type: string;
   route_code: string;
