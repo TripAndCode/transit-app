@@ -126,6 +126,13 @@ if [ "$SCOPE_OK" -eq 1 ]; then
 fi
 
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
+  # Each line needs both -- separators: the first marks the boundary between
+  # poetry's own option parsing and the wrapped command's argv (without it,
+  # some poetry versions misread a flag appearing before the wrapped
+  # command's own -- as an unrecognized poetry option instead of forwarding
+  # it); the second is ruff's own end-of-flags marker so a dash-prefixed
+  # filename is read as a path, not a ruff flag. Collapsing either back to
+  # one -- has silently broken this before -- do not simplify.
   {
     echo "== poetry run ruff format --check (changed files) =="
     run_with_timeout 60 poetry run -- ruff format --check -- "${PY_FILES[@]}" || FAIL=1
