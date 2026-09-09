@@ -117,9 +117,12 @@ _MAX_DAY_BYTES = 16 * 1024 * 1024
 # or one read, so a source trickling its bodies can keep every one of a
 # station-day's nine blocks inside its own timeout and still take minutes, and
 # a pass multiplies that by station-days and by stations. A caller with a
-# deadline (`ingest_weather`'s `max_seconds`) is what bounds a run: it is
-# threaded down to every block fetch, which both refuses to start past the
-# deadline and clamps this ceiling to whatever is left of it.
+# deadline (`ingest_weather`'s `max_seconds`) is what keeps a run near its
+# budget: it is threaded down to every block fetch, which both refuses to
+# start past the deadline and clamps this ceiling to whatever is left of it.
+# That still leaves one overrun uncovered -- a body arriving a few bytes at a
+# time re-arms the ceiling on every socket operation, so a trickling source can
+# hold a single already-started read open past the deadline indefinitely.
 _FETCH_TIMEOUT_SEC = 20.0
 
 # How long the source keeps a day's point observations published. This single
@@ -286,9 +289,13 @@ def _fetch_block(
     is returned so the caller can debit its running total.
 
     *timeout* is the per-socket-operation ceiling, which a caller working
-    against a wall-clock deadline passes clamped to the time it has left, so a
-    trickling source cannot carry the call past that deadline by a further
-    `_FETCH_TIMEOUT_SEC`.
+    against a wall-clock deadline passes clamped to the time it has left. That
+    bounds a source that stops responding outright, but not one that keeps
+    trickling: the ceiling re-arms on every socket operation, so a body
+    delivered a few bytes at a time stays inside it indefinitely and can carry
+    the call arbitrarily far past the caller's deadline. Bounding that would
+    take a deadline on the body read itself, which `safe_urlopen` does not
+    currently expose.
 
     Every failure mode degrades to ``None`` rather than raising: a block that
     isn't published yet (or has aged out of the source's rolling retention) is

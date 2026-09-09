@@ -4,6 +4,8 @@ comparison's shaping -- no DB, no network (see `pipeline.weather` and
 
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
+
 from pipeline.reports.weather import (
     MIN_DAYS_PER_GROUP,
     WET_DAY_PRECIP_MM,
@@ -596,6 +598,37 @@ def test_ingest_weather_clamps_days_to_the_publication_window(monkeypatch):
     oldest = date(2026, 4, 9) - timedelta(days=PUBLICATION_WINDOW_DAYS - 1)
     assert [obs_date for _, obs_date in fetched] == [oldest + timedelta(days=i) for i in range(PUBLICATION_WINDOW_DAYS)]
     assert conn.stored_ranges == [("11111", oldest, date(2026, 4, 9))]
+
+
+@pytest.mark.parametrize("switch", [None, "false", "", "0", "no"])
+def test_ingest_weather_off_switch_touches_neither_the_source_nor_the_db(monkeypatch, switch):
+    """The switch is what decides whether this deployment makes scheduled
+    outbound requests to a third party at all, so its off state needs a
+    negative control: unset, or set to anything that is not an affirmative
+    value, the pass must issue no request and open no cursor -- not merely
+    write nothing. Guarding the connection as well as the fetch is what would
+    catch the check being moved out to the CLI, which would leave the cron
+    path in `api.routers.internal` fetching on every poke with the switch
+    off."""
+    import pipeline.weather as weather
+
+    if switch is None:
+        monkeypatch.delenv("WEATHER_INGEST_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("WEATHER_INGEST_ENABLED", switch)
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError("the off switch must not reach the source or the database")
+
+    monkeypatch.setattr(weather, "fetch_daily_observation", _refuse)
+    monkeypatch.setattr(weather, "safe_urlopen", _refuse)
+
+    class _RefusingConn:
+        cursor = _refuse
+        commit = _refuse
+        rollback = _refuse
+
+    assert weather.ingest_weather(_RefusingConn(), days=3, today=date(2026, 4, 4)) == (0, 0, [])
 
 
 def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
