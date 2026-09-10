@@ -54,8 +54,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   worker's, in two different worktrees on the same VPS — race on
   `tests/conftest.py`'s per-test Postgres `TRUNCATE ... CASCADE` and
   ClickHouse `DROP TABLE`/`CREATE TABLE`, producing spurious failures with
-  no connection to either diff (real occurrence: see docs/refactor-log.md's
-  item 104 entry). For any run that might overlap with another one on the
+  no connection to either diff. For any run that might overlap with another one on the
   same host, use `scripts/run_full_ci.sh` instead: it builds and starts its
   own uniquely-named Postgres + ClickHouse pair on two free ports, applies
   schema, runs the same lint/type/test gate as `.github/workflows/ci.yml`'s

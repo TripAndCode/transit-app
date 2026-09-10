@@ -48,8 +48,8 @@ set -euo pipefail
 # `.env`, so honouring them can't reintroduce the dev-DB leak above, while
 # letting scripts/run_full_ci.sh (or any other caller that started its own
 # isolated, per-invocation containers) point this script at a dedicated
-# pair instead of the fixed, shared one -- see run_full_ci.sh's own header
-# for why sharing that fixed pair across concurrent runs is unsafe.
+# pair instead of the fixed, shared one -- a shared pair's per-test
+# TRUNCATE/DROP-CREATE races across concurrent runs.
 pg_port="${TEST_PG_PORT:-5544}"
 ch_port="${TEST_CH_PORT:-8124}"
 export DATABASE_URL="postgresql://transit:transit@localhost:${pg_port}/transit_test"

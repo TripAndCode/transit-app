@@ -15,9 +15,8 @@
 # worktrees on the same VPS -- don't just risk a `docker run` name
 # collision: `tests/conftest.py`'s per-test Postgres `TRUNCATE ... CASCADE`
 # and its ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
-# runs, producing spurious failures with no connection to either diff (see
-# docs/refactor-log.md's item 104 entry for a real occurrence). This script
-# picks a fresh container name and a free host port on every invocation
+# runs, producing spurious failures with no connection to either diff. This
+# script picks a fresh container name and a free host port on every invocation
 # instead, so any number of worktrees/jobs can run it at the same time on
 # one host without coordinating -- it never touches the shared
 # `transit-test-pg`/`transit-test-ch` containers at all.
@@ -39,7 +38,12 @@ pg_name="transit-fullci-pg-${instance_id}"
 ch_name="transit-fullci-ch-${instance_id}"
 
 cleanup() {
-  docker rm -f "$pg_name" "$ch_name" >/dev/null 2>&1 || true
+  # `-v`: both images declare a VOLUME for their data directory, so a plain
+  # `docker rm -f` without it would leave an anonymous volume orphaned on
+  # disk after every single invocation (success or failure) -- this script
+  # is meant to run repeatedly/concurrently on one persistent VPS host, so
+  # that leak would otherwise accumulate without bound.
+  docker rm -f -v "$pg_name" "$ch_name" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -81,7 +85,7 @@ start_containers() {
     then
       return 0
     fi
-    docker rm -f "$pg_name" "$ch_name" >/dev/null 2>&1 || true
+    docker rm -f -v "$pg_name" "$ch_name" >/dev/null 2>&1 || true
     sleep 1
   done
   echo "run_full_ci.sh: could not start isolated containers after 5 attempts" >&2
