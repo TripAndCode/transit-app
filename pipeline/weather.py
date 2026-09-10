@@ -98,20 +98,29 @@ _READINGS_PER_DAY = 144
 # that composes it is a normal observation.
 _NORMAL_QUALITY_FLAG = 0
 
-# One 3-hour block is tens of KB; this cap is orders of magnitude above that,
-# and only there to keep a misbehaving/redirected endpoint from streaming an
+# One 3-hour block is tens of KB; this cap is a small multiple of that, and
+# only there to keep a misbehaving/redirected endpoint from streaming an
 # unbounded body into memory (url_guard's own default cap is sized for GTFS
 # static zips, far too generous for a small JSON document).
-_MAX_BLOCK_BYTES = 8 * 1024 * 1024
+_MAX_BLOCK_BYTES = 256 * 1024
 
 # Bound on the SUM of the nine blocks a single station-day merges into one
 # dict. A per-block cap alone lets an endpoint serving nine merely-large
 # bodies hold nine times that much at once, and this ingest also runs inside
 # the long-lived API process (the cron path in api.routers.internal), so the
-# peak that matters is the merged total, not any one response. Still orders of
-# magnitude above a real day's payload; exceeding it aborts the day rather
+# peak that matters is the merged total, not any one response. Still a small
+# multiple above a real day's payload; exceeding it aborts the day rather
 # than truncating it, since a partial day is never written anyway.
-_MAX_DAY_BYTES = 16 * 1024 * 1024
+_MAX_DAY_BYTES = 2 * 1024 * 1024
+
+# A real 3-hour block holds one entry per 10-minute reading -- 18 of them.
+# This caps the parsed mapping at several times that, rejecting a block whose
+# SHAPE doesn't match a real one regardless of its wire size: a body that
+# stays under `_MAX_BLOCK_BYTES` can still carry far more (small) keys than
+# any real block would, and it is the merged `readings` dict -- Python
+# objects, not wire bytes -- that occupies the long-lived API process across
+# all nine blocks of a station-day.
+_MAX_READINGS_PER_BLOCK = 90
 
 # Per-socket-operation ceiling, NOT a budget for a run: it bounds one connect
 # or one read, so a source trickling its bodies can keep every one of a
@@ -318,6 +327,11 @@ def _fetch_block(
     isn't published yet (or has aged out of the source's rolling retention) is
     an ordinary, expected outcome for an ingest pass, and the caller turns a
     missing block into "this day isn't ready" rather than an error.
+
+    A parsed mapping with more than `_MAX_READINGS_PER_BLOCK` entries also
+    degrades to ``None``: that bounds the shape of what a caller merges into
+    its running `readings` dict, independent of the body's byte size on the
+    wire.
     """
     # station_id is percent-encoded because it comes from a hand-populated table
     # and lands in the URL's path: an unencoded `/`, `?` or `#` in it would point
@@ -340,6 +354,16 @@ def _fetch_block(
         return None
     if not isinstance(payload, dict):
         logger.warning("weather: unexpected payload shape for station %s %s hour %02d", station_id, day, hour)
+        return None
+    if len(payload) > _MAX_READINGS_PER_BLOCK:
+        logger.warning(
+            "weather: block for station %s %s hour %02d has %d entries, exceeding the %d-entry cap",
+            station_id,
+            day,
+            hour,
+            len(payload),
+            _MAX_READINGS_PER_BLOCK,
+        )
         return None
     return payload, len(raw)
 
