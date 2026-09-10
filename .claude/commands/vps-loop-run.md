@@ -246,7 +246,11 @@ repairs and nothing else:
 This writes the untracked file directly — there is nothing to commit here, unlike
 Step 2's `cleanup_git_state.py` pass. A warning about a merged branch with no
 matching item number is informational (a possible renumbering or manual removal);
-it does not block the tick. If the command itself errors, follow the Boundaries
+it does not block the tick. A warning that "backlog item N appears more than once"
+means two same-numbered item lines exist in the file (whether or not a heading
+merge exposed them this run) and the script deliberately did not guess which copy
+is authoritative; treat it the same way — log it for human follow-up and do not
+block the tick on it alone. If the command itself errors, follow the Boundaries
 tool-error rule (including its `**Blocker-tag:**` requirement per Step 0): log it
 and stop this tick — never hand-edit around a script failure here.
 

@@ -70,11 +70,10 @@ TERMINAL_MARKERS = ("DONE", "MOOT", "DO NOT START")
 
 @dataclass(frozen=True)
 class Item:
-    """One numbered backlog entry's location and unmodified header line."""
+    """One numbered backlog entry's identity and location within the file."""
 
     number: int
     line_index: int
-    header_line: str
 
 
 @dataclass(frozen=True)
@@ -98,7 +97,7 @@ def parse_items(lines: Sequence[str]) -> list[Item]:
     for index, line in enumerate(lines):
         match = ITEM_HEADER_RE.match(line)
         if match:
-            items.append(Item(number=int(match.group("num")), line_index=index, header_line=line))
+            items.append(Item(number=int(match.group("num")), line_index=index))
     return items
 
 
@@ -131,7 +130,12 @@ def parse_merged_prs_payload(payload: list[dict[str, object]]) -> dict[int, Merg
         raw_pr_number = entry.get("number")
         if raw_pr_number is None:
             raise ReconcileError(f"gh pr list entry for branch {branch!r} is missing a PR 'number' field")
-        pr_number = int(raw_pr_number)  # type: ignore[call-overload]
+        try:
+            pr_number = int(raw_pr_number)  # type: ignore[call-overload]
+        except (TypeError, ValueError) as exc:
+            raise ReconcileError(
+                f"gh pr list entry for branch {branch!r} has a non-numeric PR 'number' field: {raw_pr_number!r}"
+            ) from exc
         merged_at = str(entry.get("mergedAt") or "")
         merged_date = merged_at.split("T", 1)[0] if merged_at else "unknown-date"
         existing = merged.get(number)
@@ -266,20 +270,38 @@ def _section_ends(headings: list[tuple[int, int, str]], total_lines: int) -> dic
 def find_duplicate_item_numbers(lines: Sequence[str]) -> list[int]:
     """Return backlog item numbers that label more than one header line, sorted.
 
-    Two duplicate ``## `` sections merged together can each have contained an
-    item with the same number (e.g. an old and a re-added copy of the same
-    backlog entry). Merging sections only removes the redundant heading; it
-    never looks inside the bodies it concatenates, so a same-numbered pair of
-    item lines survives side by side in the merged result. `reconcile_item_
-    statuses` keys its lookup by item number, so a plain merge would silently
-    keep only one of the two and never revisit the other — this lets callers
-    surface that instead of losing it quietly.
+    A same-numbered pair of item lines can end up side by side for more than
+    one reason: two duplicate ``## `` sections getting merged together (each
+    containing an item with the same number), or two same-numbered items
+    already sitting in the same section with no heading merge involved at
+    all (e.g. left over from a manual restore or a prior tick). Either shape
+    is dangerous the same way: `reconcile_item_statuses` keys its lookup by
+    item number, so it would silently keep only one of the two and never
+    revisit the other. This function is the single source of truth for
+    detecting that fork, independent of how it arose, so callers can surface
+    it instead of losing a copy quietly.
     """
 
     counts: dict[int, int] = {}
     for item in parse_items(lines):
         counts[item.number] = counts.get(item.number, 0) + 1
     return sorted(number for number, count in counts.items() if count > 1)
+
+
+def duplicate_item_number_warnings(lines: Sequence[str]) -> list[str]:
+    """Build one human-readable warning per number `find_duplicate_item_numbers` flags.
+
+    Shared by every caller that needs to surface this fork (a heading merge
+    that exposes it, and `main`'s unconditional check on every run) so the
+    wording — and the "backlog item N appears more than once" phrase callers
+    key off of — stays in exactly one place.
+    """
+
+    return [
+        f"backlog item {number} appears more than once in the file; "
+        "the individual item lines were not deduplicated automatically and need manual review"
+        for number in find_duplicate_item_numbers(lines)
+    ]
 
 
 def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], list[str], list[str]]:
@@ -353,11 +375,7 @@ def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], li
     if len(lines) in inject_before:
         new_lines.extend(inject_before[len(lines)])
 
-    warnings = [
-        f"backlog item {number} appears more than once after merging duplicate sections; "
-        "the individual item lines were not deduplicated automatically and need manual review"
-        for number in find_duplicate_item_numbers(new_lines)
-    ]
+    warnings = duplicate_item_number_warnings(new_lines)
 
     return new_lines, changes, warnings
 
@@ -389,7 +407,14 @@ def main() -> int:
 
     deduplicated_lines, dedupe_changes, dedupe_warnings = merge_duplicate_level2_sections(lines)
     reconciled_lines, status_changes, status_warnings = reconcile_item_statuses(deduplicated_lines, merged_by_item)
-    warnings = dedupe_warnings + status_warnings
+    # Check for duplicate item numbers unconditionally on every run, not only as a
+    # side effect of a heading merge finding something to merge — two same-numbered
+    # items can already sit side by side with no duplicate heading involved at all.
+    # `dict.fromkeys` dedupes against `dedupe_warnings`, which may already carry the
+    # identical message when a heading merge just exposed it.
+    warnings = list(
+        dict.fromkeys(dedupe_warnings + status_warnings + duplicate_item_number_warnings(reconciled_lines))
+    )
 
     for change in dedupe_changes:
         print(f"DEDUPLICATE: {change}")

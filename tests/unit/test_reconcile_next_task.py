@@ -85,6 +85,16 @@ def test_parse_merged_prs_payload_raises_reconcile_error_on_missing_number():
         reconcile.parse_merged_prs_payload(payload)
 
 
+def test_parse_merged_prs_payload_raises_reconcile_error_on_non_numeric_number():
+    # A malformed `gh` response with a non-numeric "number" must surface as the
+    # script's own clean ReconcileError (caught by main()'s error path), never
+    # a raw ValueError/TypeError.
+    payload = [{"number": "not-a-number", "headRefName": "vps-loop/item-108", "mergedAt": "2026-09-11T00:00:00Z"}]
+
+    with pytest.raises(reconcile.ReconcileError):
+        reconcile.parse_merged_prs_payload(payload)
+
+
 # --- reconcile_item_statuses --------------------------------------------------
 
 
@@ -257,6 +267,19 @@ def test_find_duplicate_item_numbers_empty_when_all_numbers_unique():
     assert reconcile.find_duplicate_item_numbers(lines_of(text)) == []
 
 
+def test_duplicate_item_number_warnings_covers_two_same_numbered_items_with_no_heading_at_all():
+    # No `## ` heading anywhere in this text, let alone a duplicate one — the two
+    # same-numbered items are already sitting side by side in the same section,
+    # e.g. left over from a manual restore or a prior tick. This must still be
+    # flagged; it's not conditional on any heading-merge byproduct.
+    text = "108. **First copy.**\n108. **Second copy.**\n"
+
+    warnings = reconcile.duplicate_item_number_warnings(lines_of(text))
+
+    assert len(warnings) == 1
+    assert "backlog item 108 appears more than once" in warnings[0]
+
+
 # --- find_headings / fenced code blocks ---------------------------------------
 
 
@@ -371,3 +394,27 @@ def test_main_reports_error_for_missing_file(tmp_path: Path, monkeypatch: pytest
 
     assert exit_code == 2
     assert "does not exist" in capsys.readouterr().err
+
+
+def test_main_warns_on_duplicate_item_numbers_with_no_duplicate_heading_involved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    # Reproduces the original failure mode through a different door: two items
+    # already share a number in the same section (e.g. left over from a manual
+    # restore or a prior tick) with no duplicate `## ` heading anywhere in the
+    # file, so `merge_duplicate_level2_sections` never runs its own duplicate-
+    # number check. `main` must still catch this on every run, not only as a
+    # byproduct of a heading merge finding something to merge.
+    target = tmp_path / "NEXT_TASK.md"
+    target.write_text(
+        "108. **First copy.**\n109. **Some other item.**\n108. **Second copy, same number.**\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(reconcile, "load_merged_item_prs", lambda _repo: {})
+    monkeypatch.setattr(sys, "argv", ["reconcile_next_task.py", "--repo", str(tmp_path), "--file", str(target)])
+
+    exit_code = reconcile.main()
+
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "backlog item 108 appears more than once" in err
