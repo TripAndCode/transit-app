@@ -895,11 +895,6 @@ async def chat_with_tools(
             },
         )
 
-    # -----------------------------------------------------------------------
-    # FLAG-OFF path: same tool-calling flow as Phase ① (no cache reads/
-    # writes), gated by the anon-quota check above when one is set. A BYOK
-    # caller (user_key set) skips it — see the docstring's ``user_id`` section.
-    # -----------------------------------------------------------------------
     if user_key is None:
         _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
