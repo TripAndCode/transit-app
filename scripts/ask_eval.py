@@ -45,7 +45,6 @@ def main() -> int:
         expected_hash = signature_hash(expected_tool, expected_args)
 
         if via == "chip":
-            # chip catalog was removed in Phase ③.5; skip with a warning.
             chip_total += 1
             print(f"  WARN: skipping chip entry {e['id']!r} (catalog removed)", file=sys.stderr)
             continue
@@ -60,7 +59,6 @@ def main() -> int:
 
         elif via == "paraphrase-reachable":
             paraphrase_total += 1
-            # chip catalog removed; paraphrase entries referencing chips are skipped.
             print(f"  WARN: skipping paraphrase entry {e['id']!r} (chip catalog removed)", file=sys.stderr)
             continue
 
@@ -78,12 +76,8 @@ def main() -> int:
         if len(misses) > 20:
             print(f"  ... and {len(misses) - 20} more")
 
-    # CI gate: builder must be 100%.
-    # chip gate is skipped when chip_total == 0 (catalog removed in Phase ③.5).
-    # Guard against silent-pass when the gold file has been emptied — require
-    # at least 20 builder entries (4 entries × 5 parameterized cards, Phase ③.5).
-    _MIN_CHIP_ENTRIES = 0  # chip catalog removed in Phase ③.5
-    _MIN_BUILDER_ENTRIES = 20  # Phase ③.5: 4 entries × 5 cards
+    _MIN_CHIP_ENTRIES = 0
+    _MIN_BUILDER_ENTRIES = 20
     if chip_total > 0 and chip_total < _MIN_CHIP_ENTRIES:
         msg = f"gold set has {chip_total} chip entries; expected >= {_MIN_CHIP_ENTRIES}"
         print(f"\nERROR: {msg}", file=sys.stderr)
