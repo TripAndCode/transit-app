@@ -83,9 +83,9 @@ owned that finding. Cap at two fix iterations. Do not repeat clean groups merely
 “fresh eyes.”
 
 For a high-risk diff, after all Major findings are resolved, run one final integrated
-review over the cumulative diff. Use Opus for this final call when the Agent tool
-supports a model override; otherwise use the configured reviewer. A third full read
-is justified only when that final review itself caused a material code change.
+review over the cumulative diff — one reviewer, no dimension slice, looking for
+interactions between the fixes rather than for fresh defects. A third full read is
+justified only when that final review itself caused a material code change.
 
 If a known PR number was supplied, fetch its review threads once. Suppress a finding
 only when the same location is already raised and the current code demonstrably fixes
