@@ -14,6 +14,10 @@ CRON_TZ=Asia/Tokyo
 0  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
 5  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
 10 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
+# verify-r2.sh independently lists each configured agency's actual R2
+# objects and checks freshness + byte-size integrity, rather than trusting
+# sync-r2.sh's own exit status -- runs right after it, same env sourcing.
+15 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/verify-r2.sh  >> /home/opc/collector/cron.log 2>&1
 # prune.sh REFUSES to run (exit 65) unless sync-r2.sh's .sync-r2.last-ok
 # marker is fresh (see both scripts) -- replaces the old "workstation
 # mirror" (this repo's make fetch + make sync-r2) as prune's actual,
@@ -21,6 +25,11 @@ CRON_TZ=Asia/Tokyo
 # itself a nonzero exit, so the wrapper pages on it instead of letting a
 # real R2 outage show up only as prune.sh silently skipping its weekly run.
 30 9 * * 0  /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/prune.sh                  >> /home/opc/collector/cron.log 2>&1
+# prune-r2.sh enforces the same kind of parity gate as prune.sh above, but
+# against R2's own much longer retention window (R2 is the durable archive,
+# not a 90-day rolling buffer) -- see the script for why the defaults differ
+# so much from prune.sh's.
+35 9 * * 0  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/prune-r2.sh    >> /home/opc/collector/cron.log 2>&1
 # health-check.sh is deliberately NOT wrapped: it sends its own ok/fail pings,
 # and the wrapper would report every problem it finds a second time. Its
 # cadence is also what makes the check's own period/grace alarm meaningful --

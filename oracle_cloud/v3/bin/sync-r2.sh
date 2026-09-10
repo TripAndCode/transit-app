@@ -6,10 +6,12 @@
 # actually collects the data. Same bucket layout as that workstation
 # mirror (rt/<id>/, static/<id>/), so it continues the existing R2 archive
 # rather than starting a parallel one. `aws s3 sync` only transfers
-# new/changed objects, so reruns are cheap and idempotent. R2-side objects
-# are never pruned by this script or by prune.sh (which only deletes local
-# files) — an accepted, unbounded-growth tradeoff at current data volumes;
-# revisit with an R2 lifecycle rule if that changes.
+# new/changed objects, so reruns are cheap and idempotent. This script never
+# deletes anything; R2-side retention is bin/prune-r2.sh's job (it runs on
+# its own, much longer, cadence since R2 is the durable long-term archive —
+# see that script), and bin/verify-r2.sh independently confirms what actually
+# landed in R2 is fresh and intact rather than trusting this script's own
+# exit status alone.
 #
 # Required env (set in /etc/environment — cron doesn't source ~/.bashrc):
 #   OBJECT_STORE_ENDPOINT, OBJECT_STORE_BUCKET,
