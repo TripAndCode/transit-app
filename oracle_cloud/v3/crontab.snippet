@@ -13,7 +13,7 @@ CRON_TZ=Asia/Tokyo
 # case is one file syncing a day late, never corruption or loss.
 0  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
 5  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
-10 9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
+10 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
 # prune.sh REFUSES to run (exit 65) unless sync-r2.sh's .sync-r2.last-ok
 # marker is fresh (see both scripts) -- replaces the old "workstation
 # mirror" (this repo's make fetch + make sync-r2) as prune's actual,
