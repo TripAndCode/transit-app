@@ -3,9 +3,10 @@
 Covers `rt_field_coverage_probes` end to end: what
 `pipeline.strategies.static_join.record_field_coverage_probe` writes, and
 what `rt_field_coverage_confirmed`/`rt_field_coverage_confirmed_agencies`
-then trust. The point of the registry is that verifying a feed is a probe
-run rather than a code change, so these tests drive it exclusively through
-those two public entry points.
+then trust, plus what `invalidate_field_coverage_probes` withdraws. The
+point of the registry is that verifying a feed is a probe run rather than a
+code change, so these tests drive it exclusively through those public entry
+points.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ import pytest
 
 from pipeline.strategies.static_join import (
     RT_COVERAGE_FIELDS,
+    invalidate_field_coverage_probes,
     record_field_coverage_probe,
     rt_field_coverage_confirmed,
     rt_field_coverage_confirmed_agencies,
@@ -171,6 +173,22 @@ async def test_empty_capture_is_refused_rather_than_recorded(aconn, aagency_id):
 
     count = await aconn.fetchval("SELECT count(*) FROM rt_field_coverage_probes WHERE agency_id = $1", aagency_id)
     assert count == 0
+
+
+async def test_invalidation_closes_the_gate_again(aconn, aagency_id):
+    """A verdict describes one feed, so whatever repoints an agency at a
+    different feed discards it: the agency drops back to the unprobed
+    default until a probe re-earns trust, rather than lending the new feed
+    the old one's coverage."""
+    await _set_strategy(aconn, aagency_id, "static_join")
+    await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin", ttl_days=None)
+    assert await rt_field_coverage_confirmed(aagency_id, aconn) is True
+
+    dropped = await invalidate_field_coverage_probes(aconn, aagency_id)
+
+    assert dropped == len(RT_COVERAGE_FIELDS)
+    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert await invalidate_field_coverage_probes(aconn, aagency_id) == 0
 
 
 async def test_batch_and_single_gate_agree(aconn, aagency_id):

@@ -64,12 +64,9 @@ RT_COVERAGE_FIELDS = (
 DEFAULT_PROBE_TTL_DAYS = 180
 
 # Coverage fractions separating "this feed populates the field" from "this
-# feed happened to emit it once". stop_id and both schedule_relationship_*
-# fields are near-universal on a feed that sends them at all; arr_delay is
-# sparse by construction (only a StopTimeUpdate carrying an `arrival`
-# submessage has one), so it is confirmed by falling strictly INSIDE a band
-# -- 0.0 means never sent, and a fraction near 1.0 means the field is not
-# the sparse arrival estimate this codebase reads it as.
+# feed happened to emit it once". arr_delay is sparse by construction (only
+# a StopTimeUpdate carrying an `arrival` submessage has one), so it is
+# confirmed by a strictly-inside band rather than a floor like the others.
 _NEAR_UNIVERSAL_MIN = 0.99
 _ARR_DELAY_SPARSE_RANGE = (0.0, 0.5)  # exclusive lower, exclusive upper
 
@@ -90,6 +87,10 @@ _CONFIRMED_AGENCIES_SQL = """
     GROUP BY p.agency_id
     HAVING count(DISTINCT p.field_name) = $4::int
 """
+
+# A verdict describes the feed that was probed, not the agency row that
+# happened to point at it, so repointing agencies.feed_url has to drop it.
+_INVALIDATE_PROBES_SQL = "DELETE FROM rt_field_coverage_probes WHERE agency_id = $1"
 
 _RECORD_PROBE_SQL = """
     INSERT INTO rt_field_coverage_probes
@@ -152,6 +153,13 @@ def assess_field_coverage(cov: dict) -> dict[str, bool] | None:
     stop_time_updates neither confirms nor refutes anything about a feed's
     field-population habits, and must not be read as a refutation.
 
+    stop_id and both schedule_relationship_* fields are near-universal on a
+    feed that sends them at all, so each is confirmed by clearing
+    ``_NEAR_UNIVERSAL_MIN``. arr_delay instead has to land strictly inside
+    ``_ARR_DELAY_SPARSE_RANGE``: 0.0 means the feed never sends it, and a
+    fraction near 1.0 means the field is not the sparse arrival estimate
+    this codebase reads it as.
+
     Lives next to the decoder (rather than in the probe CLI) so the exact
     thresholds deciding what gets written to ``rt_field_coverage_probes``
     are defined once, alongside the gate that reads it.
@@ -212,6 +220,21 @@ async def record_field_coverage_probe(
             ],
         )
     return verdicts
+
+
+async def invalidate_field_coverage_probes(conn, agency_id: int) -> int:
+    """Discard every recorded coverage verdict for *agency_id*, returning
+    how many rows were dropped.
+
+    Called by whatever repoints ``agencies.feed_url``: coverage is a
+    property of one feed, so a verdict cannot follow the agency row onto a
+    different feed nobody has probed -- least of all a non-expiring one.
+    Deleting is the fail-closed choice, leaving the agency in exactly the
+    state a freshly onboarded one starts in ("not available" until a probe
+    re-earns trust) rather than a half-trusted one.
+    """
+    tag = await conn.execute(_INVALIDATE_PROBES_SQL, agency_id)
+    return int(tag.rsplit(" ", 1)[-1])
 
 
 def _decode_rows(pb_bytes: bytes):

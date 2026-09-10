@@ -4,14 +4,120 @@ No DB, no network. `pipeline.strategies.static_join.assess_field_coverage`
 is the canonical verdict -- the same call `--record` persists to
 `rt_field_coverage_probes` -- and `_assess` is the probe CLI's human-facing
 report built on top of it; both are covered here so the report can't drift
-from what gets recorded. The fetch/CLI/DB plumbing needs real network and
-isn't covered here.
+from what gets recorded. `_record`'s source-vs-agency check is covered too,
+against a stub connection -- it decides whether anything is written at all,
+before any DB round trip that matters. Fetching a live feed needs real
+network and isn't covered here.
 """
 
 from __future__ import annotations
 
+import asyncpg
+import pytest
+
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, assess_field_coverage
+from scripts import probe_rt_field_coverage as probe
 from scripts.probe_rt_field_coverage import _assess
+
+_FEED_URL = "https://feeds.example.jp/realtime/8/trip_updates.bin"
+
+
+def _confirmed_cov() -> dict:
+    """A field_coverage() result shaped like a verified feed's."""
+    return {
+        "stop_time_updates": 100,
+        "feed_timestamp": 1_770_000_000,
+        "stop_id_coverage": 1.0,
+        "arr_delay_coverage": 0.2,
+        "schedule_relationship_trip_coverage": 1.0,
+        "schedule_relationship_stop_coverage": 1.0,
+    }
+
+
+class _StubConn:
+    """The one query `_record` makes before deciding to write."""
+
+    def __init__(self, feed_url: str | None):
+        self._feed_url = feed_url
+        self.closed = False
+
+    async def fetchval(self, _sql, *_args):
+        return self._feed_url
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def stub_db(monkeypatch):
+    """Point `_record` at a stub agencies row, and capture what it records.
+
+    Returns a callable taking the agency's stored feed_url and yielding the
+    list writes land in, so a test asserting nothing was written asserts on
+    the same list a successful write would append to.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql://stub/stub")
+    recorded: list[tuple] = []
+
+    async def _fake_record(conn, agency_id, cov, source_feed, ttl_days):
+        recorded.append((agency_id, source_feed, ttl_days))
+
+    monkeypatch.setattr(probe, "record_field_coverage_probe", _fake_record)
+
+    def _arrange(feed_url):
+        async def _fake_connect(_url):
+            return _StubConn(feed_url)
+
+        monkeypatch.setattr(asyncpg, "connect", _fake_connect)
+        return recorded
+
+    return _arrange
+
+
+@pytest.mark.asyncio
+async def test_record_refuses_a_url_that_is_not_the_agencys_own_feed(stub_db):
+    """These vendor feeds differ only by an operator number in the path, so
+    probing one operator's feed against another's --agency-id is an easy
+    slip -- and would record a full set of affirmative verdicts for a feed
+    that agency does not even read."""
+    recorded = stub_db(_FEED_URL)
+    other_feed = _FEED_URL.replace("/8/", "/12/")
+
+    with pytest.raises(ValueError, match="feed_url"):
+        await probe._record(12, _confirmed_cov(), other_feed, 180, probed_url=other_feed)
+
+    assert recorded == []
+
+
+@pytest.mark.asyncio
+async def test_record_accepts_the_agencys_own_feed_url(stub_db):
+    recorded = stub_db(_FEED_URL)
+
+    await probe._record(8, _confirmed_cov(), _FEED_URL, 180, probed_url=_FEED_URL)
+
+    assert recorded == [(8, _FEED_URL, 180)]
+
+
+@pytest.mark.asyncio
+async def test_record_accepts_a_local_capture_for_any_agency(stub_db):
+    """--file is the deliberate escape hatch: a capture path can never equal
+    a feed URL, so there is nothing to match and the operator vouches for
+    where the sample came from. The recorded source_feed names the capture."""
+    recorded = stub_db(_FEED_URL)
+
+    await probe._record(8, _confirmed_cov(), "tests/fixtures/hiroden_tu.bin", None, probed_url=None)
+
+    assert recorded == [(8, "tests/fixtures/hiroden_tu.bin", None)]
+
+
+@pytest.mark.asyncio
+async def test_record_reports_an_unknown_agency_id_plainly(stub_db):
+    recorded = stub_db(None)
+
+    with pytest.raises(ValueError, match="no agencies row"):
+        await probe._record(999, _confirmed_cov(), _FEED_URL, 180, probed_url=_FEED_URL)
+
+    assert recorded == []
 
 
 def test_assess_field_coverage_returns_none_for_an_empty_capture():

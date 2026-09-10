@@ -485,3 +485,82 @@ async def test_get_agency_includes_latest_data_date(agencies_client):
     resp = await client.get(f"/api/agencies/{aid}")
     assert resp.status_code == 200
     assert resp.json()["latest_data_date"] == "2026-05-01"
+
+
+async def _probe_count(agency_id: int) -> int:
+    from api.main import app
+
+    async with app.state.pool.acquire() as conn:
+        return await conn.fetchval("SELECT count(*) FROM rt_field_coverage_probes WHERE agency_id = $1", agency_id)
+
+
+async def _create_probed_agency(client, sid, name: str, feed_url: str) -> int:
+    """Create an agency and record a full affirmative coverage verdict for it."""
+    from api.main import app
+    from tests.conftest import confirm_rt_field_coverage
+
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": name, "feed_url": feed_url},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    aid = create_resp.json()["agency_id"]
+    async with app.state.pool.acquire() as conn:
+        await confirm_rt_field_coverage(conn, aid)
+    return aid
+
+
+@pytest.mark.asyncio
+async def test_patch_feed_url_discards_the_coverage_verdict(agencies_client):
+    """Repointing an agency at a different feed must not let the new feed
+    inherit the old one's verified RT field coverage: the verdict describes
+    the probed feed, so it has to be re-earned by a probe run."""
+    client, sid = agencies_client
+    aid = await _create_probed_agency(client, sid, "Repoint", "http://old.example.com/tu.bin")
+    assert await _probe_count(aid) == 4
+
+    resp = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"feed_url": "http://new.example.com/tu.bin"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["feed_url"] == "http://new.example.com/tu.bin"
+    assert await _probe_count(aid) == 0
+
+
+@pytest.mark.asyncio
+async def test_patch_resubmitting_the_same_feed_url_keeps_the_verdict(agencies_client):
+    """A write that resubmits the current URL is not a repoint, so it must
+    not cost the agency coverage it has already been probed for."""
+    client, sid = agencies_client
+    aid = await _create_probed_agency(client, sid, "SameURL", "http://same.example.com/tu.bin")
+
+    resp = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"agency_name": "SameURL renamed", "feed_url": "http://same.example.com/tu.bin"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert await _probe_count(aid) == 4
+
+
+@pytest.mark.asyncio
+async def test_patch_other_fields_keeps_the_verdict(agencies_client):
+    """Coverage follows the feed, so an edit that leaves feed_url alone
+    (here ingest_strategy, the gate's other half) leaves the verdict too."""
+    client, sid = agencies_client
+    aid = await _create_probed_agency(client, sid, "OtherFields", "http://other.example.com/tu.bin")
+
+    resp = await client.patch(
+        f"/api/agencies/{aid}",
+        json={"ingest_strategy": "static_join"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert await _probe_count(aid) == 4

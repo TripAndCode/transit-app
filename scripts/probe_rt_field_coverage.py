@@ -33,6 +33,10 @@ directly, independent of any DB state), which is what lets it vet a feed
 before an `agencies` row for it even exists. ``--file`` is for a sample
 already saved locally, e.g. a capture made by a session that does have
 network access, or a fixture under ``tests/fixtures/``.
+
+With ``--record``, a ``--url`` probe must be the ``feed_url`` already
+stored for ``--agency-id`` or nothing is written; a ``--file`` capture has
+no URL to check and is trusted (``_record`` spells out why).
 """
 
 from __future__ import annotations
@@ -88,7 +92,25 @@ def _assess(cov: dict) -> dict:
     return {**cov, "matches_confirmed_agencies": checks}
 
 
-async def _record(agency_id: int, cov: dict, source_feed: str, ttl_days: int | None) -> None:
+async def _record(agency_id: int, cov: dict, source_feed: str, ttl_days: int | None, *, probed_url: str | None) -> None:
+    """Persist this run's verdict for *agency_id*, after checking the thing
+    that was probed really is that agency's feed.
+
+    *source_feed* is recorded as the provenance of the verdict: the feed URL
+    for ``--url``, the capture's path for ``--file``. *probed_url* is set
+    only in the first case, and then it must equal ``agencies.feed_url``
+    exactly or nothing is written: these vendor feeds differ only by an
+    operator number in the path, so a mistyped ``--agency-id`` would
+    otherwise record one operator's coverage against another's row -- as a
+    full set of affirmative verdicts, which is worse than no verdict at all.
+
+    A ``--file`` capture passes ``probed_url=None`` on purpose, not by
+    omission: a local path can never equal a feed URL, so there is nothing
+    to compare, and vetting a capture taken elsewhere (by a session that had
+    network access, or a checked-in fixture) is exactly what that flag is
+    for. The operator vouches for which feed it came from, and *source_feed*
+    names the capture so the claim stays auditable.
+    """
     import asyncpg
 
     database_url = os.environ.get("DATABASE_URL")
@@ -96,10 +118,17 @@ async def _record(agency_id: int, cov: dict, source_feed: str, ttl_days: int | N
         raise SystemExit("RECORD FAILED: DATABASE_URL is not set")
     conn = await asyncpg.connect(database_url)
     try:
-        # Checked up front so a mistyped agency_id reports as a plain
+        # Fetched up front so a mistyped agency_id reports as a plain
         # "unknown agency" instead of a raw foreign-key traceback.
-        if not await conn.fetchval("SELECT 1 FROM agencies WHERE agency_id = $1", agency_id):
+        feed_url = await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id = $1", agency_id)
+        if feed_url is None:
             raise ValueError(f"no agencies row with agency_id = {agency_id}")
+        if probed_url is not None and probed_url != feed_url:
+            raise ValueError(
+                f"--url probed {probed_url} but agency {agency_id}'s feed_url is {feed_url}; "
+                "these feed URLs differ only by an operator number, so check --agency-id "
+                "(use --file to record a capture you have vouched for yourself)"
+            )
         await record_field_coverage_probe(conn, agency_id, cov, source_feed, ttl_days)
     finally:
         await conn.close()
@@ -173,6 +202,7 @@ def main() -> None:
                 cov,
                 args.url or args.file,
                 args.ttl_days if args.ttl_days else None,
+                probed_url=args.url,
             )
         )
     except ValueError as e:

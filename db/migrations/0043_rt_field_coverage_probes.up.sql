@@ -36,16 +36,21 @@ CREATE TABLE IF NOT EXISTS rt_field_coverage_probes (
     PRIMARY KEY (agency_id, field_name)
 );
 
--- Carry over the three agencies whose coverage was previously asserted by a
--- hardcoded Python set. Their per-field coverage is independently pinned by
+-- Carry over the three Hiroshima feeds whose coverage a hardcoded Python
+-- set used to assert. Their per-field coverage is independently pinned by
 -- `tests/pipeline/test_static_join.py` against checked-in captures of these
 -- exact feeds, so they are seeded as non-expiring: the fixtures, not a
 -- decaying live probe, are what backs the verdict. A later probe run against
 -- one of these feeds upserts over this row, expiry included.
 --
--- Guarded by an ingest_strategy match and an agencies-row join so this is a
--- no-op on a database where those agency_ids are absent or belong to some
--- other operator (a fresh test DB, a single-agency deployment).
+-- Matched on each feed's own URL, not on an agency_id: agency_id is a
+-- SERIAL, so on a deployment whose agencies were created through the admin
+-- API rather than this repo's pinned seed data, ids 8/9/10 are merely the
+-- 8th-10th rows inserted and could be any operator. feed_url is UNIQUE and
+-- identifies the exact feed whose captures back the verdict, so the
+-- carry-over stays exact and every other database is a genuine no-op. The
+-- ingest_strategy term keeps a row that has since been repointed at another
+-- strategy out of the registry the strategy gate reads.
 INSERT INTO rt_field_coverage_probes (agency_id, field_name, confirmed, source_feed, expires_at)
 SELECT a.agency_id, f.field_name, TRUE, a.feed_url, NULL
 FROM agencies a
@@ -53,6 +58,10 @@ CROSS JOIN (VALUES
     ('stop_id'), ('arr_delay'),
     ('schedule_relationship_trip'), ('schedule_relationship_stop')
 ) AS f(field_name)
-WHERE a.agency_id IN (8, 9, 10)
+WHERE a.feed_url IN (
+        'https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin',
+        'https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin',
+        'https://ajt-mobusta-gtfs.mcapps.jp/realtime/10/trip_updates.bin'
+    )
   AND a.ingest_strategy = 'static_join'
 ON CONFLICT (agency_id, field_name) DO NOTHING;
