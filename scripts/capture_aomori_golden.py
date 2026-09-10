@@ -35,12 +35,9 @@ def main() -> None:
     pb_path = ROOT / "tests" / "fixtures" / "aomori_sample.pb"
     raw = pb_path.read_bytes()
 
-    # Mimic ingest()'s captured_at derivation. Use a fixed date so the snapshot
-    # is reproducible regardless of when the script is run.
     captured_at = _ts(args.date, "TripUpdate_120000.pb")
     rows = parse_pb(raw, captured_at, f"{args.date}/TripUpdate_120000.pb")
 
-    # parse_pb returns 12-tuples; serialize to JSON arrays for stability.
     serialized = [list(row) for row in rows]
 
     out = ROOT / "tests" / "fixtures" / "aomori_golden.json"
