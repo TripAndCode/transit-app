@@ -8,6 +8,7 @@ if ! flock -n 200; then
 fi
 
 cd /root/transit-app || exit 1
+export HOME=/root
 
 SETTINGS_SOURCE=/root/transit-app-settings.local.json
 SETTINGS_TARGET=/root/transit-app/.claude/settings.local.json
