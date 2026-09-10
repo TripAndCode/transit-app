@@ -64,11 +64,6 @@ def _run_ingest_and_analyze() -> None:
     # poke inside this long-lived API process.
     ch_client = None
     conn = None
-    # Whether the weather pass below should run: set once the lock is held
-    # and agencies are found, not inferred from `agency_ids` afterward, so a
-    # later failure (e.g. the isolated check_agg_freshness call below) can't
-    # retroactively suppress a poke that already did real ingest+analyze work.
-    run_weather = False
     try:
         ch_client = get_client()
         conn = psycopg2.connect(db_url)
@@ -99,7 +94,6 @@ def _run_ingest_and_analyze() -> None:
         if not agency_ids:
             _log.warning("cron: no agencies seeded; nothing to ingest")
             return
-        run_weather = True
 
         for aid in agency_ids:
             try:
@@ -155,9 +149,10 @@ def _run_ingest_and_analyze() -> None:
             if ch_client is not None:
                 ch_client.close()
 
-    if not run_weather:
-        return
-
+    # No guard needed here: a lock miss, an empty roster, or a setup failure
+    # each `return`/raise from inside the try above, which exits the whole
+    # function once `finally` runs -- execution only ever reaches this line
+    # when the lock was held and agencies were found.
     _run_weather_ingest(db_url)
 
 
@@ -185,6 +180,12 @@ def _run_weather_ingest(db_url: str) -> None:
     from the CLI's). A failure here is logged and never allowed to affect
     the ingest+analyze work above, which has already fully committed by the
     time this runs.
+
+    No longer serialized against a concurrent poke's own weather pass (the
+    advisory lock above no longer covers this call at all): two pokes close
+    enough together can each decide the same station-day needs fetching and
+    both fetch it. Left unguarded because `ingest_weather`'s upsert makes a
+    duplicate fetch merely wasteful, never incorrect.
     """
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 

@@ -542,7 +542,7 @@ def ingest_weather(
     from_date = to_date - timedelta(days=days - 1)
     now = datetime.now(timezone.utc)
     # Monotonic: a wall-clock jump (NTP step, DST) must not extend or truncate
-    # a budget whose whole job is bounding how long a lock is held.
+    # a budget whose whole job is bounding this pass's own runtime.
     deadline = None if max_seconds is None else time.monotonic() + max_seconds
 
     try:
