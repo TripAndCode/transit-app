@@ -529,6 +529,12 @@ Major-finding gate and targeted verification. Record that a direct fallback was
 used in the Status log. If the coordinator cannot complete that fallback, stop with
 `**Blocker-tag:** reviewer-dispatch-safety-blocked`.
 
+An operator-completed fallback may be reused only when the Status log records
+`manual security review: item N, head <SHA>, base <SHA>, no Major findings` and
+the current worktree `HEAD` and `merge-base HEAD main` exactly match those SHAs.
+Otherwise the security group must be reviewed again; never use a result from a
+different branch tip or base.
+
 Per CLAUDE.md, every PR gets **at least two full, independent `/review-branch`
 invocations** before Step 6 — unconditionally, even when the first finds nothing.
 Run them as a strict sequence, not a single branching decision:
