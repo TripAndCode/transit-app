@@ -14,6 +14,8 @@ static IS collected on the VM via `direct_url` curl.
 
 ## 0. Prereqs
 - [ ] Create 4 checks at https://healthchecks.io (period 10 min, grace 5 min); note ping URLs.
+- [ ] Create a 5th "collector health" check (period 1 h, grace 30 min) for
+      `ALERT_PING_URL` — see [11. Alerting](#11-alerting).
 - [ ] `feat/collector-v3` merged; `oracle_cloud/v3/` present on workstation.
 
 ## 1. Install tree (no impact on running v1)
@@ -95,6 +97,32 @@ GTFS still needs its own refresh path if that gap matters.
 
 ## 10. +1 week: remove old tree
     rm -rf /home/opc/app/transportation_analysis/{poller.sh,poller_static.sh,cron.log,poller.log,static_poller.log,static_cron.log,archive,static_archive}
+
+## 11. Alerting
+The 4 per-agency checks in step 0 only cover RT polling, and only for an
+agency whose poller is running well enough to ping. Everything else — static
+fetching, the R2 mirror, empty output, an agency that is configured but never
+started — is covered by `bin/health-check.sh` plus `bin/cron-wrap.sh`, both of
+which report to the single "collector health" check:
+
+    # on VM, /etc/environment (cron does not source ~/.bashrc):
+    ALERT_PING_URL=https://hc-ping.com/<collector-health-uuid>
+
+`cron-wrap.sh` wraps every cron job and pings `<url>/fail` with the job's exit
+status and output tail when one fails. `health-check.sh` runs every 30 min and
+pings the bare URL when everything is fresh, `<url>/fail` with the specific
+reasons when it is not. Leaving `ALERT_PING_URL` unset is supported and keeps
+the previous log-only behavior — nothing fails, nothing pages.
+
+Thresholds are env-overridable in `/etc/environment` (defaults in
+`health-check.sh`); `SYNC_R2_MAX_STALE_DAYS` is deliberately shared with
+`prune.sh`, so the R2 staleness that stops pruning is the same one that alerts.
+
+Verify before relying on it:
+
+    /home/opc/collector/bin/health-check.sh; echo "exit=$?"     # expect exit=0
+    ALERT_PING_URL= COLLECTOR_BASE=/tmp/nope /home/opc/collector/bin/health-check.sh; echo "exit=$?"
+    # expect exit=64 (missing roster) and the reason on stderr, nothing pinged
 
 ## Rollback (any point before step 10)
     sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10'

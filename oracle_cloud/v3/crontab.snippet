@@ -1,18 +1,29 @@
 # Collector v3 cron jobs (pollers run under systemd, NOT cron).
 CRON_TZ=Asia/Tokyo
+# Every job runs under bin/cron-wrap.sh: cron.log still gets the job's full
+# output, and a nonzero exit additionally pings ALERT_PING_URL/fail with the
+# job name, its status, and the tail of that output. Without the wrapper a
+# failure is only ever written to cron.log, where nobody sees it.
+# ALERT_PING_URL (and the OBJECT_STORE_* vars sync-r2.sh needs) live in
+# /etc/environment — cron does not source ~/.bashrc.
+#
 # 5-minute offsets are generous, not exact: static-fetch.sh/rotate-day.sh
 # write via mktemp+atomic mv, so even a slow run overlapping the next job
 # never exposes a partial file to sync-r2.sh's include filters -- worst
 # case is one file syncing a day late, never corruption or loss.
-0  9 * * *  nice -n 10 /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
-5  9 * * *  nice -n 10 /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
-10 9 * * *  nice -n 10 /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
+0  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/static-fetch.sh >> /home/opc/collector/cron.log 2>&1
+5  9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/rotate-day.sh  >> /home/opc/collector/cron.log 2>&1
+10 9 * * *  nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/sync-r2.sh     >> /home/opc/collector/cron.log 2>&1
 # prune.sh REFUSES to run (exit 65) unless sync-r2.sh's .sync-r2.last-ok
 # marker is fresh (see both scripts) -- replaces the old "workstation
 # mirror" (this repo's make fetch + make sync-r2) as prune's actual,
-# enforced parity gate, not just a documented assumption. Still: nothing
-# pages on either script's nonzero exit yet, so a real R2 outage shows up
-# as prune.sh silently skipping its weekly run (visible in cron.log) until
-# someone looks -- wiring both into the existing healthchecks.io ping_url
-# convention (see agencies.tsv) would close that last gap.
-30 9 * * 0 /home/opc/collector/bin/prune.sh                   >> /home/opc/collector/cron.log 2>&1
+# enforced parity gate, not just a documented assumption. That refusal is
+# itself a nonzero exit, so the wrapper pages on it instead of letting a
+# real R2 outage show up only as prune.sh silently skipping its weekly run.
+30 9 * * 0  /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/prune.sh                  >> /home/opc/collector/cron.log 2>&1
+# health-check.sh is deliberately NOT wrapped: it sends its own ok/fail pings,
+# and the wrapper would report every problem it finds a second time. Its
+# cadence is also what makes the check's own period/grace alarm meaningful --
+# a VM that is down or a cron that stopped firing can only be caught by the
+# all-clear failing to arrive.
+*/30 * * * * /home/opc/collector/bin/health-check.sh >> /home/opc/collector/cron.log 2>&1
