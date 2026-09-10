@@ -51,8 +51,9 @@ VPS loop; it defaults to dry-run and rechecks mutable state before applying a pl
 `scripts/comment_lint.py` narrows the `comments` dimension twice over: unchanged
 comments beside changed code via `--stale-candidates`, and banners, over-long blocks,
 pointers at other comments, and line-number references the diff introduced via
-`--diff --warn`. No hook or CI step runs it, so that dimension is the only place those
-rules are applied — `--warn` reports without gating. `--baseline` sweeps every tracked
+`--diff --warn`. A warn-only pre-push hook outside this repository runs the
+same linter; it never blocks and never runs during review, so that dimension is the
+only place those rules are actually applied — `--warn` reports without gating. `--baseline` sweeps every tracked
 source for the same rules, for a deliberate repository-wide pass rather than a review.
 It reads Python, TypeScript, and JavaScript only, so it has nothing to say about a
 Markdown-only diff. All three scripts are versioned here on purpose: a review rule

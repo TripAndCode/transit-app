@@ -46,6 +46,10 @@ otherwise:
 A process-doc diff is Markdown, which `comment_lint.py` does not read, so `comments`
 runs there on its empty-list fallback. The agent file owns what that fallback is.
 
+**API-contract overlay:** when the diff changes an endpoint's request or response
+shape, fold `api-contract` into the first group rather than adding a call. Both sides
+live in this repository, so the reviewer needs the whole prepared diff, not a slice.
+
 **High-risk overlay:** auth/session/admin authorization, credential or PII handling,
 user-supplied URLs, schema/data migrations, destructive data paths, or security
 controls. For these diffs, keep the total at three calls by splitting `security` from
