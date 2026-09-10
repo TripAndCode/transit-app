@@ -96,6 +96,12 @@ def test_aggregate_daily_rejects_non_finite_readings():
         assert aggregate_daily("99999", _DAY, readings) is None
 
 
+def test_aggregate_daily_rejects_a_finite_sum_that_overflows():
+    """Finite source values can still overflow when a whole day is summed."""
+    readings = _readings(_DAY, precip_per_slot=1e308)
+    assert aggregate_daily("99999", _DAY, readings) is None
+
+
 def test_aggregate_daily_drops_a_non_finite_temperature_without_losing_the_day():
     """Temperature is optional, so a non-finite one is dropped like any other
     unusable temperature reading rather than failing the day -- but it must not
