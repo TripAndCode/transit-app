@@ -74,6 +74,21 @@ grep -q "R2_RT_RETENTION_DAYS must be a positive integer" "$TEST_BASE/out.log" \
 [ -s "$AWS_LOG" ] && fail "aws was invoked despite R2_RT_RETENTION_DAYS=0"
 pass "R2_RT_RETENTION_DAYS=0 is rejected instead of wiping the RT archive"
 
+# A leading-zero numeral like "00" passes a naive digits-only check too, but
+# a plain (non-base-10-forced) arithmetic context parses it as octal, where
+# "00" is still 0 -- the same catastrophic cutoff=NOW bug as R2_RT_RETENTION_
+# DAYS=0 above, just spelled differently. Validation must reject it too.
+seed_lists
+set +e
+R2_RT_RETENTION_DAYS=00 R2_STATIC_RETENTION_DAYS=1 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "R2_RT_RETENTION_DAYS=00 should exit 64, got $rc"
+grep -q "R2_RT_RETENTION_DAYS must be a positive integer" "$TEST_BASE/out.log" \
+    || fail "rejection reason for R2_RT_RETENTION_DAYS=00 absent"
+[ -s "$AWS_LOG" ] && fail "aws was invoked despite R2_RT_RETENTION_DAYS=00"
+pass "R2_RT_RETENTION_DAYS=00 is rejected instead of wiping the RT archive"
+
 set +e
 R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=0 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
 rc=$?

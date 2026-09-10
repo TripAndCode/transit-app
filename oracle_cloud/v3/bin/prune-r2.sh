@@ -42,11 +42,19 @@ export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 for var in R2_RT_RETENTION_DAYS R2_STATIC_RETENTION_DAYS MAX_STALE_DAYS; do
     value="${!var}"
     case "$value" in
-        ''|*[!0-9]*|0)
+        ''|*[!0-9]*)
             echo "prune-r2.sh: $var must be a positive integer, got '$value'" >&2
             exit 64
             ;;
     esac
+    # Digits-only doesn't rule out a leading-zero numeral like "00" or "008" --
+    # forcing base-10 interpretation here (rather than letting a later plain
+    # arithmetic context treat a leading zero as octal, where "00" is 0 just
+    # like the literal "0") is what makes this reject the same way "0" does.
+    if [ "$((10#$value))" -le 0 ]; then
+        echo "prune-r2.sh: $var must be a positive integer, got '$value'" >&2
+        exit 64
+    fi
 done
 
 if [ ! -f "$OK_MARKER" ]; then
