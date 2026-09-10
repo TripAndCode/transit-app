@@ -47,9 +47,10 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   over-long blocks, banners, pointers at other comments, and line-number references
   the diff introduced. It does not catch a block the diff formed by deleting the line
   that separated two shorter ones, so judge that shape yourself where the diff joins
-  neighbouring comments. `--warn` keeps it reporting rather than gating. Nothing in this
-  repository runs the linter as a commit or push gate, so this dimension is where
-  those four rules are applied; do not assume some other check caught them.
+  neighbouring comments. `--warn` keeps it reporting rather than gating. A
+  warn-only pre-push hook outside this repository runs the same linter, but it never
+  blocks and it does not run during review, so this dimension is where those four
+  rules are actually applied; do not assume some other check caught them.
   Judge the rest by what a machine cannot: does each comment still describe what the
   code now does? Apply the repository's durable-content rule — a comment must not cite
   a PR number, an issue, a past bug, or a date as the reason code looks the way it
@@ -58,6 +59,11 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   it.
 - **alternatives** — a materially simpler, faster, or lower-memory way to meet the
   objective; do not report speculative rewrites.
+- **api-contract** — for a diff that changes an endpoint's request or response only:
+  the FastAPI/Pydantic shape, the frontend type consuming it, and any fixture or
+  exact-string test of that payload agree, including status and error codes. This
+  repository holds both sides, so a drift here is a same-diff defect rather than a
+  cross-repository one.
 - **enforcement** — for lint, CI, hook, or static-analysis changes only. Require a
   positive control that is caught, a legitimate negative control that passes, and
   scope matching the stated policy.
@@ -74,6 +80,13 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
 - The changed-file list is not a read boundary. Follow callers, consumers, tests, or
   configuration when the assigned dimension requires it, but stay in the named
   worktree.
+- Repository invariants a finding is measured against, from `CLAUDE.md`: React
+  Compiler is enabled, so never report a missing `useMemo`/`useCallback`/`React.memo`
+  as a perf fix and never accept a ref written during render; prefer derived state to
+  a synchronization effect; every visible string goes through `t()` with keys in both
+  `frontend/src/i18n/locales/{ja,en}.json`, and server-side strings in `_LOCALES`
+  update both languages and their exact-string tests together; new pages stay
+  lazy-loaded and MapLibre stays out of the entry chunk.
 - Report only findings that affect correctness, security, performance, enforcement,
   or the objective. No style nits.
 - Format each finding as `Major` or `Minor`, with its dimension, confidence, file and

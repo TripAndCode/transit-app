@@ -46,6 +46,10 @@ otherwise:
 A process-doc diff is Markdown, which `comment_lint.py` does not read, so `comments`
 runs there on its empty-list fallback. The agent file owns what that fallback is.
 
+**API-contract overlay:** when the diff changes an endpoint's request or response
+shape, fold `api-contract` into the first group rather than adding a call. Both sides
+live in this repository, so the reviewer needs the whole prepared diff, not a slice.
+
 **High-risk overlay:** auth/session/admin authorization, credential or PII handling,
 user-supplied URLs, schema/data migrations, destructive data paths, or security
 controls. For these diffs, keep the total at three calls by splitting `security` from
@@ -79,9 +83,9 @@ owned that finding. Cap at two fix iterations. Do not repeat clean groups merely
 “fresh eyes.”
 
 For a high-risk diff, after all Major findings are resolved, run one final integrated
-review over the cumulative diff. Use Opus for this final call when the Agent tool
-supports a model override; otherwise use the configured reviewer. A third full read
-is justified only when that final review itself caused a material code change.
+review over the cumulative diff — one reviewer, no dimension slice, looking for
+interactions between the fixes rather than for fresh defects. A third full read is
+justified only when that final review itself caused a material code change.
 
 If a known PR number was supplied, fetch its review threads once. Suppress a finding
 only when the same location is already raised and the current code demonstrably fixes
