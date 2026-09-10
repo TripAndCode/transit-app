@@ -552,9 +552,10 @@ def ingest_weather(
         # Ends this read's transaction before the first outbound request.
         conn.commit()
     except Exception:
-        # Roll back before re-raising so the caller's session stays usable: the
-        # cron path runs an aggregate-freshness check on this same connection
-        # afterwards, and an aborted transaction would take that down too.
+        # Roll back before re-raising so the caller's session stays usable:
+        # an aborted transaction poisons every later statement on the same
+        # connection until it is rolled back, and this function does not own
+        # the connection's lifetime.
         conn.rollback()
         raise
     if not station_ids:

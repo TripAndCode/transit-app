@@ -64,10 +64,11 @@ def _run_ingest_and_analyze() -> None:
     # poke inside this long-lived API process.
     ch_client = None
     conn = None
-    # Populated only once the lock is held and agencies are found -- gates
-    # the weather pass below, which must not run at all when this poke
-    # skipped everything else (lock miss, no agencies, or setup failure).
-    agency_ids: list[int] = []
+    # Whether the weather pass below should run: set once the lock is held
+    # and agencies are found, not inferred from `agency_ids` afterward, so a
+    # later failure (e.g. the isolated check_agg_freshness call below) can't
+    # retroactively suppress a poke that already did real ingest+analyze work.
+    run_weather = False
     try:
         ch_client = get_client()
         conn = psycopg2.connect(db_url)
@@ -98,6 +99,7 @@ def _run_ingest_and_analyze() -> None:
         if not agency_ids:
             _log.warning("cron: no agencies seeded; nothing to ingest")
             return
+        run_weather = True
 
         for aid in agency_ids:
             try:
@@ -111,15 +113,22 @@ def _run_ingest_and_analyze() -> None:
 
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
-        stale = check_agg_freshness(conn, ch_client, agency_ids)
-        if stale:
-            _log.error(
-                "cron: %d agency(ies) have stale aggregates after analyze: %s",
-                len(stale),
-                [s.agency_id for s in stale],
-            )
-        else:
-            _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
+        # Isolated in its own try/except, like the per-agency loop above: a
+        # failure here (e.g. a transient ClickHouse error) must not also
+        # suppress the weather pass below, which has nothing to do with
+        # aggregate freshness.
+        try:
+            stale = check_agg_freshness(conn, ch_client, agency_ids)
+            if stale:
+                _log.error(
+                    "cron: %d agency(ies) have stale aggregates after analyze: %s",
+                    len(stale),
+                    [s.agency_id for s in stale],
+                )
+            else:
+                _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
+        except Exception:
+            _log.exception("cron: check_agg_freshness failed")
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
@@ -146,10 +155,7 @@ def _run_ingest_and_analyze() -> None:
             if ch_client is not None:
                 ch_client.close()
 
-    if not agency_ids:
-        # Lock miss, no agencies seeded, or setup raised before either was
-        # known -- nothing else in this poke ran, so the weather pass must
-        # not either.
+    if not run_weather:
         return
 
     _run_weather_ingest(db_url)
