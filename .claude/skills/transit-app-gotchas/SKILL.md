@@ -47,6 +47,23 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   passing." `make test`/`make check` do NOT set it, so the Makefile's own
   default local gate has this gap too; always export the block above by hand
   for a run that actually covers the ClickHouse path.
+- The `transit-test-pg`/`transit-test-ch` pair above is a fixed name on a
+  fixed port, and this repo also keeps a long-lived instance of it running
+  for everyday local use. Two runs against that same pair at once —
+  e.g. an interactive verification pass and a concurrent `/vps-loop-run`
+  worker's, in two different worktrees on the same VPS — race on
+  `tests/conftest.py`'s per-test Postgres `TRUNCATE ... CASCADE` and
+  ClickHouse `DROP TABLE`/`CREATE TABLE`, producing spurious failures with
+  no connection to either diff. For any run that might overlap with another one on the
+  same host, use `scripts/run_full_ci.sh` instead: it builds and starts its
+  own uniquely-named Postgres + ClickHouse pair on two free ports, applies
+  schema, runs the same lint/type/test gate as `.github/workflows/ci.yml`'s
+  `test` job, and always tears both containers down again — any number of
+  invocations can run at once on one host without coordinating, and none of
+  them touch the shared `transit-test-pg`/`transit-test-ch` containers.
+  `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
+  `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
+  for a caller that starts its own containers by some other means.
 
 ## Frontend dev proxy — two config files
 - `frontend/` ships BOTH `vite.config.ts` (tracked) and a gitignored

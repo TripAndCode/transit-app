@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs `poetry run pytest` against the throwaway Postgres (:5544)/ClickHouse
 # (:8124) test stack, with the required env block already set inside this
-# script instead of prepended on the command line.
+# script instead of prepended on the command line. Set TEST_PG_PORT/
+# TEST_CH_PORT to point at a different (e.g. per-worktree isolated) pair
+# instead -- see scripts/run_full_ci.sh.
 #
 # Why this script exists: a Bash permission allowlist entry like
 # `Bash(poetry run pytest*)` only matches a command whose literal text
@@ -38,10 +40,23 @@ set -euo pipefail
 # --dashboard-e2e's spawned app subprocess would otherwise inherit an
 # ambient dev value straight into a live connection against the real,
 # hundreds-of-millions-of-rows dev dataset across 4 agencies.
-export DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
+#
+# The host/db-name/user/password stay force-set for that same reason, but
+# the PORT is deliberately read from TEST_PG_PORT/TEST_CH_PORT (falling
+# back to the well-known shared instances on :5544/:8124) rather than also
+# being force-set: those two names are never set by this repo's tracked
+# `.env`, so honouring them can't reintroduce the dev-DB leak above, while
+# letting scripts/run_full_ci.sh (or any other caller that started its own
+# isolated, per-invocation containers) point this script at a dedicated
+# pair instead of the fixed, shared one -- a shared pair's per-test
+# TRUNCATE/DROP-CREATE races across concurrent runs.
+pg_port="${TEST_PG_PORT:-5544}"
+ch_port="${TEST_CH_PORT:-8124}"
+export DATABASE_URL="postgresql://transit:transit@localhost:${pg_port}/transit_test"
 export RUN_CH_INTEGRATION=1
 export CLICKHOUSE_HOST=localhost
-export CLICKHOUSE_PORT=8124
+export CLICKHOUSE_PORT="${ch_port}"
+export CLICKHOUSE_TEST_PORT="${ch_port}"
 export CLICKHOUSE_USER=transit
 export CLICKHOUSE_PASSWORD=transit
 export CLICKHOUSE_DATABASE=transit_test
