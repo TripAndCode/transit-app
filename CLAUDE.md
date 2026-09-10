@@ -105,6 +105,14 @@ the task needs them.
 
 ## Durable content only
 
+- Comments and docstrings are not a second copy of the code. Keep them only when
+  they explain non-obvious rationale, a durable invariant, a security or data-safety
+  boundary, a public contract, or a nontrivial algorithm. Remove comments that
+  restate the next line, describe a function's name or arguments, narrate routine
+  control flow, or preserve historical phase/PR/session context. Prefer clear names,
+  small functions, and tests as the durable explanation. During housekeeping, delete
+  redundant prose and rewrite stale rationale instead of preserving it for
+  completeness.
 - Comments and docs state current, permanent facts, never who changed what or when.
   Do not cite a PR/issue number, a past bug, or a date as the reason code looks the
   way it does; state the underlying invariant directly instead (e.g. "ties break on
