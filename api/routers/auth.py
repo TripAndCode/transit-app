@@ -213,7 +213,6 @@ async def _fetch_userinfo(client, token, provider: str) -> dict:
             "name": info.get("name"),
             "avatar_url": info.get("picture"),
         }
-    # github
     user_resp = await client.get("user", token=token)
     user = user_resp.json()
     emails_resp = await client.get("user/emails", token=token)

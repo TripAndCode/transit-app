@@ -109,7 +109,6 @@ class AskResponse(BaseModel):
     result: dict | None = None
     ctx: dict
     router_stage: str | None = None
-    # Phase ② canonical-intent cache fields
     signature_hash: str | None = None
     confidence: float | None = None
     canonical_args: dict | None = None

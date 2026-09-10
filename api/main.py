@@ -178,9 +178,6 @@ async def lifespan(app: FastAPI):
     # are both set. See api.routers.auth.seed_local_admin.
     await seed_local_admin(app.state.pool)
 
-    # Phase 2: warm the embedding model so first request doesn't pay the
-    # load cost. Non-fatal: if the model can't load, the router will fall
-    # through to the LLM path (Phase 1 behavior).
     from pipeline.query.embeddings import get_embedder
 
     embedder = get_embedder()
