@@ -140,11 +140,15 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
             patch("pipeline.ingest.ingest_live") as fake_ingest,
             patch("pipeline.analyze.analyze") as fake_analyze,
             patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+            patch("pipeline.weather.ingest_weather") as fake_weather,
         ):
             _run_ingest_and_analyze()
 
         fake_ingest.assert_not_called()
         fake_analyze.assert_not_called()
+        # A lock miss must skip the weather pass too -- it is gated on the
+        # same "did this poke actually do anything" check as ingest/analyze.
+        fake_weather.assert_not_called()
     finally:
         with holder.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
@@ -164,8 +168,63 @@ def test_run_ingest_and_analyze_skips_when_already_running(two_agencies, monkeyp
         patch("pipeline.analyze.analyze") as fake_analyze,
         patch("pipeline.freshness.check_agg_freshness", return_value=[]),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.weather.ingest_weather") as fake_weather,
     ):
         _run_ingest_and_analyze()
 
     assert fake_ingest.call_count > 0
     assert fake_analyze.call_count > 0
+    # A successful poke (lock acquired, agencies found) must still run the
+    # weather pass -- only a skipped poke omits it.
+    fake_weather.assert_called_once()
+
+
+def test_weather_ingest_runs_only_after_the_advisory_lock_is_released(two_agencies, monkeypatch):
+    """The weather pass must open its own connection after the ingest+analyze
+    advisory lock's connection has already closed -- never share it. Sharing
+    it would let a slow/trickling weather fetch hold the lock open, and every
+    cron poke arriving meanwhile would take the "already in flight" path,
+    dropping live GTFS-RT polls that can't be recovered later (see
+    pipeline.weather.CRON_INGEST_BUDGET_SEC)."""
+    _active_id, _deleted_id = two_agencies
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+
+    from api.routers.internal import _run_ingest_and_analyze
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY
+
+    lock_was_free_during_weather = None
+
+    def fake_ingest_weather(conn, **kwargs):
+        nonlocal lock_was_free_during_weather
+        # A probe on a brand-new connection can only acquire the lock if the
+        # one _run_ingest_and_analyze held has already been released.
+        probe = psycopg2.connect(DATABASE_URL)
+        probe.autocommit = True
+        try:
+            with probe.cursor() as cur:
+                cur.execute("SELECT pg_try_advisory_lock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
+                lock_was_free_during_weather = cur.fetchone()[0]
+            if lock_was_free_during_weather:
+                with probe.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
+        finally:
+            probe.close()
+        return (0, 0, [])
+
+    with (
+        patch("pipeline.ingest.ingest_live") as fake_ingest,
+        patch("pipeline.analyze.analyze") as fake_analyze,
+        patch("pipeline.freshness.check_agg_freshness", return_value=[]),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.weather.ingest_weather", side_effect=fake_ingest_weather) as fake_weather,
+    ):
+        _run_ingest_and_analyze()
+
+    # >0 rather than assert_called_once: the shared test database may carry
+    # other already-seeded agencies alongside this fixture's own, so more
+    # than one ingest_live/analyze call is a valid outcome -- what this test
+    # verifies is the lock state during the (single) weather pass below.
+    assert fake_ingest.call_count > 0
+    assert fake_analyze.call_count > 0
+    fake_weather.assert_called_once()
+    assert lock_was_free_during_weather is True
