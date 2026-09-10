@@ -470,7 +470,12 @@ Give the worker ONLY:
 - This instruction, verbatim: "Implement this on a new branch named
   `vps-loop/item-<N>`, following this repo's normal CLAUDE.md conventions
   (tests, `make check`-scoped checks, `[skip ci]` in the commit trailer).
-  Commit your work locally on that branch, including a one-line append to
+  Before starting any lengthy test or review preparation, create a durable
+  local checkpoint commit containing the current implementation. Create another
+  checkpoint whenever a substantial fix is complete. This protects the work if
+  the coordinator process is interrupted; checkpoints must be valid commits,
+  not only uncommitted files. Then commit your work locally on that branch,
+  including a one-line append to
   `docs/refactor-log.md` describing what you did (date + summary; leave the
   PR number as `(PR #pending)` — the coordinator fills in the real number
   later). Do NOT push and do NOT open a PR — a separate verification step
