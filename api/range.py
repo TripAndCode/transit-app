@@ -138,17 +138,6 @@ def parse_iso_date(s: str | None) -> date | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# SQL clause builders
-#
-# Each builder returns ``(fragment, params)`` where ``fragment`` is a snippet
-# meant to be ANDed into a larger WHERE, and ``params`` is the list of
-# positional values the asyncpg call should append. The ``next_param`` arg
-# lets the caller thread positional placeholder numbering across multiple
-# clause builders.
-# ---------------------------------------------------------------------------
-
-
 def date_range_clause(
     column: str,
     ctx: RangeCtx,
@@ -195,7 +184,6 @@ def dow_clause(
         return "TRUE", [], next_param
     if ctx.dow == "weekday":
         return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
-    # weekend: Saturday (6) + Sunday (7)
     return f"EXTRACT(ISODOW FROM {column}::date) IN (6, 7)", [], next_param
 
 
