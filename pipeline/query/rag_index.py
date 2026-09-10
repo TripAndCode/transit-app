@@ -1,4 +1,4 @@
-"""``rag_chunks`` reader for the Phase 2 router.
+"""``rag_chunks`` reader for the embedding router.
 
 Stores one row per indexed golden-set question. Tool + args for each
 chunk live in ``tests/ask_eval/golden_set.jsonl`` (the canonical source);

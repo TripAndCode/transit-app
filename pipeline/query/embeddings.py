@@ -1,4 +1,4 @@
-"""Sentence-transformer embedding wrapper for the Phase 2 router.
+"""Sentence-transformer embedding wrapper for the embedding router.
 
 Loads ``intfloat/multilingual-e5-small`` (384-dim, multilingual) at API
 startup. Used by:
@@ -7,8 +7,8 @@ startup. Used by:
 * :mod:`pipeline.query.rag_index` — index build (embeds golden-set Qs)
 
 Both paths are tolerant of a failed model load: if ``Embedder.available``
-is False, callers must fall through to the LLM-only path (Phase 1
-behavior). API startup never aborts on embedding failure.
+is False, callers must fall through to the LLM-only path. API startup never
+aborts on embedding failure.
 """
 
 from __future__ import annotations

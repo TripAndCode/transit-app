@@ -1,4 +1,4 @@
-"""Phase 2 pre-LLM router.
+"""Pre-LLM router.
 
 Three-stage pipeline orchestrated from :func:`route_question`:
 
@@ -11,7 +11,7 @@ Three-stage pipeline orchestrated from :func:`route_question`:
 
 The router is additive: any failure (no rule match, embedder unavailable,
 empty index) returns ``None`` so the caller falls through to the LLM with
-empty examples. Phase 1's behavior continues to work end-to-end.
+empty examples.
 """
 
 from __future__ import annotations

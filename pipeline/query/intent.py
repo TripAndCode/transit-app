@@ -33,9 +33,6 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "trend_shift": {},
     "on_time_rate": {"threshold_min": 1, "n": 20},
     "capabilities": {},
-    # Card-surface aliases (Phase ③.5): frontend dispatches these tool names
-    # from the parameterized question cards.  No defaults to drop — all args
-    # are treated as significant.
     "on_time": {},
     "trend": {},
     "cmp_service": {},
