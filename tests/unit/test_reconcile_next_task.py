@@ -41,6 +41,25 @@ def test_parse_items_finds_headers_and_ignores_indented_continuation_lines():
     assert items[1].line_index == 4
 
 
+def test_parse_items_ignores_item_like_lines_inside_a_fenced_code_block():
+    # Mirrors find_headings's own fence-awareness test: a Status log entry
+    # that quotes this file's own "N. **..." item-header syntax inside a
+    # fenced example must not be misread as a real backlog item by the
+    # parser reconcile_item_statuses relies on.
+    text = (
+        "1. **Real item.**\n"
+        "\n"
+        "```\n"
+        "99. **Not a real item, just a quoted example.**\n"
+        "```\n"
+        "\n"
+        "2. **Another real item.**\n"
+    )
+    items = reconcile.parse_items(lines_of(text))
+
+    assert [item.number for item in items] == [1, 2]
+
+
 @pytest.mark.parametrize(
     ("header", "expected"),
     [
@@ -134,6 +153,25 @@ def test_reconcile_item_statuses_leaves_moot_items_untouched_even_if_a_branch_me
 
     assert "".join(new_lines) == text
     assert changes == []
+
+
+def test_reconcile_item_statuses_skips_duplicated_item_numbers_without_modifying_either_copy():
+    # Two same-numbered item lines (e.g. one left over in the main backlog, one
+    # in a restored-entries section) must never be resolved by the dict
+    # comprehension's arbitrary last-wins pick: applying the DONE marker to
+    # whichever copy happens to survive that pick would leave its sibling
+    # stale and contradict the "never guess which copy is authoritative"
+    # invariant this module documents and enforces elsewhere.
+    text = "108. **First copy, still open.**\n108. **Second copy, still open.**\n"
+    merged = {108: reconcile.MergedPR(pr_number=400, merged_date="2026-09-11")}
+
+    new_lines, changes, warnings = reconcile.reconcile_item_statuses(lines_of(text), merged)
+
+    assert "".join(new_lines) == text
+    assert changes == []
+    assert len(warnings) == 1
+    assert "item-108" in warnings[0]
+    assert "appears more than once" in warnings[0]
 
 
 def test_reconcile_item_statuses_warns_on_merged_branch_with_no_matching_item():

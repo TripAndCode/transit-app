@@ -42,7 +42,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 # Reuse cleanup_git_state.py's already-reviewed subprocess/error-handling
 # helpers instead of duplicating them. Loaded by file path since `scripts/`
@@ -66,6 +66,35 @@ class ReconcileError(RuntimeError):
 ITEM_HEADER_RE = re.compile(r"^(?P<num>\d+)\.\s+\*\*")
 ITEM_BRANCH_RE = re.compile(r"^vps-loop/item-(\d+)$")
 TERMINAL_MARKERS = ("DONE", "MOOT", "DO NOT START")
+FENCE_RE = re.compile(r"^ *(`{3,}|~{3,})")
+
+
+def _unfenced_lines(lines: Sequence[str]) -> Iterator[tuple[int, str]]:
+    """Yield ``(index, line)`` for every line outside a fenced code block.
+
+    A line that opens or closes a fenced code block (```` ``` ```` or ``~~~``,
+    at any indentation) toggles an in-fence state; every line while that
+    state is active — including the fence marker lines themselves — is
+    skipped. Shared by every line-start-anchored parser in this module
+    (backlog item headers, markdown headings) so a quoted example inside
+    prose (e.g. a Status log entry) can't be misread as real structure by
+    one parser while another correctly skips it. Unlike strict top-level
+    CommonMark, indentation never demotes a fence marker to an indented code
+    block here: this file's fenced blocks live inside numbered-list-item
+    continuation text and are conventionally indented 4 spaces, with no
+    surrounding paragraph context that would otherwise force that
+    reinterpretation. An unclosed fence is treated as extending to end of
+    file, matching how Markdown itself renders it.
+    """
+
+    in_fence = False
+    for index, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        yield index, line
 
 
 @dataclass(frozen=True)
@@ -90,11 +119,14 @@ def parse_items(lines: Sequence[str]) -> list[Item]:
     A continuation line is always indented, so it never matches this
     line-start anchored pattern — only the first line of each item does,
     regardless of which section (main backlog or a restored-entries
-    section) it lives in.
+    section) it lives in. Lines inside a fenced code block are skipped via
+    `_unfenced_lines`, the same fence-tracking `find_headings` uses, so a
+    future prose example that quotes this file's own ``N. **…`` syntax at
+    column 0 can't be misread as a real backlog item.
     """
 
     items = []
-    for index, line in enumerate(lines):
+    for index, line in _unfenced_lines(lines):
         match = ITEM_HEADER_RE.match(line)
         if match:
             items.append(Item(number=int(match.group("num")), line_index=index))
@@ -193,13 +225,28 @@ def reconcile_item_statuses(
     e.g. a since-renumbered or manually removed entry — since guessing where
     to insert one would be exactly the kind of judgment call this script
     must not make unattended.
+
+    A number flagged by `find_duplicate_item_numbers` is treated the same
+    way: `{item.number: item for item in parse_items(lines)}` can only keep
+    one of the two same-numbered lines, and this function must never let
+    that arbitrary dict-comprehension pick decide which copy silently gets
+    the DONE marker while its sibling is left stale. Both copies are left
+    untouched and a warning is recorded instead.
     """
 
+    duplicated_numbers = set(find_duplicate_item_numbers(lines))
     items_by_number = {item.number: item for item in parse_items(lines)}
     new_lines = list(lines)
     changes: list[str] = []
     warnings: list[str] = []
     for number, pr in sorted(merged_by_item.items()):
+        if number in duplicated_numbers:
+            warnings.append(
+                f"vps-loop/item-{number} has merged PR #{pr.pr_number}, but backlog item "
+                f"{number} appears more than once in the file; skipping the DONE marker "
+                "since it is not safe to guess which copy is authoritative"
+            )
+            continue
         item = items_by_number.get(number)
         if item is None:
             warnings.append(
@@ -217,33 +264,19 @@ def reconcile_item_statuses(
 
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-FENCE_RE = re.compile(r"^ *(`{3,}|~{3,})")
 
 
 def find_headings(lines: Sequence[str]) -> list[tuple[int, int, str]]:
     """Return ``(line index, level, title)`` for every markdown heading, in order.
 
-    A line that opens or closes a fenced code block (```` ``` ```` or ``~~~``,
-    at any indentation) toggles an in-fence state; every line while that
-    state is active is skipped even if it looks like a heading, so a quoted
-    snippet (e.g. in a Status log entry) can't be misread as a real section
-    boundary. Unlike strict top-level CommonMark, indentation never demotes a
-    fence marker to an indented code block here: this file's fenced blocks
-    live inside numbered-list-item continuation text and are conventionally
-    indented 4 spaces, with no surrounding paragraph context that would
-    otherwise force that reinterpretation. An unclosed fence is treated as
-    extending to end of file, matching how Markdown itself renders it.
+    Fenced code blocks are skipped via `_unfenced_lines` (see its docstring
+    for the fence-toggling and indentation rules), so a quoted snippet (e.g.
+    in a Status log entry) can't be misread as a real section boundary.
     """
 
     headings = []
-    in_fence = False
-    for index, line in enumerate(lines):
+    for index, line in _unfenced_lines(lines):
         stripped = line.rstrip("\n")
-        if FENCE_RE.match(stripped):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
         match = HEADING_RE.match(stripped)
         if match:
             headings.append((index, len(match.group(1)), match.group(2)))
