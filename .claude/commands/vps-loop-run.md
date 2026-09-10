@@ -521,6 +521,14 @@ command is the canonical home for review fan-out and retry policy; do not copy t
 here. Add the worktree absolute path to every dispatch and never paste diff text into
 the prompts.
 
+If a reviewer dispatch is rejected by the provider's safety classifier before the
+reviewer runs, do not change models, keep rephrasing the prompt, or treat the group
+as clean. For the affected group only, perform the same review directly in this
+coordinator session from the prepared manifest and worktree, applying the normal
+Major-finding gate and targeted verification. Record that a direct fallback was
+used in the Status log. If the coordinator cannot complete that fallback, stop with
+`**Blocker-tag:** reviewer-dispatch-safety-blocked`.
+
 Per CLAUDE.md, every PR gets **at least two full, independent `/review-branch`
 invocations** before Step 6 — unconditionally, even when the first finds nothing.
 Run them as a strict sequence, not a single branching decision:
