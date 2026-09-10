@@ -217,17 +217,21 @@ def reconcile_item_statuses(
 
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE_RE = re.compile(r"^ *(`{3,}|~{3,})")
 
 
 def find_headings(lines: Sequence[str]) -> list[tuple[int, int, str]]:
     """Return ``(line index, level, title)`` for every markdown heading, in order.
 
     A line that opens or closes a fenced code block (```` ``` ```` or ``~~~``,
-    optionally indented up to 3 spaces per CommonMark) toggles an in-fence
-    state; every line while that state is active is skipped even if it looks
-    like a heading, so a quoted snippet (e.g. in a Status log entry) can't be
-    misread as a real section boundary. An unclosed fence is treated as
+    at any indentation) toggles an in-fence state; every line while that
+    state is active is skipped even if it looks like a heading, so a quoted
+    snippet (e.g. in a Status log entry) can't be misread as a real section
+    boundary. Unlike strict top-level CommonMark, indentation never demotes a
+    fence marker to an indented code block here: this file's fenced blocks
+    live inside numbered-list-item continuation text and are conventionally
+    indented 4 spaces, with no surrounding paragraph context that would
+    otherwise force that reinterpretation. An unclosed fence is treated as
     extending to end of file, matching how Markdown itself renders it.
     """
 

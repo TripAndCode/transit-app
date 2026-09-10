@@ -308,6 +308,27 @@ def test_find_headings_handles_tilde_fences_too():
     assert [title for _index, _level, title in headings] == ["Real heading"]
 
 
+def test_find_headings_ignores_heading_like_lines_inside_a_four_space_indented_fence():
+    # NEXT_TASK.md's fenced blocks live inside numbered-list-item continuation
+    # text and are conventionally indented 4 spaces — more than the 3-space
+    # cap a strict top-level CommonMark parser would still treat as a fence.
+    text = (
+        "# Real heading\n"
+        "\n"
+        "1. **Item.**\n"
+        "\n"
+        "    ```\n"
+        "    # not a real heading, just quoted output\n"
+        "    ```\n"
+        "\n"
+        "## Another real heading\n"
+    )
+
+    headings = reconcile.find_headings(lines_of(text))
+
+    assert [title for _index, _level, title in headings] == ["Real heading", "Another real heading"]
+
+
 def test_merge_duplicate_level2_sections_ignores_heading_like_lines_in_status_log_code_block():
     # A Status log entry that happens to quote a fenced snippet containing a
     # line starting with "#" at column 0 must not be misread as a section
