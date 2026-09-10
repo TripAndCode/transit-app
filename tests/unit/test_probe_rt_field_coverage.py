@@ -1,14 +1,40 @@
-"""Pure-logic tests for scripts/probe_rt_field_coverage.py's threshold check.
+"""Pure-logic tests for the RT field-coverage threshold check.
 
-No DB, no network -- `_assess` only compares an already-computed coverage
-dict against the fixed thresholds tests/pipeline/test_static_join.py
-confirms for agencies 8/9/10; the fetch/CLI plumbing needs real network and
+No DB, no network. `pipeline.strategies.static_join.assess_field_coverage`
+is the canonical verdict -- the same call `--record` persists to
+`rt_field_coverage_probes` -- and `_assess` is the probe CLI's human-facing
+report built on top of it; both are covered here so the report can't drift
+from what gets recorded. The fetch/CLI/DB plumbing needs real network and
 isn't covered here.
 """
 
 from __future__ import annotations
 
+from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, assess_field_coverage
 from scripts.probe_rt_field_coverage import _assess
+
+
+def test_assess_field_coverage_returns_none_for_an_empty_capture():
+    """An empty poll is not evidence either way -- distinct from a verdict
+    of "this feed never sends the field"."""
+    assert assess_field_coverage({"stop_time_updates": 0, "feed_timestamp": None}) is None
+
+
+def test_assess_field_coverage_verdicts_are_keyed_by_registry_field_name():
+    """Keys must match RT_COVERAGE_FIELDS exactly: they are written straight
+    into rt_field_coverage_probes.field_name, whose CHECK constraint (and the
+    read-side gate's completeness count) depends on that spelling."""
+    cov = {
+        "stop_time_updates": 100,
+        "feed_timestamp": 1_770_000_000,
+        "stop_id_coverage": 1.0,
+        "arr_delay_coverage": 0.2,
+        "schedule_relationship_trip_coverage": 1.0,
+        "schedule_relationship_stop_coverage": 1.0,
+    }
+    verdicts = assess_field_coverage(cov)
+    assert set(verdicts) == set(RT_COVERAGE_FIELDS)
+    assert all(verdicts.values())
 
 
 def test_assess_empty_feed_has_no_stop_time_updates():

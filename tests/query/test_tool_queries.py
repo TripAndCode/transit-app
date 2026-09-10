@@ -10,20 +10,18 @@ from pipeline.query.tool_queries import (
     route_dow_breakdown,
     route_info,
 )
-from pipeline.strategies import static_join as static_join_module
+from tests.conftest import confirm_rt_field_coverage
 
 
-def _trust_schedule_padding(monkeypatch, *agency_ids):
+async def _trust_schedule_padding(conn, *agency_ids):
     """See tests/api/test_network.py's `_trust_service_delivered` docstring --
-    same reasoning, for `schedule_realism_padding`'s independent confirmed-set
-    gate: production only trusts agency_ids actually in
-    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
-    (currently 8/9/10), which a freshly-inserted test agency_id won't
-    coincidentally match. `schedule_realism_padding` calls the shared
-    `pipeline.strategies.static_join.rt_field_coverage_confirmed`, so the
-    confirmed set to patch lives on that module, not on `tool_queries`
-    itself."""
-    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
+    same reasoning, for `schedule_realism_padding`: production only trusts an
+    agency with a live verdict in `rt_field_coverage_probes`, which a
+    freshly-inserted test agency has no rows in. `schedule_realism_padding`
+    calls the shared
+    `pipeline.strategies.static_join.rt_field_coverage_confirmed`, so this is
+    the same registry every other gated reader consults."""
+    await confirm_rt_field_coverage(conn, *agency_ids)
 
 
 @pytest.mark.asyncio
@@ -425,7 +423,7 @@ async def test_schedule_realism_segments_returns_empty_without_ch(aconn, aagency
 
 @pytest.mark.asyncio
 async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_rate(
-    aagency_id, aconn, ch_client, ch_async_client, monkeypatch
+    aagency_id, aconn, ch_client, ch_async_client
 ):
     """A 3-stop trip ("T_PAD", route R9) recurring on two calendar days, with
     a deliberately padded schedule on the intermediate-stop-to-terminus
@@ -461,7 +459,7 @@ async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_ra
     from pipeline.clickhouse import insert_updates
     from pipeline.query.tool_queries import schedule_realism_padding
 
-    _trust_schedule_padding(monkeypatch, aagency_id)
+    await _trust_schedule_padding(aconn, aagency_id)
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
     await aconn.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
@@ -511,9 +509,7 @@ async def test_schedule_realism_padding_reproduces_padding_and_terminus_early_ra
 
 
 @pytest.mark.asyncio
-async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(
-    aagency_id, aconn, ch_client, ch_async_client, monkeypatch
-):
+async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(aagency_id, aconn, ch_client, ch_async_client):
     """A vehicle that arrives at an intermediate stop exactly on schedule but
     then dwells far longer than its scheduled dwell (holding to avoid an
     early departure, not boarding/alighting) must be flagged by
@@ -528,7 +524,7 @@ async def test_schedule_realism_padding_flags_held_dwell_beyond_schedule(
     from pipeline.clickhouse import insert_updates
     from pipeline.query.tool_queries import schedule_realism_padding
 
-    _trust_schedule_padding(monkeypatch, aagency_id)
+    await _trust_schedule_padding(aconn, aagency_id)
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
     await aconn.execute(
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
@@ -585,17 +581,16 @@ async def test_schedule_realism_padding_unavailable_for_non_static_join_agency(a
 
 @pytest.mark.asyncio
 async def test_schedule_realism_padding_unavailable_for_unconfirmed_static_join_agency(
-    aagency_id, aconn, ch_async_client, monkeypatch
+    aagency_id, aconn, ch_async_client
 ):
     """`ingest_strategy == 'static_join'` alone is not sufficient trust: an
-    agency outside `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` must still degrade
-    to `available: False`, mirroring `pipeline.reports.dwell_run`'s and
-    `pipeline.reports.service_delivered`'s own confirmed-set gate for the
-    same underlying fields. Explicitly empties the confirmed set so this
-    holds regardless of which real agency_ids happen to be in it."""
+    agency with no recorded RT field-coverage verdict must still degrade to
+    `available: False`, mirroring `pipeline.reports.dwell_run`'s and
+    `pipeline.reports.service_delivered`'s use of the same gate over the
+    same underlying fields. Records nothing at all, which is the production
+    default for a feed nobody has probed."""
     from pipeline.query.tool_queries import schedule_realism_padding
 
-    monkeypatch.setattr(static_join_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset())
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
 
     ctx = RangeCtx(from_date=date.today() - timedelta(days=7), to_date=date.today())

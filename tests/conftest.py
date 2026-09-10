@@ -290,6 +290,41 @@ async def aagency_id(aconn):
     return row["agency_id"]
 
 
+async def confirm_rt_field_coverage(conn, *agency_ids, confirmed=True, expires_at=None):
+    """Record an RT field-coverage probe verdict for each of *agency_ids*,
+    as `scripts/probe_rt_field_coverage.py --record` would.
+
+    Production gates every RT-optional-field reader on a live verdict in
+    `rt_field_coverage_probes` intersected with a `RT_INGEST_STRATEGIES`
+    ingest_strategy (see
+    `pipeline.strategies.static_join.rt_field_coverage_confirmed`), so a
+    freshly-inserted test agency is untrusted until a test says otherwise —
+    which is exactly the production default and needs no setup at all.
+
+    Deliberately does NOT touch `agencies.ingest_strategy`: that is the
+    gate's other, independent half, and a caller must set it explicitly so a
+    test asserting one half can't be satisfied by the other.
+    `expires_at=None` records a non-expiring verdict; pass a past timestamp
+    to exercise the staleness path. Accepts an asyncpg connection or pool
+    (both expose `execute`).
+    """
+    from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
+
+    for aid in agency_ids:
+        for field in RT_COVERAGE_FIELDS:
+            await conn.execute(
+                "INSERT INTO rt_field_coverage_probes "
+                "(agency_id, field_name, confirmed, source_feed, expires_at) "
+                "VALUES ($1, $2, $3, 'test://probe', $4) "
+                "ON CONFLICT (agency_id, field_name) DO UPDATE SET "
+                "confirmed = EXCLUDED.confirmed, expires_at = EXCLUDED.expires_at",
+                aid,
+                field,
+                confirmed,
+                expires_at,
+            )
+
+
 @pytest.fixture
 async def client(apply_schema):
     """Boot the FastAPI app against the test DB pool and yield an

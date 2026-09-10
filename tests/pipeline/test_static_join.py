@@ -470,9 +470,8 @@ def test_load_static_geiyo_fixture_row_counts(pg_conn):
 
     geiyo_tu.bin (the paired RT capture) is a known-empty overnight snapshot
     (0 stop_time_updates) that proves nothing about per-field RT coverage --
-    an agency only earns a spot in
-    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
-    once a live, in-service probe confirms real coverage -- so unlike
+    an agency only earns a verdict in `rt_field_coverage_probes` once a
+    live, in-service probe confirms real coverage -- so unlike
     `test_static_join_per_op` this only exercises the static load, not
     parse_feed/field_coverage.
     """

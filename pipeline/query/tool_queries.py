@@ -334,8 +334,8 @@ async def schedule_realism_padding(
 
     Only agencies confirmed to send `StopTimeUpdate.arrival`
     (`pipeline.strategies.static_join.rt_field_coverage_confirmed` — the
-    shared `RT_INGEST_STRATEGIES` ∩ `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
-    gate every such reader uses) ever populate
+    shared `RT_INGEST_STRATEGIES` ∩ live-probe-verdict gate every such
+    reader uses) ever populate
     `arr_delay`/`scheduled_sec`, which this decomposition needs for both the
     actual-vs-scheduled running time comparison and the hour-of-day bucket
     (an hour parsed from `scheduled_time` would silently drop every

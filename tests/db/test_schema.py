@@ -21,6 +21,7 @@ EXPECTED_TABLES = [
     "sessions",
     "login_events",
     "filter_presets",
+    "rt_field_coverage_probes",
 ]
 
 

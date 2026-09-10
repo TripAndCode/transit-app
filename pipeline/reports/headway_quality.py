@@ -80,9 +80,9 @@ async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[d
     a necessary but not sufficient condition -- an agency sharing that wire
     shape without being confirmed to actually populate `stop_id` on its own
     live feed would otherwise get its rows pooled here as if trustworthy.
-    This additionally intersects against
-    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
-    (via `rt_field_coverage_confirmed`) before returning anything, returning
+    This additionally requires a live RT field-coverage verdict for the
+    agency (via `pipeline.strategies.static_join.
+    rt_field_coverage_confirmed`) before returning anything, returning
     an empty list for an unconfirmed agency rather than a possibly-empty-but-
     still-queried result.
     """

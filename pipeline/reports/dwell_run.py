@@ -1,9 +1,9 @@
 """Read side for the dwell-time / running-time decomposition report.
 
-Reads `agg_route_daily_dwell_run` (built by `pipeline.analyze.analyze()`,
-only for agencies in
-`pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` --
-see that module's docstring for why `ingest_strategy` alone isn't sufficient
+Reads `agg_route_daily_dwell_run` (built by `pipeline.analyze.analyze()`),
+gated on a live RT field-coverage verdict for the agency (see
+`pipeline.strategies.static_join.rt_field_coverage_confirmed` and
+that module's docstring for why `ingest_strategy` alone isn't sufficient
 trust: sharing the static_join JOIN mechanism doesn't imply a feed actually
 populates `arr_delay`, only that its wire shape matches an agency that's
 been confirmed to. See that builder and `pipeline.dwell_run`'s module
