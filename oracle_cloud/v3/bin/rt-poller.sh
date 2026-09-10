@@ -7,14 +7,22 @@
 # Sends a healthchecks.io ping after a successful fetch, at most every ~5 min.
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=agencies-lib.sh
+. "$SCRIPT_DIR/agencies-lib.sh"
+
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 AGENCY_ID="${1:?usage: rt-poller.sh <agency_id>}"
 TSV="$BASE_DIR/etc/agencies.tsv"
 
 row=$(awk -F'\t' -v id="$AGENCY_ID" '$1==id && $0 !~ /^#/ {print; exit}' "$TSV")
 [ -n "$row" ] || { echo "agency $AGENCY_ID not found in $TSV" >&2; exit 64; }
-IFS=$'\t' read -r _ NAME INTERVAL FEED_URL STATIC_URL PING_URL <<< "$row"
-: "$STATIC_URL"  # unused here (static-fetch.sh's job); kept for column clarity
+split_agency_row "$row"
+NAME="$agency_name"
+INTERVAL="$agency_interval"
+FEED_URL="$agency_feed_url"
+PING_URL="$agency_ping_url"
+: "$agency_static_url"  # unused here (static-fetch.sh's job); part of the row
 case "$INTERVAL" in ''|*[!0-9]*|0|0[0-9]*) echo "invalid interval '$INTERVAL' for agency $AGENCY_ID" >&2; exit 64;; esac
 
 RT_DIR="$BASE_DIR/data/$AGENCY_ID/rt"
