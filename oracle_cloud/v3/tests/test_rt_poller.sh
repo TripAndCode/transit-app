@@ -24,6 +24,26 @@ ls "$COLLECTOR_BASE/data/1/rt/$day/"*.part 2>/dev/null && fail "leftover .part f
 grep -q "http://ping.test/hc" "$CURL_LOG" || fail "healthcheck ping never sent"
 pass "rt-poller writes pb + pings"
 
+# A row whose static_url is EMPTY but whose ping_url is not (the real shape of
+# an agency whose static GTFS is collected off-VM) must still find its
+# ping_url: tab is an IFS whitespace character, so a naive `IFS=$'\t' read`
+# collapses the two tabs and leaves that agency with no healthcheck at all --
+# exactly the agency whose poller dying would then go unnoticed.
+teardown_base
+setup_base
+printf '1\taomori\t1\thttp://feed.test/tu.pb\t\thttp://ping.test/hc-empty-static\n' \
+    > "$COLLECTOR_BASE/etc/agencies.tsv"
+../bin/rt-poller.sh 1 > "$COLLECTOR_BASE/poller.out" 2>&1 &
+PID=$!
+sleep 1.5
+kill "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+grep -q "http://ping.test/hc-empty-static" "$CURL_LOG" \
+    || fail "ping_url was lost because static_url is empty"
+grep -q "feed=http://feed.test/tu.pb" "$COLLECTOR_BASE/poller.out" \
+    || fail "feed_url misparsed on a row with an empty static_url"
+pass "an empty static_url column does not shift the ping_url away"
+
 # Failure mode: CURL_FAIL — poller must not crash, must not leave .part.
 teardown_base
 setup_base
