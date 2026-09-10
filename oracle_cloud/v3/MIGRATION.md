@@ -85,6 +85,15 @@ gate. `prune.sh` now also refuses to run (exit 65) unless sync-r2.sh's
 `.sync-r2.last-ok` marker is fresh, so the parity gate is enforced in code,
 not just documented here.
 
+`bin/verify-r2.sh` runs right after `sync-r2.sh` and independently lists
+each configured agency's actual R2 objects, checking freshness and
+byte-size integrity against local disk instead of trusting `sync-r2.sh`'s
+own exit status. `bin/prune-r2.sh` runs weekly (like `prune.sh`, gated on
+the same fresh-marker check) and enforces a bounded, multi-year retention
+window on R2 objects — see that script for why its defaults are so much
+longer than `prune.sh`'s local ones. Both are wrapped by `cron-wrap.sh` like
+`sync-r2.sh` and `prune.sh`, so a failure of either pages the same way.
+
 Known gap, unchanged from before: agency 1 (Aomori) has no `static_url` in
 `agencies.tsv` (see the note at the top of this file), so this VM never
 collects new Aomori static GTFS at all — sync-r2.sh only mirrors what the
