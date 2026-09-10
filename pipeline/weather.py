@@ -262,13 +262,23 @@ def aggregate_daily(
         )
         return None
 
+    precip_total = round(sum(precip), 1)
+    if not math.isfinite(precip_total):
+        logger.warning("weather: station %s %s precipitation total is non-finite", station_id, obs_date)
+        return None
+
+    temp_avg = round(sum(temps) / len(temps), 1) if temps else None
+    if temp_avg is not None and not math.isfinite(temp_avg):
+        logger.warning("weather: station %s %s temperature average is non-finite", station_id, obs_date)
+        return None
+
     return DailyObservation(
         station_id=station_id,
         obs_date=obs_date,
         # 1 dp matches the source's own published resolution; summing ~144
         # floats otherwise leaves binary-representation noise in the total.
-        precip_mm=round(sum(precip), 1),
-        temp_avg_c=round(sum(temps) / len(temps), 1) if temps else None,
+        precip_mm=precip_total,
+        temp_avg_c=temp_avg,
         temp_max_c=max(temps) if temps else None,
         temp_min_c=min(temps) if temps else None,
     )

@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS agency_weather_stations (
 CREATE TABLE IF NOT EXISTS weather_daily_observations (
     station_id   TEXT NOT NULL,
     obs_date     DATE NOT NULL,
-    precip_mm    DOUBLE PRECISION CHECK (precip_mm >= 0),
+    -- The upper bound also rejects NaN/Infinity in PostgreSQL, whose
+    -- comparison semantics make `>= 0` alone insufficient.
+    precip_mm    DOUBLE PRECISION CHECK (precip_mm >= 0 AND precip_mm < 1000000),
     temp_avg_c   DOUBLE PRECISION,
     temp_max_c   DOUBLE PRECISION,
     temp_min_c   DOUBLE PRECISION,
