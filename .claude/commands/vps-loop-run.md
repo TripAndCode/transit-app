@@ -222,6 +222,34 @@ empty:
    `**Blocker-tag:**` requirement per Step 0): log it and stop this tick. Never
    replace a retained decision with manual force deletion.
 
+## Step 2a — Reconcile NEXT_TASK.md against merged PRs and duplicate sections
+
+`NEXT_TASK.md` is untracked and edited across many independent ticks — a tick can
+ship a PR and die before Step 6.11 rewrites the item's own status text, a human can
+merge a `vps-loop/item-<N>` PR by hand outside the loop entirely, or a future
+restoration of lost backlog items can create a second same-titled `## ` section
+without noticing one already exists (see `## Restored Backlog Entries`'s own
+history). Left alone, any of these lets the file keep reporting already-merged
+work as open or in progress. Run `python3 scripts/reconcile_next_task.py` (against
+`NEXT_TASK.md` at the repo root) and inspect its plan, then run
+`python3 scripts/reconcile_next_task.py --apply`. It performs two narrow, safe
+repairs and nothing else:
+
+1. For any item whose `vps-loop/item-<N>` branch has a merged PR but whose own
+   bold header doesn't already open with `DONE`/`MOOT`/`DO NOT START`, prefixes it
+   with a normalized `DONE (PR #<number>, merged <date>) — ` marker — never
+   rewriting anything beyond that prefix.
+2. Merges any `## ` heading whose exact title repeats (moving every later
+   occurrence's body into the first one and dropping the redundant heading), so a
+   duplicate restored-backlog section can never silently fork the file in two.
+
+This writes the untracked file directly — there is nothing to commit here, unlike
+Step 2's `cleanup_git_state.py` pass. A warning about a merged branch with no
+matching item number is informational (a possible renumbering or manual removal);
+it does not block the tick. If the command itself errors, follow the Boundaries
+tool-error rule (including its `**Blocker-tag:**` requirement per Step 0): log it
+and stop this tick — never hand-edit around a script failure here.
+
 ## Step 2b — Detect unshipped work stranded behind an already-merged item
 
 Step 3's per-item check treats any `MERGED` PR for `vps-loop/item-<N>` as "done,
@@ -333,7 +361,7 @@ Walk items top to bottom:
   skip-as-in-progress behavior below) — same conservative bias as Step 2b's
   own "treat this judgment as possibly wrong" caveat.
   If the entry clearly shows both passes complete: this PR was shipped (Steps
-  6.1–6.4) by a tick that ended before reaching 6.5–6.11, and nothing in this
+  6.1–6.4) by a tick that ended before reaching 6.5–6.12, and nothing in this
   file otherwise routes a later tick back to finish readying/merging it — it
   would sit open indefinitely, since Step 3's ordinary `OPEN` handling never
   revisits it. Before trusting the closing statement, confirm no commit has
@@ -446,11 +474,12 @@ worktree, so it resolves against current `main`).
      trust boundary before anything is pushed.
   2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
      two adjustments: note in the PR body that this resumed an interrupted prior
-     run, and replace Step 6.11's status line with `- <UTC timestamp>: item N
+     run, and replace Step 6.12's status line with `- <UTC timestamp>: item N
      shipped as PR #<number> (resumed from an interrupted prior run's existing
-     commits).` Step 6.4 is conditional — an interrupted worker may never
-     have written the `(PR #pending)` placeholder. This run is done; do not also
-     dispatch a new item.
+     commits).` Step 6.11's item-header update still runs unchanged — only the
+     Status log wording in 6.12 changes here. Step 6.4 is conditional — an
+     interrupted worker may never have written the `(PR #pending)` placeholder.
+     This run is done; do not also dispatch a new item.
   3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
      `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
      path first, fix the listed findings there, and commit. Cap at 2 fix iterations
@@ -570,9 +599,11 @@ extra tokens for how infrequently this coordinator runs.)
 
 ## Step 6 — Ship it
 
-From the worktree (`git -C <worktree-abs-path> ...`). Items below are numbered
-6.1–6.11; every cross-reference uses that dotted form, never a bare "step N", to
-avoid confusion with this section's own "Step 6" heading.
+From the worktree (`git -C <worktree-abs-path> ...`) through 6.10; 6.11–6.12 run
+after the worktree is gone, from the main `main` checkout instead (noted again at
+6.11 itself). Items below are numbered 6.1–6.12; every cross-reference uses that
+dotted form, never a bare "step N", to avoid confusion with this section's own
+"Step 6" heading.
 
 6.1. Before pushing, record `origin/main`'s current SHA (`git rev-parse
      origin/main`) as `MAIN_SHA_AT_REVIEW` — this is the `main` that Step 5's
@@ -637,7 +668,20 @@ avoid confusion with this section's own "Step 6" heading.
       `scripts/daily_git_hygiene.py --apply` — a separate, non-loop-tick
       process (see its own docstring for the lock it takes to avoid racing
       a live tick) that automates exactly this batch-delete.
-6.11. Append: `- <UTC timestamp>: item N merged as PR #<number>; both
+6.11. In the backlog section itself (not just the Status log below), edit item N's
+      own bold header from the main `main` checkout — not the now-removed worktree
+      — to open with `DONE (PR #<number>, merged <date>) — ` before its existing
+      text, exactly the convention already used throughout the file. This is what
+      makes the file authoritative: the Status log entry in 6.12 is a narrative
+      trail, but Step 3's own "first actionable item" scan and a human skimming the
+      backlog both read the numbered item's own header, not the log. Do not skip
+      this because 6.12 will also record the merge — a merge recorded only in the
+      log and never reflected on the item itself is exactly the failure mode this
+      step exists to close. (Step 2a's `reconcile_next_task.py` pass performs this
+      same edit automatically on a *later* tick if it's ever missed here — e.g. a
+      tick that dies between 6.9 and 6.11 — but doing it here directly keeps the
+      file correct without waiting for that next tick.)
+6.12. Append: `- <UTC timestamp>: item N merged as PR #<number>; both
       /review-branch passes clean, mergeable/clean confirmed, squash-merged and
       cleaned up.`
 
