@@ -103,10 +103,12 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
 
 ## VPS operations
 
-- Cron invokes a short `claude -p "/vps-loop-run"` wrapper; the command file owns
+- A systemd timer invokes a single-flight `claude -p "/vps-loop-run"` wrapper; the command file owns
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
-  `/root/claude-loop.sh` itself is VPS-local infrastructure, not tracked in this
-  repo -- it runs the invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  The timer cadence is longer than the wrapper's hard timeout, and systemd kills
+  the complete process group on timeout so a background worker cannot outlive its
+  coordinator. `/root/claude-loop.sh` itself is VPS-local infrastructure, not tracked
+  in this repo -- it runs the invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
   so a dispatched Step-4 worker's background Agent task isn't killed by the
   CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a "you'll be
   notified when it finishes" expectation after that ceiling can never be
@@ -117,7 +119,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
-  cron. The loop operates on one item per tick and may merge its own PR once
+  the systemd timer. The loop operates on one item per tick and may merge its own PR once
   both review passes are clean and it's mergeable/clean.
 - The pre-push backend timeout is 420 seconds — the full suite's legitimate
   wall-clock time leaves real headroom on a small VPS, which can run

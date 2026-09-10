@@ -1,0 +1,16 @@
+[Unit]
+Description=Autonomous Claude VPS loop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/transit-app
+ExecStart=/root/claude-loop.sh
+TimeoutStartSec=3300
+KillMode=control-group
+StandardOutput=append:/root/claude-loop.log
+StandardError=append:/root/claude-loop.log
+
+[Install]
+WantedBy=multi-user.target

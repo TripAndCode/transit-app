@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the autonomous Claude VPS loop hourly
+
+[Timer]
+OnCalendar=*-*-* *:03:00
+Persistent=true
+Unit=claude-loop.service
+
+[Install]
+WantedBy=timers.target
