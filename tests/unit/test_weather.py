@@ -2,6 +2,7 @@
 comparison's shaping -- no DB, no network (see `pipeline.weather` and
 `pipeline.reports.weather` for the invariants exercised here)."""
 
+import json
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -15,8 +16,10 @@ from pipeline.reports.weather import (
 from pipeline.weather import (
     _MAX_BLOCK_BYTES,
     _MAX_DAY_BYTES,
+    _MAX_READINGS_PER_BLOCK,
     PUBLICATION_WINDOW_DAYS,
     DailyObservation,
+    _fetch_block,
     aggregate_daily,
     attribution,
     fetch_daily_observation,
@@ -635,6 +638,69 @@ def test_ingest_weather_off_switch_touches_neither_the_source_nor_the_db(monkeyp
         rollback = _refuse
 
     assert weather.ingest_weather(_RefusingConn(), days=3, today=date(2026, 4, 4)) == (0, 0, [])
+
+
+class _JSONResp:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def _block_body(n_entries: int) -> bytes:
+    payload = {f"2026040100{i:04d}": {"precipitation10m": [0.0, 0]} for i in range(n_entries)}
+    return json.dumps(payload).encode("utf-8")
+
+
+def test_fetch_block_accepts_a_real_sized_block(monkeypatch):
+    """A real 3-hour block holds 18 ten-minute readings -- comfortably inside
+    the shape cap."""
+    import pipeline.weather as weather
+
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: _JSONResp(_block_body(18)))
+
+    fetched = _fetch_block("99999", _DAY, 0, 1024)
+    assert fetched is not None
+    payload, n_bytes = fetched
+    assert len(payload) == 18
+    assert n_bytes == len(_block_body(18))
+
+
+def test_fetch_block_rejects_a_mapping_that_exceeds_the_shape_cap(monkeypatch):
+    """A block whose parsed mapping has far more entries than a real 3-hour
+    block ever would is rejected on its shape, independent of its wire size --
+    the merged `readings` dict a station-day builds from nine of these is
+    Python objects living in the long-lived API process, not wire bytes."""
+    import pipeline.weather as weather
+
+    monkeypatch.setattr(
+        weather,
+        "safe_urlopen",
+        lambda url, *, timeout, max_bytes: _JSONResp(_block_body(_MAX_READINGS_PER_BLOCK + 1)),
+    )
+
+    assert _fetch_block("99999", _DAY, 0, 1024 * 1024) is None
+
+
+def test_fetch_block_accepts_a_mapping_exactly_at_the_shape_cap(monkeypatch):
+    import pipeline.weather as weather
+
+    monkeypatch.setattr(
+        weather,
+        "safe_urlopen",
+        lambda url, *, timeout, max_bytes: _JSONResp(_block_body(_MAX_READINGS_PER_BLOCK)),
+    )
+
+    fetched = _fetch_block("99999", _DAY, 0, 1024 * 1024)
+    assert fetched is not None
+    assert len(fetched[0]) == _MAX_READINGS_PER_BLOCK
 
 
 def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
