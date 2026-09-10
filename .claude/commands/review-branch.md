@@ -55,6 +55,14 @@ user-supplied URLs, schema/data migrations, destructive data paths, or security
 controls. For these diffs, keep the total at three calls by splitting `security` from
 the first group; merge `security+enforcement` when both apply.
 
+If a security reviewer dispatch is rejected by the provider's safety classifier
+before the reviewer runs, do not change models or keep rephrasing the prompt. The
+invoking coordinator must perform that security review directly from the prepared
+manifest and worktree, using the same evidence-backed Major-finding gate and
+targeted verification. Do not treat the group as clean merely because dispatch was
+blocked; if the direct fallback cannot be completed, stop and report the dispatch
+safety block.
+
 Every dispatch receives only: manifest path, diff path, objective, assigned
 dimensions, worktree path, and this exact line:
 
