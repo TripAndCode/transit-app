@@ -9,6 +9,7 @@ WorkingDirectory=/root/transit-app
 ExecStart=/root/claude-loop.sh
 EnvironmentFile=-/root/claude-loop.env
 Environment=HOME=/root
+Environment=CLAUDE_MODEL=opus
 TimeoutStartSec=3300
 KillMode=control-group
 StandardOutput=append:/root/claude-loop.log
