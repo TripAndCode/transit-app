@@ -38,7 +38,7 @@ otherwise:
   `branch-reviewer` for `logic+consistency+practices+comments+security`. If
   `enforcement` is true, add one standalone `enforcement` call.
 - **Standard:** dispatch exactly two `branch-reviewer` calls:
-  1. `bugs+logic+consistency+security`
+  1. `bugs+logic+consistency`
   2. `perf+practices+comments+alternatives`
   Add one standalone `enforcement` call only when the manifest flag is true and the
   diff actually changes a quality gate.
@@ -52,16 +52,17 @@ live in this repository, so the reviewer needs the whole prepared diff, not a sl
 
 **High-risk overlay:** auth/session/admin authorization, credential or PII handling,
 user-supplied URLs, schema/data migrations, destructive data paths, or security
-controls. For these diffs, keep the total at three calls by splitting `security` from
-the first group; merge `security+enforcement` when both apply.
+controls. For these diffs, the invoking coordinator owns the `security` review
+directly from the prepared manifest and worktree; do not dispatch a reviewer with
+the `security` dimension. This avoids provider-level reviewer dispatch blocks while
+keeping the security gate mandatory.
 
-If a security reviewer dispatch is rejected by the provider's safety classifier
-before the reviewer runs, do not change models or keep rephrasing the prompt. The
-invoking coordinator must perform that security review directly from the prepared
-manifest and worktree, using the same evidence-backed Major-finding gate and
-targeted verification. Do not treat the group as clean merely because dispatch was
-blocked; if the direct fallback cannot be completed, stop and report the dispatch
-safety block.
+The direct security review must inspect changed code and relevant call sites for
+credential exposure, authorization bypass, injection/SSRF, unsafe migrations,
+untrusted file/network handling, and sensitive-data leakage. Apply the same
+evidence-backed Major-finding gate and targeted verification as a dispatched
+reviewer. If it cannot be completed, stop and report that the security gate is
+incomplete; never treat an omitted dispatch as clean.
 
 Every dispatch receives only: manifest path, diff path, objective, assigned
 dimensions, worktree path, and this exact line:
