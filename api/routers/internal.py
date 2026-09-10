@@ -50,7 +50,6 @@ def _run_ingest_and_analyze() -> None:
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
-    from pipeline.weather import CRON_INGEST_BUDGET_SEC, ingest_weather
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -65,6 +64,10 @@ def _run_ingest_and_analyze() -> None:
     # poke inside this long-lived API process.
     ch_client = None
     conn = None
+    # Populated only once the lock is held and agencies are found -- gates
+    # the weather pass below, which must not run at all when this poke
+    # skipped everything else (lock miss, no agencies, or setup failure).
+    agency_ids: list[int] = []
     try:
         ch_client = get_client()
         conn = psycopg2.connect(db_url)
@@ -106,28 +109,6 @@ def _run_ingest_and_analyze() -> None:
             except Exception:
                 _log.exception("cron: analyze failed for agency %s", aid)
 
-        # Observed daily weather for each agency's representative station.
-        # Agency-independent (it is keyed by station, and several agencies may
-        # share one), so a single pass after the per-agency loop rather than
-        # inside it. `ingest_weather` checks its own kill switch and skips
-        # every fetch when it is off, so no flag test belongs here; a failure
-        # is logged and never allowed to affect the delay aggregates above or
-        # the freshness check below.
-        #
-        # `max_seconds` is mandatory here, not a tuning knob: this call runs
-        # inside the advisory lock taken above, which is released only when
-        # the connection closes in the finally block, and it is the only work
-        # in this job that waits on a third party outside the agencies' own
-        # feeds. Without a total budget a slow source would keep the lock
-        # long after the ingest+analyze work finished, and every poke that
-        # arrives meanwhile takes the "already in flight" path -- dropping
-        # live GTFS-RT polls, which are unrecoverable once their moment has
-        # passed. Whatever the budget cuts short is picked up by a later run.
-        try:
-            ingest_weather(conn, max_seconds=CRON_INGEST_BUDGET_SEC)
-        except Exception:
-            _log.exception("cron: weather ingest failed")
-
         # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
         # completed day, surface it loudly. Read-only; never aborts the run.
         stale = check_agg_freshness(conn, ch_client, agency_ids)
@@ -142,7 +123,10 @@ def _run_ingest_and_analyze() -> None:
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
-        # a session holds when it ends.
+        # a session holds when it ends. This is also what makes the weather
+        # pass below safe to run afterwards: it never observes the lock as
+        # held, so it can never be blamed for one poke's "already in flight"
+        # skip of another.
         #
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run — an unguarded `conn.close(); ch_client.close()` would
@@ -161,6 +145,56 @@ def _run_ingest_and_analyze() -> None:
             # CLI run.
             if ch_client is not None:
                 ch_client.close()
+
+    if not agency_ids:
+        # Lock miss, no agencies seeded, or setup raised before either was
+        # known -- nothing else in this poke ran, so the weather pass must
+        # not either.
+        return
+
+    _run_weather_ingest(db_url)
+
+
+def _run_weather_ingest(db_url: str) -> None:
+    """Observed daily weather for each agency's representative station.
+
+    Runs on its OWN connection, opened only after `_run_ingest_and_analyze`
+    has already closed the connection that held the ingest+analyze advisory
+    lock -- deliberately, not incidentally. A trickling third-party response
+    can hold a single socket read open past any per-operation timeout (see
+    `pipeline.weather.CRON_INGEST_BUDGET_SEC`), and this call is the only
+    work in the cron job that waits on a third party outside the agencies'
+    own feeds. Sharing the lock-holding connection would let that overrun
+    keep the advisory lock taken, and every cron poke arriving meanwhile
+    would take the "already in flight" path -- dropping live GTFS-RT polls,
+    which are unrecoverable once their moment has passed. A dedicated
+    connection makes that impossible by construction: this pass cannot hold
+    a lock it never took, no matter how long a slow source keeps it open.
+    Safe because `ingest_weather` needs nothing from the ingest+analyze
+    transaction -- it already commits per station-day on whatever
+    connection it is given.
+
+    `ingest_weather` checks its own kill switch and skips every fetch when
+    it is off, so no flag test belongs here (a check here could diverge
+    from the CLI's). A failure here is logged and never allowed to affect
+    the ingest+analyze work above, which has already fully committed by the
+    time this runs.
+    """
+    import psycopg2  # local import: keeps the import-graph cheap on cold starts
+
+    from pipeline.weather import CRON_INGEST_BUDGET_SEC, ingest_weather
+
+    try:
+        weather_conn = psycopg2.connect(db_url)
+    except Exception:
+        _log.exception("cron: weather ingest failed to connect")
+        return
+    try:
+        ingest_weather(weather_conn, max_seconds=CRON_INGEST_BUDGET_SEC)
+    except Exception:
+        _log.exception("cron: weather ingest failed")
+    finally:
+        weather_conn.close()
 
 
 @router.post("/ingest", status_code=202)

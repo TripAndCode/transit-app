@@ -122,7 +122,12 @@ _MAX_DAY_BYTES = 16 * 1024 * 1024
 # start past the deadline and clamps this ceiling to whatever is left of it.
 # That still leaves one overrun uncovered -- a body arriving a few bytes at a
 # time re-arms the ceiling on every socket operation, so a trickling source can
-# hold a single already-started read open past the deadline indefinitely.
+# hold a single already-started read open past the deadline indefinitely. The
+# cron path (see `api.routers.internal._run_weather_ingest`) contains the
+# blast radius of that residual gap to this pass's own connection and
+# runtime: it never shares a connection with the ingest+analyze advisory
+# lock, so an overrun here cannot make another cron poke's live GTFS-RT polls
+# take the "already in flight" path.
 _FETCH_TIMEOUT_SEC = 20.0
 
 # How long the source keeps a day's point observations published. This single
@@ -134,14 +139,16 @@ _FETCH_TIMEOUT_SEC = 20.0
 # walk, since days beyond it are unfetchable by construction.
 PUBLICATION_WINDOW_DAYS = 5
 
-# Wall-clock budget for a weather pass that shares its connection -- and so
-# its session-level advisory locks -- with other work. The cron path in
-# api.routers.internal holds the ingest+analyze lock for as long as its
-# `ingest_weather` call runs, and every cron poke arriving meanwhile is
-# dropped, losing live GTFS-RT polls that cannot be recovered after the fact.
-# Sized to stay small next to the cron interval rather than to fit a whole
-# pass: a station-day the budget cuts short is an ordinary "not ready yet"
-# outcome that a later pass picks up.
+# Wall-clock budget for the cron path's weather pass. The cron path in
+# api.routers.internal runs this pass on its own connection, opened only
+# after the ingest+analyze advisory lock's connection has already closed --
+# so an overrun here can no longer hold that lock and starve a later cron
+# poke's live GTFS-RT polls. The budget still matters on its own terms: it
+# bounds how long one BackgroundTask invocation keeps running (and its
+# connection open) when a source is slow, rather than letting it run
+# unbounded. Sized to stay small next to the cron interval rather than to
+# fit a whole pass: a station-day the budget cuts short is an ordinary "not
+# ready yet" outcome that a later pass picks up.
 CRON_INGEST_BUDGET_SEC = 90.0
 
 # Minimum age of a stored copy before it is re-fetched for revisions. Keeps a
@@ -494,11 +501,17 @@ def ingest_weather(
     deadline -- before each of the nine blocks that fetch reads, so a slow
     source stops the pass mid-day instead of only at the next day or station
     boundary. On expiry the pass stops and returns what it has already
-    committed. Any caller sharing this connection, and therefore its
-    session-level locks, with other work must pass one (see
+    committed. A caller whose connection is shared with other session-level
+    state (locks, an open transaction) must still pass one (see
     `CRON_INGEST_BUDGET_SEC`): `_FETCH_TIMEOUT_SEC` bounds a single socket
-    operation, not a run, so an unbounded pass can hold those locks for far
-    longer than any per-request timeout suggests.
+    operation, not a run, and a source that keeps trickling a response body
+    can hold one already-started read open past that per-operation timeout
+    indefinitely, so only a caller-level budget keeps this call's connection
+    -- and anything scoped to its session -- from being held open far longer
+    than any per-request timeout suggests. The cron path avoids sharing its
+    connection with the ingest+analyze advisory lock at all (see
+    `api.routers.internal._run_weather_ingest`), so the budget there is a
+    ceiling on this pass's own runtime rather than a lock-protection measure.
 
     A station-day the source hasn't fully published, or that the budget cut
     short, is not a failure; it is skipped and picked up by a later pass.
