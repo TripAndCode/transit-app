@@ -128,7 +128,10 @@ def parse_merged_prs_payload(payload: list[dict[str, object]]) -> dict[int, Merg
         if not match:
             continue
         number = int(match.group(1))
-        pr_number = int(entry["number"])  # type: ignore[call-overload]
+        raw_pr_number = entry.get("number")
+        if raw_pr_number is None:
+            raise ReconcileError(f"gh pr list entry for branch {branch!r} is missing a PR 'number' field")
+        pr_number = int(raw_pr_number)  # type: ignore[call-overload]
         merged_at = str(entry.get("mergedAt") or "")
         merged_date = merged_at.split("T", 1)[0] if merged_at else "unknown-date"
         existing = merged.get(number)
@@ -141,10 +144,32 @@ def parse_merged_prs_payload(payload: list[dict[str, object]]) -> dict[int, Merg
 
 
 def load_merged_item_prs(repo: Path) -> dict[int, MergedPR]:
-    """Query GitHub once for every merged ``vps-loop/item-<N>`` PR."""
+    """Query GitHub once for every merged ``vps-loop/item-<N>`` PR.
+
+    Narrows the query server-side to branches matching ``vps-loop/item-``
+    (via ``--search``, which GitHub's search API resolves against `head`
+    independent of PR count) rather than paging through the full
+    repo-wide merged-PR history with a fixed ``--limit``. A plain
+    ``--state merged --limit N`` page silently drops any item PR older
+    than the Nth most-recently-created merged PR once the repo accumulates
+    more merged PRs than the page size — the search-scoped query keeps
+    every item PR in the result regardless of total repo-wide merged count.
+    """
 
     result = run_command(
-        ("gh", "pr", "list", "--state", "merged", "--limit", "1000", "--json", "number,headRefName,mergedAt"),
+        (
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--search",
+            "head:vps-loop/item-",
+            "--limit",
+            "1000",
+            "--json",
+            "number,headRefName,mergedAt",
+        ),
         cwd=repo,
     )
     try:
@@ -188,14 +213,30 @@ def reconcile_item_statuses(
 
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 def find_headings(lines: Sequence[str]) -> list[tuple[int, int, str]]:
-    """Return ``(line index, level, title)`` for every markdown heading, in order."""
+    """Return ``(line index, level, title)`` for every markdown heading, in order.
+
+    A line that opens or closes a fenced code block (```` ``` ```` or ``~~~``,
+    optionally indented up to 3 spaces per CommonMark) toggles an in-fence
+    state; every line while that state is active is skipped even if it looks
+    like a heading, so a quoted snippet (e.g. in a Status log entry) can't be
+    misread as a real section boundary. An unclosed fence is treated as
+    extending to end of file, matching how Markdown itself renders it.
+    """
 
     headings = []
+    in_fence = False
     for index, line in enumerate(lines):
-        match = HEADING_RE.match(line.rstrip("\n"))
+        stripped = line.rstrip("\n")
+        if FENCE_RE.match(stripped):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = HEADING_RE.match(stripped)
         if match:
             headings.append((index, len(match.group(1)), match.group(2)))
     return headings
@@ -222,7 +263,26 @@ def _section_ends(headings: list[tuple[int, int, str]], total_lines: int) -> dic
     return ends
 
 
-def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], list[str]]:
+def find_duplicate_item_numbers(lines: Sequence[str]) -> list[int]:
+    """Return backlog item numbers that label more than one header line, sorted.
+
+    Two duplicate ``## `` sections merged together can each have contained an
+    item with the same number (e.g. an old and a re-added copy of the same
+    backlog entry). Merging sections only removes the redundant heading; it
+    never looks inside the bodies it concatenates, so a same-numbered pair of
+    item lines survives side by side in the merged result. `reconcile_item_
+    statuses` keys its lookup by item number, so a plain merge would silently
+    keep only one of the two and never revisit the other — this lets callers
+    surface that instead of losing it quietly.
+    """
+
+    counts: dict[int, int] = {}
+    for item in parse_items(lines):
+        counts[item.number] = counts.get(item.number, 0) + 1
+    return sorted(number for number, count in counts.items() if count > 1)
+
+
+def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], list[str], list[str]]:
     """Merge any ``## `` heading whose exact title repeats.
 
     The first occurrence keeps its heading; every later occurrence's body is
@@ -234,12 +294,18 @@ def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], li
     (as today's actual file layout has, with ``# Status log`` between the
     backlog and any restored-entries section) is never absorbed into the
     body being moved.
+
+    Returns ``(new_lines, changes, warnings)``. A warning is recorded (never
+    an automatic drop or rewrite — this script never guesses which copy is
+    "right") when the merge leaves two item lines sharing the same number
+    side by side, so that fork gets flagged instead of one copy quietly
+    losing every future reconciliation.
     """
 
     headings = find_headings(lines)
     level2 = [(index, title) for index, level, title in headings if level == 2]
     if len(level2) < 2:
-        return list(lines), []
+        return list(lines), [], []
 
     section_end = _section_ends(headings, len(lines))
 
@@ -248,7 +314,7 @@ def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], li
         by_title.setdefault(title, []).append(index)
     duplicated = {title: indices for title, indices in by_title.items() if len(indices) > 1}
     if not duplicated:
-        return list(lines), []
+        return list(lines), [], []
 
     skip_ranges: list[tuple[int, int]] = []
     inject_before: dict[int, list[str]] = {}
@@ -287,7 +353,13 @@ def merge_duplicate_level2_sections(lines: Sequence[str]) -> tuple[list[str], li
     if len(lines) in inject_before:
         new_lines.extend(inject_before[len(lines)])
 
-    return new_lines, changes
+    warnings = [
+        f"backlog item {number} appears more than once after merging duplicate sections; "
+        "the individual item lines were not deduplicated automatically and need manual review"
+        for number in find_duplicate_item_numbers(new_lines)
+    ]
+
+    return new_lines, changes, warnings
 
 
 def main() -> int:
@@ -315,8 +387,9 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    deduplicated_lines, dedupe_changes = merge_duplicate_level2_sections(lines)
-    reconciled_lines, status_changes, warnings = reconcile_item_statuses(deduplicated_lines, merged_by_item)
+    deduplicated_lines, dedupe_changes, dedupe_warnings = merge_duplicate_level2_sections(lines)
+    reconciled_lines, status_changes, status_warnings = reconcile_item_statuses(deduplicated_lines, merged_by_item)
+    warnings = dedupe_warnings + status_warnings
 
     for change in dedupe_changes:
         print(f"DEDUPLICATE: {change}")

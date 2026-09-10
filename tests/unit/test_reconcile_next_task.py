@@ -75,6 +75,16 @@ def test_parse_merged_prs_payload_keeps_only_item_branches_and_highest_pr():
     assert set(merged) == {107, 3}
 
 
+def test_parse_merged_prs_payload_raises_reconcile_error_on_missing_number():
+    # `gh pr list` should always include "number" when requested, but if a future
+    # response ever omits it, this must surface as the script's own clean
+    # ReconcileError (caught by main()'s error path), never a raw KeyError.
+    payload = [{"headRefName": "vps-loop/item-108", "mergedAt": "2026-09-11T00:00:00Z"}]
+
+    with pytest.raises(reconcile.ReconcileError):
+        reconcile.parse_merged_prs_payload(payload)
+
+
 # --- reconcile_item_statuses --------------------------------------------------
 
 
@@ -151,12 +161,13 @@ def test_merge_duplicate_level2_sections_combines_bodies_and_drops_second_headin
         "108. **New restored item.**\n"
     )
 
-    new_lines, changes = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
     result = "".join(new_lines)
 
     assert len(changes) == 1
     assert "Restored Backlog Entries" in changes[0]
     assert "line 5" in changes[0]
+    assert warnings == []
     # Only one heading survives.
     assert result.count("## Restored Backlog Entries") == 1
     # Both items now live under the single, first heading.
@@ -176,28 +187,136 @@ def test_merge_duplicate_level2_sections_combines_bodies_and_drops_second_headin
 def test_merge_duplicate_level2_sections_is_a_noop_when_headings_are_unique():
     text = "# Top\n\n## Section A\n\nbody\n\n## Section B\n\nother body\n"
 
-    new_lines, changes = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
 
     assert "".join(new_lines) == text
     assert changes == []
+    assert warnings == []
 
 
 def test_merge_duplicate_level2_sections_handles_no_headings():
     text = "just some text\nwith no headings at all\n"
 
-    new_lines, changes = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
 
     assert "".join(new_lines) == text
     assert changes == []
+    assert warnings == []
 
 
 def test_merge_duplicate_level2_sections_leaves_differently_worded_headings_alone():
     text = "## Section A\n\nbody\n\n## Section A (continued)\n\nother body\n"
 
-    new_lines, changes = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
 
     assert "".join(new_lines) == text
     assert changes == []
+    assert warnings == []
+
+
+def test_merge_duplicate_level2_sections_warns_on_same_numbered_item_across_sections():
+    # Unlike the distinct-numbers dedup test above (87 vs. 108), both duplicate
+    # sections here carry an item *87* — the merge must not silently keep only
+    # one of the two copies without flagging the fork.
+    text = (
+        "# Refactor backlog\n"
+        "\n"
+        "## Restored Backlog Entries\n"
+        "\n"
+        "87. **Old restored item, still open.**\n"
+        "\n"
+        "# Status log\n"
+        "\n"
+        "- entry\n"
+        "\n"
+        "## Restored Backlog Entries\n"
+        "\n"
+        "87. **DONE (PR #200, merged 2026-09-01) — Old restored item, still open.**\n"
+    )
+
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    result = "".join(new_lines)
+
+    assert len(changes) == 1
+    # Both copies of item 87 survive the merge untouched...
+    assert result.count("87. **") == 2
+    # ...but the fork is surfaced instead of silently dropping one copy.
+    assert len(warnings) == 1
+    assert "item 87" in warnings[0]
+
+
+def test_find_duplicate_item_numbers_returns_sorted_numbers_seen_more_than_once():
+    text = "1. **A.**\n2. **B.**\n1. **A again.**\n3. **C.**\n3. **C again.**\n"
+
+    assert reconcile.find_duplicate_item_numbers(lines_of(text)) == [1, 3]
+
+
+def test_find_duplicate_item_numbers_empty_when_all_numbers_unique():
+    text = "1. **A.**\n2. **B.**\n"
+
+    assert reconcile.find_duplicate_item_numbers(lines_of(text)) == []
+
+
+# --- find_headings / fenced code blocks ---------------------------------------
+
+
+def test_find_headings_ignores_heading_like_lines_inside_a_fenced_code_block():
+    text = (
+        "# Real heading\n"
+        "\n"
+        "```\n"
+        "# not a real heading, just quoted output\n"
+        "## also not real\n"
+        "```\n"
+        "\n"
+        "## Another real heading\n"
+    )
+
+    headings = reconcile.find_headings(lines_of(text))
+
+    assert [title for _index, _level, title in headings] == ["Real heading", "Another real heading"]
+
+
+def test_find_headings_handles_tilde_fences_too():
+    text = "~~~\n# inside a tilde fence\n~~~\n## Real heading\n"
+
+    headings = reconcile.find_headings(lines_of(text))
+
+    assert [title for _index, _level, title in headings] == ["Real heading"]
+
+
+def test_merge_duplicate_level2_sections_ignores_heading_like_lines_in_status_log_code_block():
+    # A Status log entry that happens to quote a fenced snippet containing a
+    # line starting with "#" at column 0 must not be misread as a section
+    # boundary and corrupt where a real duplicate section's body starts/ends.
+    text = (
+        "# Refactor backlog\n"
+        "\n"
+        "## Restored Backlog Entries\n"
+        "\n"
+        "87. **Old restored item.**\n"
+        "\n"
+        "# Status log\n"
+        "\n"
+        "- entry with a quoted snippet:\n"
+        "  ```\n"
+        "  # looks like a heading but is inside a fence\n"
+        "  ```\n"
+        "\n"
+        "## Restored Backlog Entries\n"
+        "\n"
+        "108. **New restored item.**\n"
+    )
+
+    new_lines, changes, warnings = reconcile.merge_duplicate_level2_sections(lines_of(text))
+    result = "".join(new_lines)
+
+    assert len(changes) == 1
+    assert warnings == []
+    assert result.count("## Restored Backlog Entries") == 1
+    assert "87. **Old restored item.**" in result
+    assert "108. **New restored item.**" in result
+    assert "# looks like a heading but is inside a fence" in result
 
 
 # --- main() end-to-end ---------------------------------------------------------
