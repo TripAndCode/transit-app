@@ -42,7 +42,7 @@ export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 for var in R2_RT_RETENTION_DAYS R2_STATIC_RETENTION_DAYS MAX_STALE_DAYS; do
     value="${!var}"
     case "$value" in
-        ''|*[!0-9]*)
+        ''|*[!0-9]*|0)
             echo "prune-r2.sh: $var must be a positive integer, got '$value'" >&2
             exit 64
             ;;

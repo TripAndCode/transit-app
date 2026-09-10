@@ -60,6 +60,30 @@ $new_ts 200 static/8/gtfs_static_20260901.zip
 "
 }
 
+# Zero is not a positive integer despite passing a naive digits-only check --
+# R2_RT_RETENTION_DAYS=0 must not be accepted, since cutoff=NOW would delete
+# every RT object ever uploaded (there is no "keep" exception on the RT path).
+seed_lists
+set +e
+R2_RT_RETENTION_DAYS=0 R2_STATIC_RETENTION_DAYS=1 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "R2_RT_RETENTION_DAYS=0 should exit 64, got $rc"
+grep -q "R2_RT_RETENTION_DAYS must be a positive integer" "$TEST_BASE/out.log" \
+    || fail "rejection reason for R2_RT_RETENTION_DAYS=0 absent"
+[ -s "$AWS_LOG" ] && fail "aws was invoked despite R2_RT_RETENTION_DAYS=0"
+pass "R2_RT_RETENTION_DAYS=0 is rejected instead of wiping the RT archive"
+
+set +e
+R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=0 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "R2_STATIC_RETENTION_DAYS=0 should exit 64, got $rc"
+grep -q "R2_STATIC_RETENTION_DAYS must be a positive integer" "$TEST_BASE/out.log" \
+    || fail "rejection reason for R2_STATIC_RETENTION_DAYS=0 absent"
+[ -s "$AWS_LOG" ] && fail "aws was invoked despite R2_STATIC_RETENTION_DAYS=0"
+pass "R2_STATIC_RETENTION_DAYS=0 is rejected instead of wiping the static archive"
+
 # No sync-r2.sh success marker yet -> refuses to run, deletes nothing.
 seed_lists
 if R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=1 ../bin/prune-r2.sh 2>/dev/null; then
