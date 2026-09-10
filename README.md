@@ -133,6 +133,18 @@ DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
   poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
+That fixed `:5544`/`:8124` pair is shared — fine for one run at a time, but
+two runs against it at once (e.g. two worktrees on the same host) can
+interfere with each other's schema mid-test. `scripts/run_full_ci.sh` runs
+the same lint/type/test gate as CI against its own uniquely-named,
+uniquely-ported Postgres + ClickHouse pair instead, torn down again on
+exit, so any number of invocations can run concurrently without
+coordinating:
+
+```bash
+scripts/run_full_ci.sh
+```
+
 Frontend checks:
 
 ```bash
