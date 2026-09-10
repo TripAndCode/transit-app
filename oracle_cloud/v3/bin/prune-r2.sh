@@ -55,6 +55,14 @@ for var in R2_RT_RETENTION_DAYS R2_STATIC_RETENTION_DAYS MAX_STALE_DAYS; do
         echo "prune-r2.sh: $var must be a positive integer, got '$value'" >&2
         exit 64
     fi
+    # A non-degenerate leading-zero numeral (e.g. "010", "018") passes the
+    # check above but is not itself safe to hand to a later plain arithmetic
+    # context, which would treat it as octal -- silently changing its value
+    # ("010" -> 8) or aborting outright ("018" has no digit 8 in octal).
+    # Normalize the variable itself to its base-10 decimal form now so every
+    # downstream consumer, including prune_prefix's retention parameter,
+    # only ever sees the clean decimal value.
+    printf -v "$var" '%d' "$((10#$value))"
 done
 
 if [ ! -f "$OK_MARKER" ]; then
@@ -126,7 +134,16 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
 
     [ -n "${static:-}" ] || continue
     keep=$(readlink "$BASE_DIR/data/$id/static/latest.zip" 2>/dev/null || true)
-    [ -n "$keep" ] && keep=$(basename "$keep")
+    if [ -z "$keep" ]; then
+        # An agency configured for static GTFS but with no resolvable local
+        # latest.zip means the current live target is unknown here. Pruning
+        # blind in that state risks deleting R2's only copy of it, the exact
+        # thing the keep exception exists to prevent -- so skip this
+        # agency's static prune entirely rather than run it without a keep.
+        echo "prune-r2.sh: a$id: local latest.zip could not be resolved — skipping static prune" >&2
+        continue
+    fi
+    keep=$(basename "$keep")
     prune_prefix "static/$id/" "$R2_STATIC_RETENTION_DAYS" "$keep"
 done < "$TSV"
 

@@ -68,6 +68,13 @@ for var in R2_RT_MAX_STALE_DAYS MIN_RT_OBJECT_BYTES MIN_STATIC_OBJECT_BYTES; do
             exit 64
             ;;
     esac
+    # Digits-only doesn't rule out a leading-zero numeral like "010" or "018" --
+    # a later plain arithmetic context (`$(( ))`) treats a leading zero as
+    # octal, which either silently changes the value ("010" -> 8) or aborts
+    # the whole script ("018" has no digit 8 in octal). Forcing base-10
+    # interpretation now and writing the normalized decimal string back into
+    # the variable means every later plain arithmetic use of it is safe.
+    printf -v "$var" '%d' "$((10#$value))"
 done
 
 if [ ! -f "$TSV" ]; then

@@ -165,3 +165,35 @@ rc=$?
 set -e
 [ "$rc" -eq 64 ] || fail "a non-numeric R2_RT_MAX_STALE_DAYS should exit 64, got $rc"
 pass "a non-numeric threshold is rejected with exit 64"
+
+# A non-degenerate leading-zero threshold ("010") must be read as decimal 10,
+# not octal 8 -- a 9-day-old RT object must still be considered fresh at a
+# 10-day limit, but would wrongly fail if the limit were silently misread as
+# an 8-day one. Single-agency (no static_url) roster keeps this focused on
+# the RT threshold arithmetic.
+printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
+    > "$COLLECTOR_BASE/etc/agencies.tsv"
+nine_days_ago=$(days_ago_ts 9)
+export LS_rt_1_="$nine_days_ago $rt1_size rt/1/20260902.tar.gz"$'\n'
+set +e
+R2_RT_MAX_STALE_DAYS=010 ../bin/verify-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "R2_RT_MAX_STALE_DAYS=010 should treat a 9-day-old RT object as fresh under a decimal 10-day limit, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+grep -q "1 agencies checked" "$TEST_BASE/out.log" || fail "R2_RT_MAX_STALE_DAYS=010 did not finish checking the agency"
+pass "a leading-zero threshold (010) is read as decimal 10, not octal 8"
+
+# A leading-zero threshold with an invalid octal digit ("008") must not crash
+# the arithmetic that consumes it and silently abort the rest of the
+# per-agency loop while still exiting 0.
+export LS_rt_1_="$fresh $rt1_size rt/1/20260909.tar.gz"$'\n'
+set +e
+R2_RT_MAX_STALE_DAYS=008 ../bin/verify-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "R2_RT_MAX_STALE_DAYS=008 with fresh objects should still exit 0, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+grep -q "value too great for base" "$TEST_BASE/out.log" \
+    && fail "R2_RT_MAX_STALE_DAYS=008 triggered an octal-parse arithmetic error"
+grep -q "1 agencies checked" "$TEST_BASE/out.log" \
+    || fail "R2_RT_MAX_STALE_DAYS=008 aborted the per-agency loop early instead of checking the agency"
+pass "a leading-zero threshold whose octal reading is invalid (008) doesn't abort the per-agency scan"

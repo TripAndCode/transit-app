@@ -116,6 +116,39 @@ fi
 [ -s "$AWS_LOG" ] && fail "aws was invoked despite a stale marker"
 pass "prune-r2.sh refuses to run when the sync-r2.sh marker is stale"
 
+# A non-degenerate leading-zero retention ("010") must be read as decimal 10,
+# not octal 8 -- an RT object 9 days old must survive at retention 10 but
+# would wrongly be pruned if the retention were silently misread as octal 8.
+nine_days_ts=$(date -u -v-9d +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date -u -d "9 days ago" +%Y-%m-%d\ %H:%M:%S)
+export LS_rt_1_="$nine_days_ts 100 rt/1/20260902.tar.gz
+"
+export LS_static_8_="$old_ts 200 static/8/gtfs_static_20200101.zip
+"
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"
+R2_RT_RETENTION_DAYS=010 R2_STATIC_RETENTION_DAYS=3650 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "R2_RT_RETENTION_DAYS=010 should run cleanly, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+grep -q "s3 rm s3://test-bucket/rt/1/20260902.tar.gz" "$AWS_LOG" \
+    && fail "a 9-day-old RT object was pruned under retention=010 (octal-8 misreading); it should survive under decimal 10"
+pass "a leading-zero retention (010) is read as decimal 10, not octal 8"
+
+# A leading-zero retention with an invalid octal digit ("018") must not crash
+# the arithmetic that consumes it -- normalizing the variable to decimal at
+# validation time is what prevents the fatal "value too great for base" error.
+seed_lists
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"
+R2_RT_RETENTION_DAYS=018 R2_STATIC_RETENTION_DAYS=3650 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "R2_RT_RETENTION_DAYS=018 should not crash, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+grep -q "value too great for base" "$TEST_BASE/out.log" \
+    && fail "R2_RT_RETENTION_DAYS=018 triggered an octal-parse arithmetic error"
+grep -q "s3 rm s3://test-bucket/rt/1/20200101.tar.gz" "$AWS_LOG" \
+    || fail "the old RT object should still be pruned under retention=018 (decimal 18)"
+pass "a leading-zero retention with an invalid octal digit (018) is read as decimal, not crashed on"
+seed_lists
+
 # Fresh marker, aggressive (1-day) retention -> deletes old objects, keeps
 # young ones and the current static target regardless of age.
 touch "$COLLECTOR_BASE/.sync-r2.last-ok"
@@ -151,6 +184,25 @@ fi
 grep -q "s3 rm s3://test-bucket/rt/1/20200101.tar.gz" "$AWS_LOG" \
     || fail "the delete was not attempted despite the induced failure"
 pass "a delete failure is surfaced as a nonzero exit without aborting the run"
+
+# When an agency's local latest.zip cannot be resolved (no symlink present),
+# the only known static object for that agency in R2 -- even one well past
+# retention -- must survive: with no live target to compare against, pruning
+# has no way to tell the current copy from a stale one, so it must not touch
+# that agency's static objects at all rather than delete everything.
+seed_lists
+rm -f "$COLLECTOR_BASE/data/8/static/latest.zip"
+export LS_static_8_="$old_ts 200 static/8/gtfs_static_20200101.zip
+"
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"
+R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=1 ../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "prune-r2.sh should still exit 0 when only latest.zip is unresolved, got rc=$rc: $(cat "$TEST_BASE/out.log")"
+grep -q "s3 rm s3://test-bucket/static/8/gtfs_static_20200101.zip" "$AWS_LOG" \
+    && fail "a static object was deleted for an agency whose live target (latest.zip) could not be resolved"
+pass "static pruning is skipped for an agency whose local latest.zip cannot be resolved"
+ln -sfn gtfs_static_20200101.zip "$COLLECTOR_BASE/data/8/static/latest.zip"
 
 # Missing roster: cannot enumerate agencies to prune.
 touch "$COLLECTOR_BASE/.sync-r2.last-ok"
