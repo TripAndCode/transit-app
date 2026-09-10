@@ -8,8 +8,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from pipeline.reports import service_delivered as service_delivered_module
 from pipeline.reports.network import compute_network_summary
+from tests.conftest import confirm_rt_field_coverage
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -21,7 +21,7 @@ _TRUNCATE_SQL = (
 
 
 @pytest.fixture
-async def net_pool(apply_schema, monkeypatch):
+async def net_pool(apply_schema):
     # In-process compute cache is keyed on (from_date, to_date) only, so two
     # tests sharing a date range would leak results — clear it per test.
     compute_network_summary.cache_clear()
@@ -32,7 +32,7 @@ async def net_pool(apply_schema, monkeypatch):
         a = await c.fetchrow(ins, "A", "http://na")
         b = await c.fetchrow(ins, "B", "http://nb")
         cc = await c.fetchrow(ins, "C", "http://nc")
-    _trust_service_delivered(monkeypatch, a["agency_id"], b["agency_id"], cc["agency_id"])
+    await _trust_service_delivered(pool, a["agency_id"], b["agency_id"], cc["agency_id"])
     yield pool, a["agency_id"], b["agency_id"], cc["agency_id"]
     async with pool.acquire() as c:
         await c.execute(_TRUNCATE_SQL)
@@ -131,14 +131,14 @@ async def _set_ingest_strategy(pool, aid, strategy):
         await c.execute("UPDATE agencies SET ingest_strategy = $1 WHERE agency_id = $2", strategy, aid)
 
 
-def _trust_service_delivered(monkeypatch, *agency_ids):
-    """Simulate `scripts/probe_rt_field_coverage.py` having already confirmed
-    real (non-empty) RT field coverage for these dynamically-created test
-    agencies -- production only trusts agency_ids that are actually in
-    `pipeline.strategies.static_join.RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`
-    (currently 8/9/10), which a freshly-inserted test agency_id won't
-    coincidentally match."""
-    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset(agency_ids))
+async def _trust_service_delivered(pool, *agency_ids):
+    """Simulate `scripts/probe_rt_field_coverage.py --record` having already
+    confirmed real (non-empty) RT field coverage for these dynamically-created
+    test agencies -- production only trusts an agency with a live verdict in
+    `rt_field_coverage_probes`, which a freshly-inserted test agency has no
+    rows in. Leaves `ingest_strategy` alone: that is the gate's other,
+    independent half."""
+    await confirm_rt_field_coverage(pool, *agency_ids)
 
 
 async def _seed_static_version_summary(pool, aid, version, trip_count, vehicle_km=None, computed_at=None):
@@ -172,12 +172,12 @@ async def _seed_service_delivered_daily(pool, aid, rows):
             )
 
 
-async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client, monkeypatch):
+async def test_compute_service_delivered_reads_precomputed_daily_aggregate(net_pool, ch_async_client):
     """The read path sums agg_service_delivered_daily over the range and
     divides against the static schedule's planned count -- no ClickHouse
     access. 5 planned trips, 1 non-executed trip-day precomputed -> 80%."""
     pool, a, b, _cc = net_pool
-    _trust_service_delivered(monkeypatch, a, b)
+    await _trust_service_delivered(pool, a, b)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
@@ -215,18 +215,17 @@ async def test_compute_service_delivered_not_available_when_not_static_join(net_
     assert row["service_delivered_pct"] is None
 
 
-async def test_compute_service_delivered_not_available_for_unconfirmed_static_join_agency(
-    net_pool, ch_async_client, monkeypatch
-):
+async def test_compute_service_delivered_not_available_for_unconfirmed_static_join_agency(net_pool, ch_async_client):
     """`ingest_strategy == 'static_join'` alone is not sufficient trust: an
-    agency outside `RT_FIELD_COVERAGE_CONFIRMED_AGENCIES` must still read
+    agency with no live verdict in `rt_field_coverage_probes` must still read
     "not available" even with real planned trips and precomputed
-    non-executed data -- only `scripts/probe_rt_field_coverage.py` confirming
-    a live feed's real coverage (never an empty/overnight capture) earns a
-    spot in that set. Explicitly empties the confirmed set so this holds
-    regardless of which real agency_ids happen to be in it."""
+    non-executed data -- only `scripts/probe_rt_field_coverage.py --record`
+    confirming a live feed's real coverage (never an empty/overnight capture)
+    earns that trust. Deletes the fixture's recorded verdicts so this holds
+    independently of what the fixture set up."""
     pool, a, _b, _cc = net_pool
-    monkeypatch.setattr(service_delivered_module, "RT_FIELD_COVERAGE_CONFIRMED_AGENCIES", frozenset())
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM rt_field_coverage_probes")
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 1)])
@@ -257,12 +256,12 @@ async def test_compute_service_delivered_no_static_schedule_is_not_available(net
     assert row["service_delivered_pct"] is None
 
 
-async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client, monkeypatch):
+async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(net_pool, ch_async_client):
     """A non_executed_trips total exceeding planned_trips (feed drift, or a
     RT-only ADDED trip marked CANCELED) must clamp executed_trips at 0, never
     go negative."""
     pool, a, _b, _cc = net_pool
-    _trust_service_delivered(monkeypatch, a)
+    await _trust_service_delivered(pool, a)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260401")
     await _set_ingest_strategy(pool, a, "static_join")
     await _seed_service_delivered_daily(pool, a, [("2026-04-01", 5)])

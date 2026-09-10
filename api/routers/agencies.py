@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
+from pipeline.strategies.static_join import invalidate_field_coverage_probes
 from pipeline.url_guard import FeedURLError, validate_feed_url
 
 router = APIRouter(prefix="/api/agencies", tags=["agencies"])
@@ -162,12 +163,17 @@ async def patch_agency(
             raise HTTPException(status_code=422, detail=str(exc)) from None
 
     updates: dict[str, Any] = {field: getattr(body, field) for field in body.model_fields_set}
+    # Only an actual repoint invalidates: resubmitting the same URL is not a
+    # new feed and must not cost the agency its verified coverage.
+    repointed = "feed_url" in updates and updates["feed_url"] != row["feed_url"]
 
     if updates:
         set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
         sql = f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1"
         async with conn.transaction():
             await conn.execute(sql, agency_id, *updates.values())
+            if repointed:
+                await invalidate_field_coverage_probes(conn, agency_id)
             await record_event(
                 conn,
                 user_id=None,

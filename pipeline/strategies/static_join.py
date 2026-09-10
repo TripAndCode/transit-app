@@ -7,23 +7,23 @@ on (agency_id, trip_id, stop_sequence).
 Rows where the JOIN misses get NULLs in service_type / scheduled_time;
 route_code is taken straight from the RT trip.route_id and is always non-null.
 
-``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`` lists agencies whose RT-sourced
-optional fields (stop_id, arr_delay, schedule_relationship_trip,
-schedule_relationship_stop) have actually been observed populated on a real,
-non-empty live feed -- not merely agencies that share this strategy's
-opaque-trip_id JOIN mechanism. ``ingest_strategy == 'static_join'`` alone
-means a feed's wire shape matches; it does NOT mean the feed populates these
-optional fields the way 8/9/10 do (see ``field_coverage``'s docstring). Every
-reader that trusts these fields must intersect against this explicit set
-rather than trusting ``ingest_strategy`` alone -- use ``rt_field_coverage_
-confirmed`` below rather than re-deriving this check inline, so a newly added
-reader can't silently skip the confirmed-set half of the gate.
+An agency's RT-sourced optional fields (``RT_COVERAGE_FIELDS``: stop_id,
+arr_delay, schedule_relationship_trip, schedule_relationship_stop) are
+trusted only once that agency's OWN live feed has been probed and found to
+populate them, as recorded in the ``rt_field_coverage_probes`` registry.
+``ingest_strategy == 'static_join'`` alone means a feed's wire shape
+matches an already-verified agency's; it does NOT mean the feed populates
+these optional fields the same way (see ``field_coverage``'s docstring).
+Every reader that trusts these fields calls ``rt_field_coverage_confirmed``
+below rather than re-deriving the check inline, so a newly added reader
+can't silently skip half the gate.
 
-Add an agency_id to that set only after running
-``scripts/probe_rt_field_coverage.py --url <realtime_url>`` against that
-agency's own live feed during active service hours and confirming real
-(non-empty) per-field coverage -- an empty/overnight capture (no
-stop_time_updates at all) confirms nothing and does not qualify.
+Verifying a feed is an operational act, not a code change: run
+``scripts/probe_rt_field_coverage.py --url <realtime_url> --agency-id <id>
+--record`` against that agency's own live feed during active service hours.
+An empty/overnight capture (no stop_time_updates at all) confirms nothing
+and is refused rather than recorded, and a recorded verdict carries an
+expiry so trust in a feed that later changes shape lapses on its own.
 """
 
 import logging
@@ -37,20 +37,102 @@ _log = logging.getLogger(__name__)
 
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
-# trust; see RT_FIELD_COVERAGE_CONFIRMED_AGENCIES below for the additional
-# per-agency confirmation gate. Shared (via this module, and via
-# rt_field_coverage_confirmed below) by every reader that needs this check
-# so they can't drift apart if a second ingest strategy is ever confirmed.
+# trust; the per-agency probe registry below is the other half of the gate.
+# Shared (via this module, and via rt_field_coverage_confirmed below) by
+# every reader that needs this check so they can't drift apart if a second
+# ingest strategy is ever confirmed.
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
 
-RT_FIELD_COVERAGE_CONFIRMED_AGENCIES = frozenset({8, 9, 10})
+# The RT-optional per-stop_time_update fields whose population is verified
+# per agency. An agency counts as confirmed only with a live, affirmative
+# verdict for EVERY one of them: the readers behind this gate (service
+# delivered, dwell/running time, schedule-realism padding, headway quality)
+# collectively need all four, and a partial verdict means the feed was never
+# fully vetted, not that the unrecorded fields are fine.
+RT_COVERAGE_FIELDS = (
+    "stop_id",
+    "arr_delay",
+    "schedule_relationship_trip",
+    "schedule_relationship_stop",
+)
+
+# How long a recorded probe verdict is trusted before it must be re-run. A
+# feed's field population is a property of a vendor deployment that can
+# change without notice, so a verdict decays instead of standing forever;
+# the horizon is long enough that re-probing stays a periodic operational
+# chore rather than a continuous one.
+DEFAULT_PROBE_TTL_DAYS = 180
+
+# Coverage fractions separating "this feed populates the field" from "this
+# feed happened to emit it once". arr_delay is sparse by construction (only
+# a StopTimeUpdate carrying an `arrival` submessage has one), so it is
+# confirmed by a strictly-inside band rather than a floor like the others.
+_NEAR_UNIVERSAL_MIN = 0.99
+_ARR_DELAY_SPARSE_RANGE = (0.0, 0.5)  # exclusive lower, exclusive upper
+
+# An agency is confirmed when its ingest strategy CAN send these fields and
+# the registry holds a live (unexpired), affirmative verdict for every field
+# in RT_COVERAGE_FIELDS. An expired or absent row reads exactly like a
+# refuted one here: "never verified" and "verified absent" are both "don't
+# trust this field", and only a fresh probe distinguishes them.
+_CONFIRMED_AGENCIES_SQL = """
+    SELECT p.agency_id
+    FROM rt_field_coverage_probes p
+    JOIN agencies a ON a.agency_id = p.agency_id
+    WHERE a.ingest_strategy = ANY($1::text[])
+      AND p.agency_id = ANY($2::int[])
+      AND p.field_name = ANY($3::text[])
+      AND p.confirmed
+      AND (p.expires_at IS NULL OR p.expires_at > now())
+    GROUP BY p.agency_id
+    HAVING count(DISTINCT p.field_name) = $4::int
+"""
+
+# A verdict describes the feed that was probed, not the agency row that
+# happened to point at it, so repointing agencies.feed_url has to drop it.
+_INVALIDATE_PROBES_SQL = "DELETE FROM rt_field_coverage_probes WHERE agency_id = $1"
+
+_RECORD_PROBE_SQL = """
+    INSERT INTO rt_field_coverage_probes
+        (agency_id, field_name, confirmed, coverage, sample_size,
+         source_feed, probed_at, expires_at)
+    VALUES ($1, $2, $3, $4, $5, $6, now(), now() + ($7::int * INTERVAL '1 day'))
+    ON CONFLICT (agency_id, field_name) DO UPDATE SET
+        confirmed   = EXCLUDED.confirmed,
+        coverage    = EXCLUDED.coverage,
+        sample_size = EXCLUDED.sample_size,
+        source_feed = EXCLUDED.source_feed,
+        probed_at   = EXCLUDED.probed_at,
+        expires_at  = EXCLUDED.expires_at
+"""
+
+
+async def rt_field_coverage_confirmed_agencies(conn, agency_ids) -> set[int]:
+    """The subset of *agency_ids* holding a live, complete RT field-coverage
+    verdict, resolved in one round trip.
+
+    Batch form of ``rt_field_coverage_confirmed`` for a reader that gates a
+    whole list of agencies at once; both run the same registry query, so a
+    per-agency and a batch caller can never disagree about one agency.
+    """
+    ids = list(agency_ids)
+    if not ids:
+        return set()
+    rows = await conn.fetch(
+        _CONFIRMED_AGENCIES_SQL,
+        list(RT_INGEST_STRATEGIES),
+        ids,
+        list(RT_COVERAGE_FIELDS),
+        len(RT_COVERAGE_FIELDS),
+    )
+    return {r["agency_id"] for r in rows}
 
 
 async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
     """True only when *agency_id* both uses an ingest strategy that CAN
-    populate the RT-optional fields (``RT_INGEST_STRATEGIES``) AND is in
-    the explicit confirmed-set gate (``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``)
-    -- an ``ingest_strategy`` match alone means a feed's wire shape merely
+    populate the RT-optional fields (``RT_INGEST_STRATEGIES``) AND has a
+    live, complete verdict in the ``rt_field_coverage_probes`` registry --
+    an ``ingest_strategy`` match alone means a feed's wire shape merely
     matches a confirmed agency's, not that this agency's own live feed has
     been probed and found to actually populate these fields.
 
@@ -60,10 +142,99 @@ async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
     so a newly added reader can't accidentally trust ``ingest_strategy``
     alone.
     """
-    if agency_id not in RT_FIELD_COVERAGE_CONFIRMED_AGENCIES:
-        return False
-    row = await conn.fetchrow("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    return bool(row and row["ingest_strategy"] in RT_INGEST_STRATEGIES)
+    return agency_id in await rt_field_coverage_confirmed_agencies(conn, [agency_id])
+
+
+def assess_field_coverage(cov: dict) -> dict[str, bool] | None:
+    """Turn a ``field_coverage`` result into a per-field confirm/refute
+    verdict keyed by ``RT_COVERAGE_FIELDS`` name.
+
+    Returns ``None`` when there is nothing to assess: a poll with zero
+    stop_time_updates neither confirms nor refutes anything about a feed's
+    field-population habits, and must not be read as a refutation.
+
+    stop_id and both schedule_relationship_* fields are near-universal on a
+    feed that sends them at all, so each is confirmed by clearing
+    ``_NEAR_UNIVERSAL_MIN``. arr_delay instead has to land strictly inside
+    ``_ARR_DELAY_SPARSE_RANGE``: 0.0 means the feed never sends it, and a
+    fraction near 1.0 means the field is not the sparse arrival estimate
+    this codebase reads it as.
+
+    Lives next to the decoder (rather than in the probe CLI) so the exact
+    thresholds deciding what gets written to ``rt_field_coverage_probes``
+    are defined once, alongside the gate that reads it.
+    """
+    if cov["stop_time_updates"] == 0:
+        return None
+    lo, hi = _ARR_DELAY_SPARSE_RANGE
+    return {
+        "stop_id": cov["stop_id_coverage"] >= _NEAR_UNIVERSAL_MIN,
+        "arr_delay": lo < cov["arr_delay_coverage"] < hi,
+        "schedule_relationship_trip": cov["schedule_relationship_trip_coverage"] >= _NEAR_UNIVERSAL_MIN,
+        "schedule_relationship_stop": cov["schedule_relationship_stop_coverage"] >= _NEAR_UNIVERSAL_MIN,
+    }
+
+
+async def record_field_coverage_probe(
+    conn,
+    agency_id: int,
+    cov: dict,
+    source_feed: str,
+    ttl_days: int | None = DEFAULT_PROBE_TTL_DAYS,
+) -> dict[str, bool]:
+    """Persist one probe run's per-field verdicts for *agency_id*, and
+    return them.
+
+    *cov* is a ``field_coverage`` result and *source_feed* records what was
+    actually probed (the live feed URL, or the path of a capture taken from
+    it). ``ttl_days=None`` records a non-expiring verdict, for a feed whose
+    coverage is pinned by something more durable than one poll (e.g. a
+    checked-in capture the test suite asserts against).
+
+    Raises ``ValueError`` for a capture with no stop_time_updates: an empty
+    poll is not evidence, and writing ``confirmed = false`` from one would
+    turn "probed at the wrong time of day" into a durable refutation. All
+    fields are written in one transaction, so no reader can observe a
+    half-updated verdict for an agency.
+    """
+    verdicts = assess_field_coverage(cov)
+    if verdicts is None:
+        raise ValueError(
+            f"agency {agency_id}: capture has no stop_time_updates -- "
+            "an empty poll confirms nothing; re-probe during active service hours"
+        )
+    async with conn.transaction():
+        await conn.executemany(
+            _RECORD_PROBE_SQL,
+            [
+                (
+                    agency_id,
+                    field,
+                    verdicts[field],
+                    cov[f"{field}_coverage"],
+                    cov["stop_time_updates"],
+                    source_feed,
+                    ttl_days,
+                )
+                for field in RT_COVERAGE_FIELDS
+            ],
+        )
+    return verdicts
+
+
+async def invalidate_field_coverage_probes(conn, agency_id: int) -> int:
+    """Discard every recorded coverage verdict for *agency_id*, returning
+    how many rows were dropped.
+
+    Called by whatever repoints ``agencies.feed_url``: coverage is a
+    property of one feed, so a verdict cannot follow the agency row onto a
+    different feed nobody has probed -- least of all a non-expiring one.
+    Deleting is the fail-closed choice, leaving the agency in exactly the
+    state a freshly onboarded one starts in ("not available" until a probe
+    re-earns trust) rather than a half-trusted one.
+    """
+    tag = await conn.execute(_INVALIDATE_PROBES_SQL, agency_id)
+    return int(tag.rsplit(" ", 1)[-1])
 
 
 def _decode_rows(pb_bytes: bytes):
@@ -123,17 +294,16 @@ def field_coverage(pb_bytes: bytes) -> dict:
     feed itself sends stop_id/arr_delay/schedule_relationship_*/feed_timestamp.
     That makes this usable to check a feed BEFORE an agency row for it even
     exists, which is the point: every reader that trusts an RT-optional
-    field gates "is this optional field populated" on membership in
-    ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES`` (this module, via
+    field gates "is this optional field populated" on a live verdict in the
+    ``rt_field_coverage_probes`` registry (this module, via
     ``rt_field_coverage_confirmed``), not on ``ingest_strategy ==
     'static_join'`` alone -- sharing this strategy's opaque-trip_id JOIN
-    mechanism only means a feed's
-    wire shape matches 8/9/10's, empirically confirmed for those three (see
-    ``tests/pipeline/test_static_join.py::test_static_join_per_op``'s real-
-    fixture coverage assertions), NOT that every feed needing the same JOIN
-    also populates these fields the same way. Run this (see
-    ``scripts/probe_rt_field_coverage.py``) against a new agency's live feed
-    before adding it to ``RT_FIELD_COVERAGE_CONFIRMED_AGENCIES``.
+    mechanism only means a feed's wire shape matches an already-verified
+    agency's (see ``tests/pipeline/test_static_join.py::
+    test_static_join_per_op``'s real-fixture coverage assertions), NOT that
+    every feed needing the same JOIN also populates these fields the same
+    way. Run this (see ``scripts/probe_rt_field_coverage.py``) against a new
+    agency's live feed and record the verdict before any report trusts it.
 
     Returns ``{"stop_time_updates": int, "feed_timestamp": int | None}``
     plus, only when ``stop_time_updates > 0`` (an empty poll says nothing
