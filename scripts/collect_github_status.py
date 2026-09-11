@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Collect the GitHub operations-status snapshot (component `github`, item 118's contract).
+"""Collect the GitHub operations-status snapshot for the `github` component of
+`ops_status.py`'s `ComponentStatus` contract.
 
 Reuses the VPS's existing `gh` CLI authentication (the same one `/vps-loop-run` and
 `scripts/cleanup_git_state.py`/`reconcile_next_task.py` already rely on) rather than
@@ -165,7 +166,7 @@ def fetch_open_prs(*, repo_slug: str, limit: int, runner: Runner) -> tuple[list[
                 "--limit",
                 str(limit),
                 "--json",
-                "number,title,isDraft,mergeable,mergeStateStatus,headRefName,updatedAt,statusCheckRollup",
+                "number,isDraft,mergeable,mergeStateStatus,statusCheckRollup",
             ]
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -182,10 +183,16 @@ def fetch_open_prs(*, repo_slug: str, limit: int, runner: Runner) -> tuple[list[
     return prs, None, ""
 
 
-def fetch_branch_protection(*, repo_slug: str, limit: int, runner: Runner) -> dict[str, bool] | None:
-    """Return `{branch_name: protected}` for up to `limit` branches (one bounded page,
-    via a URL query param -- never `-f`/`-F`, which would flip `gh api` to POST), or
-    `None` on any failure."""
+def fetch_branch_protection(*, repo_slug: str, limit: int, runner: Runner) -> tuple[dict[str, bool], bool] | None:
+    """Return `({branch_name: protected}, page_truncated)` for up to `limit` branches
+    (one bounded page, via a URL query param -- never `-f`/`-F`, which would flip
+    `gh api` to POST), or `None` on any failure.
+
+    `page_truncated` is True when the page came back with `>= limit` entries, meaning
+    the repo may have more branches than fit on this one page. A caller must not treat
+    a branch name absent from the mapping as confirmed-unprotected when `page_truncated`
+    is True -- it may simply not have been on this page (see `gather_stale_branches`).
+    """
 
     try:
         proc = runner(["gh", "api", f"repos/{repo_slug}/branches?per_page={limit}"])
@@ -203,7 +210,7 @@ def fetch_branch_protection(*, repo_slug: str, limit: int, runner: Runner) -> di
     for item in data:
         if isinstance(item, dict) and isinstance(item.get("name"), str):
             mapping[item["name"]] = bool(item.get("protected", False))
-    return mapping
+    return mapping, len(data) >= limit
 
 
 def gather_stale_branches(
@@ -215,6 +222,7 @@ def gather_stale_branches(
     stale_days: float,
     max_branches: int,
     git_runner: Runner = _run,
+    remote_protection_truncated: bool = False,
 ) -> tuple[str, ...] | None:
     """Return up to `max_branches` non-protected branch names whose last commit is at
     least `stale_days` old (oldest first), or `None` if the underlying git call failed.
@@ -224,7 +232,11 @@ def gather_stale_branches(
     per branch would turn one bounded call into an unbounded one as branch count grows.
     A branch is treated as protected if GitHub reports it so, or if its name is in
     `protected_names` (this repo does not currently configure branch protection at all,
-    so the latter is the operative check in practice -- see `CLAUDE.md`).
+    so the latter is the operative check in practice -- see `CLAUDE.md`). A branch name
+    absent from `remote_protection` is treated as unprotected only when
+    `remote_protection_truncated` is False; when the branches page was truncated, an
+    absent name's protection status is unknown (it may simply be past the page limit),
+    so it is excluded from the stale-branches list rather than assumed unprotected.
     """
 
     try:
@@ -257,8 +269,12 @@ def gather_stale_branches(
             continue
         if name in protected_names:
             continue
-        if remote_protection is not None and remote_protection.get(name):
-            continue
+        if remote_protection is not None:
+            if name in remote_protection:
+                if remote_protection[name]:
+                    continue
+            elif remote_protection_truncated:
+                continue  # protection status unknown past the truncated page -- don't assume unprotected
         try:
             commit_dt = datetime.fromisoformat(date_str.strip())
         except ValueError:
@@ -287,7 +303,8 @@ def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
         number = pr.get("number")
         if pr.get("isDraft"):
             draft_count += 1
-        if pr.get("mergeable") == "CONFLICTING" and isinstance(number, int):
+        is_conflicting = pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY"
+        if is_conflicting and isinstance(number, int):
             conflicting_numbers.append(number)
         checks = pr.get("statusCheckRollup")
         if isinstance(checks, list) and isinstance(number, int):
@@ -360,6 +377,7 @@ class GithubFacts:
     pr_error_kind: str | None
     pr_error_detail: str
     branch_protection_known: bool
+    branch_page_truncated: bool
     stale_branches: tuple[str, ...] | None
     cached_document: dict | None
 
@@ -375,11 +393,25 @@ def build_github_status(
     three-way split."""
 
     if facts.prs is not None:
+        cached_stale_branches: object = ()
+        if facts.cached_document is not None:
+            cached_stale_branches = ops_status.from_json_dict(facts.cached_document).details.get(
+                "stale_unprotected_branches", ()
+            )
+
+        stale_unprotected_branches = (
+            list(facts.stale_branches)
+            if facts.stale_branches is not None
+            else [name for name in cached_stale_branches if isinstance(name, str)]
+            if isinstance(cached_stale_branches, list)
+            else []
+        )
         details = {
             **summarize_prs(facts.prs, limit=facts.pr_limit),
             "branch_protection_known": facts.branch_protection_known,
+            "branch_page_truncated": facts.branch_page_truncated,
             "stale_branches_known": facts.stale_branches is not None,
-            "stale_unprotected_branches": list(facts.stale_branches or ()),
+            "stale_unprotected_branches": stale_unprotected_branches,
         }
         return ops_status.build_status(
             component="github",
@@ -396,6 +428,7 @@ def build_github_status(
         cached = ops_status.from_json_dict(facts.cached_document)
         details = dict(cached.details)
         details["branch_protection_known"] = facts.branch_protection_known
+        details["branch_page_truncated"] = facts.branch_page_truncated
         if facts.stale_branches is not None:
             details["stale_unprotected_branches"] = list(facts.stale_branches)
         details["stale_branches_known"] = facts.stale_branches is not None
@@ -415,6 +448,7 @@ def build_github_status(
 
     details = {
         "branch_protection_known": facts.branch_protection_known,
+        "branch_page_truncated": facts.branch_page_truncated,
         "stale_branches_known": facts.stale_branches is not None,
         "stale_unprotected_branches": list(facts.stale_branches or ()),
         "last_error_kind": facts.pr_error_kind or "unknown_error",
@@ -452,6 +486,7 @@ def collect_github_facts(
     prs: list[dict] | None
     pr_error_kind: str | None
     branch_protection: dict[str, bool] | None
+    branch_page_truncated: bool = False
 
     repo_slug = resolve_repo_slug(repo, git_runner=git_runner)
     if repo_slug is None:
@@ -459,13 +494,18 @@ def collect_github_facts(
         branch_protection = None
     else:
         prs, pr_error_kind, pr_error_detail = fetch_open_prs(repo_slug=repo_slug, limit=pr_limit, runner=gh_runner)
-        branch_protection = fetch_branch_protection(repo_slug=repo_slug, limit=branch_limit, runner=gh_runner)
+        branch_protection_result = fetch_branch_protection(repo_slug=repo_slug, limit=branch_limit, runner=gh_runner)
+        if branch_protection_result is not None:
+            branch_protection, branch_page_truncated = branch_protection_result
+        else:
+            branch_protection = None
 
     stale_branches = gather_stale_branches(
         repo=repo,
         now=now,
         protected_names=always_protected,
         remote_protection=branch_protection,
+        remote_protection_truncated=branch_page_truncated,
         stale_days=stale_branch_days,
         max_branches=ops_status.MAX_DETAIL_LIST_LENGTH,
         git_runner=git_runner,
@@ -480,6 +520,7 @@ def collect_github_facts(
         pr_error_kind=pr_error_kind,
         pr_error_detail=pr_error_detail,
         branch_protection_known=branch_protection is not None,
+        branch_page_truncated=branch_page_truncated,
         stale_branches=stale_branches,
         cached_document=cached_document,
     )

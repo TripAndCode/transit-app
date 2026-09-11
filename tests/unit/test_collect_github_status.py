@@ -1,5 +1,5 @@
 """Tests for scripts/collect_github_status.py: the GitHub collector for the `github`
-operations-status component (item 121)."""
+operations-status component."""
 
 from __future__ import annotations
 
@@ -143,50 +143,38 @@ def test_diagnose_gh_failure_redacts_and_bounds_excerpt():
 # --- fetch_open_prs ---------------------------------------------------------------
 
 # Recorded (field-trimmed, token-free) fixture shaped exactly like a real
-# `gh pr list --json number,title,isDraft,mergeable,mergeStateStatus,headRefName,
-# updatedAt,statusCheckRollup` response against this repo.
+# `gh pr list --json number,isDraft,mergeable,mergeStateStatus,statusCheckRollup`
+# response against this repo.
 OPEN_PRS_FIXTURE = json.dumps(
     [
         {
             "number": 400,
-            "title": "feat(oracle): publish an Oracle collector heartbeat",
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
-            "headRefName": "vps-loop/item-119",
-            "updatedAt": "2026-09-11T09:42:05Z",
             "statusCheckRollup": [],
         },
         {
             "number": 401,
-            "title": "feat(ops): collect VPS and Claude-loop status",
             "isDraft": True,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "DRAFT",
-            "headRefName": "vps-loop/item-120",
-            "updatedAt": "2026-09-11T10:05:00Z",
             "statusCheckRollup": [],
         },
         {
             "number": 402,
-            "title": "fix(frontend): simplify comparison explanation layout",
             "isDraft": False,
             "mergeable": "CONFLICTING",
             "mergeStateStatus": "DIRTY",
-            "headRefName": "fix/dark-mode-ui-pass",
-            "updatedAt": "2026-09-11T08:00:00Z",
             "statusCheckRollup": [
                 {"name": "backend-tests", "status": "COMPLETED", "conclusion": "SUCCESS", "isRequired": True}
             ],
         },
         {
             "number": 403,
-            "title": "fix(frontend): brighten dark theme text colors",
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
-            "headRefName": "fix/dark-mode-ui-pass-2",
-            "updatedAt": "2026-09-11T08:10:00Z",
             "statusCheckRollup": [
                 {"name": "backend-tests", "status": "COMPLETED", "conclusion": "FAILURE", "isRequired": True},
                 {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "isRequired": False},
@@ -194,18 +182,26 @@ OPEN_PRS_FIXTURE = json.dumps(
         },
         {
             "number": 404,
-            "title": "chore: unrelated optional check failure",
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
-            "headRefName": "chore/unrelated",
-            "updatedAt": "2026-09-11T08:20:00Z",
             "statusCheckRollup": [
                 {"name": "optional-canary", "status": "COMPLETED", "conclusion": "FAILURE", "isRequired": False}
             ],
         },
     ]
 )
+
+# A PR GitHub is still computing mergeability for (`mergeable == "UNKNOWN"`) but whose
+# `mergeStateStatus` has already settled to `DIRTY` -- conflict detection must not wait
+# for `mergeable` to catch up.
+DIRTY_UNKNOWN_MERGEABLE_PR = {
+    "number": 405,
+    "isDraft": False,
+    "mergeable": "UNKNOWN",
+    "mergeStateStatus": "DIRTY",
+    "statusCheckRollup": [],
+}
 
 
 def test_fetch_open_prs_parses_fixture():
@@ -279,14 +275,26 @@ BRANCHES_FIXTURE = json.dumps(
 
 def test_fetch_branch_protection_parses_fixture():
     runner = runner_from({"gh api": FakeCompletedProcess(0, stdout=BRANCHES_FIXTURE)})
-    mapping = collector.fetch_branch_protection(repo_slug=REPO_SLUG, limit=100, runner=runner)
+    result = collector.fetch_branch_protection(repo_slug=REPO_SLUG, limit=100, runner=runner)
 
+    assert result is not None
+    mapping, truncated = result
     assert mapping == {
         "main": False,
         "production": False,
         "fix/dark-mode-ui-pass": False,
         "vps-loop/item-129": True,
     }
+    assert truncated is False
+
+
+def test_fetch_branch_protection_marks_truncated_when_at_limit():
+    runner = runner_from({"gh api": FakeCompletedProcess(0, stdout=BRANCHES_FIXTURE)})
+    result = collector.fetch_branch_protection(repo_slug=REPO_SLUG, limit=4, runner=runner)
+
+    assert result is not None
+    _mapping, truncated = result
+    assert truncated is True
 
 
 def test_fetch_branch_protection_none_on_failure():
@@ -340,6 +348,16 @@ def test_summarize_prs_caps_number_lists_at_contract_bound():
     assert len(summary["conflicting_pr_numbers"]) == collector.ops_status.MAX_DETAIL_LIST_LENGTH
 
 
+def test_summarize_prs_counts_dirty_merge_state_as_conflicting_even_when_mergeable_unknown():
+    # GitHub computes `mergeStateStatus` before `mergeable` settles; a PR can sit at
+    # `mergeable == "UNKNOWN"` with `mergeStateStatus` already "DIRTY" for a while.
+    prs = [*json.loads(OPEN_PRS_FIXTURE), DIRTY_UNKNOWN_MERGEABLE_PR]
+    summary = collector.summarize_prs(prs, limit=50)
+
+    assert summary["conflicting_pr_count"] == 2
+    assert summary["conflicting_pr_numbers"] == [402, 405]
+
+
 # --- gather_stale_branches ----------------------------------------------------------
 
 FOR_EACH_REF_FIXTURE = "\n".join(
@@ -385,6 +403,25 @@ def test_gather_stale_branches_respects_remote_protection_flag():
     )
 
     assert stale == ("vps-loop/item-2",)
+
+
+def test_gather_stale_branches_excludes_branches_missing_from_truncated_protection_page():
+    # "vps-loop/item-2" is absent from `remote_protection` (it fell past the truncated
+    # page), so its protection status is unknown -- it must not be assumed unprotected
+    # and included in the stale list, unlike the untruncated case above.
+    runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
+    stale = collector.gather_stale_branches(
+        repo=Path("/repo"),
+        now=T0,
+        protected_names=frozenset({"main", "production"}),
+        remote_protection={"vps-loop/item-1": True},
+        remote_protection_truncated=True,
+        stale_days=30.0,
+        max_branches=10,
+        git_runner=runner,
+    )
+
+    assert stale == ()
 
 
 def test_gather_stale_branches_caps_at_max_branches_oldest_first():
@@ -491,6 +528,7 @@ def make_facts(
     pr_error_kind: str | None = None,
     pr_error_detail: str = "",
     branch_protection_known: bool = True,
+    branch_page_truncated: bool = False,
     stale_branches: tuple[str, ...] | None = (),
     cached_document: dict | None = None,
 ) -> "collector.GithubFacts":
@@ -501,6 +539,7 @@ def make_facts(
         pr_error_kind=pr_error_kind,
         pr_error_detail=pr_error_detail,
         branch_protection_known=branch_protection_known,
+        branch_page_truncated=branch_page_truncated,
         stale_branches=stale_branches,
         cached_document=cached_document,
     )
@@ -518,6 +557,61 @@ def test_build_status_healthy_on_fresh_success():
     assert status.component == "github"
     assert status.last_success_at == T0
     assert status.details["open_pr_count"] == 5
+
+
+def test_build_status_fresh_success_falls_back_to_cached_stale_branches_when_local_scan_fails():
+    # `gh pr list` succeeded this tick, but the local git scan and the branch-protection
+    # fetch both failed independently -- the stale-branch picture from the last good
+    # cache must survive rather than being silently wiped to "unknown"/empty, mirroring
+    # the symmetric cache-fallback branch below.
+    prs = json.loads(OPEN_PRS_FIXTURE)
+    cached_status = make_status(
+        details={
+            "open_pr_count": 1,
+            "branch_protection_known": True,
+            "stale_branches_known": True,
+            "stale_unprotected_branches": ["vps-loop/item-9"],
+        }
+    )
+    cached_document = collector.ops_status.to_json_dict(cached_status)
+    facts = make_facts(
+        prs=prs,
+        branch_protection_known=False,
+        stale_branches=None,
+        cached_document=cached_document,
+    )
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    assert status.details["open_pr_count"] == 5  # this tick's own fresh PR data, not the cache's
+    assert status.details["branch_protection_known"] is False  # this tick's own reality, not the cache's
+    assert status.details["stale_branches_known"] is False
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-9"]
+
+
+def test_build_status_fresh_success_uses_fresh_stale_branches_over_cache_when_available():
+    prs = json.loads(OPEN_PRS_FIXTURE)
+    cached_status = make_status(
+        details={
+            "open_pr_count": 1,
+            "branch_protection_known": False,
+            "stale_branches_known": False,
+            "stale_unprotected_branches": [],
+        }
+    )
+    cached_document = collector.ops_status.to_json_dict(cached_status)
+    facts = make_facts(
+        prs=prs,
+        branch_protection_known=True,
+        stale_branches=("vps-loop/item-11",),
+        cached_document=cached_document,
+    )
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    assert status.details["branch_protection_known"] is True
+    assert status.details["stale_branches_known"] is True
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-11"]
 
 
 def test_build_status_unknown_when_no_success_and_no_cache():
