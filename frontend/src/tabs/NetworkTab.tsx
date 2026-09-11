@@ -18,9 +18,9 @@ const card: React.CSSProperties = {
   borderRadius: 10,
   marginBottom: 10,
 };
-const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
+const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, marginBottom: 8 };
 const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
-const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
+const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: "1 1 180px", minWidth: 0 };
 const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
 const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
 const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
@@ -89,7 +89,7 @@ export function NetworkTab() {
             : card
         }
       >
-        <div style={cardTop}>
+          <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
             to={`/agencies/${a.agency_id}/overview${suffix}`}
@@ -135,7 +135,7 @@ export function NetworkTab() {
             </div>
           </div>
         </div>
-        <div style={barRow}>
+          <div className="network-card-bar" style={barRow}>
           <div style={barBg}>
             <div
               style={{
@@ -175,6 +175,15 @@ export function NetworkTab() {
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
         .network-card a:hover { text-decoration: underline; }
+        .network-card-top > div { min-width: 0; }
+        .network-card-bar { min-width: 0; }
+        .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+        .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+        .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
+        .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+        .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
+        .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 12px; }
+        @media (max-width: 720px) { .network-howto-list { grid-template-columns: 1fr; } }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
@@ -182,12 +191,12 @@ export function NetworkTab() {
       <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 8px" }}>
         {t("network.title")}
       </h1>
-      <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: "0 0 12px", maxWidth: 720, lineHeight: 1.5 }}>
+      <p className="network-help" style={{ margin: "0 0 12px" }}>
         {t("network.help")}
       </p>
-      <details style={{ marginBottom: 16, fontSize: 13, color: "var(--text-secondary)" }}>
+      <details className="network-howto" style={{ marginBottom: 16 }}>
         <summary style={{ cursor: "pointer", color: "var(--accent)" }}>{t("network.howto_title")}</summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+        <ul className="network-howto-list">
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
           {ridershipWeightingAvailable && (

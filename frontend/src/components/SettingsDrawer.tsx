@@ -84,7 +84,7 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={save}
-            style={{ background: "var(--accent)", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 4 }}
+            style={{ background: "var(--accent)", color: "var(--on-accent)", border: "none", padding: "6px 14px", borderRadius: 4 }}
           >
             {t("common.save")}
           </button>

@@ -12,6 +12,7 @@
   --text-tertiary: #6E6E6E;
   --accent: #5b6cad;
   --accent-soft: #e8ebf4;
+  --on-accent: #ffffff;
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
@@ -84,6 +85,7 @@
   --trend-neutral-bg: rgba(71, 85, 105, 0.08);
   --track-bg: rgba(0, 0, 0, 0.03);
   --hover-tint: rgba(0, 0, 0, 0.04);
+  --bg-soft-hover: #e4e4e0;
   --skeleton-a: #ececec;
   --skeleton-b: #f5f5f5;
   --space-1: 4px;
@@ -103,21 +105,22 @@
 :root[data-theme="dark"] {
   --bg-page: #0F1119;
   --bg-surface: #141726;
-  --bg-soft: #1B1F35;
-  --border-soft: #232840;
-  --border-subtle: #2A3050;
-  --text-primary: #DDD9F3;
-  --text-secondary: #9894B8;
+  --bg-soft: #202642;
+  --border-soft: #343B5B;
+  --border-subtle: #414A70;
+  --text-primary: #FAFAFF;
+  --text-secondary: #E5E7F2;
   /* Was #5A607A (2.87:1 vs --bg-surface, 2.62:1 vs --bg-soft) -- failed WCAG
      AA (4.5:1) for normal text in both places this token is used against.
      Retuned to clear 4.5:1 on both while keeping the same purple-blue hue
      family as --text-primary/--text-secondary (blended toward --text-secondary
      rather than desaturating to neutral grey). */
-  --text-tertiary: #8584A5;
+  --text-tertiary: #C9CBDA;
   /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
      Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
-  --accent: #1A8A72;
-  --accent-soft: rgba(26, 138, 114, 0.13);
+  --accent: #27B596;
+  --accent-soft: rgba(39, 181, 150, 0.18);
+  --on-accent: #071a16;
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
@@ -133,11 +136,28 @@
   --trend-neutral-bg: rgba(148, 163, 184, 0.16);
   --track-bg: rgba(255, 255, 255, 0.08);
   --hover-tint: rgba(255, 255, 255, 0.08);
-  --skeleton-a: #1B1F35;
-  --skeleton-b: #262b47;
+  --bg-soft-hover: #2a2f4a;
+  --skeleton-a: #202642;
+  --skeleton-b: #30385A;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+
+.definition-meta {
+  display: block;
+  max-width: 760px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.definition-meta > span:not(:last-child)::after {
+  content: "·";
+  margin: 0 10px;
+  color: var(--text-tertiary);
+}
+@media (max-width: 720px) {
+  .definition-meta { max-width: 100%; }
+}
 html, body, #root { height: 100%; margin: 0; }
 
 body {

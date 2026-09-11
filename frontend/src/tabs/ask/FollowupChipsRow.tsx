@@ -110,10 +110,10 @@ export function FollowupChipsRow({
                 opacity: isLastClicked ? 0.55 : 1,
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover, #e4e4e7)";
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover)";
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, #f4f4f5)";
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
               }}
             >
               {t(chip.label_key)}

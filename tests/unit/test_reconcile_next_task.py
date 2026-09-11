@@ -47,13 +47,7 @@ def test_parse_items_ignores_item_like_lines_inside_a_fenced_code_block():
     # fenced example must not be misread as a real backlog item by the
     # parser reconcile_item_statuses relies on.
     text = (
-        "1. **Real item.**\n"
-        "\n"
-        "```\n"
-        "99. **Not a real item, just a quoted example.**\n"
-        "```\n"
-        "\n"
-        "2. **Another real item.**\n"
+        "1. **Real item.**\n\n```\n99. **Not a real item, just a quoted example.**\n```\n\n2. **Another real item.**\n"
     )
     items = reconcile.parse_items(lines_of(text))
 
@@ -182,9 +176,7 @@ def test_reconcile_item_statuses_warns_on_merged_branch_with_no_matching_item():
 
     assert "".join(new_lines) == text
     assert changes == []
-    assert warnings == [
-        "vps-loop/item-42 has merged PR #7, but no numbered backlog item 42 was found in the file"
-    ]
+    assert warnings == ["vps-loop/item-42 has merged PR #7, but no numbered backlog item 42 was found in the file"]
 
 
 # --- merge_duplicate_level2_sections ------------------------------------------

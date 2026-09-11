@@ -153,7 +153,7 @@ export function RoutesPicker({
                   background: allOn
                     ? "var(--accent-soft)"
                     : someOn
-                      ? "rgba(91,108,173,0.06)"
+                      ? "var(--accent-soft)"
                       : "transparent",
                   fontSize: 13,
                   display: "flex",
