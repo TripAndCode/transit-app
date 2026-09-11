@@ -395,6 +395,10 @@ def build_github_status(
     if facts.cached_document is not None:
         cached = ops_status.from_json_dict(facts.cached_document)
         details = dict(cached.details)
+        details["branch_protection_known"] = facts.branch_protection_known
+        if facts.stale_branches is not None:
+            details["stale_unprotected_branches"] = list(facts.stale_branches)
+        details["stale_branches_known"] = facts.stale_branches is not None
         details["last_error_kind"] = facts.pr_error_kind or "unknown_error"
         if facts.pr_error_detail:
             details["last_error_detail"] = facts.pr_error_detail
@@ -409,7 +413,12 @@ def build_github_status(
             now=facts.now,
         )
 
-    details = {"last_error_kind": facts.pr_error_kind or "unknown_error"}
+    details = {
+        "branch_protection_known": facts.branch_protection_known,
+        "stale_branches_known": facts.stale_branches is not None,
+        "stale_unprotected_branches": list(facts.stale_branches or ()),
+        "last_error_kind": facts.pr_error_kind or "unknown_error",
+    }
     if facts.pr_error_detail:
         details["last_error_detail"] = facts.pr_error_detail
     return ops_status.build_status(

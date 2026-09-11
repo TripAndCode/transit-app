@@ -555,6 +555,91 @@ def test_build_status_cache_fallback_degrades_with_age():
     assert status.state == "stale"
 
 
+def test_build_status_cache_fallback_uses_this_runs_fresh_stale_branch_data():
+    # The cached document reflects an older run's (now stale) branch-protection/stale-
+    # branch picture; this run's own local git scan and branch-protection fetch succeeded
+    # even though the PR fetch failed, so the fresher facts must win over the cache.
+    cached_status = make_status(
+        last_success_at=datetime(2026, 9, 11, 11, 30, 0, tzinfo=timezone.utc),
+        details={
+            "open_pr_count": 3,
+            "branch_protection_known": False,
+            "stale_branches_known": False,
+            "stale_unprotected_branches": [],
+        },
+    )
+    cached_document = collector.ops_status.to_json_dict(cached_status)
+    facts = make_facts(
+        prs=None,
+        pr_error_kind="network_error",
+        branch_protection_known=True,
+        stale_branches=("vps-loop/item-5",),
+        cached_document=cached_document,
+    )
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    assert status.details["open_pr_count"] == 3  # only the PR data actually came from cache
+    assert status.details["branch_protection_known"] is True
+    assert status.details["stale_branches_known"] is True
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-5"]
+    assert status.details["last_error_kind"] == "network_error"
+
+
+def test_build_status_cache_fallback_falls_back_to_cache_when_local_scan_also_fails():
+    cached_status = make_status(
+        details={
+            "open_pr_count": 3,
+            "branch_protection_known": True,
+            "stale_branches_known": True,
+            "stale_unprotected_branches": ["vps-loop/item-1"],
+        }
+    )
+    cached_document = collector.ops_status.to_json_dict(cached_status)
+    facts = make_facts(
+        prs=None,
+        pr_error_kind="network_error",
+        branch_protection_known=False,
+        stale_branches=None,
+        cached_document=cached_document,
+    )
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    # This run couldn't gather stale branches either, so there is nothing fresher than
+    # the cache to overlay -- the cached list is preserved rather than wiped to empty.
+    assert status.details["branch_protection_known"] is False
+    assert status.details["stale_branches_known"] is False
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-1"]
+
+
+def test_build_status_no_cache_includes_fresh_stale_branch_data():
+    facts = make_facts(
+        prs=None,
+        pr_error_kind="network_error",
+        cached_document=None,
+        branch_protection_known=True,
+        stale_branches=("vps-loop/item-7",),
+    )
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    assert status.state == "unknown"
+    assert status.details["branch_protection_known"] is True
+    assert status.details["stale_branches_known"] is True
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-7"]
+    assert status.details["last_error_kind"] == "network_error"
+
+
+def test_build_status_no_cache_and_no_local_scan_reports_unknown_stale_branches():
+    facts = make_facts(prs=None, pr_error_kind="network_error", cached_document=None, stale_branches=None)
+
+    status = collector.build_github_status(facts, **HEALTHY_KWARGS)
+
+    assert status.details["stale_branches_known"] is False
+    assert status.details["stale_unprotected_branches"] == []
+
+
 def test_build_status_document_is_contract_valid():
     prs = json.loads(OPEN_PRS_FIXTURE)
     facts = make_facts(prs=prs)
@@ -630,6 +715,53 @@ def test_collect_github_status_does_not_overwrite_cache_on_failure(tmp_path):
 
     assert status.details["last_error_kind"] == "auth_error"
     assert cache_path.stat().st_mtime_ns == original_mtime
+
+
+def test_collect_github_status_reports_fresh_stale_branches_when_only_pr_fetch_fails(tmp_path):
+    # gh pr list fails (auth error) but the local git scan and the branch-protection API
+    # call both succeed this run -- their results must survive into the reported status
+    # rather than being discarded because the PR fetch failed.
+    cache_path = tmp_path / "cache.json"
+    cached_status = make_status(
+        details={
+            "open_pr_count": 3,
+            "branch_protection_known": False,
+            "stale_branches_known": False,
+            "stale_unprotected_branches": [],
+        }
+    )
+    collector.save_cached_document(cache_path, collector.ops_status.to_json_dict(cached_status))
+
+    git_runner = runner_from(
+        {
+            "git -C /repo remote get-url origin": FakeCompletedProcess(
+                0, stdout="https://github.com/TripAndCode/transit-app.git\n"
+            ),
+            "git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE),
+        }
+    )
+    gh_runner = runner_from(
+        {
+            "gh pr list": FakeCompletedProcess(1, stderr="gh: Bad credentials (HTTP 401)"),
+            "gh api": FakeCompletedProcess(0, stdout=BRANCHES_FIXTURE),
+        }
+    )
+
+    status = collector.collect_github_status(
+        repo=Path("/repo"),
+        cache_path=cache_path,
+        now=T0,
+        gh_runner=gh_runner,
+        git_runner=git_runner,
+    )
+
+    assert status.details["last_error_kind"] == "auth_error"
+    assert status.details["branch_protection_known"] is True
+    assert status.details["stale_branches_known"] is True
+    assert status.details["stale_unprotected_branches"] == ["vps-loop/item-1", "vps-loop/item-2"]
+    # A cache-fallback result never overwrites the cache, even though this run gathered
+    # fresher stale-branch data than what's on disk.
+    assert json.loads(cache_path.read_text())["details"]["stale_unprotected_branches"] == []
 
 
 def test_collect_github_status_unknown_when_not_a_git_repo(tmp_path):
