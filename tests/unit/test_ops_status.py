@@ -316,9 +316,7 @@ def test_validate_component_status_rejects_naive_observed_at():
 
 
 def test_validate_component_status_enforces_max_payload_size_even_when_details_pass_individually():
-    details = {
-        f"field_{i:02d}": "x" * ops_status.MAX_DETAIL_STRING_LENGTH for i in range(ops_status.MAX_DETAIL_KEYS)
-    }
+    details = {f"field_{i:02d}": "x" * ops_status.MAX_DETAIL_STRING_LENGTH for i in range(ops_status.MAX_DETAIL_KEYS)}
     ops_status.validate_details(details)  # each field individually passes
     with pytest.raises(OpsStatusError, match=r"-byte limit"):
         ops_status.validate_component_status(_status(details=details))
