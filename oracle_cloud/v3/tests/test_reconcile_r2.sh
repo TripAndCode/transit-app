@@ -196,6 +196,40 @@ rc=$?
 set -e
 [ "$rc" -eq 1 ] || fail "a recheck size mismatch should surface as a nonzero exit, got $rc: $(cat "$TEST_BASE/out.log")"
 grep -q "^rt/99/20260901.tar.gz$" "$RM_LOG" && fail "an object that changed between listing and delete was deleted anyway"
-grep -q "changed between listing and delete" "$TEST_BASE/out.log" \
+grep -q "changed size between listing and delete" "$TEST_BASE/out.log" \
     || fail "the recheck mismatch was not reported"
 pass "an object that changed between listing and delete is skipped, not deleted, and surfaces as a failure"
+
+# --- a recheck prefix match that also returns an unrelated longer key ------
+# `aws s3 ls <prefix>` for prefix="rt/1/20260901.tar.gz" also matches a key
+# that merely STARTS WITH it, e.g. "rt/1/20260901.tar.gz.tmp" -- the recheck
+# must pick out the exact key, not just trust the first line returned.
+seed_listing
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"; : > "$RM_LOG"
+cat > "$SHIM_DIR/aws" <<'SHIM'
+#!/usr/bin/env bash
+echo "$@" >> "$AWS_LOG"
+if [ "$1" = s3 ] && [ "$2" = ls ]; then
+    url="$3"
+    prefix="${url#s3://*/}"
+    if [ "$prefix" = "rt/1/20260901.tar.gz.tmp" ]; then
+        printf '%s\n' "2026-09-01 00:00:00 999 rt/1/20260901.tar.gz.tmp"
+        exit 0
+    fi
+    printf '%s\n' "$LS_ALL" | awk -v p="$prefix" '$4 != "" && index($4, p) == 1'
+    exit 0
+fi
+if [ "$1" = s3 ] && [ "$2" = rm ]; then
+    key="${3#s3://*/}"
+    echo "$key" >> "$RM_LOG"
+    exit "${AWS_RM_EXIT:-0}"
+fi
+exit 0
+SHIM
+chmod +x "$SHIM_DIR/aws"
+run --execute
+[ "$rc" -eq 0 ] || fail "recheck prefix collision should not surface as a failure, got $rc: $(cat "$TEST_BASE/out.log")"
+grep -q "^rt/1/20260901.tar.gz.tmp$" "$RM_LOG" || fail "the malformed .tmp object was not deleted despite an exact-size recheck match"
+grep -q "^rt/1/20260901.tar.gz$" "$RM_LOG" && fail "the correctly-named object was deleted due to a prefix-match recheck collision"
+pass "the recheck picks the exact key, not a longer key that merely shares its prefix"

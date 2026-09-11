@@ -170,15 +170,24 @@ while read -r d t size key; do
 
     [ "$EXECUTE" -eq 1 ] || continue
 
+    # A prefix listing on $key can also return a *longer* key that merely
+    # starts with it (e.g. "foo.tar.gz" is a valid S3 prefix match for
+    # "foo.tar.gz.tmp" too) -- so this picks out the line whose key is
+    # exactly $key rather than trusting the first line returned.
     recheck=$("$AWS" s3 ls "s3://$OBJECT_STORE_BUCKET/$key" --recursive \
         --endpoint-url "$OBJECT_STORE_ENDPOINT" 2>/dev/null)
-    if [ -z "$recheck" ]; then
+    recheck_size=""
+    while read -r _ _ rsize rkey; do
+        [ "$rkey" = "$key" ] || continue
+        recheck_size="$rsize"
+        break
+    done <<< "$recheck"
+    if [ -z "$recheck_size" ]; then
         echo "reconcile-r2.sh: $key is already gone by delete time, skipping"
         continue
     fi
-    read -r _ _ recheck_size recheck_key <<< "$recheck"
-    if [ "$recheck_key" != "$key" ] || [ "$recheck_size" != "$size" ]; then
-        echo "reconcile-r2.sh: $key changed between listing and delete (now '$recheck_key'," \
+    if [ "$recheck_size" != "$size" ]; then
+        echo "reconcile-r2.sh: $key changed size between listing and delete ($size ->" \
             "$recheck_size bytes) — skipping rather than delete something this run never" \
             "actually confirmed" >&2
         failed=1
