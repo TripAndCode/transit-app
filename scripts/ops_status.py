@@ -2,14 +2,14 @@
 """The operations-status contract: one versioned, read-only status document shape
 shared by every ops component (the VPS loop, GitHub, the Oracle crawler, and R2).
 
-Items 119-123 each publish or collect one component's health (Oracle heartbeat,
-VPS/loop collector, GitHub collector, storage metrics, and the ops status page
-that assembles all of them). Without a shared contract, each would invent its
-own state names, freshness math, and bounds -- and the page assembling them
-would have no common ground to render against. This module is that shared
-ground: it is data-only (a snapshot of what is true right now, never a command
-or a write path) and versioned (`schema_version`) so a future incompatible
-change can be detected by a consumer instead of silently misread.
+An Oracle heartbeat publisher, a VPS/loop collector, a GitHub collector, a
+storage-metrics (R2) collector, and a status page that assembles them each
+publish or collect one component's health. Without a shared contract, each
+would invent its own state names, freshness math, and bounds -- and the page
+assembling them would have no common ground to render against. This module is
+that shared ground: it is data-only (a snapshot of what is true right now,
+never a command or a write path) and versioned (`schema_version`) so a future
+incompatible change can be detected by a consumer instead of silently misread.
 
 Every component status is a `ComponentStatus`, carrying exactly:
 
@@ -77,13 +77,8 @@ MAX_DETAIL_KEYS = 20
 MAX_DETAIL_KEY_LENGTH = 64
 MAX_DETAIL_STRING_LENGTH = 200
 MAX_DETAIL_LIST_LENGTH = 10
-# The one enforced ceiling on the whole serialized document (fixed fields --
-# component, state, two timestamps, schema_version, age_seconds -- plus
-# `details`). `validate_details` only bounds `details`' shape (key count,
-# nesting, string/list length); it does NOT also cap total bytes, so filling
-# every key to its per-field limit is a real, independently testable way to
-# hit this ceiling rather than being blocked earlier by a redundant check.
-# Small enough that a status snapshot can never grow into a log dump.
+# The only whole-document byte ceiling; validate_details bounds `details`'
+# shape but never its total serialized size on its own.
 MAX_PAYLOAD_BYTES = 4096
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -116,6 +111,15 @@ _FORBIDDEN_KEY_EXACT = frozenset(
     {"log", "logs", "traceback", "stacktrace", "stack_trace", "raw_log", "full_log", "stdout", "stderr"}
 )
 
+# Built from the same constants `validate_details` enforces at runtime, so
+# `JSON_SCHEMA`'s copy of the forbidden-key rule cannot drift from it. Keys are
+# already required elsewhere to be lowercase (`_NAME_RE`), so no case-insensitive
+# flag is needed here.
+_FORBIDDEN_KEY_PATTERN = (
+    "^(?!(?:" + "|".join(sorted(re.escape(k) for k in _FORBIDDEN_KEY_EXACT)) + r")$)"
+    "(?!.*(?:" + "|".join(re.escape(s) for s in _FORBIDDEN_KEY_SUBSTRINGS) + ")).*$"
+)
+
 JSON_SCHEMA: dict = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://transit-app.internal/schemas/ops-status/v1",
@@ -132,6 +136,10 @@ JSON_SCHEMA: dict = {
         "age_seconds",
         "details",
     ],
+    # JSON Schema has no keyword for a whole-document byte ceiling; this
+    # vendor extension documents the same bound `validate_document` enforces
+    # at runtime so a schema-only reader still knows it exists.
+    "maxPayloadBytes": MAX_PAYLOAD_BYTES,
     "properties": {
         "schema_version": {"const": SCHEMA_VERSION},
         "component": {"type": "string", "enum": sorted(COMPONENTS)},
@@ -142,10 +150,14 @@ JSON_SCHEMA: dict = {
         "details": {
             "type": "object",
             "maxProperties": MAX_DETAIL_KEYS,
+            "propertyNames": {"pattern": _FORBIDDEN_KEY_PATTERN},
             "additionalProperties": {
                 "type": ["string", "number", "boolean", "null", "array"],
                 "maxLength": MAX_DETAIL_STRING_LENGTH,
-                "items": {"type": ["string", "number", "boolean", "null"]},
+                "items": {
+                    "type": ["string", "number", "boolean", "null"],
+                    "maxLength": MAX_DETAIL_STRING_LENGTH,
+                },
                 "maxItems": MAX_DETAIL_LIST_LENGTH,
             },
         },
@@ -179,10 +191,10 @@ def compute_age_seconds(observed_at: datetime, last_success_at: datetime | None)
 
     Negative results (a `last_success_at` reported after `observed_at`, which
     should never happen within one honestly-produced document) clamp to 0
-    rather than propagating a nonsensical negative age -- `classify_state`
-    treats that same inconsistency as grounds for `unknown` before this
-    function is even reached in the normal path, but callers using this
-    helper standalone still get a safe value.
+    rather than propagating a nonsensical negative age. `classify_state` only
+    treats this inconsistency as grounds for `unknown` once the reversal
+    exceeds its `max_clock_skew_seconds` tolerance; a smaller reversal is not
+    caught there and clamps to 0 like any other caller of this function.
     """
 
     if last_success_at is None:
@@ -296,7 +308,49 @@ def _validate_detail_scalar(value: object, *, key: str) -> None:
     )
 
 
-def validate_component_status(status: ComponentStatus) -> None:
+def _validate_freshness_invariants(
+    *,
+    state: str,
+    observed_at: datetime,
+    last_success_at: datetime | None,
+    age_seconds: int | None,
+    max_clock_skew_seconds: float,
+) -> None:
+    """Cross-check `state`/`age_seconds` against `last_success_at`, per the module docstring's
+    "`last_success_at: null` implies `unknown`/no success yet" rule and `classify_state`'s own
+    derivation of these fields from the raw timestamps.
+    """
+
+    if last_success_at is None:
+        if age_seconds is not None:
+            raise OpsStatusError("age_seconds must be null when last_success_at is null")
+        if state not in {"unknown", "failed"}:
+            raise OpsStatusError(
+                f"state {state!r} is inconsistent with last_success_at being null (expected 'unknown' or 'failed')"
+            )
+        return
+
+    expected_age_seconds = compute_age_seconds(observed_at, last_success_at)
+    assert expected_age_seconds is not None
+    if age_seconds is None:
+        # `classify_state` can legitimately leave age_seconds unset here: an
+        # internally inconsistent last_success_at/observed_at ordering beyond
+        # max_clock_skew_seconds resolves to `unknown` with no age.
+        if state != "unknown":
+            raise OpsStatusError(f"age_seconds must not be null when last_success_at is present and state is {state!r}")
+        return
+    if abs(age_seconds - expected_age_seconds) > max_clock_skew_seconds:
+        raise OpsStatusError(
+            f"age_seconds {age_seconds} is inconsistent with observed_at/last_success_at "
+            f"(expected {expected_age_seconds}, outside the {max_clock_skew_seconds}s tolerance)"
+        )
+
+
+def validate_component_status(
+    status: ComponentStatus,
+    *,
+    max_clock_skew_seconds: float = DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+) -> None:
     """Enforce every contract rule on an already-constructed `ComponentStatus`."""
 
     if status.schema_version != SCHEMA_VERSION:
@@ -311,6 +365,13 @@ def validate_component_status(status: ComponentStatus) -> None:
     if status.age_seconds is not None and status.age_seconds < 0:
         raise OpsStatusError("age_seconds must be >= 0")
     validate_details(status.details)
+    _validate_freshness_invariants(
+        state=status.state,
+        observed_at=status.observed_at,
+        last_success_at=status.last_success_at,
+        age_seconds=status.age_seconds,
+        max_clock_skew_seconds=max_clock_skew_seconds,
+    )
 
     document = to_json_dict(status)
     size = len(json.dumps(document, separators=(",", ":")).encode("utf-8"))
@@ -351,7 +412,7 @@ def build_status(
         age_seconds=age_seconds,
         details=dict(details or {}),
     )
-    validate_component_status(status)
+    validate_component_status(status, max_clock_skew_seconds=max_clock_skew_seconds)
     return status
 
 
@@ -385,10 +446,14 @@ def to_json_dict(status: ComponentStatus) -> dict:
     }
 
 
-def from_json_dict(data: Mapping[str, object]) -> ComponentStatus:
+def from_json_dict(
+    data: Mapping[str, object],
+    *,
+    max_clock_skew_seconds: float = DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+) -> ComponentStatus:
     """Parse and validate a plain dict (e.g. from `json.load`) into a `ComponentStatus`."""
 
-    validate_document(data)
+    validate_document(data, max_clock_skew_seconds=max_clock_skew_seconds)
     last_success_raw = data.get("last_success_at")
     status = ComponentStatus(
         schema_version=data["schema_version"],  # type: ignore[arg-type]
@@ -403,14 +468,18 @@ def from_json_dict(data: Mapping[str, object]) -> ComponentStatus:
         age_seconds=data.get("age_seconds"),  # type: ignore[arg-type]
         details=data["details"],  # type: ignore[arg-type]
     )
-    validate_component_status(status)
+    validate_component_status(status, max_clock_skew_seconds=max_clock_skew_seconds)
     return status
 
 
 _REQUIRED_FIELDS = ("schema_version", "component", "state", "observed_at", "last_success_at", "age_seconds", "details")
 
 
-def validate_document(data: object) -> None:
+def validate_document(
+    data: object,
+    *,
+    max_clock_skew_seconds: float = DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+) -> None:
     """Validate a raw, already-parsed JSON dict against the contract before any dataclass exists.
 
     This is the entry point a non-Python producer's output should be checked
@@ -445,46 +514,25 @@ def validate_document(data: object) -> None:
     if age_seconds_invalid:
         raise OpsStatusError("age_seconds must be a non-negative integer or null")
 
-    _parse_timestamp(data["observed_at"], field_name="observed_at")
-    if data["last_success_at"] is not None:
+    observed_at_dt = _parse_timestamp(data["observed_at"], field_name="observed_at")
+    last_success_at_dt = (
         _parse_timestamp(data["last_success_at"], field_name="last_success_at")
+        if data["last_success_at"] is not None
+        else None
+    )
 
     validate_details(data["details"])
+    _validate_freshness_invariants(
+        state=data["state"],  # type: ignore[arg-type]
+        observed_at=observed_at_dt,
+        last_success_at=last_success_at_dt,
+        age_seconds=age_seconds,
+        max_clock_skew_seconds=max_clock_skew_seconds,
+    )
 
     size = len(json.dumps(data, separators=(",", ":")).encode("utf-8"))
     if size > MAX_PAYLOAD_BYTES:
         raise OpsStatusError(f"status document is {size} bytes, more than the {MAX_PAYLOAD_BYTES}-byte limit")
-
-
-def build_bundle(statuses: Mapping[str, ComponentStatus], *, generated_at: datetime | None = None) -> dict:
-    """Assemble one or more component statuses into a single versioned page-ready document.
-
-    Producers (items 119-122) each publish their own `ComponentStatus`
-    independently; this only groups already-validated statuses for a
-    consumer (item 123's status page) that wants one document instead of N.
-    Every key in `statuses` must equal its own value's `component`, so a
-    caller cannot accidentally file a status snapshot under the wrong name.
-    """
-
-    for name, status in statuses.items():
-        validate_component_status(status)
-        if name != status.component:
-            raise OpsStatusError(f"bundle key {name!r} does not match its status's own component {status.component!r}")
-
-    if generated_at is not None:
-        generated_at = _require_utc(generated_at, field_name="generated_at")
-    else:
-        generated_at = datetime.now(timezone.utc)
-    bundle = {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": _isoformat(generated_at),
-        "components": {name: to_json_dict(status) for name, status in statuses.items()},
-    }
-    size = len(json.dumps(bundle, separators=(",", ":")).encode("utf-8"))
-    max_bundle_bytes = MAX_PAYLOAD_BYTES * len(COMPONENTS) + 512
-    if size > max_bundle_bytes:
-        raise OpsStatusError(f"status bundle is {size} bytes, more than the {max_bundle_bytes}-byte limit")
-    return bundle
 
 
 def main(argv: Sequence[str] | None = None) -> int:

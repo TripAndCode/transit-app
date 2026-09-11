@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -315,6 +316,41 @@ def test_validate_component_status_rejects_naive_observed_at():
         ops_status.validate_component_status(_status(observed_at=datetime(2026, 9, 11)))
 
 
+def test_validate_component_status_rejects_age_seconds_without_last_success():
+    with pytest.raises(OpsStatusError, match="age_seconds must be null"):
+        ops_status.validate_component_status(_status(state="healthy", last_success_at=None, age_seconds=100))
+
+
+def test_validate_component_status_rejects_state_inconsistent_with_null_last_success():
+    with pytest.raises(OpsStatusError, match="inconsistent with last_success_at being null"):
+        ops_status.validate_component_status(_status(state="healthy", last_success_at=None, age_seconds=None))
+
+
+def test_validate_component_status_accepts_unknown_or_failed_with_null_last_success():
+    ops_status.validate_component_status(_status(state="unknown", last_success_at=None, age_seconds=None))
+    ops_status.validate_component_status(_status(state="failed", last_success_at=None, age_seconds=None))
+
+
+def test_validate_component_status_rejects_age_seconds_mismatched_with_last_success():
+    with pytest.raises(OpsStatusError, match="inconsistent with observed_at/last_success_at"):
+        ops_status.validate_component_status(
+            _status(state="healthy", observed_at=T0, last_success_at=T0, age_seconds=99999)
+        )
+
+
+def test_validate_component_status_rejects_null_age_when_last_success_present_and_state_not_unknown():
+    with pytest.raises(OpsStatusError, match="age_seconds must not be null"):
+        ops_status.validate_component_status(
+            _status(state="healthy", observed_at=T0, last_success_at=T0, age_seconds=None)
+        )
+
+
+def test_validate_component_status_allows_unknown_with_null_age_on_reversed_timestamps():
+    ops_status.validate_component_status(
+        _status(state="unknown", observed_at=T0, last_success_at=utc(seconds=1000), age_seconds=None)
+    )
+
+
 def test_validate_component_status_enforces_max_payload_size_even_when_details_pass_individually():
     details = {f"field_{i:02d}": "x" * ops_status.MAX_DETAIL_STRING_LENGTH for i in range(ops_status.MAX_DETAIL_KEYS)}
     ops_status.validate_details(details)  # each field individually passes
@@ -412,6 +448,29 @@ def test_validate_document_rejects_bool_age_seconds():
         ops_status.validate_document(_document(age_seconds=True))
 
 
+def test_validate_document_rejects_age_seconds_without_last_success():
+    document = _document(state="healthy", last_success_at=None, age_seconds=100)
+    with pytest.raises(OpsStatusError, match="age_seconds must be null"):
+        ops_status.validate_document(document)
+
+
+def test_validate_document_rejects_state_inconsistent_with_null_last_success():
+    document = _document(state="healthy", last_success_at=None, age_seconds=None)
+    with pytest.raises(OpsStatusError, match="inconsistent with last_success_at being null"):
+        ops_status.validate_document(document)
+
+
+def test_validate_document_accepts_unknown_or_failed_with_null_last_success():
+    ops_status.validate_document(_document(state="unknown", last_success_at=None, age_seconds=None))
+    ops_status.validate_document(_document(state="failed", last_success_at=None, age_seconds=None))
+
+
+def test_validate_document_rejects_age_seconds_mismatched_with_last_success():
+    document = _document(state="healthy", age_seconds=99999)
+    with pytest.raises(OpsStatusError, match="inconsistent with observed_at/last_success_at"):
+        ops_status.validate_document(document)
+
+
 def test_validate_document_rejects_oversized_payload():
     details = {f"field_{i:02d}": "x" * ops_status.MAX_DETAIL_STRING_LENGTH for i in range(ops_status.MAX_DETAIL_KEYS)}
     document = _document(details=details)
@@ -423,32 +482,6 @@ def test_validate_document_round_trips_through_json_dumps_and_loads():
     document = _document()
     reloaded = json.loads(json.dumps(document))
     ops_status.validate_document(reloaded)
-
-
-# --- build_bundle --------------------------------------------------------------
-
-
-def test_build_bundle_groups_statuses_by_component():
-    statuses = {
-        "vps_loop": _status(component="vps_loop"),
-        "r2": _status(component="r2"),
-    }
-    bundle = ops_status.build_bundle(statuses, generated_at=T0)
-    assert bundle["schema_version"] == ops_status.SCHEMA_VERSION
-    assert set(bundle["components"]) == {"vps_loop", "r2"}
-    assert bundle["components"]["r2"]["component"] == "r2"
-
-
-def test_build_bundle_rejects_mismatched_key():
-    statuses = {"github": _status(component="r2")}
-    with pytest.raises(OpsStatusError, match="does not match"):
-        ops_status.build_bundle(statuses, generated_at=T0)
-
-
-def test_build_bundle_rejects_invalid_member_status():
-    statuses = {"vps_loop": _status(component="vps_loop", state="not_a_state")}
-    with pytest.raises(OpsStatusError, match="unknown state"):
-        ops_status.build_bundle(statuses, generated_at=T0)
 
 
 # --- JSON_SCHEMA sanity --------------------------------------------------------
@@ -464,6 +497,34 @@ def test_json_schema_component_enum_matches_components_constant():
 
 def test_json_schema_state_enum_matches_states_constant():
     assert set(ops_status.JSON_SCHEMA["properties"]["state"]["enum"]) == ops_status.STATES
+
+
+def test_json_schema_encodes_max_payload_bytes():
+    assert ops_status.JSON_SCHEMA["maxPayloadBytes"] == ops_status.MAX_PAYLOAD_BYTES
+
+
+def test_json_schema_details_list_items_enforce_string_length_cap():
+    items_schema = ops_status.JSON_SCHEMA["properties"]["details"]["additionalProperties"]["items"]
+    assert items_schema["maxLength"] == ops_status.MAX_DETAIL_STRING_LENGTH
+
+
+def test_json_schema_forbidden_key_pattern_rejects_exact_log_like_keys():
+    pattern = re.compile(ops_status.JSON_SCHEMA["properties"]["details"]["propertyNames"]["pattern"])
+    for key in sorted(ops_status._FORBIDDEN_KEY_EXACT):
+        assert not pattern.match(key), f"schema pattern should reject exact forbidden key {key!r}"
+
+
+def test_json_schema_forbidden_key_pattern_rejects_credential_like_substrings():
+    pattern = re.compile(ops_status.JSON_SCHEMA["properties"]["details"]["propertyNames"]["pattern"])
+    for substring in ops_status._FORBIDDEN_KEY_SUBSTRINGS:
+        key = f"{substring}_value"
+        assert not pattern.match(key), f"schema pattern should reject credential-like key {key!r}"
+
+
+def test_json_schema_forbidden_key_pattern_allows_ordinary_keys():
+    pattern = re.compile(ops_status.JSON_SCHEMA["properties"]["details"]["propertyNames"]["pattern"])
+    for key in ("agencies_ok", "note", "ratio", "catalog_size"):
+        assert pattern.match(key), f"schema pattern should allow ordinary key {key!r}"
 
 
 # --- CLI ------------------------------------------------------------------------
