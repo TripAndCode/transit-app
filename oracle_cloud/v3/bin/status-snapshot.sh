@@ -255,6 +255,13 @@ if [ ! -f "$VERIFY_RESULT_MARKER" ]; then
     verify_state=unknown; verify_epoch=""
 else
     read -r verify_ts verify_result verify_total < "$VERIFY_RESULT_MARKER" 2>/dev/null || true
+    # Constrain to the only two values record_result ever writes, so a
+    # hand-edited or corrupted marker can't inject an unescaped/malformed
+    # value into the JSON document assembled below.
+    case "${verify_result:-}" in
+        ok|fail) ;;
+        *) verify_result="unknown" ;;
+    esac
     result_epoch=$(parse_iso_epoch "${verify_ts:-}")
     if [ -z "$result_epoch" ]; then
         verify_state=unknown; verify_epoch=""; verify_result="unknown"

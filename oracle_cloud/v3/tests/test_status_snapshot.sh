@@ -253,3 +253,18 @@ if [ "$have_python3" -eq 1 ]; then
     python3 -c "import json; json.load(open('$OUT'))" || fail "the written document is not valid JSON"
     pass "the written document parses as valid JSON"
 fi
+
+# A hand-edited or corrupted .verify-r2.last-result marker (anything other
+# than the literal ok/fail record_result writes) must not flow unescaped
+# into the JSON document -- it is normalized to verify_result=unknown.
+seed_healthy
+printf '%s "bogus\\n" 7\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a corrupted verify_result marker should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"verify_result":"unknown"' "$OUT" || \
+    fail "a corrupted verify_result value should be normalized to unknown: $(cat "$OUT")"
+if [ "$have_python3" -eq 1 ]; then
+    python3 -c "import json; json.load(open('$OUT'))" || \
+        fail "a corrupted verify_result value must not break the document's JSON validity: $(cat "$OUT")"
+fi
+pass "a corrupted verify_result marker value is normalized to unknown instead of breaking the document"
