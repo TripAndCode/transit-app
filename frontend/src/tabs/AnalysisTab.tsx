@@ -17,6 +17,7 @@ import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../a
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
+import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
@@ -248,6 +249,14 @@ export function AnalysisTab() {
                 nothing itself when this agency has no standards configured. */}
             {detail.data.report_type === "on_time" && id != null && (
               <PerformanceStandardPanel aid={id} ctx={ctx} />
+            )}
+            {/* Fourth, still-narrower panel (item 130) -- observed rain-vs-
+                dry average delay, rendered alongside (never instead of)
+                on_time/headway_quality/performance_standard above. Renders
+                its own calm "not configured" line rather than nothing when
+                this agency has no weather station mapped. */}
+            {detail.data.report_type === "on_time" && id != null && (
+              <WeatherDelayPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
