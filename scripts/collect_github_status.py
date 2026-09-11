@@ -123,6 +123,14 @@ def resolve_repo_slug(repo: Path, *, git_runner: Runner = _run) -> str | None:
     return _parse_github_slug(proc.stdout)
 
 
+def _has_http_status(lowered_stderr: str, code: str) -> bool:
+    """Match `code` only in the `HTTP <code>` shape real `gh` errors use (e.g. `(HTTP
+    401)`), not as a bare substring -- an unrelated multi-digit number such as a PR
+    number could otherwise contain the same digits and be misclassified."""
+
+    return re.search(rf"\bhttp {code}\b", lowered_stderr) is not None
+
+
 def diagnose_gh_failure(stderr: str) -> tuple[str, str]:
     """Classify a failed `gh` invocation's stderr into `(kind, redacted_excerpt)`.
 
@@ -135,13 +143,18 @@ def diagnose_gh_failure(stderr: str) -> tuple[str, str]:
     """
 
     lowered = stderr.lower()
-    if "bad credentials" in lowered or "not logged" in lowered or "authentication" in lowered or "401" in lowered:
+    if (
+        "bad credentials" in lowered
+        or "not logged" in lowered
+        or "authentication" in lowered
+        or _has_http_status(lowered, "401")
+    ):
         kind = "auth_error"
-    elif "rate limit" in lowered or "403" in lowered:
+    elif "rate limit" in lowered or _has_http_status(lowered, "403"):
         kind = "rate_limited"
     elif any(marker in lowered for marker in ("could not resolve host", "timed out", "timeout", "connection")):
         kind = "network_error"
-    elif "404" in lowered or "not found" in lowered:
+    elif "not found" in lowered or _has_http_status(lowered, "404"):
         kind = "not_found"
     else:
         kind = "unknown_error"
@@ -232,8 +245,11 @@ def gather_stale_branches(
     per branch would turn one bounded call into an unbounded one as branch count grows.
     A branch is treated as protected if GitHub reports it so, or if its name is in
     `protected_names` (this repo does not currently configure branch protection at all,
-    so the latter is the operative check in practice -- see `CLAUDE.md`). A branch name
-    absent from `remote_protection` is treated as unprotected only when
+    so the latter is the operative check in practice -- see `CLAUDE.md`). When
+    `remote_protection` is `None` (the branch-protection fetch failed entirely this
+    tick), every branch not in `protected_names` has unknown status and is excluded
+    from the stale-branches list rather than assumed unprotected. A branch name absent
+    from a non-`None` `remote_protection` is treated as unprotected only when
     `remote_protection_truncated` is False; when the branches page was truncated, an
     absent name's protection status is unknown (it may simply be past the page limit),
     so it is excluded from the stale-branches list rather than assumed unprotected.
@@ -269,12 +285,13 @@ def gather_stale_branches(
             continue
         if name in protected_names:
             continue
-        if remote_protection is not None:
-            if name in remote_protection:
-                if remote_protection[name]:
-                    continue
-            elif remote_protection_truncated:
-                continue  # protection status unknown past the truncated page -- don't assume unprotected
+        if remote_protection is None:
+            continue  # protection fetch failed entirely this tick -- don't assume unprotected
+        if name in remote_protection:
+            if remote_protection[name]:
+                continue
+        elif remote_protection_truncated:
+            continue  # protection status unknown past the truncated page -- don't assume unprotected
         try:
             commit_dt = datetime.fromisoformat(date_str.strip())
         except ValueError:

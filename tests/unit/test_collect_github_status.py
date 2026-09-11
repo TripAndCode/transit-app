@@ -132,6 +132,21 @@ def test_diagnose_gh_failure_classifies(stderr, expected_kind):
     assert kind == expected_kind
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "gh: could not merge pull request #14012: merge conflict",
+        "gh: failed to update issue 4033: validation failed",
+    ],
+)
+def test_diagnose_gh_failure_does_not_misclassify_pr_numbers_as_http_status(stderr):
+    # A PR/issue number that happens to contain "401"/"403"/"404" as a digit substring
+    # (14012, 4033) must not be misclassified as auth_error/rate_limited/not_found --
+    # only the "HTTP <code>" shape real `gh` errors use should trigger those kinds.
+    kind, _excerpt = collector.diagnose_gh_failure(stderr)
+    assert kind == "unknown_error"
+
+
 def test_diagnose_gh_failure_redacts_and_bounds_excerpt():
     stderr = "gh: request failed using token ghp_abcdefghijklmnopqrstuvwxyz012345"
     _kind, excerpt = collector.diagnose_gh_failure(stderr)
@@ -374,7 +389,7 @@ def test_gather_stale_branches_filters_protected_and_recent():
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
-        remote_protection=None,
+        remote_protection={},
         stale_days=30.0,
         max_branches=10,
         git_runner=runner,
@@ -383,6 +398,26 @@ def test_gather_stale_branches_filters_protected_and_recent():
     # "main"/"production" excluded as always-protected; "fix/dark-mode-ui-pass" is
     # only ~1 day old (not stale); the two vps-loop branches are both >30 days old.
     assert stale == ("vps-loop/item-1", "vps-loop/item-2")
+
+
+def test_gather_stale_branches_excludes_all_non_hardcoded_branches_when_protection_fetch_failed():
+    # `remote_protection=None` means `fetch_branch_protection` failed entirely this
+    # tick (e.g. `gh api` errored, timed out, or returned invalid JSON) -- distinct
+    # from a successful-but-truncated page. Every branch not in the hardcoded
+    # `protected_names` has unknown protection status and must be excluded, the same
+    # conservative treatment as the truncated-page case, not assumed unprotected.
+    runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
+    stale = collector.gather_stale_branches(
+        repo=Path("/repo"),
+        now=T0,
+        protected_names=frozenset({"main", "production"}),
+        remote_protection=None,
+        stale_days=30.0,
+        max_branches=10,
+        git_runner=runner,
+    )
+
+    assert stale == ()
 
 
 def test_gather_stale_branches_respects_remote_protection_flag():
@@ -426,7 +461,7 @@ def test_gather_stale_branches_caps_at_max_branches_oldest_first():
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset(),
-        remote_protection=None,
+        remote_protection={},
         stale_days=30.0,
         max_branches=10,
         git_runner=runner,
