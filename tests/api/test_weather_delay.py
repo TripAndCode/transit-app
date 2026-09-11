@@ -349,9 +349,10 @@ async def test_buckets_split_by_precipitation_edges(weather_client):
     assert by_label["20mm+"]["days"] == 1
     assert by_label["20mm+"]["avg_delay_sec"] == pytest.approx(150.0, abs=1e-6)
 
-    # Additive only: the wet/dry split is untouched by the bucket breakdown.
-    assert body["wet"]["days"] == 3
-    assert body["dry"]["days"] == 3
+    # Additive only: the wet/dry split (>= 1mm, independent of the bucket
+    # edges) is untouched by the bucket breakdown.
+    assert body["wet"]["days"] == 4
+    assert body["dry"]["days"] == 2
 
 
 async def test_buckets_report_empty_ones_rather_than_omitting_them(weather_client):
