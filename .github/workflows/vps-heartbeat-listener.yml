@@ -1,10 +1,12 @@
 name: VPS Heartbeat Listener
 
-# Fired by the VPS cron wrapper (/root/claude-loop.sh) after every hourly run,
-# success or failure, via `gh api repos/:owner/:repo/dispatches -f
-# event_type=vps-heartbeat`. This job does nothing but exist and complete —
-# vps-heartbeat-watchdog.yml queries this workflow's most recent run
-# timestamp to detect whether the VPS loop has gone silent.
+# Fired by the VPS cron wrapper (deploy/vps/claude-loop.sh) after every hourly
+# run, success or failure, via `gh api repos/:owner/:repo/dispatches -f
+# event_type=vps-heartbeat` plus a `client_payload` built from
+# `scripts/vps_loop_health.py`'s report. vps-heartbeat-watchdog.yml queries
+# this workflow's most recent run timestamp to detect whether the VPS loop
+# has gone silent entirely, and greps this run's own log for the `HEALTH ...`
+# lines below to detect a loop that keeps running but isn't progressing.
 on:
   repository_dispatch:
     types: [vps-heartbeat]
@@ -13,5 +15,25 @@ jobs:
   record:
     runs-on: ubuntu-latest
     steps:
-      - name: Record heartbeat
-        run: echo "Heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - name: Record heartbeat and reported loop health
+        # Values come from our own trusted VPS dispatch, not third-party
+        # input, but they still go through `env:` rather than being
+        # interpolated directly into the script body, per GitHub's own
+        # script-injection guidance for `${{ github.event.* }}` values.
+        env:
+          HEALTH_PAUSED: ${{ github.event.client_payload.paused }}
+          HEALTH_REPEATED_WITHOUT_PROGRESS: ${{ github.event.client_payload.repeated_without_progress }}
+          HEALTH_STALE_PAUSE: ${{ github.event.client_payload.stale_pause }}
+          HEALTH_BLOCKER_CLASS: ${{ github.event.client_payload.blocker_class }}
+          HEALTH_CURRENT_ITEM: ${{ github.event.client_payload.current_item }}
+          HEALTH_LAST_SUCCESSFUL_TICK: ${{ github.event.client_payload.last_successful_tick }}
+          HEALTH_PAUSED_SINCE: ${{ github.event.client_payload.paused_since }}
+        run: |
+          echo "Heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "HEALTH paused=$HEALTH_PAUSED"
+          echo "HEALTH repeated_without_progress=$HEALTH_REPEATED_WITHOUT_PROGRESS"
+          echo "HEALTH stale_pause=$HEALTH_STALE_PAUSE"
+          echo "HEALTH blocker_class=$HEALTH_BLOCKER_CLASS"
+          echo "HEALTH current_item=$HEALTH_CURRENT_ITEM"
+          echo "HEALTH last_successful_tick=$HEALTH_LAST_SUCCESSFUL_TICK"
+          echo "HEALTH paused_since=$HEALTH_PAUSED_SINCE"

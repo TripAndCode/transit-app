@@ -42,3 +42,48 @@ jobs:
             echo "::error::Last VPS heartbeat was ${AGE_MIN} minutes ago (threshold: 100 min). The VPS autonomous loop may have stopped — check cron, gh auth, and the claude setup-token on the VPS."
             exit 1
           fi
+
+      # A "silent" loop (checked above) is not the only failure mode: the
+      # systemd timer can keep firing hourly, and each tick can keep exiting
+      # normally, while /vps-loop-run itself makes zero forward progress —
+      # either stuck on the same Blocker-tag 3+ ticks running, or paused (its
+      # own circuit breaker, see .claude/commands/vps-loop-run.md Step 0) far
+      # longer than its own reduced probe cadence. deploy/vps/claude-loop.sh
+      # folds scripts/vps_loop_health.py's report into every heartbeat's
+      # client_payload; vps-heartbeat-listener.yml echoes it as plain `HEALTH
+      # key=value` lines in its own run log, which is the only place a
+      # repository_dispatch payload survives after the triggering run
+      # completes. Reusing this scheduled job (not the dispatch-triggered
+      # listener) to fail on it keeps the same guaranteed-email path the
+      # heartbeat-age check above already relies on.
+      - name: Check reported loop health from the last heartbeat
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID=$(gh run list --repo "${{ github.repository }}" \
+            --workflow=vps-heartbeat-listener.yml \
+            --json databaseId \
+            --limit 1 -q '.[0].databaseId')
+          if [ -z "${RUN_ID:-}" ]; then
+            echo "No heartbeat run found yet; nothing to check."
+            exit 0
+          fi
+          LOG=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --log 2>/dev/null || true)
+          if [ -z "$LOG" ]; then
+            echo "Could not fetch the last heartbeat run's log; skipping the health-payload check this cycle."
+            exit 0
+          fi
+          REPEATED=$(echo "$LOG" | grep -o 'HEALTH repeated_without_progress=[a-z]*' | tail -n1 | cut -d= -f2)
+          STALE=$(echo "$LOG" | grep -o 'HEALTH stale_pause=[a-z]*' | tail -n1 | cut -d= -f2)
+          BLOCKER=$(echo "$LOG" | grep -o 'HEALTH blocker_class=[^[:space:]]*' | tail -n1 | cut -d= -f2-)
+          PAUSED_SINCE=$(echo "$LOG" | grep -o 'HEALTH paused_since=[^[:space:]]*' | tail -n1 | cut -d= -f2-)
+          echo "Reported: repeated_without_progress=${REPEATED:-unknown} stale_pause=${STALE:-unknown} blocker_class=${BLOCKER:-none} paused_since=${PAUSED_SINCE:-n/a}"
+          if [ "$REPEATED" = "true" ]; then
+            echo "::error::VPS loop reported repeated_without_progress: the last 3 ticks stopped on the same blocker (${BLOCKER:-unknown}) with no shipped progress in between — see NEXT_TASK.md's Status log on the VPS."
+            exit 1
+          fi
+          if [ "$STALE" = "true" ]; then
+            echo "::error::VPS loop reported stale_pause: paused since ${PAUSED_SINCE:-an unknown time}, longer than its own reduced probe cadence allows — a probe should already have logged a fresh bookkeeping entry. Check NEXT_TASK.md's Status log and the claude-loop.timer/service on the VPS."
+            exit 1
+          fi
