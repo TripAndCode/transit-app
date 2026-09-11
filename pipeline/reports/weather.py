@@ -48,6 +48,22 @@ WET_DAY_PRECIP_MM = 1.0
 # same convention `api.triage`'s `low_confidence` uses for thin routes.
 MIN_DAYS_PER_GROUP = 5
 
+# A finer, additive breakdown alongside the wet/dry split: each matched
+# service day falls into exactly one bucket by that day's observed
+# rainfall, independent of `WET_DAY_PRECIP_MM`. Ordered driest-first so
+# callers can render the array positionally. The boundaries are inclusive on
+# their upper edge (e.g. exactly 5mm is "0-5mm", not "5-20mm").
+RAIN_BUCKET_LABELS: tuple[str, ...] = ("0mm", "0-5mm", "5-20mm", "20mm+")
+
+_BUCKET_CASE_SQL = """
+    CASE
+        WHEN precip_mm = 0 THEN '0mm'
+        WHEN precip_mm <= 5 THEN '0-5mm'
+        WHEN precip_mm <= 20 THEN '5-20mm'
+        ELSE '20mm+'
+    END
+"""
+
 _STATION_SQL = """
     SELECT station_id, station_name, note
     FROM agency_weather_stations
@@ -124,15 +140,37 @@ def _group(rows_by_wet: Mapping[bool, Mapping[str, Any]], is_wet: bool) -> dict[
     }
 
 
+def _bucket_group(rows_by_bucket: Mapping[str, Mapping[str, Any]], label: str) -> dict[str, Any]:
+    """One precipitation bucket, or an all-zero/None one when it has no days."""
+    row = rows_by_bucket.get(label)
+    if row is None:
+        return {"label": label, "days": 0, "samples": 0, "avg_delay_sec": None}
+
+    days = int(row["days"] or 0)
+    samples = int(row["samples"] or 0)
+    sum_delay_sec = row["sum_delay_sec"]
+    return {
+        "label": label,
+        "days": days,
+        "samples": samples,
+        "avg_delay_sec": (None if not samples or sum_delay_sec is None else round(float(sum_delay_sec) / samples, 1)),
+    }
+
+
 def summarize_rain_delay(
     rows: Iterable[Mapping[str, Any]],
     station: Mapping[str, Any] | None,
+    bucket_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Shape the two-row wet/dry aggregate into the response body. Pure.
 
-    *rows* are the per-bucket aggregates (keys ``is_wet``, ``days``,
+    *rows* are the per-side aggregates (keys ``is_wet``, ``days``,
     ``samples``, ``sum_delay_sec``, ``avg_precip_mm``); *station* is the
     agency's representative station mapping, or ``None`` if it has none.
+    *bucket_rows* are the same service days re-grouped by
+    `RAIN_BUCKET_LABELS` (keys ``bucket``, ``days``, ``samples``,
+    ``sum_delay_sec``) -- additive alongside the wet/dry split, computed from
+    the same matched days.
 
     ``available`` is False when there is no station configured, or when no
     in-range service day could be matched to an observation at all -- there is
@@ -144,6 +182,9 @@ def summarize_rain_delay(
     by_wet = {bool(r["is_wet"]): r for r in rows}
     wet = _group(by_wet, True)
     dry = _group(by_wet, False)
+
+    by_bucket = {r["bucket"]: r for r in bucket_rows}
+    buckets = [_bucket_group(by_bucket, label) for label in RAIN_BUCKET_LABELS]
 
     delta_sec: float | None = None
     if wet["avg_delay_sec"] is not None and dry["avg_delay_sec"] is not None:
@@ -167,6 +208,7 @@ def summarize_rain_delay(
         "dry": dry,
         "delta_sec": delta_sec,
         "low_confidence": delta_sec is None or thin,
+        "buckets": buckets,
     }
 
 
@@ -203,16 +245,27 @@ async def compute_rain_delay(agency_id: int, ctx: RangeCtx, conn) -> dict[str, A
             GROUP BY d.date, w.precip_mm
         )
         SELECT (precip_mm >= ${n}) AS is_wet,
+               NULL::text AS bucket,
                COUNT(*)::bigint AS days,
                SUM(samples)::bigint AS samples,
                SUM(sum_delay_sec)::bigint AS sum_delay_sec,
                AVG(precip_mm) AS avg_precip_mm
         FROM day
         GROUP BY 1
-        ORDER BY 1
+        UNION ALL
+        SELECT NULL::boolean AS is_wet,
+               {_BUCKET_CASE_SQL} AS bucket,
+               COUNT(*)::bigint AS days,
+               SUM(samples)::bigint AS samples,
+               SUM(sum_delay_sec)::bigint AS sum_delay_sec,
+               NULL::double precision AS avg_precip_mm
+        FROM day
+        GROUP BY 2
     """
     rows = await conn.fetch(sql, agency_id, *params, WET_DAY_PRECIP_MM)
-    return summarize_rain_delay(rows, station)
+    wet_dry_rows = [r for r in rows if r["bucket"] is None]
+    bucket_rows = [r for r in rows if r["is_wet"] is None]
+    return summarize_rain_delay(wet_dry_rows, station, bucket_rows)
 
 
 # Plain-language, jargon-free (no "pooled"/"association"/"n="), and explicit on
