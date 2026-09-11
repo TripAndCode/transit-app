@@ -29,7 +29,7 @@ describe("LandingPage", () => {
     );
     expect(
       screen.getByText(
-        "Live vehicle positions, delay analysis, and network comparisons for every agency you track.",
+        "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
       ),
     ).toBeTruthy();
     const cta = screen.getByRole("link", { name: "Sign in" });

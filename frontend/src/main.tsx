@@ -2,7 +2,7 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
-import { RedirectReportsToAnalysis, RedirectForecastToAnalysis } from "./routes/legacyRedirects";
+import { RedirectReportsToAnalysis, RedirectForecastToAnalysis, RedirectLiveToOperations } from "./routes/legacyRedirects";
 import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
 import "./i18n";
 import App from "./App";
@@ -22,7 +22,6 @@ import "./styles/global.css";
 const OverviewTab = lazy(() => import("./tabs/OverviewTab").then((m) => ({ default: m.OverviewTab })));
 const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapTab })));
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
-const LiveTab = lazy(() => import("./tabs/LiveTab").then((m) => ({ default: m.LiveTab })));
 const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
@@ -80,7 +79,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/overview", element: el(<OverviewTab />) },
       { path: "agencies/:agencyId/map", element: el(<MapTab />) },
       { path: "agencies/:agencyId/ask", element: el(<AskTab />) },
-      { path: "agencies/:agencyId/live", element: el(<LiveTab />) },
+      { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
       { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
       // Network was promoted from a standalone /network route into the

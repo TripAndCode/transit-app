@@ -2,8 +2,8 @@
   "nav": {
     "overview": "概況",
     "overview_subtitle": "今すぐ何が起きているか",
-    "map": "地図",
-    "map_subtitle": "どこで起きているか",
+    "map": "運行状況",
+    "map_subtitle": "現在の遅延と報告停留所",
     "ask": "質問",
     "live": "最新観測",
     "live_subtitle": "停留所ごとの実測値",
@@ -28,7 +28,7 @@
   "landing": {
     "hero": {
       "title": "今すぐ何が起きているか。どこで起きているか。",
-      "subtitle": "各事業者のリアルタイムな車両位置、遅延分析、事業者間の比較をまとめて確認できます。",
+      "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
       "guest_cta": "ゲストとして利用する"
     },
     "explorer": {
@@ -454,6 +454,59 @@
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
+    }
+  },
+  "operations": {
+    "eyebrow": "リアルタイム運行監視",
+    "title": "運行状況",
+    "mode_label": "運行状況の表示モード",
+    "mode": {
+      "current": "現在",
+      "history": "履歴分析"
+    },
+    "route_filter": "路線",
+    "all_routes": "すべての路線",
+    "last_updated": "最終更新 {{when}}",
+    "no_update": "最終更新なし",
+    "refresh": "運行状況を更新",
+    "summary_label": "現在の運行サマリー",
+    "loading": "最新の運行状況を取得中...",
+    "stats": {
+      "active": "運行中",
+      "anomaly": "異常",
+      "watch": "注意",
+      "freshness": "データ鮮度"
+    },
+    "freshness": {
+      "normal": "正常",
+      "delayed": "遅延",
+      "stale": "要確認",
+      "unknown": "不明"
+    },
+    "map": {
+      "aria_label": "最新報告停留所と遅延の地図",
+      "delay": "遅延 {{delay}}",
+      "reported_stop": "報告停留所: {{stop}}",
+      "updated": "更新 {{when}}",
+      "disclosure": "{{located}}/{{total}}便をTripUpdateの最新報告停留所に表示（静的GTFS座標・GPS位置ではありません）"
+    },
+    "queue": {
+      "eyebrow": "優先順位順",
+      "title": "要対応",
+      "total": "{{count}}路線",
+      "deviation": "基準より {{delay}}",
+      "current_delay": "現在 {{delay}}",
+      "reported_stop": "報告停留所: {{stop}}",
+      "location_unavailable": "停留所位置を解決できません",
+      "show_on_map": "地図で確認",
+      "open_trip": "便を開く",
+      "clear_title": "現在、要対応の路線はありません",
+      "clear_body": "最新報告を30秒ごとに確認しています。",
+      "normal_routes": "平常運行 {{count}}路線"
+    },
+    "empty": {
+      "title": "現在表示できる便がありません",
+      "hint": "最新のTripUpdateを待っています。受信後、自動的に表示します。"
     }
   },
   "map": {

@@ -21,6 +21,7 @@ import type {
   ForecastOverview,
   HeadwayQualityResponse,
   HeatmapCollection,
+  LiveTripsResponse,
   NetworkSummary,
   OverviewSummary,
   PeakHourBreakdown,
@@ -263,6 +264,18 @@ export function useTodayRouteSummary(
   return useQuery({
     queryKey: ["today_route_summary", agencyId],
     queryFn: ({ signal }) => apiGet<RouteSummaryResponse>(`/api/${agencyId}/today/route-summary`, { signal }),
+    enabled: agencyId != null,
+    refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+export function useLiveTrips(
+  agencyId: number | null,
+  options: { autoRefresh: boolean } = { autoRefresh: true },
+): UseQueryResult<LiveTripsResponse> {
+  return useQuery({
+    queryKey: ["live_trips", agencyId],
+    queryFn: ({ signal }) => apiGet<LiveTripsResponse>(`/api/${agencyId}/delays/live`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
   });
