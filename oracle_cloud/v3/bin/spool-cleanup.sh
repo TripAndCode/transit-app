@@ -43,12 +43,7 @@
 # the rest of the run, matching sync-r2.sh/prune-r2.sh/verify-r2.sh.
 set -uo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=agencies-lib.sh
-. "$SCRIPT_DIR/agencies-lib.sh"
-
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
-TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
 AWS="${AWS_CLI:-aws}"
 LOCK_FILE="${SPOOL_CLEANUP_LOCK:-$BASE_DIR/spool-cleanup.lock}"
 
@@ -79,11 +74,6 @@ if [ "$((10#$SPOOL_DISK_BUDGET_BYTES))" -le 0 ]; then
     exit 64
 fi
 printf -v SPOOL_DISK_BUDGET_BYTES '%d' "$((10#$SPOOL_DISK_BUDGET_BYTES))"
-
-if [ ! -f "$TSV" ]; then
-    echo "spool-cleanup.sh: agencies roster $TSV is missing" >&2
-    exit 64
-fi
 
 # Prevent an overlapping run (e.g. a slow first-time backlog reclaim still
 # running when the next day's cron fires) from racing this one against the
@@ -159,45 +149,43 @@ reclaim_or_keep() {
     remaining_bytes=$((remaining_bytes + local_size))
 }
 
-# `|| [ -n "$row" ]` processes a final row lacking a trailing newline, matching
-# the other agencies.tsv readers.
-while IFS= read -r row || [ -n "${row:-}" ]; do
-    agency_row_is_data "$row" || continue
-    split_agency_row "$row"
-    id="$agency_id"
-
-    rt="$BASE_DIR/data/$id/rt"
-    if [ -d "$rt" ]; then
-        rt_files=$(find "$rt" -maxdepth 1 -name '*.tar.gz' -type f)
-        if [ -n "$rt_files" ]; then
-            rt_listing=$(r2_list "rt/$id/")
-            while IFS= read -r f; do
-                [ -n "$f" ] || continue
-                reclaim_or_keep "$f" "$rt_listing" "rt/$id/"
-            done <<< "$rt_files"
-        fi
+# Discovers directories the same way sync-r2.sh/prune.sh do -- globbing what
+# actually exists on disk, not the agencies roster -- so a directory whose
+# agency ID has fallen out of (or was never in) agencies.tsv still gets its
+# bytes measured and reclaimed, matching this script's own budget guarantee.
+for rt in "$BASE_DIR"/data/*/rt; do
+    [ -d "$rt" ] || continue
+    id=$(basename "$(dirname "$rt")")
+    rt_files=$(find "$rt" -maxdepth 1 -name '*.tar.gz' -type f)
+    if [ -n "$rt_files" ]; then
+        rt_listing=$(r2_list "rt/$id/")
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            reclaim_or_keep "$f" "$rt_listing" "rt/$id/"
+        done <<< "$rt_files"
     fi
+done
 
-    sdir="$BASE_DIR/data/$id/static"
-    if [ -d "$sdir" ]; then
-        keep=$(readlink "$sdir/latest.zip" 2>/dev/null || true)
-        # Compare on basename so relative or absolute link targets both match.
-        [ -n "$keep" ] && keep=$(basename "$keep")
-        static_files=$(find "$sdir" -maxdepth 1 -name 'gtfs_static_*.zip' -type f)
-        if [ -n "$static_files" ]; then
-            static_listing=$(r2_list "static/$id/")
-            while IFS= read -r f; do
-                [ -n "$f" ] || continue
-                if [ -n "$keep" ] && [ "$(basename "$f")" = "$keep" ]; then
-                    size=$(wc -c < "$f" | tr -d ' ')
-                    remaining_bytes=$((remaining_bytes + size))
-                    continue
-                fi
-                reclaim_or_keep "$f" "$static_listing" "static/$id/"
-            done <<< "$static_files"
-        fi
+for sdir in "$BASE_DIR"/data/*/static; do
+    [ -d "$sdir" ] || continue
+    id=$(basename "$(dirname "$sdir")")
+    keep=$(readlink "$sdir/latest.zip" 2>/dev/null || true)
+    # Compare on basename so relative or absolute link targets both match.
+    [ -n "$keep" ] && keep=$(basename "$keep")
+    static_files=$(find "$sdir" -maxdepth 1 -name 'gtfs_static_*.zip' -type f)
+    if [ -n "$static_files" ]; then
+        static_listing=$(r2_list "static/$id/")
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if [ -n "$keep" ] && [ "$(basename "$f")" = "$keep" ]; then
+                size=$(wc -c < "$f" | tr -d ' ')
+                remaining_bytes=$((remaining_bytes + size))
+                continue
+            fi
+            reclaim_or_keep "$f" "$static_listing" "static/$id/"
+        done <<< "$static_files"
     fi
-done < "$TSV"
+done
 
 if [ "$remaining_bytes" -gt "$SPOOL_DISK_BUDGET_BYTES" ]; then
     echo "spool-cleanup.sh: PROBLEM local spool is ${remaining_bytes} bytes, over the ${SPOOL_DISK_BUDGET_BYTES}-byte budget, after reclaiming every archive R2 has confirmed -- the rest is either still pending its first successful upload or genuinely failing to sync; investigate sync-r2.sh/verify-r2.sh before anything here can safely free more" >&2

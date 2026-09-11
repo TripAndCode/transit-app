@@ -33,13 +33,6 @@ exit 0
 SHIM
 chmod +x "$SHIM_DIR/aws"
 
-printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' \
-    > "$COLLECTOR_BASE/etc/agencies.tsv"
-printf '1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
-    >> "$COLLECTOR_BASE/etc/agencies.tsv"
-printf '8\thiroden\t60\thttp://feed.test/tu8.pb\thttp://feed.test/s8.zip\thttp://ping.test/8\n' \
-    >> "$COLLECTOR_BASE/etc/agencies.tsv"
-
 now_ts() { date -u +%Y-%m-%d\ %H:%M:%S; }
 
 run_cleanup() {
@@ -72,16 +65,16 @@ if SPOOL_DISK_BUDGET_BYTES=0 ../bin/spool-cleanup.sh 2>/dev/null; then
 fi
 pass "zero SPOOL_DISK_BUDGET_BYTES is rejected"
 
-# Missing roster.
-if AGENCIES_TSV=/does/not/exist ../bin/spool-cleanup.sh 2>/dev/null; then
-    fail "spool-cleanup.sh should exit nonzero with a missing roster"
-fi
-pass "a missing agencies roster fails"
-
 # --- fixtures ------------------------------------------------------------
+# Discovery is driven entirely by what exists under data/*/rt and
+# data/*/static (matching sync-r2.sh/prune.sh), not by any agencies roster --
+# agency 99 below deliberately has no roster entry anywhere, to prove a
+# decommissioned/orphaned agency directory still gets its bytes counted and
+# reclaimed rather than silently skipped.
 rt1="$COLLECTOR_BASE/data/1/rt"; rt8="$COLLECTOR_BASE/data/8/rt"
 sdir8="$COLLECTOR_BASE/data/8/static"
-mkdir -p "$rt1" "$rt8" "$sdir8"
+rt99="$COLLECTOR_BASE/data/99/rt"
+mkdir -p "$rt1" "$rt8" "$sdir8" "$rt99"
 
 # a1: one RT tarball already fully mirrored (verified -> should be removed).
 printf 'RTDATA-1-UPLOADED' > "$rt1/20260901.tar.gz"
@@ -102,9 +95,15 @@ printf 'STATICZIP-CURRENT' > "$sdir8/gtfs_static_20260901.zip"
 size_static_current=$(wc -c < "$sdir8/gtfs_static_20260901.zip" | tr -d ' ')
 ln -sfn gtfs_static_20260901.zip "$sdir8/latest.zip"
 
+# a99: an orphaned agency directory (no roster entry anywhere) with one RT
+# tarball already fully mirrored -> discovery must still find and reclaim it.
+printf 'RTDATA-99-UPLOADED' > "$rt99/20260901.tar.gz"
+size_a99_uploaded=$(wc -c < "$rt99/20260901.tar.gz" | tr -d ' ')
+
 fresh=$(now_ts)
 export LS_rt_1_="$fresh $size_a1_uploaded rt/1/20260901.tar.gz"$'\n'
 export LS_rt_8_="$fresh 3 rt/8/20260901.tar.gz"$'\n'
+export LS_rt_99_="$fresh $size_a99_uploaded rt/99/20260901.tar.gz"$'\n'
 export LS_static_8_="$fresh $size_static_old static/8/gtfs_static_20260801.zip
 $fresh $size_static_current static/8/gtfs_static_20260901.zip
 "
@@ -120,6 +119,9 @@ run_cleanup
 grep -q "kept — R2 object size" "$TEST_BASE/out.log" || fail "size-mismatch reason missing from output"
 grep -q "kept — not yet found in R2" "$TEST_BASE/out.log" || fail "not-yet-uploaded reason missing from output"
 pass "removes only R2-verified archives, keeps pending/corrupt uploads and the live static target"
+
+[ -f "$rt99/20260901.tar.gz" ] && fail "a99: orphaned (roster-less) agency's verified-uploaded RT tarball survived cleanup"
+pass "an agency directory absent from any roster is still discovered and reclaimed"
 
 # --- idempotency ---------------------------------------------------------
 run_cleanup

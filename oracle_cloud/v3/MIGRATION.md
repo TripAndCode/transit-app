@@ -101,11 +101,10 @@ match) that specific RT/static archive is uploaded — well before
 archive is left in place for `sync-r2.sh` to retry; local spool bytes
 remaining after that reclaim are checked against the required
 `SPOOL_DISK_BUDGET_BYTES` env var, and exceeding it is reported as a
-failure, never as a further deletion. Unlike `prune.sh`'s line above,
-`spool-cleanup.sh`'s crontab.snippet entry ships active, not commented out,
-so it starts running as soon as the snippet is installed (step 5) — set
-`SPOOL_DISK_BUDGET_BYTES` in `/etc/environment` alongside the `OBJECT_STORE_*`
-vars *before* running `crontab /home/opc/crontab.snippet`, not after.
+failure, never as a further deletion. `spool-cleanup.sh`'s crontab.snippet
+entry runs immediately once the snippet is installed, so `SPOOL_DISK_BUDGET_BYTES`
+must be set in `/etc/environment` alongside the `OBJECT_STORE_*` vars *before*
+running `crontab /home/opc/crontab.snippet` (step 5), not after.
 
 Known gap, unchanged from before: agency 1 (Aomori) has no `static_url` in
 `agencies.tsv` (see the note at the top of this file), so this VM never
