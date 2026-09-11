@@ -270,6 +270,14 @@ def test_validate_details_allows_null_values():
     ops_status.validate_details({"last_error": None})
 
 
+def test_validate_details_rejects_key_with_trailing_newline():
+    # `_NAME_RE.match` would incorrectly accept this: `$` matches just before a
+    # trailing "\n" as well as true end-of-string, and `.match()` never
+    # requires consuming the whole string. `fullmatch` closes both gaps.
+    with pytest.raises(OpsStatusError, match="lowercase_snake_case"):
+        ops_status.validate_details({"abc\n": "value"})
+
+
 # --- validate_component_status / build_status ---------------------------------
 
 
@@ -294,6 +302,13 @@ def test_validate_component_status_accepts_valid_status():
 def test_validate_component_status_rejects_wrong_schema_version():
     with pytest.raises(OpsStatusError, match="schema_version"):
         ops_status.validate_component_status(_status(schema_version=999))
+
+
+def test_validate_component_status_rejects_bool_schema_version():
+    # `bool` is a subclass of `int`, so `True != SCHEMA_VERSION` is False when
+    # `SCHEMA_VERSION == 1`; guard against `bool` explicitly like `age_seconds` does.
+    with pytest.raises(OpsStatusError, match="schema_version"):
+        ops_status.validate_component_status(_status(schema_version=True))
 
 
 def test_validate_component_status_rejects_unknown_component():
@@ -417,6 +432,15 @@ def test_from_json_dict_rejects_bad_timestamp():
         ops_status.from_json_dict(document)
 
 
+def test_from_json_dict_copies_details_instead_of_aliasing():
+    # `ComponentStatus` is a frozen, documented immutable snapshot; it must not
+    # share a mutable `details` dict with the caller's parsed document.
+    document = ops_status.to_json_dict(_status(details={"agencies": 3}))
+    status = ops_status.from_json_dict(document)
+    document["details"]["agencies"] = 999
+    assert status.details["agencies"] == 3
+
+
 # --- validate_document (raw dict / non-Python producer path) ------------------
 
 
@@ -456,6 +480,28 @@ def test_validate_document_rejects_wrong_schema_version():
 def test_validate_document_rejects_bool_age_seconds():
     with pytest.raises(OpsStatusError, match="age_seconds"):
         ops_status.validate_document(_document(age_seconds=True))
+
+
+def test_validate_document_rejects_bool_schema_version():
+    # `bool` is a subclass of `int`, so `True != SCHEMA_VERSION` is False when
+    # `SCHEMA_VERSION == 1`; guard against `bool` explicitly like `age_seconds` does.
+    with pytest.raises(OpsStatusError, match="schema_version"):
+        ops_status.validate_document(_document(schema_version=True))
+
+
+def test_validate_document_rejects_non_string_component_with_ops_status_error():
+    # A list is unhashable, so `in COMPONENTS` (a frozenset) would raise a raw
+    # `TypeError` instead of the module's own `OpsStatusError` unless the type
+    # is checked first -- and `main()` only catches `OpsStatusError`.
+    document = _document(component=["vps_loop"])
+    with pytest.raises(OpsStatusError, match="component must be a string"):
+        ops_status.validate_document(document)
+
+
+def test_validate_document_rejects_non_string_state_with_ops_status_error():
+    document = _document(state=["healthy"])
+    with pytest.raises(OpsStatusError, match="state must be a string"):
+        ops_status.validate_document(document)
 
 
 def test_validate_document_rejects_age_seconds_without_last_success():

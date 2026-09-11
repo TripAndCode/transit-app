@@ -283,7 +283,7 @@ def validate_details(details: object) -> None:
         raise OpsStatusError(f"details has {len(details)} keys, more than the {MAX_DETAIL_KEYS} allowed")
 
     for key, value in details.items():
-        if not isinstance(key, str) or not _NAME_RE.match(key):
+        if not isinstance(key, str) or not _NAME_RE.fullmatch(key):
             raise OpsStatusError(f"details key {key!r} is not a bounded lowercase_snake_case identifier")
         if len(key) > MAX_DETAIL_KEY_LENGTH:
             raise OpsStatusError(f"details key {key!r} exceeds {MAX_DETAIL_KEY_LENGTH} characters")
@@ -369,7 +369,7 @@ def validate_component_status(
 ) -> None:
     """Enforce every contract rule on an already-constructed `ComponentStatus`."""
 
-    if status.schema_version != SCHEMA_VERSION:
+    if isinstance(status.schema_version, bool) or status.schema_version != SCHEMA_VERSION:
         raise OpsStatusError(f"unsupported schema_version {status.schema_version} (expected {SCHEMA_VERSION})")
     if status.component not in COMPONENTS:
         raise OpsStatusError(f"unknown component {status.component!r} (expected one of {sorted(COMPONENTS)})")
@@ -482,7 +482,7 @@ def from_json_dict(
             else None
         ),
         age_seconds=data.get("age_seconds"),  # type: ignore[arg-type]
-        details=data["details"],  # type: ignore[arg-type]
+        details=dict(data["details"]),  # type: ignore[call-overload]
     )
     validate_component_status(status, max_clock_skew_seconds=max_clock_skew_seconds)
     return status
@@ -513,10 +513,14 @@ def validate_document(
     if extra:
         raise OpsStatusError(f"status document has unexpected field(s): {', '.join(extra)}")
 
-    if data["schema_version"] != SCHEMA_VERSION:
+    if isinstance(data["schema_version"], bool) or data["schema_version"] != SCHEMA_VERSION:
         raise OpsStatusError(f"unsupported schema_version {data['schema_version']!r} (expected {SCHEMA_VERSION})")
+    if not isinstance(data["component"], str):
+        raise OpsStatusError(f"component must be a string, got {type(data['component']).__name__}")
     if data["component"] not in COMPONENTS:
         raise OpsStatusError(f"unknown component {data['component']!r} (expected one of {sorted(COMPONENTS)})")
+    if not isinstance(data["state"], str):
+        raise OpsStatusError(f"state must be a string, got {type(data['state']).__name__}")
     if data["state"] not in STATES:
         raise OpsStatusError(f"unknown state {data['state']!r} (expected one of {sorted(STATES)})")
     if not isinstance(data["observed_at"], str):
