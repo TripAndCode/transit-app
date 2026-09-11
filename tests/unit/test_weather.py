@@ -9,6 +9,7 @@ import pytest
 
 from pipeline.reports.weather import (
     MIN_DAYS_PER_GROUP,
+    RAIN_BUCKET_LABELS,
     WET_DAY_PRECIP_MM,
     observation_disclaimer,
     summarize_rain_delay,
@@ -377,6 +378,51 @@ def test_summarize_rain_delay_flags_low_confidence_on_a_thin_sample_count():
         _STATION,
     )
     assert out["low_confidence"] is True
+
+
+def _precip_bucket(label: str, days: int, samples: int, sum_delay_sec: int):
+    return {"bucket": label, "days": days, "samples": samples, "sum_delay_sec": sum_delay_sec}
+
+
+def test_summarize_rain_delay_buckets_default_to_empty_without_bucket_rows():
+    """A caller that passes no `bucket_rows` (e.g. an older test fixture) still
+    gets the full, ordered set of buckets back, each reporting zero days
+    rather than being omitted."""
+    out = summarize_rain_delay(
+        [_bucket(True, days=10, samples=1000, sum_delay_sec=120_000, avg_precip_mm=12.3)],
+        _STATION,
+    )
+    assert [b["label"] for b in out["buckets"]] == list(RAIN_BUCKET_LABELS)
+    assert all(b["days"] == 0 and b["samples"] == 0 and b["avg_delay_sec"] is None for b in out["buckets"])
+
+
+def test_summarize_rain_delay_pools_buckets_additively_without_touching_wet_dry():
+    """The bucket breakdown is additive: it pools like `wet`/`dry` do (raw
+    seconds over sample count), and leaves `wet`/`dry`/`delta_sec` unchanged."""
+    out = summarize_rain_delay(
+        [
+            _bucket(True, days=10, samples=1000, sum_delay_sec=120_000, avg_precip_mm=12.3),
+            _bucket(False, days=20, samples=4000, sum_delay_sec=360_000, avg_precip_mm=0.1),
+        ],
+        _STATION,
+        [
+            _precip_bucket("0mm", days=15, samples=3000, sum_delay_sec=270_000),
+            _precip_bucket("5-20mm", days=8, samples=800, sum_delay_sec=96_000),
+        ],
+    )
+    assert out["wet"]["avg_delay_sec"] == 120.0
+    assert out["dry"]["avg_delay_sec"] == 90.0
+    assert out["delta_sec"] == 30.0
+
+    by_label = {b["label"]: b for b in out["buckets"]}
+    assert by_label["0mm"]["days"] == 15
+    assert by_label["0mm"]["avg_delay_sec"] == 90.0
+    assert by_label["5-20mm"]["days"] == 8
+    assert by_label["5-20mm"]["avg_delay_sec"] == 120.0
+    # Buckets with no matched day are reported as empty, not omitted.
+    assert by_label["0-5mm"] == {"label": "0-5mm", "days": 0, "samples": 0, "avg_delay_sec": None}
+    assert by_label["20mm+"] == {"label": "20mm+", "days": 0, "samples": 0, "avg_delay_sec": None}
+    assert [b["label"] for b in out["buckets"]] == list(RAIN_BUCKET_LABELS)
 
 
 def test_observation_disclaimer_denies_forecast_and_causation_in_both_locales():
