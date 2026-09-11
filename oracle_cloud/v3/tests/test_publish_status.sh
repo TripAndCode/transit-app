@@ -7,6 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./helpers.sh
 setup_base
+trap teardown_base EXIT
 
 OUT="$COLLECTOR_BASE/.status/oracle-crawler-status.json"
 mkdir -p "$(dirname "$OUT")"
@@ -82,5 +83,3 @@ grep -q "FAILED to publish" "$TEST_BASE/out.log" || fail "undelivered publish no
 grep -q "ghp_testtoken" "$TEST_BASE/out.log" && fail "the bearer token leaked into the failure output"
 unset CURL_FAIL
 pass "an unreachable channel is reported without leaking the token"
-
-teardown_base

@@ -246,8 +246,8 @@ pass "a future-dated RT sample clamps both rt_worst_age_seconds and age_seconds 
 
 # A leading-zero interval in agencies.tsv (e.g. "089") is a bare arithmetic
 # operand -- bash treats a leading zero as octal, and "089" isn't valid
-# octal at all, which previously crashed the whole script instead of
-# degrading gracefully like every other malformed-input case here.
+# octal at all; status-snapshot.sh normalizes via `10#$interval` before
+# using it as an arithmetic operand.
 seed_healthy
 printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
 printf '1\taomori\t089\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' >> "$COLLECTOR_BASE/etc/agencies.tsv"
