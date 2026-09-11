@@ -1060,7 +1060,13 @@
         "dry": "晴天日"
       },
       "delta_label": "差（雨天 − 晴天）: {{value}}",
-      "delta_unavailable": "この期間はどちらかの条件に十分な日数がなく、比較できません。"
+      "delta_unavailable": "この期間はどちらかの条件に十分な日数がなく、比較できません。",
+      "buckets": {
+        "title": "降水量別の遅延",
+        "no_data": "データなし",
+        "sample_count": "{{count}}件",
+        "bar_aria": "{{label}}: {{value}}、{{count}}件"
+      }
     }
   },
   "insight_panel": {
