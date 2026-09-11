@@ -170,7 +170,7 @@ export function NetworkTab() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1040, margin: "0 auto" }}>
+    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <style>{`
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
