@@ -111,7 +111,7 @@ def test_query_systemd_unit_parses_active_healthy_unit():
     runner = runner_from(
         {
             "systemctl show": FakeCompletedProcess(
-                0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\n"
+                0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\nLoadState=loaded\n"
             )
         }
     )
@@ -124,7 +124,11 @@ def test_query_systemd_unit_parses_active_healthy_unit():
 
 def test_query_systemd_unit_reports_explicit_failure():
     runner = runner_from(
-        {"systemctl show": FakeCompletedProcess(0, stdout="ActiveState=failed\nSubState=failed\nResult=exit-code\n")}
+        {
+            "systemctl show": FakeCompletedProcess(
+                0, stdout="ActiveState=failed\nSubState=failed\nResult=exit-code\nLoadState=loaded\n"
+            )
+        }
     )
     active_state, _sub_state, reported_failure = collector.query_systemd_unit(runner=runner)
 
@@ -134,7 +138,11 @@ def test_query_systemd_unit_reports_explicit_failure():
 
 def test_query_systemd_unit_reports_failure_from_result_even_if_active_state_differs():
     runner = runner_from(
-        {"systemctl show": FakeCompletedProcess(0, stdout="ActiveState=inactive\nSubState=dead\nResult=failed\n")}
+        {
+            "systemctl show": FakeCompletedProcess(
+                0, stdout="ActiveState=inactive\nSubState=dead\nResult=failed\nLoadState=loaded\n"
+            )
+        }
     )
     _active_state, _sub_state, reported_failure = collector.query_systemd_unit(runner=runner)
 
@@ -143,6 +151,22 @@ def test_query_systemd_unit_reports_failure_from_result_even_if_active_state_dif
 
 def test_query_systemd_unit_degrades_to_unknown_on_nonzero_exit():
     runner = runner_from({"systemctl show": FakeCompletedProcess(4, stderr="Unit not found.")})
+    active_state, sub_state, reported_failure = collector.query_systemd_unit(runner=runner)
+
+    assert (active_state, sub_state, reported_failure) == (None, None, False)
+
+
+def test_query_systemd_unit_degrades_to_unknown_for_never_installed_unit():
+    # `systemctl show` exits 0 even for a unit that was never installed, reporting
+    # ActiveState=inactive/SubState=dead -- only LoadState distinguishes this from a
+    # legitimately idle, actually-installed unit.
+    runner = runner_from(
+        {
+            "systemctl show": FakeCompletedProcess(
+                0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\nLoadState=not-found\n"
+            )
+        }
+    )
     active_state, sub_state, reported_failure = collector.query_systemd_unit(runner=runner)
 
     assert (active_state, sub_state, reported_failure) == (None, None, False)
@@ -430,7 +454,11 @@ def test_collect_vps_facts_end_to_end_with_injected_runners(tmp_path):
     next_task, timer = write_next_task(tmp_path, "- 2026-09-11T11:30:00Z: item 120 shipped as PR #1.\n")
 
     systemd_runner = runner_from(
-        {"systemctl show": FakeCompletedProcess(0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\n")}
+        {
+            "systemctl show": FakeCompletedProcess(
+                0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\nLoadState=loaded\n"
+            )
+        }
     )
     process_runner = runner_from({"pgrep -f": FakeCompletedProcess(1)})
     git_runner = runner_from(

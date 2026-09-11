@@ -75,9 +75,10 @@ vps_loop_health = _load_sibling("vps_loop_health")
 DEFAULT_SERVICE_UNIT = "claude-loop.service"
 # Healthy up to 1.5 tick intervals (scheduling jitter past the top of the hour
 # is normal); stale past `vps_loop_health`'s own reduced-probe-cadence
-# threshold (`--probe-multiplier`, default 3.0) -- the same point past which
-# that module's `stale_pause` alert already treats a paused loop as overdue
-# for a fresh bookkeeping entry.
+# threshold alone (`tick_interval * probe_multiplier`, default 3.0) -- 1.5x
+# earlier than that module's own `stale_pause` alert, which additionally
+# applies its `stale_pause_buffer` on top before treating a paused loop as
+# overdue for a fresh bookkeeping entry.
 DEFAULT_HEALTHY_MULTIPLIER = 1.5
 DEFAULT_STALE_MULTIPLIER = 3.0
 # Matches `deploy/vps/claude-loop.sh`'s own invocation of the CLI.
@@ -123,14 +124,17 @@ def classify_loop_activity(*, claude_process_state: str, repeated_without_progre
     for the priority order and its rationale."""
 
     if claude_process_state == "running":
-        return "active"
-    if repeated_without_progress:
-        return "restarting"
-    if paused:
-        return "paused"
-    if claude_process_state == "unknown":
-        return "unknown"
-    return "idle"
+        result = "active"
+    elif repeated_without_progress:
+        result = "restarting"
+    elif paused:
+        result = "paused"
+    elif claude_process_state == "unknown":
+        result = "unknown"
+    else:
+        result = "idle"
+    assert result in LOOP_ACTIVITY_STATES
+    return result
 
 
 def _run(cmd: Sequence[str], *, timeout: float = 10.0) -> "subprocess.CompletedProcess[str]":
@@ -151,7 +155,7 @@ def query_systemd_unit(
     """
 
     try:
-        proc = runner(["systemctl", "show", unit, "--property=ActiveState,SubState,Result"])
+        proc = runner(["systemctl", "show", unit, "--property=ActiveState,SubState,Result,LoadState"])
     except (OSError, subprocess.TimeoutExpired):
         return None, None, False
     if proc.returncode != 0:
@@ -162,6 +166,12 @@ def query_systemd_unit(
         key, sep, value = line.partition("=")
         if sep:
             fields[key] = value
+
+    if fields.get("LoadState") != "loaded":
+        # `systemctl show` exits 0 even for a unit that was never installed,
+        # reporting ActiveState=inactive/SubState=dead -- indistinguishable
+        # from a legitimately idle unit unless LoadState is checked too.
+        return None, None, False
 
     active_state = fields.get("ActiveState") or None
     sub_state = fields.get("SubState") or None
