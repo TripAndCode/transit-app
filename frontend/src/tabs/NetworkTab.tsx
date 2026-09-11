@@ -18,9 +18,9 @@ const card: React.CSSProperties = {
   borderRadius: 10,
   marginBottom: 10,
 };
-const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
+const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, marginBottom: 8 };
 const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
-const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
+const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: "1 1 180px", minWidth: 0 };
 const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
 const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
 const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
@@ -89,7 +89,7 @@ export function NetworkTab() {
             : card
         }
       >
-        <div style={cardTop}>
+          <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
             to={`/agencies/${a.agency_id}/overview${suffix}`}
@@ -135,7 +135,7 @@ export function NetworkTab() {
             </div>
           </div>
         </div>
-        <div style={barRow}>
+          <div className="network-card-bar" style={barRow}>
           <div style={barBg}>
             <div
               style={{
@@ -175,6 +175,8 @@ export function NetworkTab() {
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
         .network-card a:hover { text-decoration: underline; }
+        .network-card-top > div { min-width: 0; }
+        .network-card-bar { min-width: 0; }
         .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
         .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
         .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
