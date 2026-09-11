@@ -63,9 +63,7 @@ def test_loop_activity_active_when_claude_process_running():
 
 def test_loop_activity_restarting_when_repeated_without_progress_and_no_process():
     assert (
-        collector.classify_loop_activity(
-            claude_process_state="absent", repeated_without_progress=True, paused=False
-        )
+        collector.classify_loop_activity(claude_process_state="absent", repeated_without_progress=True, paused=False)
         == "restarting"
     )
 
@@ -79,27 +77,21 @@ def test_loop_activity_restarting_takes_priority_over_paused():
 
 def test_loop_activity_paused_when_no_process_and_not_repeated():
     assert (
-        collector.classify_loop_activity(
-            claude_process_state="absent", repeated_without_progress=False, paused=True
-        )
+        collector.classify_loop_activity(claude_process_state="absent", repeated_without_progress=False, paused=True)
         == "paused"
     )
 
 
 def test_loop_activity_unknown_when_process_state_unknown_and_otherwise_quiet():
     assert (
-        collector.classify_loop_activity(
-            claude_process_state="unknown", repeated_without_progress=False, paused=False
-        )
+        collector.classify_loop_activity(claude_process_state="unknown", repeated_without_progress=False, paused=False)
         == "unknown"
     )
 
 
 def test_loop_activity_idle_when_absent_and_otherwise_quiet():
     assert (
-        collector.classify_loop_activity(
-            claude_process_state="absent", repeated_without_progress=False, paused=False
-        )
+        collector.classify_loop_activity(claude_process_state="absent", repeated_without_progress=False, paused=False)
         == "idle"
     )
 
