@@ -371,8 +371,12 @@ def validate_component_status(
 
     if isinstance(status.schema_version, bool) or status.schema_version != SCHEMA_VERSION:
         raise OpsStatusError(f"unsupported schema_version {status.schema_version} (expected {SCHEMA_VERSION})")
+    if not isinstance(status.component, str):
+        raise OpsStatusError(f"component must be a string, got {type(status.component).__name__}")
     if status.component not in COMPONENTS:
         raise OpsStatusError(f"unknown component {status.component!r} (expected one of {sorted(COMPONENTS)})")
+    if not isinstance(status.state, str):
+        raise OpsStatusError(f"state must be a string, got {type(status.state).__name__}")
     if status.state not in STATES:
         raise OpsStatusError(f"unknown state {status.state!r} (expected one of {sorted(STATES)})")
     _require_utc(status.observed_at, field_name="observed_at")
@@ -564,7 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         data = json.loads(args.validate.read_text(encoding="utf-8"))
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"ERROR: cannot read {args.validate}: {exc}", file=sys.stderr)
         return 2
     except json.JSONDecodeError as exc:

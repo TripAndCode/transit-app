@@ -316,9 +316,22 @@ def test_validate_component_status_rejects_unknown_component():
         ops_status.validate_component_status(_status(component="not_a_component"))
 
 
+def test_validate_component_status_rejects_non_string_component_with_ops_status_error():
+    # A list is unhashable, so `in COMPONENTS` (a frozenset) would raise a raw
+    # `TypeError` instead of the module's own `OpsStatusError` unless the type
+    # is checked first, mirroring `validate_document`'s same guard.
+    with pytest.raises(OpsStatusError, match="component must be a string"):
+        ops_status.validate_component_status(_status(component=["vps_loop"]))
+
+
 def test_validate_component_status_rejects_unknown_state():
     with pytest.raises(OpsStatusError, match="unknown state"):
         ops_status.validate_component_status(_status(state="on_fire"))
+
+
+def test_validate_component_status_rejects_non_string_state_with_ops_status_error():
+    with pytest.raises(OpsStatusError, match="state must be a string"):
+        ops_status.validate_component_status(_status(state=["healthy"]))
 
 
 def test_validate_component_status_rejects_negative_age():
@@ -625,6 +638,14 @@ def test_main_validate_exits_two_for_missing_file(tmp_path, capsys):
 def test_main_validate_exits_two_for_invalid_json(tmp_path, capsys):
     path = tmp_path / "status.json"
     path.write_text("{not json", encoding="utf-8")
+    exit_code = ops_status.main(["--validate", str(path)])
+    assert exit_code == 2
+    assert "ERROR" in capsys.readouterr().err
+
+
+def test_main_validate_exits_two_for_invalid_utf8(tmp_path, capsys):
+    path = tmp_path / "status.json"
+    path.write_bytes(b"\xff\xfe\x00not valid utf-8")
     exit_code = ops_status.main(["--validate", str(path)])
     assert exit_code == 2
     assert "ERROR" in capsys.readouterr().err
