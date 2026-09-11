@@ -169,10 +169,12 @@ All read-only:
 - `SELECT * FROM weather_daily_observations WHERE station_id = '31312' ORDER BY obs_date DESC LIMIT 5;`
   should show rows appearing after the next cron tick or `make
   ingest-weather` run.
-- `GET /api/{agency_id}/weather_delay` should return `available: true` (once
-  enough matched service days exist — see `MIN_DAYS_PER_GROUP` in
-  `pipeline/reports/weather.py` for the low-confidence threshold) instead of
-  `available: false`.
+- `GET /api/{agency_id}/weather_delay` should return `available: true` (true
+  once at least one in-range service day is matched to an observation)
+  instead of `available: false`. Until enough days accumulate on both the
+  wet and dry side (`MIN_DAYS_PER_GROUP` in `pipeline/reports/weather.py`),
+  the response also carries `low_confidence: true` — expected right after
+  enabling ingest, not a sign anything is broken.
 - Application logs show `weather: wrote N of M station-days examined` (info
   level, from `pipeline/weather.py`'s `ingest_weather`) rather than `weather:
   WEATHER_INGEST_ENABLED is not set; skipping weather ingest`.
