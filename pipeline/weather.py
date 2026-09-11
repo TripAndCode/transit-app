@@ -87,7 +87,7 @@ _POINT_URL = "https://www.jma.go.jp/bosai/amedas/data/point/{station_id}/{ymd}_{
 # the template names: percent-encoding leaves `.` untouched, so an encoded
 # `..` path segment still reaches the URL and most origin servers resolve it
 # a directory up from there.
-_STATION_ID_RE = re.compile(r"^[0-9]{5}$")
+_STATION_ID_RE = re.compile(r"[0-9]{5}")
 
 # The source publishes point observations in 3-hour files: `_00` covers
 # 00:00-02:50, `_21` covers 21:00-23:50. A day's own eight files therefore
@@ -348,7 +348,7 @@ def _fetch_block(
     encoded `..` path segment still resolves a directory up on most origin
     servers.
     """
-    if not _STATION_ID_RE.match(station_id):
+    if not _STATION_ID_RE.fullmatch(station_id):
         logger.warning("weather: rejecting station_id %r outside the allowed character set", station_id)
         return None
     # station_id is also percent-encoded, belt-and-braces with the character-set

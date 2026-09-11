@@ -760,3 +760,17 @@ def test_fetch_block_rejects_a_dot_segment_station_id(monkeypatch):
 
     assert weather._fetch_block("47765/../../forecast", _DAY, 0, 1024) is None
     assert seen == []
+
+
+def test_fetch_block_rejects_a_trailing_newline_station_id(monkeypatch):
+    """A bare `$`-anchored pattern matches before a trailing newline, not just
+    at the true end of the string, so ``"12345\\n"`` must still be rejected --
+    ``fullmatch`` (rather than ``match`` against a ``$``-terminated pattern)
+    is what actually closes that gap."""
+    import pipeline.weather as weather
+
+    seen: list[str] = []
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: seen.append(url))
+
+    assert weather._fetch_block("12345\n", _DAY, 0, 1024) is None
+    assert seen == []
