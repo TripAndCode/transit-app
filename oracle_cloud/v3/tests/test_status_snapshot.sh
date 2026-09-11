@@ -98,13 +98,22 @@ grep -q '"state":"healthy"' "$OUT" || fail "no agency having a static_url must n
 grep -q '"static_state":"not_applicable"' "$OUT" || fail "static should be not_applicable, not unknown/stale: $(cat "$OUT")"
 pass "an all-off-VM-static roster (no static_url anywhere) reports static as not_applicable, not a problem"
 
-# R2 sync has never completed: reported as unknown.
+# R2 sync has never completed: reported as unknown, with an explicit
+# sync_result of "unknown" (never "fail" -- sync-r2.sh has no on-disk
+# "attempted and failed" signal, only "has/hasn't ever recorded a success").
 seed_healthy
 rm -f "$COLLECTOR_BASE/.sync-r2.last-ok"
 run_snapshot
 [ "$rc" -eq 0 ] || fail "a missing sync marker should still exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q '"state":"unknown"' "$OUT" || fail "a missing R2 sync marker should report unknown: $(cat "$OUT")"
-pass "R2 sync having never completed reports state=unknown"
+grep -q '"sync_result":"unknown"' "$OUT" || fail "sync_result should be unknown, not fail, when the marker has never been written: $(cat "$OUT")"
+pass "R2 sync having never completed reports state=unknown with sync_result=unknown"
+
+# R2 sync marker present: sync_result is explicitly "ok".
+seed_healthy
+run_snapshot
+grep -q '"sync_result":"ok"' "$OUT" || fail "a present sync marker should report sync_result=ok: $(cat "$OUT")"
+pass "a present R2 sync marker reports sync_result=ok"
 
 # R2 sync marker present but stale (30 days old, over SYNC_R2_MAX_STALE_DAYS).
 seed_healthy

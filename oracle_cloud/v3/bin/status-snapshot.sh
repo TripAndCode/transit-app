@@ -201,9 +201,17 @@ else
 fi
 
 # --- R2 sync (sync-r2.sh's own success marker) ---
+# sync-r2.sh only ever writes OK_MARKER on a fully-successful run (see its
+# own header), so its mere presence already means "sync-r2.sh's last
+# recorded result was ok" -- there is no separate on-disk "fail" signal to
+# read for sync (unlike verify-r2.sh's RESULT_MARKER, written on every
+# completed run either way), so "unknown" is the honest answer for "never
+# recorded a success", not a guessed "fail".
+sync_result="unknown"
 if [ ! -f "$SYNC_OK_MARKER" ]; then
     sync_state=unknown; sync_epoch=""
 else
+    sync_result="ok"
     # sync-r2.sh writes the marker's CONTENT as the success timestamp itself
     # (not just relying on mtime), so read that first; fall back to mtime for
     # a marker written some other way (e.g. by hand during a migration).
@@ -310,7 +318,7 @@ disk_used_pct_json=$(num_or_null "$disk_used_pct")
 disk_free_bytes_json=$(num_or_null "$disk_free_bytes")
 
 DETAILS=$(cat <<JSON
-{"agencies_configured":$agencies_configured,"rt_state":"$rt_state","static_state":"$static_state","r2_state":"$r2_state","verify_result":"$verify_result","rt_worst_age_seconds":$rt_worst_age_seconds,"static_worst_age_seconds":$static_worst_age_seconds,"sync_marker_age_seconds":$sync_marker_age_seconds,"verify_age_seconds":$verify_age_seconds,"r2_object_total":$r2_object_total_json,"disk_used_pct":$disk_used_pct_json,"disk_free_bytes":$disk_free_bytes_json}
+{"agencies_configured":$agencies_configured,"rt_state":"$rt_state","static_state":"$static_state","r2_state":"$r2_state","sync_result":"$sync_result","verify_result":"$verify_result","rt_worst_age_seconds":$rt_worst_age_seconds,"static_worst_age_seconds":$static_worst_age_seconds,"sync_marker_age_seconds":$sync_marker_age_seconds,"verify_age_seconds":$verify_age_seconds,"r2_object_total":$r2_object_total_json,"disk_used_pct":$disk_used_pct_json,"disk_free_bytes":$disk_free_bytes_json}
 JSON
 )
 
