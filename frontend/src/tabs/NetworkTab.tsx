@@ -99,6 +99,7 @@ export function NetworkTab() {
             {a.agency_name}
           </Link>
           {isCurrent && <span data-testid="you-badge" style={youBadgeStyle}>{t("network.you_badge")}</span>}
+        </div>
           <div className="network-card-metrics">
             <div className="network-card-metric network-card-metric--delay">
               <span className="network-card-metric-label">{t("network.col_avg_delay")}</span>
@@ -146,7 +147,6 @@ export function NetworkTab() {
               </div>
             </div>
           </div>
-        </div>
           <div className="network-card-bar" style={barRow}>
           <div style={barBg}>
             <div
@@ -189,11 +189,13 @@ export function NetworkTab() {
         .network-card a:hover { text-decoration: underline; }
         .network-card-top > div { min-width: 0; }
         .network-card-bar { min-width: 0; }
-        .network-card-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; min-width: 0; text-align: right; }
-        .network-card-metric { min-width: 0; }
-        .network-card-metric-label { display: block; margin-bottom: 2px; color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
-        .network-card-metric--delay { min-width: 120px; }
-        @media (max-width: 720px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); text-align: left; width: 100%; } }
+        .network-card-metrics { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 8px; min-width: 0; margin: 14px 0 16px; }
+        .network-card-metric { min-width: 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); text-align: left; }
+        .network-card-metric--delay { background: var(--accent-soft); border-color: var(--accent); }
+        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+        .network-card-metric--delay > div { font-size: 28px !important; line-height: 1; }
+        .network-card-metric--delay .network-card-metric-label { color: var(--text-primary); }
+        @media (max-width: 720px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
         .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
         .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
