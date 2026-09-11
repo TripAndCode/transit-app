@@ -65,7 +65,9 @@ jobs:
             --workflow=vps-heartbeat-listener.yml \
             --json databaseId \
             --limit 1 -q '.[0].databaseId')
-          if [ -z "${RUN_ID:-}" ]; then
+          # An empty result list makes the jq expression above resolve to the
+          # literal string "null", not an empty string.
+          if [ -z "${RUN_ID:-}" ] || [ "$RUN_ID" = "null" ]; then
             echo "No heartbeat run found yet; nothing to check."
             exit 0
           fi
@@ -74,10 +76,15 @@ jobs:
             echo "Could not fetch the last heartbeat run's log; skipping the health-payload check this cycle."
             exit 0
           fi
-          REPEATED=$(echo "$LOG" | grep -o 'HEALTH repeated_without_progress=[a-z]*' | tail -n1 | cut -d= -f2)
-          STALE=$(echo "$LOG" | grep -o 'HEALTH stale_pause=[a-z]*' | tail -n1 | cut -d= -f2)
-          BLOCKER=$(echo "$LOG" | grep -o 'HEALTH blocker_class=[^[:space:]]*' | tail -n1 | cut -d= -f2-)
-          PAUSED_SINCE=$(echo "$LOG" | grep -o 'HEALTH paused_since=[^[:space:]]*' | tail -n1 | cut -d= -f2-)
+          # Each pipeline's own trailing "|| true" absorbs grep's exit 1 when a
+          # line is simply absent (e.g. the run predates this feature) --
+          # without it, `pipefail` would propagate that as the assignment's
+          # own exit status and `set -e` would abort the step entirely,
+          # exactly the ungraceful failure this check is meant to avoid.
+          REPEATED=$(echo "$LOG" | grep -o 'HEALTH repeated_without_progress=[a-z]*' | tail -n1 | cut -d= -f2 || true)
+          STALE=$(echo "$LOG" | grep -o 'HEALTH stale_pause=[a-z]*' | tail -n1 | cut -d= -f2 || true)
+          BLOCKER=$(echo "$LOG" | grep -o 'HEALTH blocker_class=[^[:space:]]*' | tail -n1 | cut -d= -f2- || true)
+          PAUSED_SINCE=$(echo "$LOG" | grep -o 'HEALTH paused_since=[^[:space:]]*' | tail -n1 | cut -d= -f2- || true)
           echo "Reported: repeated_without_progress=${REPEATED:-unknown} stale_pause=${STALE:-unknown} blocker_class=${BLOCKER:-none} paused_since=${PAUSED_SINCE:-n/a}"
           if [ "$REPEATED" = "true" ]; then
             echo "::error::VPS loop reported repeated_without_progress: the last 3 ticks stopped on the same blocker (${BLOCKER:-unknown}) with no shipped progress in between — see NEXT_TASK.md's Status log on the VPS."
