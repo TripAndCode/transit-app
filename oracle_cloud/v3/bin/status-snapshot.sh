@@ -362,8 +362,8 @@ if df_line=$(df -Pk "$BASE_DIR" 2>/dev/null | awk 'NR==2 {print $4, $5}'); then
     avail_kb=$(printf '%s' "$df_line" | cut -d' ' -f1)
     pct=$(printf '%s' "$df_line" | cut -d' ' -f2)
     pct="${pct%\%}"
-    case "$avail_kb" in ''|*[!0-9]*) ;; *) disk_free_bytes=$(( avail_kb * 1024 ));; esac
-    case "$pct" in ''|*[!0-9]*) ;; *) disk_used_pct="$pct";; esac
+    case "$avail_kb" in ''|*[!0-9]*) ;; *) disk_free_bytes=$(( 10#$avail_kb * 1024 ));; esac
+    case "$pct" in ''|*[!0-9]*) ;; *) disk_used_pct=$(( 10#$pct ));; esac
 fi
 
 num_or_null() { [ -n "${1:-}" ] && [ "$1" != null ] && echo "$1" || echo null; }

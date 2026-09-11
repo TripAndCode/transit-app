@@ -267,6 +267,29 @@ grep -q '"disk_used_pct":null' "$OUT" && fail "disk_used_pct should not be null 
 grep -q '"disk_free_bytes":null' "$OUT" && fail "disk_free_bytes should not be null on a real filesystem: $(cat "$OUT")"
 pass "disk usage details are populated"
 
+# A leading-zero df -Pk field (available KB or capacity percent) is a bare
+# arithmetic/JSON-number operand -- normalized via 10# the same way every
+# other on-disk-derived integer in this file is.
+seed_healthy
+cat > "$SHIM_DIR/df" <<'SHIM'
+#!/usr/bin/env bash
+printf 'Filesystem     1024-blocks      Used Available Capacity Mounted on\n'
+printf 'tmpfs             1000000    500000   0012345       05%% /test\n'
+SHIM
+chmod +x "$SHIM_DIR/df"
+run_snapshot
+rm -f "$SHIM_DIR/df"
+[ "$rc" -eq 0 ] || fail "a leading-zero df output should still exit 0, not crash: $(cat "$TEST_BASE/out.log")"
+grep -q '"disk_free_bytes":12641280' "$OUT" || \
+    fail "disk_free_bytes should normalize a leading-zero available-KB field to base-10 (0012345 KB -> 12641280 bytes): $(cat "$OUT")"
+grep -q '"disk_used_pct":5' "$OUT" || \
+    fail "disk_used_pct should normalize a leading-zero capacity field to base-10: $(cat "$OUT")"
+if [ "$have_python3" -eq 1 ]; then
+    python3 -c "import json; json.load(open('$OUT'))" || \
+        fail "a leading-zero df output must not break the document's JSON validity: $(cat "$OUT")"
+fi
+pass "a leading-zero df output normalizes disk_free_bytes/disk_used_pct to base-10"
+
 # A non-numeric threshold is rejected before anything is read or written.
 seed_healthy
 rm -rf "$COLLECTOR_BASE/.status"
@@ -298,6 +321,30 @@ if [ "$have_python3" -eq 1 ]; then
     run_snapshot
     python3 -c "import json; json.load(open('$OUT'))" || fail "the written document is not valid JSON"
     pass "the written document parses as valid JSON"
+fi
+
+# The shell-built document must satisfy the actual Python contract it
+# claims to follow, not just be valid JSON -- a healthy document and a
+# failed-with-no-prior-success document (the one combination requiring
+# state=failed paired with last_success_at=null) both exercised directly
+# against scripts/ops_status.py's own validator, so a future contract
+# change this producer no longer satisfies fails here instead of only
+# surfacing downstream as collect_oracle_status.py rejecting every heartbeat.
+if [ "$have_python3" -eq 1 ]; then
+    OPS_STATUS_PY="$(cd ../../.. && pwd)/scripts/ops_status.py"
+    seed_healthy
+    run_snapshot
+    python3 "$OPS_STATUS_PY" --validate "$OUT" || \
+        fail "a healthy document must satisfy scripts/ops_status.py's own contract validator: $(cat "$OUT")"
+    pass "a healthy document satisfies scripts/ops_status.py's contract validator"
+
+    seed_healthy
+    rm -f "$COLLECTOR_BASE/.verify-r2.last-success"
+    printf '%s fail 7\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
+    run_snapshot
+    python3 "$OPS_STATUS_PY" --validate "$OUT" || \
+        fail "a failed-with-no-prior-success document must satisfy scripts/ops_status.py's own contract validator: $(cat "$OUT")"
+    pass "a failed-with-no-prior-success document satisfies scripts/ops_status.py's contract validator"
 fi
 
 # A hand-edited or corrupted .verify-r2.last-result marker (anything other
