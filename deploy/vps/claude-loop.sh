@@ -45,5 +45,31 @@ timeout --foreground --kill-after=30s "${CLAUDE_TICK_TIMEOUT_SEC}s" \
   claude --model "$CLAUDE_MODEL" --permission-mode auto -p "/vps-loop-run" --output-format text
 CLAUDE_EXIT=$?
 
-gh api repos/TripAndCode/transit-app/dispatches -f event_type=vps-heartbeat >/dev/null 2>&1
+# Fold vps-loop-run's own progress signal into the heartbeat: scripts/vps_loop_health.py
+# parses NEXT_TASK.md's Status log for last_successful_tick/current_item/blocker_class/
+# paused state and the repeated_without_progress/stale_pause alert flags. Pre-declare
+# defaults before eval'ing its --format shell output so a parse error there (it fails
+# closed, non-zero exit, empty stdout) never leaves a variable unset under this script's
+# own `set -u` further down.
+VPS_LOOP_LAST_SUCCESSFUL_TICK=""
+VPS_LOOP_CURRENT_ITEM=""
+VPS_LOOP_BLOCKER_CLASS=""
+VPS_LOOP_PAUSED="false"
+VPS_LOOP_PAUSED_SINCE=""
+VPS_LOOP_REPEATED_WITHOUT_PROGRESS="false"
+VPS_LOOP_STALE_PAUSE="false"
+HEALTH_SHELL_OUTPUT=$(python3 scripts/vps_loop_health.py --repo /root/transit-app \
+  --out /root/vps-loop-health.json --format shell 2>/root/vps-loop-health.err) || true
+eval "$HEALTH_SHELL_OUTPUT"
+
+gh api repos/TripAndCode/transit-app/dispatches \
+  -f event_type=vps-heartbeat \
+  -F "client_payload[paused]=$VPS_LOOP_PAUSED" \
+  -F "client_payload[repeated_without_progress]=$VPS_LOOP_REPEATED_WITHOUT_PROGRESS" \
+  -F "client_payload[stale_pause]=$VPS_LOOP_STALE_PAUSE" \
+  -F "client_payload[blocker_class]=$VPS_LOOP_BLOCKER_CLASS" \
+  -F "client_payload[current_item]=$VPS_LOOP_CURRENT_ITEM" \
+  -F "client_payload[last_successful_tick]=$VPS_LOOP_LAST_SUCCESSFUL_TICK" \
+  -F "client_payload[paused_since]=$VPS_LOOP_PAUSED_SINCE" \
+  >/dev/null 2>&1
 exit "$CLAUDE_EXIT"

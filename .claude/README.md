@@ -107,8 +107,11 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
   The timer cadence is longer than the wrapper's hard timeout, and systemd kills
   the complete process group on timeout so a background worker cannot outlive its
-  coordinator. `/root/claude-loop.sh` itself is VPS-local infrastructure, not tracked
-  in this repo -- it runs the invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  coordinator. The wrapper is tracked at `deploy/vps/claude-loop.sh` and deployed
+  to `/root/claude-loop.sh` on the VPS (only that deployed copy, plus the
+  `deploy/systemd/claude-loop.{service,timer}` units, are VPS-local
+  installation state, not this repo's own tracked source) -- it runs the
+  invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
   so a dispatched Step-4 worker's background Agent task isn't killed by the
   CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a "you'll be
   notified when it finishes" expectation after that ceiling can never be
@@ -116,6 +119,20 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   when the parent process exits. A genuinely-hung worker is still caught by
   `vps-heartbeat-watchdog.yml`, since a stuck run never reaches the
   heartbeat line either.
+- Every heartbeat also carries `scripts/vps_loop_health.py`'s report (last
+  successful tick, current item, blocker class, pause state, and its own
+  `repeated_without_progress`/`stale_pause` alert flags parsed straight from
+  `NEXT_TASK.md`'s Status log) as the dispatch's `client_payload`.
+  `vps-heartbeat-listener.yml` echoes it as plain `HEALTH key=value` lines in
+  its own run log — the only place a `repository_dispatch` payload survives
+  after the triggering run completes — and `vps-heartbeat-watchdog.yml`
+  greps the latest one on its own `schedule` trigger, failing (the same
+  guaranteed-email path as its heartbeat-age check) when the loop is stuck on
+  an identical blocker for 3+ ticks or has stayed paused past its own reduced
+  probe cadence. This catches a loop that keeps ticking (so the plain
+  heartbeat-age check alone sees nothing wrong) but isn't actually
+  progressing — a distinct failure mode from the silent-loop case the
+  heartbeat-age check exists for.
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
@@ -152,7 +169,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   reachability requirement applies here as for any other binary this job
   shells out to), and it assumes `/root/transit-app` is the only clone of
   this project on the host — an independent second clone's own venv isn't
-  detectable as in-use and would eventually be pruned. Like `/root/claude-loop.sh`, the
-  crontab wiring itself is VPS-local infrastructure, not tracked in this
-  repo — only the
-  script it invokes is.
+  detectable as in-use and would eventually be pruned. Like installing
+  `deploy/systemd/claude-loop.timer`/`.service` onto the VPS, the crontab
+  wiring itself is VPS-local installation state, not tracked in this repo —
+  only the script it invokes is.
