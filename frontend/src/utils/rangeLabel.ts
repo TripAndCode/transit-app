@@ -1,15 +1,6 @@
 import type { FilterCtx } from "../api/types";
 
-/** Humanize a filter context's date range for display, or null if it has no
- *  range set (callers decide their own fallback — ThreadSidebar shows
- *  nothing, FilterContextBar defaults to "last 30 days"). Recognizes the
- *  common 7/30/90-day presets by name; anything else renders as the literal
- *  from/to dates joined by the locale-aware separator.
- *
- *  Extracted because this exact block was independently duplicated in
- *  ThreadSidebar.tsx and FilterContextBar.tsx, and the same hardcoded
- *  separator bug had to be fixed in both places — a single shared
- *  implementation is what actually prevents a third recurrence. */
+/** Format a filter context's date range for display. */
 export function rangeLabel(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string | null {
   if (!fc.from_date || !fc.to_date) return null;
   const from = new Date(fc.from_date);
