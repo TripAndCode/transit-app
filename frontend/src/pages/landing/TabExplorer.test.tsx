@@ -59,7 +59,7 @@ describe("TabExplorer", () => {
 
   it("has exactly one navigation pattern: only the list buttons, no second widget", () => {
     renderWithProviders(<TabExplorer />);
-    // Six tabs, one button each -- nothing else interactive on the page.
-    expect(screen.getAllByRole("button")).toHaveLength(6);
+    // Five tabs, one button each -- nothing else interactive on the page.
+    expect(screen.getAllByRole("button")).toHaveLength(5);
   });
 });

@@ -2,8 +2,8 @@
   "nav": {
     "overview": "Overview",
     "overview_subtitle": "What's happening right now",
-    "map": "Map",
-    "map_subtitle": "Where it's happening",
+    "map": "Operations",
+    "map_subtitle": "Current delays and reported stops",
     "ask": "Ask",
     "live": "Latest observations",
     "live_subtitle": "Stop-by-stop readings",
@@ -28,7 +28,7 @@
   "landing": {
     "hero": {
       "title": "What's happening right now — and where it's happening.",
-      "subtitle": "Live vehicle positions, delay analysis, and network comparisons for every agency you track.",
+      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
       "guest_cta": "Continue as a guest"
     },
     "explorer": {
@@ -454,6 +454,59 @@
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes."
+    }
+  },
+  "operations": {
+    "eyebrow": "REAL-TIME OPERATIONS",
+    "title": "Operations",
+    "mode_label": "Operations view",
+    "mode": {
+      "current": "Current",
+      "history": "Historical analysis"
+    },
+    "route_filter": "Route",
+    "all_routes": "All routes",
+    "last_updated": "Last updated {{when}}",
+    "no_update": "No update received",
+    "refresh": "Refresh operations",
+    "summary_label": "Current operations summary",
+    "loading": "Loading the latest operations...",
+    "stats": {
+      "active": "Active trips",
+      "anomaly": "Anomalies",
+      "watch": "Watch",
+      "freshness": "Data freshness"
+    },
+    "freshness": {
+      "normal": "Healthy",
+      "delayed": "Delayed",
+      "stale": "Check feed",
+      "unknown": "Unknown"
+    },
+    "map": {
+      "aria_label": "Map of latest reported stops and delays",
+      "delay": "Delay {{delay}}",
+      "reported_stop": "Reported stop: {{stop}}",
+      "updated": "Updated {{when}}",
+      "disclosure": "{{located}} of {{total}} trips shown at their latest TripUpdate stop (static GTFS coordinates, not GPS positions)"
+    },
+    "queue": {
+      "eyebrow": "PRIORITY ORDER",
+      "title": "Needs attention",
+      "total": "{{count}} routes",
+      "deviation": "{{delay}} vs baseline",
+      "current_delay": "Current {{delay}}",
+      "reported_stop": "Reported stop: {{stop}}",
+      "location_unavailable": "Stop location unavailable",
+      "show_on_map": "Show on map",
+      "open_trip": "Open trips",
+      "clear_title": "No routes currently need attention",
+      "clear_body": "Latest reports are checked every 30 seconds.",
+      "normal_routes": "{{count}} routes operating normally"
+    },
+    "empty": {
+      "title": "No current trips to display",
+      "hint": "Waiting for the latest TripUpdate. New reports appear automatically."
     }
   },
   "map": {

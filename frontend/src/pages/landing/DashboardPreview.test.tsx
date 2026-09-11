@@ -48,7 +48,7 @@ function renderPreview() {
   );
 }
 
-const NAV_LABELS = ["Overview", "Map", "Analysis", "Agencies", "Latest observations"];
+const NAV_LABELS = ["Overview", "Operations", "Analysis", "Agencies"];
 
 describe("DashboardPreview", () => {
   beforeEach(() => {
@@ -62,7 +62,7 @@ describe("DashboardPreview", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows only the real 5 sidebar tabs as peer nav items, with Ask and Help visually distinct", () => {
+  it("shows only the real 4 sidebar tabs as peer nav items, with Ask and Help visually distinct", () => {
     renderPreview();
     for (const label of NAV_LABELS) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
@@ -105,14 +105,14 @@ describe("DashboardPreview", () => {
     await user.click(screen.getByRole("button", { name: /^Agencies/ }));
     expect(screen.getByText("Avg delay (min)")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /^Latest observations/ }));
-    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /^Operations/ }));
+    expect(screen.getByText("On-time route")).toBeTruthy();
   });
 
-  it("renders the Map tab full-bleed with floating style/heatmap/legend controls, all functional", async () => {
+  it("renders the Operations map full-bleed with floating controls", async () => {
     const user = userEvent.setup();
     renderPreview();
-    await user.click(screen.getByRole("button", { name: /^Map/ }));
+    await user.click(screen.getByRole("button", { name: /^Operations/ }));
 
     expect(screen.getByText("On-time route")).toBeTruthy();
     expect(screen.getByText("Delayed route")).toBeTruthy();
@@ -190,7 +190,7 @@ describe("DashboardPreview auto-advance", () => {
     vi.restoreAllMocks();
   });
 
-  it("cycles Overview -> Map -> Analysis -> Agencies -> Live on its own when left untouched", () => {
+  it("cycles Overview -> Operations -> Analysis -> Agencies -> Overview when left untouched", () => {
     mockMatchMedia(false);
     renderPreview();
     expect(screen.getByText("Route R1")).toBeTruthy();
@@ -213,7 +213,7 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
     });
-    expect(screen.getByRole("button", { name: "Latest" })).toBeTruthy();
+    expect(screen.getByText("Route R1")).toBeTruthy();
   });
 
   it("pauses while the pointer hovers the preview, and resumes once it leaves", () => {

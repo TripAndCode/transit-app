@@ -77,6 +77,26 @@ export type RouteSummaryResponse = {
   clamp_count: number;
 };
 
+export type LiveTrip = {
+  trip_id: string;
+  route_code: string | null;
+  service_type: string | null;
+  scheduled_time: string | null;
+  dep_delay: number;
+  captured_at: string;
+  stop_id: string | null;
+  stop_sequence: number;
+  stop_name: string | null;
+  stop_lat: number | null;
+  stop_lon: number | null;
+  headsign: string | null;
+};
+
+export type LiveTripsResponse = {
+  latest_captured_at: string | null;
+  rows: LiveTrip[];
+};
+
 export type RouteShapeStop = {
   stop_sequence: number;
   stop_name: string;

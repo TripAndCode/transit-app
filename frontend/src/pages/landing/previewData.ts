@@ -71,23 +71,6 @@ export const PREVIEW_HOURLY = [
   { hour: 21, delayMin: 1.0 },
 ] as const;
 
-type PreviewObservation = {
-  routeCode: string;
-  stopN: number;
-  delayMin: number;
-  minutesAgo: number;
-};
-
-// Latest-observations mock feed, deliberately unsorted by either field so
-// both sort modes visibly reorder the list.
-export const PREVIEW_OBSERVATIONS: PreviewObservation[] = [
-  { routeCode: "R1", stopN: 4, delayMin: 0.5, minutesAgo: 2 },
-  { routeCode: "R4", stopN: 12, delayMin: 3.1, minutesAgo: 6 },
-  { routeCode: "R7", stopN: 2, delayMin: 0.2, minutesAgo: 1 },
-  { routeCode: "R9", stopN: 9, delayMin: 5.0, minutesAgo: 9 },
-  { routeCode: "R1", stopN: 7, delayMin: 1.1, minutesAgo: 14 },
-];
-
 type PreviewAskExchange = { questionKey: string; answerKey: string };
 
 // Canned question/answer pairs for the Ask preview's suggestion chips. Real

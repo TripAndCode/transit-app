@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   GitCompare,
   HelpCircle,
-  History,
   ChevronLeft,
   ChevronRight,
   type LucideIcon,
@@ -14,11 +13,11 @@ import {
 import { onActivateKey } from "../../utils/a11y";
 import { PREVIEW_AGENCIES, type PreviewAgencyKey } from "./previewData";
 
-export type PreviewTabKey = "overview" | "map" | "analysis" | "network" | "live" | "ask";
+export type PreviewTabKey = "overview" | "map" | "analysis" | "network" | "ask";
 
 type NavItem = { key: PreviewTabKey; labelKey: string; subtitleKey: string; Icon: LucideIcon };
 
-// Same 5 tabs, in the same order, with the same labelKey/subtitleKey pairs
+// Same four tabs, in the same order, with the same labelKey/subtitleKey pairs
 // and icons as the real signed-in sidebar's own `ITEMS`
 // (components/Sidebar.tsx) -- Ask is deliberately excluded from this list
 // (rendered as the dashed-border CTA below, matching Sidebar.tsx's own
@@ -28,7 +27,6 @@ const ITEMS: NavItem[] = [
   { key: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
   { key: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
   { key: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
-  { key: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: History },
 ];
 
 // Same key as the real Sidebar.tsx's COLLAPSED_PREF_KEY -- intentionally
