@@ -351,10 +351,9 @@ def _fetch_block(
     if not _STATION_ID_RE.fullmatch(station_id):
         logger.warning("weather: rejecting station_id %r outside the allowed character set", station_id)
         return None
-    # station_id is also percent-encoded, belt-and-braces with the character-set
-    # check above: it comes from a hand-populated table and lands in the URL's
-    # path, so an unencoded `/`, `?` or `#` in it would point the fetch at a
-    # different document on the host than this template names.
+    # station_id is also percent-encoded: a no-op for the current [0-9]{5}
+    # character set, kept so the URL path stays bounded if that set is ever
+    # loosened.
     url = _POINT_URL.format(station_id=quote(station_id, safe=""), ymd=day.strftime("%Y%m%d"), hour=hour)
     try:
         with safe_urlopen(url, timeout=timeout, max_bytes=max_bytes) as resp:
