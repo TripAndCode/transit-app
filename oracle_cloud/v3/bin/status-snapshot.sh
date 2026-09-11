@@ -143,6 +143,11 @@ else
             rt_epoch=$(file_epoch "$newest_rt")
             case "$interval" in
                 ''|*[!0-9]*|0) interval=1 ;;  # invalid config: don't crash, just treat as maximally strict
+                # A leading-zero interval (e.g. "089") is otherwise still a
+                # bare arithmetic operand below, where bash treats a
+                # leading 0 as octal -- "089" is not valid octal at all
+                # (fatal), and "030" would silently misclassify as 24.
+                *) interval=$(( 10#$interval )) ;;
             esac
             if [ -n "$rt_epoch" ]; then
                 age=$(( NOW - rt_epoch ))

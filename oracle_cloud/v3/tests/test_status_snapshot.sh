@@ -244,6 +244,22 @@ if [ "$have_python3" -eq 1 ]; then
 fi
 pass "a future-dated RT sample clamps both rt_worst_age_seconds and age_seconds at zero instead of going negative"
 
+# A leading-zero interval in agencies.tsv (e.g. "089") is a bare arithmetic
+# operand -- bash treats a leading zero as octal, and "089" isn't valid
+# octal at all, which previously crashed the whole script instead of
+# degrading gracefully like every other malformed-input case here.
+seed_healthy
+printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+printf '1\taomori\t089\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' >> "$COLLECTOR_BASE/etc/agencies.tsv"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a leading-zero interval should still exit 0, not crash: $(cat "$TEST_BASE/out.log")"
+[ -f "$OUT" ] || fail "a leading-zero interval must still produce a status document"
+if [ "$have_python3" -eq 1 ]; then
+    python3 -c "import json; json.load(open('$OUT'))" || \
+        fail "a leading-zero interval must not break the document's JSON validity: $(cat "$OUT")"
+fi
+pass "a leading-zero agency interval does not crash the script"
+
 # Disk usage details are populated with plausible (non-null) numbers.
 seed_healthy
 run_snapshot
