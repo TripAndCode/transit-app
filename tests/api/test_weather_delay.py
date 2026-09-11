@@ -314,6 +314,75 @@ async def test_response_carries_disclaimer_and_attribution_in_both_locales(weath
     assert ja["disclaimer"] != en["disclaimer"]
 
 
+async def test_buckets_split_by_precipitation_edges(weather_client):
+    """The bucket boundaries are inclusive on their upper edge: exactly 5mm and
+    exactly 20mm land in the lower bucket, and the additive breakdown does not
+    disturb the existing wet/dry split."""
+    client, aid, pool = weather_client
+    await _seed_station(pool, aid)
+    day = _FROM
+    for precip_mm, avg_delay_sec in [
+        (0.0, 100),  # "0mm"
+        (0.9, 110),  # "0-5mm" (below the wet threshold, still > 0)
+        (5.0, 120),  # "0-5mm" (upper edge, inclusive)
+        (5.1, 130),  # "5-20mm"
+        (20.0, 140),  # "5-20mm" (upper edge, inclusive)
+        (20.1, 150),  # "20mm+"
+    ]:
+        await _seed_day(pool, aid, day, precip_mm=precip_mm, avg_delay_sec=avg_delay_sec)
+        day += timedelta(days=1)
+
+    r = await client.get(f"/api/{aid}/weather_delay?{_RANGE}")
+    body = r.json()
+    by_label = {b["label"]: b for b in body["buckets"]}
+    assert [b["label"] for b in body["buckets"]] == ["0mm", "0-5mm", "5-20mm", "20mm+"]
+
+    assert by_label["0mm"]["days"] == 1
+    assert by_label["0mm"]["avg_delay_sec"] == pytest.approx(100.0, abs=1e-6)
+
+    assert by_label["0-5mm"]["days"] == 2
+    assert by_label["0-5mm"]["avg_delay_sec"] == pytest.approx(115.0, abs=1e-6)
+
+    assert by_label["5-20mm"]["days"] == 2
+    assert by_label["5-20mm"]["avg_delay_sec"] == pytest.approx(135.0, abs=1e-6)
+
+    assert by_label["20mm+"]["days"] == 1
+    assert by_label["20mm+"]["avg_delay_sec"] == pytest.approx(150.0, abs=1e-6)
+
+    # Additive only: the wet/dry split (>= 1mm, independent of the bucket
+    # edges) is untouched by the bucket breakdown.
+    assert body["wet"]["days"] == 4
+    assert body["dry"]["days"] == 2
+
+
+async def test_buckets_report_empty_ones_rather_than_omitting_them(weather_client):
+    """A bucket with no matched day is still present in the array, reporting
+    zero days -- callers should not have to special-case a missing label."""
+    client, aid, pool = weather_client
+    await _seed_station(pool, aid)
+    await _seed_day(pool, aid, _FROM, precip_mm=0.0, avg_delay_sec=200)
+
+    r = await client.get(f"/api/{aid}/weather_delay?{_RANGE}")
+    body = r.json()
+    by_label = {b["label"]: b for b in body["buckets"]}
+    assert by_label["0mm"]["days"] == 1
+    for label in ("0-5mm", "5-20mm", "20mm+"):
+        assert by_label[label] == {"label": label, "days": 0, "samples": 0, "avg_delay_sec": None}
+
+
+async def test_buckets_are_empty_when_the_metric_is_unavailable(weather_client):
+    """No configured station means no data to bucket either -- the shape is
+    still the full, ordered, all-empty array rather than an omitted field."""
+    client, aid, pool = weather_client
+    await _seed_day(pool, aid, _FROM, precip_mm=None, avg_delay_sec=120)
+
+    r = await client.get(f"/api/{aid}/weather_delay?{_RANGE}")
+    body = r.json()
+    assert body["available"] is False
+    assert [b["label"] for b in body["buckets"]] == ["0mm", "0-5mm", "5-20mm", "20mm+"]
+    assert all(b["days"] == 0 for b in body["buckets"])
+
+
 async def test_observations_are_shared_across_agencies_on_one_station(weather_client):
     """Observations are keyed by station, not agency: a second agency pointed
     at the same station reads the same days without a second copy."""

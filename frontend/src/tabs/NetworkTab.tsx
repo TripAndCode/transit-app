@@ -18,9 +18,9 @@ const card: React.CSSProperties = {
   borderRadius: 10,
   marginBottom: 10,
 };
-const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 };
+const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, marginBottom: 8 };
 const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
-const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: 1 };
+const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: "1 1 180px", minWidth: 0 };
 const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
 const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
 const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
@@ -89,7 +89,7 @@ export function NetworkTab() {
             : card
         }
       >
-        <div style={cardTop}>
+          <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
             to={`/agencies/${a.agency_id}/overview${suffix}`}
@@ -99,8 +99,11 @@ export function NetworkTab() {
             {a.agency_name}
           </Link>
           {isCurrent && <span data-testid="you-badge" style={youBadgeStyle}>{t("network.you_badge")}</span>}
-          <div style={{ textAlign: "right" }}>
-            <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
+        </div>
+          <div className="network-card-metrics">
+            <div className="network-card-metric network-card-metric--delay">
+              <span className="network-card-metric-label">{t("network.col_avg_delay")}</span>
+              <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
               {a.avg_delay_min == null ? (
                 "—"
               ) : (
@@ -110,19 +113,28 @@ export function NetworkTab() {
                   <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
                 </span>
               )}
+              </div>
             </div>
-            <div
+            <div className="network-card-metric">
+              <span className="network-card-metric-label">{t("network.col_on_time")}</span>
+              <div
               style={onTimeStyle}
               aria-label={isWeightedView ? t("network.col_on_time_weighted") : t("network.col_on_time")}
             >
               {displayedOnTimePct == null
                 ? "—"
                 : `${displayedOnTimePct.toFixed(1)}%${isWeightedView ? t("network.on_time_weighted_suffix") : ""}`}
+              </div>
             </div>
-            <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
-              {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
+            <div className="network-card-metric">
+              <span className="network-card-metric-label">{t("network.col_delivered")}</span>
+              <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
+                {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
+              </div>
             </div>
-            <div
+            <div className="network-card-metric">
+              <span className="network-card-metric-label">{t("network.col_vehicle_km_delivered")}</span>
+              <div
               style={onTimeStyle}
               aria-label={t("network.col_vehicle_km_delivered")}
               title={a.static_version_id ? t("network.schedule_version_title", { version: a.static_version_id }) : undefined}
@@ -132,10 +144,10 @@ export function NetworkTab() {
                 : a.planned_trip_count != null
                   ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
                   : "—"}
+              </div>
             </div>
           </div>
-        </div>
-        <div style={barRow}>
+          <div className="network-card-bar" style={barRow}>
           <div style={barBg}>
             <div
               style={{
@@ -170,11 +182,20 @@ export function NetworkTab() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1040, margin: "0 auto" }}>
+    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <style>{`
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
         .network-card a:hover { text-decoration: underline; }
+        .network-card-top > div { min-width: 0; }
+        .network-card-bar { min-width: 0; }
+        .network-card-metrics { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 8px; min-width: 0; margin: 14px 0 16px; }
+        .network-card-metric { min-width: 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); text-align: left; }
+        .network-card-metric--delay { background: var(--accent-soft); border-color: var(--accent); }
+        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+        .network-card-metric--delay > div { font-size: 28px !important; line-height: 1; }
+        .network-card-metric--delay .network-card-metric-label { color: var(--text-primary); }
+        @media (max-width: 720px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
         .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
         .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }

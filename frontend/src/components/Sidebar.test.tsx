@@ -37,18 +37,17 @@ function renderSidebar(path = "/agencies/1/map") {
 }
 
 describe("Sidebar", () => {
-  it("renders the 5 main nav items with their label and subtitle", () => {
+  it("renders the 4 main nav items with their label and subtitle", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("What's happening right now")).toBeTruthy();
-    expect(screen.getByText("Map")).toBeTruthy();
-    expect(screen.getByText("Where it's happening")).toBeTruthy();
+    expect(screen.getByText("Operations")).toBeTruthy();
+    expect(screen.getByText("Current delays and reported stops")).toBeTruthy();
     expect(screen.getByText("Analysis")).toBeTruthy();
     expect(screen.getByText("When and why delays happen")).toBeTruthy();
     expect(screen.getByText("Agencies")).toBeTruthy();
     expect(screen.getByText("How you compare to others")).toBeTruthy();
-    expect(screen.getByText("Latest observations")).toBeTruthy();
-    expect(screen.getByText("Stop-by-stop readings")).toBeTruthy();
+    expect(screen.queryByText("Latest observations")).toBeNull();
   });
 
   it("renders Ask as a distinct CTA", () => {
@@ -56,18 +55,19 @@ describe("Sidebar", () => {
     expect(screen.getByText("Ask")).toBeTruthy();
   });
 
-  it("renders Live as a nav item when viewing a specific agency", () => {
+  it("folds the former Live view into Operations", () => {
     renderSidebar("/agencies/8/overview");
-    expect(screen.getByRole("link", { name: /Latest observations/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Operations/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
   });
 
-  it("points the Live nav item at the current agency's live route, preserving the filter query string", () => {
+  it("points Operations at the current agency's map route, preserving the filter query string", () => {
     renderSidebar("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: /Latest observations/ });
-    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: /Operations/ });
+    expect(link).toHaveAttribute("href", "/agencies/8/map?from=2026-06-01&to=2026-06-07");
   });
 
-  it("does not render the Live nav item outside any agency context", () => {
+  it("does not render Operations outside any agency context", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
@@ -77,12 +77,12 @@ describe("Sidebar", () => {
         </I18nextProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Operations/ })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
     renderSidebar("/agencies/1/map");
-    const mapLink = screen.getByRole("link", { name: /Map/ });
+    const mapLink = screen.getByRole("link", { name: /Operations/ });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
@@ -145,7 +145,7 @@ describe("Sidebar", () => {
       expect(screen.queryByText("Overview")).toBeNull();
       expect(screen.queryByText("What's happening right now")).toBeNull();
       expect(screen.queryByText("PROTOTYPE")).toBeNull();
-      expect(screen.getByRole("link", { name: "Map" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Operations" })).toBeTruthy();
     });
 
     it("shows an expand toggle once collapsed, which restores the labels when clicked", async () => {
@@ -195,7 +195,7 @@ describe("Sidebar", () => {
       // width. Conditionally rendering on isMobile means it's now absent
       // entirely on a wide viewport.
       expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
-      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
     });
 
     it("renders only the mobile rail (no desktop nav) on a narrow viewport", () => {
@@ -218,46 +218,46 @@ describe("Sidebar", () => {
     it("renders the hamburger trigger without mounting the nav until opened", () => {
       renderSidebar();
       expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
-      // No "Map" link should exist yet — the drawer body is lazily mounted
+      // No Operations link should exist yet — the drawer body is lazily mounted
       // on open, and (unlike the old always-mounted-desktop-plus-CSS-hidden
       // pattern) the desktop nav isn't rendered at all on a narrow viewport,
       // so the common (closed) case has zero nav links in the DOM.
-      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+      expect(screen.queryAllByRole("link", { name: /Operations/ }).length).toBe(0);
     });
 
     it("mounts the nav links once the hamburger is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
     });
 
     it("closes the drawer (unmounting the nav) when a nav link inside it is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Open menu" }));
-      const mapLinks = screen.getAllByRole("link", { name: /Map/ });
+      const mapLinks = screen.getAllByRole("link", { name: /Operations/ });
       expect(mapLinks.length).toBe(1);
       await user.click(mapLinks[0]);
-      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+      expect(screen.queryAllByRole("link", { name: /Operations/ }).length).toBe(0);
     });
 
     it("closes the drawer when the close button inside it is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
       await user.click(screen.getByRole("button", { name: "Close" }));
-      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+      expect(screen.queryAllByRole("link", { name: /Operations/ }).length).toBe(0);
     });
 
     it("closes the drawer when the backdrop is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Map/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
       await user.click(screen.getByRole("presentation"));
-      expect(screen.queryAllByRole("link", { name: /Map/ }).length).toBe(0);
+      expect(screen.queryAllByRole("link", { name: /Operations/ }).length).toBe(0);
     });
   });
 });

@@ -1,0 +1,45 @@
+name: Oracle Heartbeat Listener
+
+# Fired by the Oracle collector VM (oracle_cloud/v3/bin/publish-status.sh,
+# cron) via `curl -X POST .../dispatches -H "Authorization: Bearer
+# $ORACLE_STATUS_GH_TOKEN"` -- a fine-grained PAT that lives only on Oracle
+# and is unrelated to any SSH key, so nothing about this channel ever
+# requires copying Oracle's SSH private key anywhere. This endpoint requires
+# the token's only grant, repository Contents: read & write, which is the
+# same permission needed to push commits or write/delete files via the
+# Contents API -- so this token carries full push-equivalent access to this
+# repo, not a heartbeat-only capability, and must be treated and rotated with
+# that same rigor. `client_payload` is the
+# operations-status document status-snapshot.sh built (see
+# scripts/ops_status.py for the contract it follows).
+#
+# Mirrors vps-heartbeat-listener.yml's own pattern in the opposite direction:
+# that one records the VPS loop's heartbeat for GitHub-side watching; this one
+# records the Oracle collector's, for the VPS's own already-authenticated
+# `gh` to read back out via `gh run view --log` -- the only place a
+# `repository_dispatch` payload survives after the triggering run completes.
+on:
+  repository_dispatch:
+    types: [oracle-heartbeat]
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record the Oracle collector's status document
+        # The payload comes from our own trusted Oracle dispatch, not
+        # third-party input, but it still goes through `env:` rather than
+        # being interpolated directly into the script body, per GitHub's own
+        # script-injection guidance for `${{ github.event.* }}` values.
+        env:
+          ORACLE_STATUS_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          echo "Oracle heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # toJson() always pretty-prints (multi-line, indented); re-compact
+          # with jq so the whole document survives as the single grep-able
+          # line the VPS-side reader expects -- mirroring vps-heartbeat-
+          # listener.yml's own idea of a single log line as the payload's
+          # durable home, though that workflow spreads its facts across one
+          # "HEALTH key=value" line per field rather than one line per
+          # document.
+          echo "ORACLE_STATUS $(echo "$ORACLE_STATUS_JSON" | jq -c '.')"

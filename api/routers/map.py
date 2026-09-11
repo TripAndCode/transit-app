@@ -2,7 +2,7 @@
 
 Three resources back the Map tab:
 
-- ``GET /delays/live``: rows from the most recent ``captured_at`` date.
+- ``GET /delays/live``: each current trip's latest reported stop and delay.
 - ``GET /route-shape``: ordered stop sequence for one route plus, when
   the agency has loaded GTFS ``shapes.txt``, a real road-shape
   ``geometry`` field. Falls back to ``geometry: null`` so the frontend
@@ -122,62 +122,36 @@ async def _latest_route_observation(conn, ch, agency_id: int, route_code: str) -
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
     ch=Depends(get_ch),
-    limit: int = Query(default=200, le=500),
+    limit: int = Query(default=500, le=500),
 ):
-    """Rows from the most recent observation date with a freshness header."""
+    """Latest reported stop and delay for trips in the current feed window."""
     latest_ts = await max_captured_at(ch, agency_id)
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring),
-    # matching the mechanism used at the other 3 sort-based-dedup sites in
-    # this file (route_shape, route_trips, route_stop_profile). Unlike those,
-    # this query is always bounded to one JST day off the sort index, well
-    # inside the 30s max_execution_time cap — the old
-    # `ORDER BY ... LIMIT 1 BY` form was never a timeout risk here. The reason
-    # to rewrite it anyway is consistency (one dedup idiom across the file,
-    # not two) and determinism, per the tiebreak note below. Multiple non-key
-    # columns (route_code, service_type, scheduled_time, dep_delay) are read
-    # off the SAME winning row, so they're packed into ONE tuple-argMax rather
-    # than one argMax per column — per-column argMax on a captured_at tie
-    # could silently mix columns from two different physical rows. The inner
-    # query's tuple is unpacked by position in the outer SELECT so the
-    # result's column names/order match the pre-migration SELECT list
-    # exactly (`route_code, service_type, scheduled_time, dep_delay`).
-    #
-    # This endpoint dedups by trip_id ALONE (no stop_sequence in the group
-    # key), unlike build_dedup_ch_sql. A single GTFS-RT poll commonly reports
-    # dep_delay for several of a trip's upcoming stops at once (confirmed on
-    # real data: ~13% of trips on a given day), so more than one physical row
-    # can share the exact same (captured_at, file_name) for one trip_id — a
-    # tie the old sort-based form also never broke (ORDER BY trip_id,
-    # captured_at DESC had no third key either), leaving its winner among
-    # those rows to whatever order the query engine happened to produce.
-    # `-toInt32(u.stop_sequence)` makes that residual tie deterministic here:
-    # among same-poll rows for one trip, the one for the LOWEST stop_sequence
-    # (the soonest upcoming stop) wins — the most currently-relevant row for a
-    # live board. `scheduled_time` is the field this tie *most commonly*
-    # touches (it's per-stop, so it differs across a trip's stop_sequence rows
-    # whenever the poll spans multiple stops) — but `dep_delay` is ALSO
-    # per-stop and can differ across those tied rows too, by a real margin
-    # when it happens, not just noise. route_code/service_type are
-    # trip-level and unaffected.
+    # A poll can report several future stops for one trip. The lowest sequence
+    # in the newest poll is the nearest reported stop and wins the final tie.
     rows_result = await ch.query(
         """
         SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
-            winner.3 AS scheduled_time, winner.4 AS dep_delay, captured_at
+            winner.3 AS scheduled_time, winner.4 AS dep_delay,
+            winner.5 AS stop_id, winner.6 AS stop_sequence, captured_at
         FROM (
             SELECT u.trip_id AS trip_id,
                 argMax(
-                    tuple(u.route_code, u.service_type, u.scheduled_time, u.dep_delay),
+                    tuple(
+                        u.route_code, u.service_type, u.scheduled_time,
+                        u.dep_delay, u.stop_id, u.stop_sequence
+                    ),
                     (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
                 ) AS winner,
                 max(u.captured_at) AS captured_at
             FROM updates AS u
             WHERE u.agency_id = {agency_id:UInt16}
               AND u.dep_delay IS NOT NULL
-              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+              AND u.captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE
             GROUP BY u.trip_id
         ) AS grouped
         ORDER BY trip_id
@@ -185,16 +159,6 @@ async def live_delays(
         """,
         parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
     )
-    # Build each row via dict(zip(...)) rather than deriving a column index
-    # up front (e.g. `cols.index("captured_at")`): clickhouse-connect returns
-    # `column_names == ()` for a zero-row result (routine here — an agency's
-    # latest JST day can have observations where every one has a NULL
-    # dep_delay, e.g. arrival-only rows or a degraded poll, in which case
-    # `latest_ts` above is non-None but this query's `dep_delay IS NOT NULL`
-    # filter matches zero rows), and `().index(...)` raises `ValueError`
-    # unconditionally, before the loop even runs. Looping over `zip(...)`
-    # instead just doesn't execute when `result_rows` is empty, so `[]` falls
-    # out naturally.
     out_rows = []
     for r in rows_result.result_rows:
         row = dict(zip(rows_result.column_names, r, strict=True))
@@ -206,6 +170,64 @@ async def live_delays(
         if row["scheduled_time"] is not None and len(row["scheduled_time"]) < 8:
             row["scheduled_time"] = f"{row['scheduled_time']}:00"
         out_rows.append(row)
+
+    metadata_by_trip: dict[str, dict] = {}
+    if out_rows:
+        trip_ids = [row["trip_id"] for row in out_rows]
+        stop_sequences = [row["stop_sequence"] for row in out_rows]
+        rt_stop_ids = [row["stop_id"] for row in out_rows]
+        # Stop/headsign enrichment is non-critical relative to the ClickHouse
+        # trip/delay data above (same "one sub-check must not sink the whole
+        # response" shape as the freshness probe elsewhere in this file) — a
+        # Postgres hiccup degrades to missing stop metadata, not a 500.
+        try:
+            metadata_rows = await conn.fetch(
+                """
+                WITH live AS (
+                    SELECT *
+                    FROM unnest($2::text[], $3::integer[], $4::text[])
+                        AS x(trip_id, stop_sequence, rt_stop_id)
+                )
+                SELECT live.trip_id,
+                       COALESCE(rt_stop.stop_id, scheduled_stop.stop_id) AS stop_id,
+                       COALESCE(rt_stop.stop_name, scheduled_stop.stop_name) AS stop_name,
+                       COALESCE(rt_stop.stop_lat, scheduled_stop.stop_lat) AS stop_lat,
+                       COALESCE(rt_stop.stop_lon, scheduled_stop.stop_lon) AS stop_lon,
+                       st.trip_headsign
+                FROM live
+                LEFT JOIN static_stop_times sst
+                  ON sst.agency_id = $1
+                 AND sst.trip_id = live.trip_id
+                 AND sst.stop_sequence = live.stop_sequence
+                LEFT JOIN static_stops rt_stop
+                  ON rt_stop.agency_id = $1
+                 AND rt_stop.stop_id = NULLIF(live.rt_stop_id, '')
+                LEFT JOIN static_stops scheduled_stop
+                  ON scheduled_stop.agency_id = $1
+                 AND scheduled_stop.stop_id = sst.stop_id
+                LEFT JOIN static_trips st
+                  ON st.agency_id = $1 AND st.trip_id = live.trip_id
+                """,
+                agency_id,
+                trip_ids,
+                stop_sequences,
+                rt_stop_ids,
+            )
+            metadata_by_trip = {row["trip_id"]: dict(row) for row in metadata_rows}
+        except Exception:
+            _log.warning(
+                "Postgres stop-metadata enrichment failed for agency %s — degrading to missing stop info",
+                agency_id,
+                exc_info=True,
+            )
+
+    for row in out_rows:
+        metadata = metadata_by_trip.get(row["trip_id"], {})
+        row["stop_id"] = metadata.get("stop_id") or row["stop_id"]
+        row["stop_name"] = metadata.get("stop_name")
+        row["stop_lat"] = metadata.get("stop_lat")
+        row["stop_lon"] = metadata.get("stop_lon")
+        row["headsign"] = metadata.get("trip_headsign")
     return {
         "latest_captured_at": latest_ts.isoformat(),
         "rows": out_rows,

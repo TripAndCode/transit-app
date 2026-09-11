@@ -53,3 +53,17 @@ CRON_TZ=Asia/Tokyo
 # a VM that is down or a cron that stopped firing can only be caught by the
 # all-clear failing to arrive.
 */30 * * * * /home/opc/collector/bin/health-check.sh >> /home/opc/collector/cron.log 2>&1
+# status-snapshot.sh is a pure report (see its own header): it re-derives one
+# operations-status document from the same on-disk evidence health-check.sh
+# and verify-r2.sh already produce and never pages on its own, so it needs
+# neither health-check.sh's un-wrapped self-alerting nor R2 credentials.
+# publish-status.sh sends that document onward to GitHub as a
+# repository_dispatch event for the VPS's operations status picture to read
+# back out -- both offset a few minutes from health-check.sh's own :00/:30 so
+# the three don't fire in the same instant, though nothing here shares state
+# with it. A publish failure (channel down, token revoked) pages via
+# cron-wrap.sh like any other job, but is otherwise fully isolated: neither
+# line's success or failure changes anything sync-r2.sh, verify-r2.sh, or
+# health-check.sh do.
+5,35 * * * * /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/status-snapshot.sh >> /home/opc/collector/cron.log 2>&1
+7,37 * * * * set -a; . /etc/environment; set +a; /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/publish-status.sh >> /home/opc/collector/cron.log 2>&1

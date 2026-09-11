@@ -98,4 +98,79 @@ describe("WeatherDelayPanel", () => {
     const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
     expect(container.querySelector(".skeleton")).toBeInTheDocument();
   });
+
+  it("renders no bucket chart when buckets is absent (older API response)", () => {
+    mockWeatherDelay({
+      data: {
+        available: true,
+        station: { station_id: "47765", station_name: "Example Station", note: null },
+        wet_day_threshold_mm: 1.0,
+        wet: { days: 8, samples: 240, avg_delay_sec: 95.5, avg_precip_mm: 12.3 },
+        dry: { days: 22, samples: 660, avg_delay_sec: 60.2, avg_precip_mm: 0.0 },
+        delta_sec: 35.3,
+        low_confidence: false,
+        ctx: CTX,
+        disclaimer: "Observed rainfall, not a forecast or a causal claim.",
+        attribution: "Source: example weather service",
+      },
+    });
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+
+    expect(screen.queryByText("Delay by rainfall amount")).not.toBeInTheDocument();
+  });
+
+  it("renders no bucket chart when buckets is an empty array", () => {
+    mockWeatherDelay({
+      data: {
+        available: true,
+        station: { station_id: "47765", station_name: "Example Station", note: null },
+        wet_day_threshold_mm: 1.0,
+        wet: { days: 8, samples: 240, avg_delay_sec: 95.5, avg_precip_mm: 12.3 },
+        dry: { days: 22, samples: 660, avg_delay_sec: 60.2, avg_precip_mm: 0.0 },
+        delta_sec: 35.3,
+        low_confidence: false,
+        ctx: CTX,
+        disclaimer: "Observed rainfall, not a forecast or a causal claim.",
+        attribution: "Source: example weather service",
+        buckets: [],
+      },
+    });
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+
+    expect(screen.queryByText("Delay by rainfall amount")).not.toBeInTheDocument();
+  });
+
+  it("renders a bar per bucket with average delay and sample count, and a muted placeholder for an empty bucket", () => {
+    mockWeatherDelay({
+      data: {
+        available: true,
+        station: { station_id: "47765", station_name: "Example Station", note: null },
+        wet_day_threshold_mm: 1.0,
+        wet: { days: 8, samples: 240, avg_delay_sec: 95.5, avg_precip_mm: 12.3 },
+        dry: { days: 22, samples: 660, avg_delay_sec: 60.2, avg_precip_mm: 0.0 },
+        delta_sec: 35.3,
+        low_confidence: false,
+        ctx: CTX,
+        disclaimer: "Observed rainfall, not a forecast or a causal claim.",
+        attribution: "Source: example weather service",
+        buckets: [
+          { label: "0mm", days: 22, samples: 660, avg_delay_sec: 60.2 },
+          { label: "0-5mm", days: 5, samples: 150, avg_delay_sec: 80.1 },
+          { label: "5-20mm", days: 3, samples: 90, avg_delay_sec: 110.4 },
+          { label: "20mm+", days: 0, samples: 0, avg_delay_sec: null },
+        ],
+      },
+    });
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+
+    expect(screen.getByText("Delay by rainfall amount")).toBeInTheDocument();
+    expect(screen.getByText("0mm")).toBeInTheDocument();
+    expect(screen.getByText("0-5mm")).toBeInTheDocument();
+    expect(screen.getByText("5-20mm")).toBeInTheDocument();
+    expect(screen.getByText("20mm+")).toBeInTheDocument();
+    expect(screen.getByText("80.1s")).toBeInTheDocument();
+    expect(screen.getByText("110.4s")).toBeInTheDocument();
+    expect(screen.getByText("660 samples")).toBeInTheDocument();
+    expect(screen.getByText("No data")).toBeInTheDocument();
+  });
 });
