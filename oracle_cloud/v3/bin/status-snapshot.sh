@@ -271,7 +271,11 @@ else
     else
         case "${verify_total:-}" in
             ''|*[!0-9]*) ;;
-            *) r2_object_total="$verify_total" ;;
+            # `10#` forces base-10 evaluation so a leading-zero marker value
+            # (e.g. "0007") normalizes to a plain integer instead of
+            # surviving verbatim into the JSON output, where a leading zero
+            # is not a valid number token.
+            *) r2_object_total=$(( 10#$verify_total )) ;;
         esac
         if [ "$verify_result" = "fail" ]; then
             # The highest-severity state wins regardless of how old (or
@@ -296,8 +300,7 @@ else
     fi
 fi
 
-# r2_state is the worse of sync/verify; ties keep sync's own epoch, matching
-# the fixed rt > static > sync > verify priority order used below.
+# r2_state is the worse of sync/verify; ties keep sync's own epoch.
 if [ "$(severity_rank "$verify_state")" -gt "$(severity_rank "$sync_state")" ]; then
     r2_state="$verify_state"; r2_epoch="$verify_epoch"
 else
@@ -305,11 +308,11 @@ else
 fi
 
 # --- combine rt/static/r2 into one document-level state ---
+# Ties break by this loop's own iteration order (rt, then static, then r2).
 overall_state=healthy
 overall_epoch=""
 overall_rank=-1
 for pair in "rt:$rt_state:$rt_epoch" "static:$static_state:$static_epoch" "r2:$r2_state:$r2_epoch"; do
-    name="${pair%%:*}"
     rest="${pair#*:}"
     state="${rest%%:*}"
     epoch="${rest#*:}"
@@ -338,6 +341,11 @@ if [ -z "$overall_epoch" ]; then
 else
     last_success_json="\"$(epoch_to_iso "$overall_epoch")\""
     age_seconds_json=$(( NOW - overall_epoch ))
+    # A marker/mtime timestamp comes from an independent process and is not
+    # guaranteed to be causally before this script's own NOW (e.g. a
+    # backward clock step) -- clamp rather than emit a negative age, which
+    # scripts/ops_status.py's contract rejects outright.
+    [ "$age_seconds_json" -ge 0 ] || age_seconds_json=0
 fi
 
 observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -354,7 +362,15 @@ if df_line=$(df -Pk "$BASE_DIR" 2>/dev/null | awk 'NR==2 {print $4, $5}'); then
 fi
 
 num_or_null() { [ -n "${1:-}" ] && [ "$1" != null ] && echo "$1" || echo null; }
-age_or_null() { [ -n "${1:-}" ] && echo $(( NOW - $1 )) || echo null; }
+# Clamped at zero for the same reason the top-level age_seconds is: the
+# epoch comes from an independent process's own marker/mtime, not
+# guaranteed causally before this script's NOW.
+age_or_null() {
+    [ -n "${1:-}" ] || { echo null; return; }
+    local age=$(( NOW - $1 ))
+    [ "$age" -ge 0 ] || age=0
+    echo "$age"
+}
 
 rt_worst_age_seconds=$(age_or_null "$rt_epoch")
 static_worst_age_seconds=$(age_or_null "$static_epoch")

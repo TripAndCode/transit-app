@@ -15,6 +15,7 @@ OUT="$COLLECTOR_BASE/.status/oracle-crawler-status.json"
 day=$(date -u +%Y%m%d)
 old_ts=$(date -v-30d +%Y%m%d%H%M 2>/dev/null || date -d "30 days ago" +%Y%m%d%H%M)
 old_iso=$(date -u -v-30d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "30 days ago" +%Y-%m-%dT%H:%M:%SZ)
+future_ts=$(date -v+1d +%Y%m%d%H%M 2>/dev/null || date -d "1 day" +%Y%m%d%H%M)
 
 # Agency 1 has no static_url (its static GTFS is collected off-VM, matching
 # the real Aomori configuration); agency 8 has one.
@@ -213,6 +214,35 @@ printf '%s ok 4321\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verif
 run_snapshot
 grep -q '"r2_object_total":4321' "$OUT" || fail "r2_object_total should be read from verify-r2.sh's marker: $(cat "$OUT")"
 pass "the R2 object total from verify-r2.sh's marker is carried into the document"
+
+# A leading-zero r2_object_total in the marker (hand-edited or from a
+# differently-formatted writer) must normalize to a plain integer -- a
+# literal leading zero is not a valid JSON number token.
+seed_healthy
+printf '%s ok 0042\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
+run_snapshot
+grep -q '"r2_object_total":42' "$OUT" || \
+    fail "a leading-zero r2_object_total marker value should normalize to a plain integer: $(cat "$OUT")"
+if [ "$have_python3" -eq 1 ]; then
+    python3 -c "import json; json.load(open('$OUT'))" || \
+        fail "a leading-zero r2_object_total must not break the document's JSON validity: $(cat "$OUT")"
+fi
+pass "a leading-zero r2_object_total marker value normalizes to a plain integer"
+
+# A future-dated marker/mtime (e.g. after a backward clock step elsewhere)
+# must not produce a negative age -- both the per-subsystem detail age and
+# the document-level age_seconds are clamped at zero.
+seed_healthy
+touch -t "$future_ts" "$COLLECTOR_BASE/data/1/rt/$day/TripUpdate_010203.pb"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a future-dated RT sample should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"rt_worst_age_seconds":-' "$OUT" && fail "rt_worst_age_seconds must not be negative: $(cat "$OUT")"
+grep -q '"age_seconds":-' "$OUT" && fail "the document-level age_seconds must not be negative: $(cat "$OUT")"
+if [ "$have_python3" -eq 1 ]; then
+    python3 -c "import json; json.load(open('$OUT'))" || \
+        fail "a future-dated marker must not break the document's JSON validity: $(cat "$OUT")"
+fi
+pass "a future-dated RT sample clamps both rt_worst_age_seconds and age_seconds at zero instead of going negative"
 
 # Disk usage details are populated with plausible (non-null) numbers.
 seed_healthy
