@@ -5,7 +5,6 @@ import {
   Map as MapIcon,
   BarChart3,
   GitCompare,
-  History,
   HelpCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -31,7 +30,6 @@ const ITEMS: ExplorerItem[] = [
   { key: "map", labelKey: "nav.map", previewKey: "nav.map_subtitle", Icon: MapIcon },
   { key: "analysis", labelKey: "nav.analysis", previewKey: "nav.analysis_subtitle", Icon: BarChart3 },
   { key: "network", labelKey: "nav.network", previewKey: "nav.network_subtitle", Icon: GitCompare },
-  { key: "live", labelKey: "nav.live", previewKey: "nav.live_subtitle", Icon: History },
   { key: "ask", labelKey: "nav.ask", previewKey: "landing.explorer.ask_preview", Icon: HelpCircle },
 ];
 

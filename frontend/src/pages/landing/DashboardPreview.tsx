@@ -5,7 +5,6 @@ import { PreviewOverviewPanel } from "./PreviewOverviewPanel";
 import { PreviewMapPanel } from "./PreviewMapPanel";
 import { PreviewAnalysisPanel } from "./PreviewAnalysisPanel";
 import { PreviewNetworkPanel } from "./PreviewNetworkPanel";
-import { PreviewLivePanel } from "./PreviewLivePanel";
 import { PreviewAskPanel } from "./PreviewAskPanel";
 import { PreviewHelpHint } from "./PreviewHelpHint";
 import type { PreviewAgencyKey } from "./previewData";
@@ -15,7 +14,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 // real sidebar's nav list (`PreviewSidebar`'s `ITEMS`). "ask" is deliberately
 // excluded -- it's a CTA the visitor opts into, not a peer tab, matching how
 // `PreviewSidebar` itself treats it.
-const AUTO_ADVANCE_ORDER: PreviewTabKey[] = ["overview", "map", "analysis", "network", "live"];
+const AUTO_ADVANCE_ORDER: PreviewTabKey[] = ["overview", "map", "analysis", "network"];
 
 // A visitor who never touches the preview should still see the whole cycle
 // play out like a demo video would; one tab change every few seconds reads
@@ -118,7 +117,6 @@ export function DashboardPreview() {
             {activeTab === "map" && <PreviewMapPanel />}
             {activeTab === "analysis" && <PreviewAnalysisPanel />}
             {activeTab === "network" && <PreviewNetworkPanel selectedKey={agencyKey} onSelect={setAgencyKey} />}
-            {activeTab === "live" && <PreviewLivePanel />}
             {activeTab === "ask" && <PreviewAskPanel />}
           </div>
           <PreviewHelpHint />

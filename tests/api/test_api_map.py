@@ -131,8 +131,7 @@ async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     row = next(r for r in rows if r["trip_id"] == "T_TIE")
-    # stop_sequence isn't in the response, but its winning values are:
-    # stop_sequence=1 (the lower one) must win the tie, not stop_sequence=2.
+    assert row["stop_sequence"] == 1
     assert row["dep_delay"] == 60
     assert row["scheduled_time"] == "10:05:00"
     assert row["route_code"] == "R_TIE"
@@ -162,6 +161,45 @@ async def test_live_delays_normalizes_5char_scheduled_time_to_hhmmss(map_app_ch,
     rows = resp.json()["rows"]
     row = next(r for r in rows if r["trip_id"] == "T_5CHAR")
     assert row["scheduled_time"] == "10:05:00"
+
+
+@pytest.mark.asyncio
+async def test_live_delays_resolves_stop_location_from_static_schedule(map_app_ch, ch_client):
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'S2', '中央駅', 40.8123, 140.7456, ST_SetSRID(ST_MakePoint(140.7456, 40.8123), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, trip_headsign) "
+            "VALUES ($1, 'T_STATIC', 'R_STATIC', '市役所前')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "VALUES ($1, 'T_STATIC', 2, 'S2')",
+            agency_id,
+        )
+    insert_updates(
+        ch_client,
+        agency_id=agency_id,
+        rows=[("live.pb", "2026-05-09T10:00:00Z", "T_STATIC", "weekday", "10:05", "R_STATIC", 2, 180)],
+    )
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live")
+
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["rows"] if r["trip_id"] == "T_STATIC")
+    assert row["stop_id"] == "S2"
+    assert row["stop_name"] == "中央駅"
+    assert row["stop_lat"] == 40.8123
+    assert row["stop_lon"] == 140.7456
+    assert row["headsign"] == "市役所前"
 
 
 @pytest.mark.asyncio

@@ -16,3 +16,10 @@ export function RedirectForecastToAnalysis() {
   const location = useLocation();
   return <Navigate to={`/agencies/${agencyId}/analysis/route_forecast${location.search}`} replace />;
 }
+
+/** Redirect the former standalone live board to the unified Operations map. */
+export function RedirectLiveToOperations() {
+  const { agencyId } = useParams();
+  const location = useLocation();
+  return <Navigate to={`/agencies/${agencyId}/map${location.search}`} replace />;
+}

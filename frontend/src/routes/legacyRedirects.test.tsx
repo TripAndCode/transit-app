@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { RedirectReportsToAnalysis, RedirectForecastToAnalysis } from "./legacyRedirects";
+import { RedirectReportsToAnalysis, RedirectForecastToAnalysis, RedirectLiveToOperations } from "./legacyRedirects";
 
 function DummyTarget({ label }: { label: string }) {
   return <div>{label}</div>;
@@ -49,6 +49,21 @@ describe("legacy redirects", () => {
     render(<RouterProvider router={router} />);
     expect(screen.getByText("route-forecast-landing")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/8/analysis/route_forecast");
+    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("redirects /agencies/:id/live to Operations and preserves filters", () => {
+    const router = createMemoryRouter(
+      [
+        { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
+        { path: "agencies/:agencyId/map", element: <DummyTarget label="operations" /> },
+      ],
+      { initialEntries: ["/agencies/8/live?from=2026-06-07&to=2026-06-10"] },
+    );
+    render(<RouterProvider router={router} />);
+    expect(screen.getByText("operations")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/agencies/8/map");
     expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
     expect(router.state.historyAction).toBe("REPLACE");
   });

@@ -7,7 +7,6 @@ import {
   GitCompare,
   HelpCircle,
   Clock,
-  History,
   CircleSlash,
   SquareDashed,
   ChevronLeft,
@@ -31,7 +30,6 @@ const ITEMS: Item[] = [
   { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
   { to: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
   { to: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
-  { to: "live", labelKey: "nav.live", subtitleKey: "nav.live_subtitle", Icon: History },
 ];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
