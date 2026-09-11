@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-export type RouteMode = "trend" | "hourly";
+type RouteMode = "trend" | "hourly";
 
 const MODES: readonly RouteMode[] = ["trend", "hourly"];
 
