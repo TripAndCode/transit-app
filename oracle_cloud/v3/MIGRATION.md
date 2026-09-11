@@ -175,7 +175,7 @@ record (a first-ever failure, or the marker was never written), the document
 reports `last_success_at: null`/`age_seconds: null` alongside `state:
 "failed"`, the same way `rt_state`/`static_state` report `null`/`unknown` for
 "no evidence yet" — and writes it atomically to
-`data/../.status/oracle-crawler-status.json`. Unlike `health-check.sh` it
+`$COLLECTOR_BASE/.status/oracle-crawler-status.json`. Unlike `health-check.sh` it
 never pages on its own; an unhealthy *reported* state is the normal, valid
 output of a successful run, not a script failure.
 

@@ -173,6 +173,14 @@ def test_collect_oracle_status_rejects_a_document_that_fails_contract_validation
     assert not cache.exists()
 
 
+def test_collect_oracle_status_rejects_a_contract_valid_document_for_another_component(tmp_path: Path):
+    cache = tmp_path / "watermark.json"
+    other_component_doc = make_document(T0, state_kwargs={"component": "vps_loop"})
+    with pytest.raises(OracleStatusUnavailable, match="expected 'oracle_crawler'"):
+        collect_oracle_status(cache_path=cache, log_fetcher=fetcher_returning(log_with(other_component_doc)))
+    assert not cache.exists()
+
+
 def test_collect_oracle_status_leaves_no_watermark_after_an_unavailable_channel(tmp_path: Path):
     cache = tmp_path / "watermark.json"
     with pytest.raises(OracleStatusUnavailable):

@@ -14,8 +14,8 @@
 #
 # Authentication: ORACLE_STATUS_GH_TOKEN, a fine-grained personal access
 # token scoped to nothing but triggering `repository_dispatch` on this repo.
-# Replay resistance: the receiving collector (a future VPS-side reader) never
-# lets an older or repeated `observed_at` overwrite a newer one it already
+# Replay resistance: the receiving collector (`scripts/collect_oracle_status.py`)
+# never lets an older or repeated `observed_at` overwrite a newer one it already
 # accepted, so replaying a captured request can at best re-report a fact
 # already on record -- it can never make stale data look fresh again. This
 # script's own job stops at delivering the document; it does not implement

@@ -174,6 +174,10 @@ def collect_oracle_status(
         status = from_json_dict(raw)
     except OpsStatusError as exc:
         raise OracleStatusUnavailable(f"ORACLE_STATUS document failed contract validation: {exc}") from exc
+    if status.component != "oracle_crawler":
+        raise OracleStatusUnavailable(
+            f"ORACLE_STATUS document reports component {status.component!r}, expected 'oracle_crawler'"
+        )
 
     watermark = _load_watermark(cache_path)
     if watermark is not None and status.observed_at <= watermark:

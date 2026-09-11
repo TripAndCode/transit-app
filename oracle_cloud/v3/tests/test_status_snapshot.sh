@@ -68,9 +68,21 @@ rm -f "$COLLECTOR_BASE/etc/agencies.tsv"
 run_snapshot
 [ "$rc" -eq 0 ] || fail "a missing roster should still exit 0 (unknown is a valid report): $(cat "$TEST_BASE/out.log")"
 grep -q '"state":"unknown"' "$OUT" || fail "a missing roster should report state=unknown: $(cat "$OUT")"
+grep -q '"static_state":"unknown"' "$OUT" || fail "a missing roster should report static_state=unknown: $(cat "$OUT")"
 grep -q '"last_success_at":null' "$OUT" || fail "unknown state must pair with a null last_success_at"
 grep -q '"age_seconds":null' "$OUT" || fail "unknown state must pair with a null age_seconds"
 pass "a missing agencies roster reports state=unknown instead of failing the script"
+
+# A roster file that exists but has zero data rows (header only) is the same
+# underlying fact as a missing roster -- no agencies configured at all -- and
+# must report the same static_state, not a different one.
+seed_healthy
+printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' > "$COLLECTOR_BASE/etc/agencies.tsv"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a header-only roster should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"static_state":"unknown"' "$OUT" || \
+    fail "a header-only roster should report static_state=unknown, matching a missing roster: $(cat "$OUT")"
+pass "a header-only roster (zero agencies configured) reports static_state=unknown, matching a missing roster"
 
 # An agency's RT poller went stale: overall state follows RT down to stale.
 seed_healthy
@@ -193,7 +205,7 @@ pass "a non-numeric threshold is rejected with exit 64 and writes nothing"
 # The write is atomic: no leftover temp file survives a normal run.
 seed_healthy
 run_snapshot
-leftover=$(find "$COLLECTOR_BASE/.status" -name '*.XXXXXX' -o -name 'oracle-crawler-status.json.??????' 2>/dev/null)
+leftover=$(find "$COLLECTOR_BASE/.status" -name 'oracle-crawler-status.json.??????' 2>/dev/null)
 [ -z "$leftover" ] || fail "a temp file was left behind after an atomic write: $leftover"
 pass "the status document is written atomically with no leftover temp file"
 

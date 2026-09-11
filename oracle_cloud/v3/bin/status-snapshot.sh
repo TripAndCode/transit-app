@@ -182,7 +182,7 @@ else
 
     if [ "$agencies_configured" -eq 0 ]; then
         rt_state=unknown; rt_epoch=""
-        static_state=not_applicable; static_epoch=""
+        static_state=unknown; static_epoch=""
     else
         if [ "$rt_missing_ever" -eq 1 ]; then
             rt_state=unknown; rt_epoch=""
