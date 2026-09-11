@@ -57,10 +57,10 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
         disabled={disabled}
         onMouseEnter={(e) => {
           if (disabled) return;
-          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.07)";
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--hover-tint)";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft, rgba(0,0,0,0.04))";
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
         }}
         style={{
           background: "var(--bg-soft, rgba(0,0,0,0.04))",

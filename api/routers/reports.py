@@ -278,6 +278,18 @@ class WeatherDelayGroup(BaseModel):
     avg_precip_mm: float | None
 
 
+class WeatherDelayBucket(BaseModel):
+    """One precipitation bucket (`pipeline.reports.weather.RAIN_BUCKET_LABELS`)
+    of the additive breakdown alongside the wet/dry split -- same pooling rule
+    as `WeatherDelayGroup.avg_delay_sec`, but bucketed by that day's own
+    rainfall rather than the `wet_day_threshold_mm` cutoff."""
+
+    label: str
+    days: int
+    samples: int
+    avg_delay_sec: float | None
+
+
 class WeatherDelayResponse(BaseModel):
     """Payload for `GET /weather_delay` -- observed rainfall matched to service
     days, NOT a forecast and NOT a causal claim; `disclaimer` says both in
@@ -292,7 +304,9 @@ class WeatherDelayResponse(BaseModel):
     (rainy minus non-rainy, seconds) is `None` when either side has no days,
     e.g. a window with no rainy days, which is a real answer rather than
     missing data; `low_confidence` is set whenever either side is thin enough
-    that the difference should not be read as a stable effect.
+    that the difference should not be read as a stable effect. `buckets` is a
+    finer, additive breakdown of the same matched days and does not affect
+    `wet`/`dry`/`delta_sec`/`low_confidence`.
     """
 
     available: bool
@@ -302,6 +316,7 @@ class WeatherDelayResponse(BaseModel):
     dry: WeatherDelayGroup
     delta_sec: float | None
     low_confidence: bool
+    buckets: list[WeatherDelayBucket]
     ctx: ReportCtx
     disclaimer: str
     attribution: str

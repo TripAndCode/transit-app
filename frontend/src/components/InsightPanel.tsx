@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import "./InsightPanel.css";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
 import { delayColor } from "../styles/tokens";
@@ -190,12 +191,15 @@ export function InsightPanel({ className }: { className?: string } = {}) {
               <button
                 type="button"
                 onClick={handleView}
+                className="insight-panel__view-button"
                 style={{
                   fontSize: 12,
                   padding: "6px 12px",
                   borderRadius: "var(--radius-lg)",
-                  border: "1px solid var(--border-subtle)",
+                  border: "1px solid var(--accent)",
                   background: "var(--accent-soft)",
+                  color: "var(--text-primary)",
+                  fontWeight: 600,
                   cursor: "pointer",
                 }}
               >
