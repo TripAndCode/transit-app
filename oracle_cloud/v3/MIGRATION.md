@@ -158,6 +158,49 @@ Verify before relying on it:
     ALERT_PING_URL= COLLECTOR_BASE=/tmp/nope /home/opc/collector/bin/health-check.sh; echo "exit=$?"
     # expect exit=64 (missing roster) and the reason on stderr, nothing pinged
 
+## 12. Operations-status heartbeat
+`bin/status-snapshot.sh` (cron, every 30 min) builds one operations-status
+document (see `scripts/ops_status.py` in the main repo checkout for the
+contract) from the same on-disk evidence `health-check.sh`/`verify-r2.sh`
+already produce — RT/static freshness, local disk usage, the `.sync-r2.last-
+ok` marker, and two markers `verify-r2.sh` writes: `.verify-r2.last-result`
+(`<ISO8601> <ok|fail> <object_count>`, written on every completed run,
+success or failure — this drives `verify_result`/the `failed` state) and
+`.verify-r2.last-success` (a bare `<ISO8601>` timestamp, written only when a
+run succeeds). The document's `last_success_at`/`age_seconds` for this
+subsystem always come from the success-only marker, never from
+`.last-result`'s own timestamp — otherwise a failed run's own completion time
+would masquerade as a success. When there is no genuine prior success on
+record (a first-ever failure, or the marker was never written), the document
+reports `last_success_at: null`/`age_seconds: null` alongside `state:
+"failed"`, the same way `rt_state`/`static_state` report `null`/`unknown` for
+"no evidence yet" — and writes it atomically to
+`$COLLECTOR_BASE/.status/oracle-crawler-status.json`. Unlike `health-check.sh` it
+never pages on its own; an unhealthy *reported* state is the normal, valid
+output of a successful run, not a script failure.
+
+`bin/publish-status.sh` (cron, right after it) sends that document to GitHub
+as a `repository_dispatch` event, authenticated with `ORACLE_STATUS_GH_TOKEN`
+— a fine-grained personal access token for this repo. The `dispatches`
+endpoint's only available grant is repository Contents: read & write, the
+same permission needed to push commits or write/delete files via the
+Contents API, so this token is push-equivalent access to this repo, not a
+heartbeat-only capability, and is held and rotated with that same rigor.
+This is HTTPS end to end; nothing about
+this channel ever needs Oracle's own SSH private key (or a copy of it) to
+exist anywhere else, and the VPS reads the result back out via its own,
+already-configured `gh` authentication (see `.github/workflows/oracle-
+heartbeat-listener.yml` and `scripts/collect_oracle_status.py`) — no new
+credential is needed on the VPS side at all.
+
+Provisioning: add `ORACLE_STATUS_GH_TOKEN=<token>` to `/etc/environment`
+alongside the other secrets already documented above. Leaving it unset is a
+supported configuration: `publish-status.sh` logs that publishing is
+disabled and exits 0, so a VM without a token (or one where this channel is
+intentionally turned off) still runs every other cron job exactly as before
+— nothing else in `crontab.snippet` depends on either of these two new
+lines succeeding.
+
 ## Rollback (any point before step 10)
     sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10'
     crontab /tmp/crontab.backup.*    # restores @reboot v1 line
