@@ -4,8 +4,9 @@ CRON_TZ=Asia/Tokyo
 # output, and a nonzero exit additionally pings ALERT_PING_URL/fail with the
 # job name, its status, and the tail of that output. Without the wrapper a
 # failure is only ever written to cron.log, where nobody sees it.
-# ALERT_PING_URL (and the OBJECT_STORE_* vars sync-r2.sh needs) live in
-# /etc/environment — cron does not source ~/.bashrc.
+# ALERT_PING_URL (and the OBJECT_STORE_* vars sync-r2.sh needs, plus
+# SPOOL_DISK_BUDGET_BYTES for spool-cleanup.sh) live in /etc/environment —
+# cron does not source ~/.bashrc.
 #
 # 5-minute offsets are generous, not exact: static-fetch.sh/rotate-day.sh
 # write via mktemp+atomic mv, so even a slow run overlapping the next job
@@ -18,6 +19,14 @@ CRON_TZ=Asia/Tokyo
 # objects and checks freshness + byte-size integrity, rather than trusting
 # sync-r2.sh's own exit status -- runs right after it, same env sourcing.
 15 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/verify-r2.sh  >> /home/opc/collector/cron.log 2>&1
+# spool-cleanup.sh reclaims local disk immediately, file by file, the moment
+# R2 actually confirms (its own listing + byte-size match, not just trusting
+# sync-r2.sh's exit status) that a specific RT/static archive is uploaded --
+# rather than waiting out prune.sh's much longer age-based retention window
+# below. A failed/partial upload is left in place for the next sync-r2.sh run
+# to retry, and exceeding SPOOL_DISK_BUDGET_BYTES is reported as a failure,
+# never as a further deletion. Idempotent: safe to run daily.
+20 9 * * *  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/spool-cleanup.sh  >> /home/opc/collector/cron.log 2>&1
 # prune.sh REFUSES to run (exit 65) unless sync-r2.sh's .sync-r2.last-ok
 # marker is fresh (see both scripts) -- replaces the old "workstation
 # mirror" (this repo's make fetch + make sync-r2) as prune's actual,
