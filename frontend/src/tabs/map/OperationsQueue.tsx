@@ -68,7 +68,12 @@ export function OperationsQueue({ routes, trips, selectedRoute, formatRoute, onS
         </div>
       )}
       <div className="ops-queue__footer">
-        {t("operations.queue.normal_routes", { count: bucketRoutes(routes, "normal").length })}
+        {t("operations.queue.normal_routes", {
+          // "no_baseline" routes are operating fine (below the raw-delay
+          // thresholds) but have no historical baseline to deviate from --
+          // they belong in the same "nothing to worry about" tally as normal.
+          count: bucketRoutes(routes, "normal").length + bucketRoutes(routes, "no_baseline").length,
+        })}
       </div>
     </aside>
   );

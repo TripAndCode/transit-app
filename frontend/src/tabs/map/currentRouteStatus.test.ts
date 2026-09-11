@@ -47,19 +47,33 @@ describe("buildCurrentRouteSummaries", () => {
     expect(route.trips_observed).toBe(2);
   });
 
-  it("keeps a delayed active route visible before a baseline exists", () => {
+  it("keeps a delayed active route visible before a baseline exists, but caps a single-trip sample at watch", () => {
     const [route] = buildCurrentRouteSummaries([trip("NEW", 360)], []);
-    expect(route.bucket).toBe("anomaly");
+    expect(route.bucket).toBe("watch");
     expect(route.has_baseline).toBe(false);
+    expect(route.low_confidence).toBe(true);
+  });
+
+  it("promotes a baseline-less route to anomaly once enough trips confirm it", () => {
+    const [route] = buildCurrentRouteSummaries([trip("NEW", 360), trip("NEW", 400)], []);
+    expect(route.bucket).toBe("anomaly");
+    expect(route.low_confidence).toBe(false);
   });
 
   it("uses the baseline for the active service type", () => {
     const weekend = { ...baseline(), service_type: "weekend", baseline_avg_sec: 300, baseline_p90_sec: 600 };
     const weekday = { ...baseline(), baseline_avg_sec: 60, baseline_p90_sec: 240 };
-    const [route] = buildCurrentRouteSummaries([trip("12", 360)], [weekend, weekday]);
+    const [route] = buildCurrentRouteSummaries([trip("12", 360), trip("12", 340)], [weekend, weekday]);
 
     expect(route.service_type).toBe("weekday");
     expect(route.baseline_avg_sec).toBe(60);
     expect(route.bucket).toBe("anomaly");
+  });
+
+  it("caps a single-trip anomaly at watch even when a baseline exists", () => {
+    const [route] = buildCurrentRouteSummaries([trip("12", 360)], [baseline()]);
+    expect(route.has_baseline).toBe(true);
+    expect(route.low_confidence).toBe(true);
+    expect(route.bucket).toBe("watch");
   });
 });

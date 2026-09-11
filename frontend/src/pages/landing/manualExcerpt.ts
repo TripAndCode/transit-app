@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 const MANUAL_BASE = "/user-manual";
 
 export type Locale = "en" | "ja";
-export type TabManualKey = "overview" | "map" | "analysis" | "network" | "live" | "ask";
+export type TabManualKey = "overview" | "map" | "analysis" | "network" | "ask";
 
 // The user manual (public/user-manual/{en,ja}.md) numbers its top-level
 // sections 1-9 in the same order in both locales --
@@ -16,7 +16,6 @@ const HEADING_NUMBER: Record<TabManualKey, number> = {
   map: 4,
   analysis: 5,
   network: 6,
-  live: 7,
   ask: 8,
 };
 

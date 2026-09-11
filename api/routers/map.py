@@ -154,7 +154,7 @@ async def live_delays(
               AND u.captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE
             GROUP BY u.trip_id
         ) AS grouped
-        ORDER BY dep_delay DESC, trip_id
+        ORDER BY trip_id
         LIMIT {limit:UInt32}
         """,
         parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
@@ -176,39 +176,50 @@ async def live_delays(
         trip_ids = [row["trip_id"] for row in out_rows]
         stop_sequences = [row["stop_sequence"] for row in out_rows]
         rt_stop_ids = [row["stop_id"] for row in out_rows]
-        metadata_rows = await conn.fetch(
-            """
-            WITH live AS (
-                SELECT *
-                FROM unnest($2::text[], $3::integer[], $4::text[])
-                    AS x(trip_id, stop_sequence, rt_stop_id)
+        # Stop/headsign enrichment is non-critical relative to the ClickHouse
+        # trip/delay data above (same "one sub-check must not sink the whole
+        # response" shape as the freshness probe elsewhere in this file) — a
+        # Postgres hiccup degrades to missing stop metadata, not a 500.
+        try:
+            metadata_rows = await conn.fetch(
+                """
+                WITH live AS (
+                    SELECT *
+                    FROM unnest($2::text[], $3::integer[], $4::text[])
+                        AS x(trip_id, stop_sequence, rt_stop_id)
+                )
+                SELECT live.trip_id,
+                       COALESCE(rt_stop.stop_id, scheduled_stop.stop_id) AS stop_id,
+                       COALESCE(rt_stop.stop_name, scheduled_stop.stop_name) AS stop_name,
+                       COALESCE(rt_stop.stop_lat, scheduled_stop.stop_lat) AS stop_lat,
+                       COALESCE(rt_stop.stop_lon, scheduled_stop.stop_lon) AS stop_lon,
+                       st.trip_headsign
+                FROM live
+                LEFT JOIN static_stop_times sst
+                  ON sst.agency_id = $1
+                 AND sst.trip_id = live.trip_id
+                 AND sst.stop_sequence = live.stop_sequence
+                LEFT JOIN static_stops rt_stop
+                  ON rt_stop.agency_id = $1
+                 AND rt_stop.stop_id = NULLIF(live.rt_stop_id, '')
+                LEFT JOIN static_stops scheduled_stop
+                  ON scheduled_stop.agency_id = $1
+                 AND scheduled_stop.stop_id = sst.stop_id
+                LEFT JOIN static_trips st
+                  ON st.agency_id = $1 AND st.trip_id = live.trip_id
+                """,
+                agency_id,
+                trip_ids,
+                stop_sequences,
+                rt_stop_ids,
             )
-            SELECT live.trip_id,
-                   COALESCE(rt_stop.stop_id, scheduled_stop.stop_id) AS stop_id,
-                   COALESCE(rt_stop.stop_name, scheduled_stop.stop_name) AS stop_name,
-                   COALESCE(rt_stop.stop_lat, scheduled_stop.stop_lat) AS stop_lat,
-                   COALESCE(rt_stop.stop_lon, scheduled_stop.stop_lon) AS stop_lon,
-                   st.trip_headsign
-            FROM live
-            LEFT JOIN static_stop_times sst
-              ON sst.agency_id = $1
-             AND sst.trip_id = live.trip_id
-             AND sst.stop_sequence = live.stop_sequence
-            LEFT JOIN static_stops rt_stop
-              ON rt_stop.agency_id = $1
-             AND rt_stop.stop_id = NULLIF(live.rt_stop_id, '')
-            LEFT JOIN static_stops scheduled_stop
-              ON scheduled_stop.agency_id = $1
-             AND scheduled_stop.stop_id = sst.stop_id
-            LEFT JOIN static_trips st
-              ON st.agency_id = $1 AND st.trip_id = live.trip_id
-            """,
-            agency_id,
-            trip_ids,
-            stop_sequences,
-            rt_stop_ids,
-        )
-        metadata_by_trip = {row["trip_id"]: dict(row) for row in metadata_rows}
+            metadata_by_trip = {row["trip_id"]: dict(row) for row in metadata_rows}
+        except Exception:
+            _log.warning(
+                "Postgres stop-metadata enrichment failed for agency %s — degrading to missing stop info",
+                agency_id,
+                exc_info=True,
+            )
 
     for row in out_rows:
         metadata = metadata_by_trip.get(row["trip_id"], {})

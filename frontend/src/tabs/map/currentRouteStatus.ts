@@ -19,6 +19,11 @@ export function buildCurrentRouteSummaries(liveTrips: LiveTrip[], baselines: Rou
     const baselineP90Sec = baseline?.baseline_p90_sec ?? null;
     const hasBaseline = baselineAvgSec != null && baselineP90Sec != null;
     const deviationSec = hasBaseline ? Math.round(avgDelaySec - baselineAvgSec) : null;
+    // A single currently-reporting trip is too thin a sample to trust as an
+    // anomaly -- one outlier reading could dominate. Mirrors api/triage.py's
+    // classify_route, which caps a low-confidence route at "watch" and never
+    // promotes it to "anomaly".
+    const lowConfidence = trips.length < 2;
 
     let bucket: RouteSummary["bucket"];
     if (hasBaseline) {
@@ -26,6 +31,9 @@ export function buildCurrentRouteSummaries(liveTrips: LiveTrip[], baselines: Rou
       bucket = avgDelaySec > baselineP90Sec ? "anomaly" : avgDelaySec > midpoint ? "watch" : "normal";
     } else {
       bucket = avgDelaySec >= 300 ? "anomaly" : avgDelaySec >= 180 ? "watch" : "no_baseline";
+    }
+    if (lowConfidence && bucket === "anomaly") {
+      bucket = "watch";
     }
 
     return {
@@ -41,7 +49,7 @@ export function buildCurrentRouteSummaries(liveTrips: LiveTrip[], baselines: Rou
       baseline_samples: baseline?.baseline_samples ?? null,
       deviation_sec: deviationSec,
       bucket,
-      low_confidence: trips.length < 2,
+      low_confidence: lowConfidence,
       has_baseline: hasBaseline,
       late5_pct: trips.filter((trip) => trip.dep_delay >= 300).length / trips.length * 100,
     };

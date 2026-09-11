@@ -85,4 +85,24 @@ describe("OperationsQueue", () => {
     expect(screen.getByText("operations.queue.clear_title")).toBeInTheDocument();
     expect(screen.getByText("operations.queue.normal_routes")).toBeInTheDocument();
   });
+
+  it("counts no_baseline routes alongside normal ones instead of dropping them", () => {
+    render(
+      <OperationsQueue
+        routes={[
+          summary({ bucket: "normal", deviation_sec: 0 }),
+          summary({ route_code: "13", bucket: "no_baseline", has_baseline: false, deviation_sec: null }),
+        ]}
+        trips={[trip]}
+        selectedRoute={null}
+        formatRoute={(code) => code}
+        onSelectRoute={() => {}}
+        onOpenRoute={() => {}}
+        t={((key: string, values?: Record<string, unknown>) =>
+          values ? `${key}:${JSON.stringify(values)}` : key) as TFunction}
+      />,
+    );
+
+    expect(screen.getByText('operations.queue.normal_routes:{"count":2}')).toBeInTheDocument();
+  });
 });

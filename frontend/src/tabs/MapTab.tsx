@@ -151,6 +151,14 @@ export function MapTab() {
     map.once("style.load", () => setStyleEpoch((epoch) => epoch + 1));
   }, [i18n.language, styleId]);
 
+  useEffect(() => {
+    // A popup anchored to one trip renders a static snapshot (delay, stop,
+    // "updated X ago") captured at click time. Once the 30-second live
+    // refetch lands, that trip's data may already be stale or gone from the
+    // feed, so any open popup must close rather than keep showing it.
+    popupRef.current?.remove();
+  }, [liveQuery.data]);
+
   useBasemapDim(mapRef, styleEpoch, true);
   useOperationsMapLayers(
     mapRef,
