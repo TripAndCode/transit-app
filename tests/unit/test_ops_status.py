@@ -351,6 +351,16 @@ def test_validate_component_status_allows_unknown_with_null_age_on_reversed_time
     )
 
 
+def test_validate_component_status_rejects_unknown_state_with_non_null_age_and_last_success():
+    # `classify_state` never produces state="unknown" together with a non-null
+    # age_seconds when last_success_at is present -- a hand-authored document
+    # claiming otherwise must be rejected, not silently accepted.
+    with pytest.raises(OpsStatusError, match="state must not be 'unknown'"):
+        ops_status.validate_component_status(
+            _status(state="unknown", observed_at=T0, last_success_at=T0, age_seconds=0, details={})
+        )
+
+
 def test_validate_component_status_enforces_max_payload_size_even_when_details_pass_individually():
     details = {f"field_{i:02d}": "x" * ops_status.MAX_DETAIL_STRING_LENGTH for i in range(ops_status.MAX_DETAIL_KEYS)}
     ops_status.validate_details(details)  # each field individually passes
@@ -525,6 +535,18 @@ def test_json_schema_forbidden_key_pattern_allows_ordinary_keys():
     pattern = re.compile(ops_status.JSON_SCHEMA["properties"]["details"]["propertyNames"]["pattern"])
     for key in ("agencies_ok", "note", "ratio", "catalog_size"):
         assert pattern.match(key), f"schema pattern should allow ordinary key {key!r}"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["API_KEY", "Secret", "PASSWORD", "Api_Key", "TOKEN", "AccessKey", "LOG", "Traceback"],
+)
+def test_json_schema_forbidden_key_pattern_rejects_uppercase_and_mixed_case_keys(key):
+    # Reproduces the schema-only-validator gap: a document checked only against
+    # `JSON_SCHEMA` (not `validate_details`) must reject these the same way
+    # `validate_details` does, which relies on `_NAME_RE` requiring lowercase.
+    pattern = re.compile(ops_status.JSON_SCHEMA["properties"]["details"]["propertyNames"]["pattern"])
+    assert not pattern.match(key), f"schema pattern should reject non-lowercase forbidden-like key {key!r}"
 
 
 # --- CLI ------------------------------------------------------------------------

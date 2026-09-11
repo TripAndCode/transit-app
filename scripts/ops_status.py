@@ -112,12 +112,18 @@ _FORBIDDEN_KEY_EXACT = frozenset(
 )
 
 # Built from the same constants `validate_details` enforces at runtime, so
-# `JSON_SCHEMA`'s copy of the forbidden-key rule cannot drift from it. Keys are
-# already required elsewhere to be lowercase (`_NAME_RE`), so no case-insensitive
-# flag is needed here.
+# `JSON_SCHEMA`'s copy of the forbidden-key rule cannot drift from it. The tail
+# of the pattern inlines `_NAME_RE`'s own lowercase/length identifier shape
+# (rather than relying on `validate_details`'s separate, Python-only check),
+# so a schema-only validator rejects a mixed-/upper-case forbidden-like key
+# (e.g. `API_KEY`, `Secret`) exactly like `validate_details` does. No
+# case-insensitive flag is needed: any uppercase character already fails the
+# `[a-z]`-only shape, so the forbidden-word lookaheads only need to match the
+# lowercase spellings.
 _FORBIDDEN_KEY_PATTERN = (
     "^(?!(?:" + "|".join(sorted(re.escape(k) for k in _FORBIDDEN_KEY_EXACT)) + r")$)"
-    "(?!.*(?:" + "|".join(re.escape(s) for s in _FORBIDDEN_KEY_SUBSTRINGS) + ")).*$"
+    "(?!.*(?:" + "|".join(re.escape(s) for s in _FORBIDDEN_KEY_SUBSTRINGS) + "))"
+    r"[a-z][a-z0-9_]{0,63}$"
 )
 
 JSON_SCHEMA: dict = {
@@ -319,6 +325,11 @@ def _validate_freshness_invariants(
     """Cross-check `state`/`age_seconds` against `last_success_at`, per the module docstring's
     "`last_success_at: null` implies `unknown`/no success yet" rule and `classify_state`'s own
     derivation of these fields from the raw timestamps.
+
+    When `last_success_at` is present, `classify_state` only ever pairs
+    `age_seconds is None` with `state == "unknown"` (an internally
+    inconsistent timestamp ordering beyond `max_clock_skew_seconds`) -- so
+    this is enforced as a true iff, not just one direction.
     """
 
     if last_success_at is None:
@@ -339,6 +350,11 @@ def _validate_freshness_invariants(
         if state != "unknown":
             raise OpsStatusError(f"age_seconds must not be null when last_success_at is present and state is {state!r}")
         return
+    if state == "unknown":
+        raise OpsStatusError(
+            "state must not be 'unknown' when last_success_at is present and age_seconds is non-null "
+            "('unknown' only ever pairs with a null age_seconds in this case)"
+        )
     if abs(age_seconds - expected_age_seconds) > max_clock_skew_seconds:
         raise OpsStatusError(
             f"age_seconds {age_seconds} is inconsistent with observed_at/last_success_at "
