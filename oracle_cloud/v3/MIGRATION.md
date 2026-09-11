@@ -94,6 +94,19 @@ window on R2 objects — see that script for why its defaults are so much
 longer than `prune.sh`'s local ones. Both are wrapped by `cron-wrap.sh` like
 `sync-r2.sh` and `prune.sh`, so a failure of either pages the same way.
 
+`bin/reconcile-r2.sh` runs weekly, right after `prune-r2.sh`, and covers what
+that age-based sweep cannot: it lists the ENTIRE bucket and flags any object
+under an agency id no longer in `agencies.tsv` (a retired agency, a renumbered
+or corrected id), or one whose filename doesn't match the naming rule at all
+(`rt/<id>/<YYYYMMDD>.tar.gz`, `static/<id>/gtfs_static_<YYYYMMDD>.zip`) --
+neither case is ever pruned by `prune-r2.sh`, since it only ever looks at
+prefixes for ids still in the current roster. It is dry-run by default (a
+nonzero exit when it finds orphans, so `cron-wrap.sh` pages on it, but nothing
+is deleted); deleting requires an operator to rerun it by hand with
+`--execute` (or `RECONCILE_R2_EXECUTE=1`), which itself still refuses unless
+`sync-r2.sh`'s success marker is fresh, and reconfirms each object individually
+right before its own delete.
+
 `bin/spool-cleanup.sh` runs daily right after `verify-r2.sh` and reclaims
 local disk file by file, the moment its own R2 listing confirms (byte-size
 match) that specific RT/static archive is uploaded — well before
