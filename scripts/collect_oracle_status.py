@@ -21,10 +21,9 @@ again on a later read.
 
 A channel failure (no `gh`, no run yet, a malformed log line, a document that
 fails contract validation, or a rejected replay) always raises rather than
-returning a fabricated status -- callers must treat that as `unknown`, per
-this repo's "API failure produces unknown, never a false green status" rule
-(see NEXT_TASK.md item 121), not silently reuse the last-known-good value as
-if it were still current.
+returning a fabricated status -- a channel failure must produce `unknown`,
+never a fabricated healthy/degraded status, not silently reuse the
+last-known-good value as if it were still current.
 """
 
 from __future__ import annotations
@@ -38,20 +37,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from scripts.ops_status import ComponentStatus, OpsStatusError, from_json_dict
+from scripts.ops_status import ComponentStatus, OpsStatusError, from_json_dict, to_json_dict
 
 WORKFLOW_FILE = "oracle-heartbeat-listener.yml"
 DEFAULT_REPO = "TripAndCode/transit-app"
 DEFAULT_CACHE_PATH = Path("/root/.oracle-status-watermark.json")
 
-# The listener always logs the whole document as one compact-JSON line (see
-# oracle-heartbeat-listener.yml); `re.DOTALL` is unnecessary since `jq -c`
-# never emits an embedded newline. The captured text is handed to
-# `json.loads` rather than shape-matched here, so a malformed or
-# unexpectedly-shaped payload (not valid JSON, or valid JSON that isn't an
-# object) surfaces as a specific, distinguishable error instead of silently
-# not matching this pattern at all.
-_LOG_LINE_RE = re.compile(r"^ORACLE_STATUS (.+)$", re.MULTILINE)
+# `gh run view --log` prefixes every line with `<job>\t<step>\t<timestamp> `,
+# so the marker is a substring, never the true start of a line -- this
+# pattern is deliberately unanchored to find it anywhere in the line.
+_LOG_LINE_RE = re.compile(r"ORACLE_STATUS (.+)$", re.MULTILINE)
 
 
 class OracleStatusUnavailable(Exception):
@@ -206,8 +201,6 @@ def main(argv: list[str] | None = None) -> int:
     except OracleStatusUnavailable as exc:
         print(f"UNAVAILABLE: {exc}", file=sys.stderr)
         return 2
-
-    from scripts.ops_status import to_json_dict
 
     print(json.dumps(to_json_dict(status)))
     return 0

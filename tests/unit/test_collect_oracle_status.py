@@ -36,10 +36,20 @@ def make_document(observed_at: datetime, *, state_kwargs: dict | None = None) ->
     return to_json_dict(build_status(**kwargs))
 
 
-def log_with(*docs: dict) -> str:
+_LOG_PREFIX = "record\tRecord the Oracle collector's status document\t2026-09-11T00:05:00.1234567Z "
+
+
+def log_with(*docs: dict, prefixed: bool = True) -> str:
+    """Build a fake `gh run view --log` body containing `ORACLE_STATUS` lines.
+
+    `prefixed=True` (the default) mimics real `gh run view --log` output,
+    which prepends `<job>\\t<step>\\t<timestamp> ` to every line -- the
+    marker is never at the true start of a line in production.
+    """
+    prefix = _LOG_PREFIX if prefixed else ""
     lines = ["some unrelated log line"]
     for doc in docs:
-        lines.append(f"ORACLE_STATUS {json.dumps(doc, separators=(',', ':'))}")
+        lines.append(f"{prefix}ORACLE_STATUS {json.dumps(doc, separators=(',', ':'))}")
     lines.append("Complete job name: record")
     return "\n".join(lines)
 
@@ -63,6 +73,21 @@ def test_parse_latest_status_picks_the_last_line_when_several_present():
     doc2 = make_document(T0 + timedelta(minutes=1))
     parsed = parse_latest_status(log_with(doc1, doc2))
     assert parsed["observed_at"] == doc2["observed_at"]
+
+
+def test_parse_latest_status_finds_the_marker_behind_gh_run_view_log_prefix():
+    # Real `gh run view --log` output prefixes every line with
+    # `<job>\t<step>\t<timestamp> `, so ORACLE_STATUS is never at the true
+    # start of a line in production -- only a substring match can find it.
+    doc = make_document(T0)
+    parsed = parse_latest_status(log_with(doc, prefixed=True))
+    assert parsed["observed_at"] == doc["observed_at"]
+
+
+def test_parse_latest_status_also_accepts_an_unprefixed_bare_line():
+    doc = make_document(T0)
+    parsed = parse_latest_status(log_with(doc, prefixed=False))
+    assert parsed["observed_at"] == doc["observed_at"]
 
 
 def test_parse_latest_status_raises_when_no_line_present():
