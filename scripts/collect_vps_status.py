@@ -393,9 +393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stale-pause-buffer", type=float, default=1.5)
     parser.add_argument("--healthy-multiplier", type=float, default=DEFAULT_HEALTHY_MULTIPLIER)
     parser.add_argument("--stale-multiplier", type=float, default=DEFAULT_STALE_MULTIPLIER)
-    parser.add_argument(
-        "--out", type=Path, default=None, help="Also write the status document as JSON to this path"
-    )
+    parser.add_argument("--out", type=Path, default=None, help="Also write the status document as JSON to this path")
     args = parser.parse_args(argv)
 
     repo = args.repo.resolve()

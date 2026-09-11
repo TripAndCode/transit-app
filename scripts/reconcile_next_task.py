@@ -422,9 +422,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Any worktree in the target repository")
-    parser.add_argument(
-        "--file", type=Path, default=None, help="Path to NEXT_TASK.md (default: <repo>/NEXT_TASK.md)"
-    )
+    parser.add_argument("--file", type=Path, default=None, help="Path to NEXT_TASK.md (default: <repo>/NEXT_TASK.md)")
     parser.add_argument("--apply", action="store_true", help="Write the reconciled file; default is a dry run")
     args = parser.parse_args()
 
@@ -449,9 +447,7 @@ def main() -> int:
     # items can already sit side by side with no duplicate heading involved at all.
     # `dict.fromkeys` dedupes against `dedupe_warnings`, which may already carry the
     # identical message when a heading merge just exposed it.
-    warnings = list(
-        dict.fromkeys(dedupe_warnings + status_warnings + duplicate_item_number_warnings(reconciled_lines))
-    )
+    warnings = list(dict.fromkeys(dedupe_warnings + status_warnings + duplicate_item_number_warnings(reconciled_lines)))
 
     for change in dedupe_changes:
         print(f"DEDUPLICATE: {change}")

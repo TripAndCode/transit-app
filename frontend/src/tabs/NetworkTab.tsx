@@ -175,6 +175,10 @@ export function NetworkTab() {
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
         .network-card a:hover { text-decoration: underline; }
+        .network-help { max-width: 760px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+        .network-howto { max-width: 860px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+        .network-howto ul { margin: 8px 0 0; padding-left: 20px; }
+        .network-howto li { margin: 3px 0; }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
@@ -182,12 +186,12 @@ export function NetworkTab() {
       <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 8px" }}>
         {t("network.title")}
       </h1>
-      <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: "0 0 12px", maxWidth: 720, lineHeight: 1.5 }}>
+      <p className="network-help" style={{ margin: "0 0 12px" }}>
         {t("network.help")}
       </p>
-      <details style={{ marginBottom: 16, fontSize: 13, color: "var(--text-secondary)" }}>
+      <details className="network-howto" style={{ marginBottom: 16 }}>
         <summary style={{ cursor: "pointer", color: "var(--accent)" }}>{t("network.howto_title")}</summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+        <ul>
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
           {ridershipWeightingAvailable && (
