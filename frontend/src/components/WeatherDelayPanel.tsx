@@ -11,8 +11,10 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useWeatherDelay } from "../api/hooks";
 import type { RangeCtx } from "../api/rangeContext";
+import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
+import { delayColor } from "../styles/tokens";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
@@ -97,6 +99,9 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
               ? t("reports.weather_delay.delta_unavailable")
               : t("reports.weather_delay.delta_label", { value: fmtDeltaSec(data.delta_sec, t) })}
           </p>
+          {data.buckets != null && data.buckets.length > 0 && (
+            <WeatherBucketChart buckets={data.buckets} />
+          )}
           <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--text-tertiary)", fontStyle: "italic" }}>
             {data.disclaimer}
           </p>
@@ -118,3 +123,84 @@ const td = (): React.CSSProperties => ({
   padding: "6px 10px",
   fontSize: 13,
 });
+
+// Column height of the bar track, in px -- fixed rather than a CSS percentage
+// so each bar's own height is a plain JS computation against it, matching
+// this codebase's other hand-rolled charts (see DailyChart.tsx).
+const BUCKET_TRACK_HEIGHT = 96;
+
+/** Second chart in the panel: one bar per precipitation bucket
+ *  from `pipeline.reports.weather.RAIN_BUCKET_LABELS`, additive alongside the
+ *  wet/dry comparison above. Bar height and color both encode
+ *  `avg_delay_sec` as a single sequential magnitude -- a dual axis (height
+ *  for delay, a second scale for count) would force readers to hold two
+ *  units at once, so the sample count is carried as a direct text label
+ *  instead, not a second plotted scale. A bucket with no matched days/samples renders as a
+ *  muted, minimal-height placeholder rather than being hidden, the same
+ *  "zero is a real answer" convention `WeatherDelayGroup` already uses for
+ *  the wet/dry sides. */
+function WeatherBucketChart({ buckets }: { buckets: WeatherDelayBucket[] }) {
+  const { t } = useTranslation();
+  const maxSec = Math.max(1, ...buckets.map((b) => b.avg_delay_sec ?? 0));
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>
+        {t("reports.weather_delay.buckets.title")}
+      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        {buckets.map((b) => {
+          const hasData = b.avg_delay_sec != null && b.samples > 0;
+          const barHeight = hasData
+            ? Math.max(4, (b.avg_delay_sec! / maxSec) * BUCKET_TRACK_HEIGHT)
+            : 4;
+          const color = hasData ? delayColor(b.avg_delay_sec! / 60) : "var(--border-soft)";
+          const valueLabel = hasData
+            ? fmtDelaySec(b.avg_delay_sec, t)
+            : t("reports.weather_delay.buckets.no_data");
+
+          return (
+            <div
+              key={b.label}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}
+            >
+              <span style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>{valueLabel}</span>
+              <div
+                style={{
+                  width: "100%",
+                  height: BUCKET_TRACK_HEIGHT,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <div
+                  role="img"
+                  aria-label={t("reports.weather_delay.buckets.bar_aria", {
+                    label: b.label,
+                    value: valueLabel,
+                    count: b.samples,
+                  })}
+                  title={t("reports.weather_delay.buckets.sample_count", { count: b.samples })}
+                  style={{
+                    width: "100%",
+                    maxWidth: 24,
+                    margin: "0 auto",
+                    height: barHeight,
+                    background: color,
+                    opacity: hasData ? 1 : 0.6,
+                    borderRadius: "4px 4px 0 0",
+                  }}
+                />
+              </div>
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 6 }}>{b.label}</span>
+              <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+                {t("reports.weather_delay.buckets.sample_count", { count: b.samples })}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

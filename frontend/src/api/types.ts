@@ -281,6 +281,17 @@ export type WeatherDelayGroup = {
   avg_precip_mm: number | null;
 };
 
+/** One precipitation bucket -- a finer, additive breakdown of the same
+ *  matched service days as `wet`/`dry`, independent of the wet-day
+ *  threshold. `avg_delay_sec` is `null` exactly when the bucket has no
+ *  matched days/samples, same convention as `WeatherDelayGroup`. */
+export type WeatherDelayBucket = {
+  label: string;
+  days: number;
+  samples: number;
+  avg_delay_sec: number | null;
+};
+
 /** Observed rainfall matched to service days (item 129) -- see
  *  pipeline/reports/weather.py's compute_rain_delay. This is a historical
  *  observation, NOT a weather forecast and NOT a causal claim; `disclaimer`
@@ -293,7 +304,9 @@ export type WeatherDelayGroup = {
  *  non-rainy, seconds) is `null` when either side has no days, which is a
  *  real answer rather than missing data; `low_confidence` is set whenever
  *  either side is thin enough that the difference should not be read as a
- *  stable effect. */
+ *  stable effect. `buckets` is absent from responses cached before the
+ *  backend started populating it, and may also be an empty array; treat
+ *  both the same as "nothing to show". */
 export type WeatherDelayResponse = {
   available: boolean;
   station: WeatherStation | null;
@@ -305,6 +318,7 @@ export type WeatherDelayResponse = {
   ctx: ResponseCtx;
   disclaimer: string;
   attribution: string;
+  buckets?: WeatherDelayBucket[];
 };
 
 export type Suggestion = {
