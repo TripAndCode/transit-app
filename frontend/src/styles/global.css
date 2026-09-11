@@ -108,14 +108,14 @@
   --bg-soft: #202642;
   --border-soft: #343B5B;
   --border-subtle: #414A70;
-  --text-primary: #F0EDFF;
-  --text-secondary: #B7B3D0;
+  --text-primary: #FAFAFF;
+  --text-secondary: #E5E7F2;
   /* Was #5A607A (2.87:1 vs --bg-surface, 2.62:1 vs --bg-soft) -- failed WCAG
      AA (4.5:1) for normal text in both places this token is used against.
      Retuned to clear 4.5:1 on both while keeping the same purple-blue hue
      family as --text-primary/--text-secondary (blended toward --text-secondary
      rather than desaturating to neutral grey). */
-  --text-tertiary: #A6A3C2;
+  --text-tertiary: #C9CBDA;
   /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
      Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
   --accent: #27B596;
