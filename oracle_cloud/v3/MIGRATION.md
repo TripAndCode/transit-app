@@ -181,8 +181,12 @@ output of a successful run, not a script failure.
 
 `bin/publish-status.sh` (cron, right after it) sends that document to GitHub
 as a `repository_dispatch` event, authenticated with `ORACLE_STATUS_GH_TOKEN`
-— a fine-grained personal access token scoped to nothing but triggering
-`repository_dispatch` on this repo. This is HTTPS end to end; nothing about
+— a fine-grained personal access token for this repo. The `dispatches`
+endpoint's only available grant is repository Contents: read & write, the
+same permission needed to push commits or write/delete files via the
+Contents API, so this token is push-equivalent access to this repo, not a
+heartbeat-only capability, and is held and rotated with that same rigor.
+This is HTTPS end to end; nothing about
 this channel ever needs Oracle's own SSH private key (or a copy of it) to
 exist anywhere else, and the VPS reads the result back out via its own,
 already-configured `gh` authentication (see `.github/workflows/oracle-

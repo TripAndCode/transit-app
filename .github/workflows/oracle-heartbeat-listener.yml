@@ -2,9 +2,14 @@ name: Oracle Heartbeat Listener
 
 # Fired by the Oracle collector VM (oracle_cloud/v3/bin/publish-status.sh,
 # cron) via `curl -X POST .../dispatches -H "Authorization: Bearer
-# $ORACLE_STATUS_GH_TOKEN"` -- a narrowly-scoped token that lives only on
-# Oracle and is unrelated to any SSH key, so nothing about this channel ever
-# requires copying Oracle's SSH private key anywhere. `client_payload` is the
+# $ORACLE_STATUS_GH_TOKEN"` -- a fine-grained PAT that lives only on Oracle
+# and is unrelated to any SSH key, so nothing about this channel ever
+# requires copying Oracle's SSH private key anywhere. This endpoint requires
+# the token's only grant, repository Contents: read & write, which is the
+# same permission needed to push commits or write/delete files via the
+# Contents API -- so this token carries full push-equivalent access to this
+# repo, not a heartbeat-only capability, and must be treated and rotated with
+# that same rigor. `client_payload` is the
 # operations-status document status-snapshot.sh built (see
 # scripts/ops_status.py for the contract it follows).
 #

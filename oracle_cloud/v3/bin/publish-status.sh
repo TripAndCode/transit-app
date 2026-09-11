@@ -8,12 +8,16 @@
 # just the other way around: the VPS already has its own separate `gh`
 # authentication (used for its PR work) to read `oracle-heartbeat-
 # listener.yml`'s run log back out, so nothing new needs to be granted on the
-# VPS side either -- only this script's own, narrowly-scoped GitHub token
-# (repository_dispatch only, unrelated to any SSH key) is new, and it lives
-# only on Oracle.
+# VPS side either -- only this script's own GitHub token (unrelated to any
+# SSH key) is new, and it lives only on Oracle.
 #
 # Authentication: ORACLE_STATUS_GH_TOKEN, a fine-grained personal access
-# token scoped to nothing but triggering `repository_dispatch` on this repo.
+# token for this repo. The `dispatches` endpoint's only available grant is
+# repository Contents: read & write -- the same permission needed to push
+# commits or write/delete files via the Contents API -- so this token is
+# push-equivalent access to this repo, not a heartbeat-only capability, and
+# must be handled with that same rigor (excluded from logs, rotated like any
+# other write credential).
 # Replay resistance: the receiving collector (`scripts/collect_oracle_status.py`)
 # never lets an older or repeated `observed_at` overwrite a newer one it already
 # accepted, so replaying a captured request can at best re-report a fact

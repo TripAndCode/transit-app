@@ -238,3 +238,54 @@ def test_default_log_fetcher_reports_unavailable_when_gh_is_missing(monkeypatch)
     monkeypatch.setattr(module.subprocess, "run", _raise)
     with pytest.raises(OracleStatusUnavailable, match="could not be executed"):
         module.default_log_fetcher("TripAndCode/transit-app")
+
+
+# --- CLI -----------------------------------------------------------------------
+
+
+def test_main_exit_code_0_and_prints_the_status_on_a_fresh_document(tmp_path: Path, monkeypatch, capsys):
+    from scripts import collect_oracle_status as module
+
+    doc = make_document(T0)
+    monkeypatch.setattr(
+        module,
+        "collect_oracle_status",
+        lambda **kwargs: collect_oracle_status(**{**kwargs, "log_fetcher": fetcher_returning(log_with(doc))}),
+    )
+
+    exit_code = module.main(["--cache-path", str(tmp_path / "watermark.json")])
+
+    payload = capsys.readouterr().out
+    assert exit_code == 0
+    assert '"component": "oracle_crawler"' in payload
+
+
+def test_main_exit_code_1_and_reports_a_replayed_document(tmp_path: Path, monkeypatch, capsys):
+    from scripts import collect_oracle_status as module
+
+    doc = make_document(T0)
+
+    def _raise(**kwargs):
+        seen = collect_oracle_status(**{**kwargs, "log_fetcher": fetcher_returning(log_with(doc))})
+        raise OracleStatusReplayed("already seen", seen)
+
+    monkeypatch.setattr(module, "collect_oracle_status", _raise)
+
+    exit_code = module.main(["--cache-path", str(tmp_path / "watermark.json")])
+
+    assert exit_code == 1
+    assert "REPLAYED:" in capsys.readouterr().err
+
+
+def test_main_exit_code_2_and_reports_an_unavailable_channel(tmp_path: Path, monkeypatch, capsys):
+    from scripts import collect_oracle_status as module
+
+    def _raise(**kwargs):
+        raise OracleStatusUnavailable("no gh")
+
+    monkeypatch.setattr(module, "collect_oracle_status", _raise)
+
+    exit_code = module.main(["--cache-path", str(tmp_path / "watermark.json")])
+
+    assert exit_code == 2
+    assert "UNAVAILABLE:" in capsys.readouterr().err
