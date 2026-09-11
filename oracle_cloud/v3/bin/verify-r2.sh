@@ -32,6 +32,17 @@
 # collected and turned into a nonzero exit at the end (which cron-wrap.sh
 # turns into an alert) rather than aborting the loop, matching sync-r2.sh
 # and static-fetch.sh.
+#
+# Unlike sync-r2.sh's OK_MARKER (success-only, so its own absence/staleness
+# already means "trouble"), this script had no persisted result at all before
+# RESULT_MARKER: a positive "verify-r2 last ran and passed/failed at time T"
+# record, written on every completed run (not just successes), plus the total
+# object count already gathered for free while listing each agency's own
+# prefixes. status-snapshot.sh reads this to report R2 verify freshness
+# without ever needing R2 credentials or a listing call of its own. Written
+# best-effort: a marker write failure is logged but never changes this
+# script's own pass/fail verdict, since the marker only feeds an optional
+# downstream heartbeat, not this script's actual job.
 set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -49,6 +60,7 @@ export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
 AWS="${AWS_CLI:-aws}"
+RESULT_MARKER="${VERIFY_R2_RESULT_MARKER:-$BASE_DIR/.verify-r2.last-result}"
 # Generous vs. the daily sync/rotate cadence: rotate-day.sh only tars
 # yesterday's (already-closed) day, so right after a normal sync the newest
 # rt/<id>/ object is well under a day old. Two days absorbs one missed or
@@ -105,10 +117,36 @@ r2_list() {
 NOW=$(date -u +%s)
 failed=0
 agencies=0
+total_objects=0
 
 problem() {
     echo "verify-r2.sh: PROBLEM $1" >&2
     failed=1
+}
+
+# count_lines <r2_list output> -> number of objects listed (0 for empty input).
+count_lines() {
+    [ -n "$1" ] || { echo 0; return; }
+    printf '%s\n' "$1" | wc -l | tr -d ' '
+}
+
+# record_result <ok|fail> — atomic best-effort write of
+# "<ISO8601 UTC> <ok|fail> <total_objects>" to RESULT_MARKER. Never changes
+# this script's own exit status: a failure here only degrades an optional
+# downstream heartbeat, not verify-r2.sh's actual verdict.
+record_result() {
+    local result="$1" tmp
+    tmp=$(mktemp "$RESULT_MARKER.XXXXXX" 2>/dev/null) || {
+        echo "verify-r2.sh: could not create a temp file for $RESULT_MARKER" >&2
+        return 0
+    }
+    if printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$result" "$total_objects" > "$tmp" \
+        && mv -f "$tmp" "$RESULT_MARKER"; then
+        return 0
+    fi
+    echo "verify-r2.sh: failed to write $RESULT_MARKER" >&2
+    rm -f "$tmp"
+    return 0
 }
 
 # `|| [ -n "$row" ]` processes a final row lacking a trailing newline, matching
@@ -122,6 +160,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
     static="$agency_static_url"
 
     rt_lines=$(r2_list "rt/$id/")
+    total_objects=$(( total_objects + $(count_lines "$rt_lines") ))
     if [ -z "$rt_lines" ]; then
         problem "a$id ($name): no RT objects in R2 under rt/$id/"
     else
@@ -150,6 +189,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
 
     sdir="$BASE_DIR/data/$id/static"
     static_lines=$(r2_list "static/$id/")
+    total_objects=$(( total_objects + $(count_lines "$static_lines") ))
     if [ -z "$static_lines" ]; then
         problem "a$id ($name): no static objects in R2 under static/$id/"
         continue
@@ -189,11 +229,14 @@ done < "$TSV"
 
 if [ "$agencies" -eq 0 ]; then
     echo "verify-r2.sh: no agencies configured in $TSV — nothing to verify" >&2
+    record_result fail
     exit 1
 fi
 
 if [ "$failed" -eq 1 ]; then
     echo "==> verify-r2 completed WITH FAILURES — see above" >&2
+    record_result fail
     exit 1
 fi
+record_result ok
 echo "==> verify-r2 complete — $agencies agencies checked, R2 fresh and intact"
