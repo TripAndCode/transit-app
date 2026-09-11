@@ -175,10 +175,13 @@ export function NetworkTab() {
         .network-card { transition: background var(--transition); }
         .network-card:hover { background: var(--bg-soft); }
         .network-card a:hover { text-decoration: underline; }
-        .network-help { max-width: 760px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
-        .network-howto { max-width: 860px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-        .network-howto ul { margin: 8px 0 0; padding-left: 20px; }
-        .network-howto li { margin: 3px 0; }
+        .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+        .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+        .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
+        .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+        .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
+        .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 12px; }
+        @media (max-width: 720px) { .network-howto-list { grid-template-columns: 1fr; } }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
@@ -191,7 +194,7 @@ export function NetworkTab() {
       </p>
       <details className="network-howto" style={{ marginBottom: 16 }}>
         <summary style={{ cursor: "pointer", color: "var(--accent)" }}>{t("network.howto_title")}</summary>
-        <ul>
+        <ul className="network-howto-list">
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
           {ridershipWeightingAvailable && (
