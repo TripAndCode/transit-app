@@ -129,7 +129,7 @@ const td = (): React.CSSProperties => ({
 // this codebase's other hand-rolled charts (see DailyChart.tsx).
 const BUCKET_TRACK_HEIGHT = 96;
 
-/** Second chart in the panel (item 132): one bar per precipitation bucket
+/** Second chart in the panel: one bar per precipitation bucket
  *  from `pipeline.reports.weather.RAIN_BUCKET_LABELS`, additive alongside the
  *  wet/dry comparison above. Bar height and color both encode
  *  `avg_delay_sec` (a single sequential magnitude, per the dataviz skill --

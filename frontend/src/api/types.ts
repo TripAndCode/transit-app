@@ -261,8 +261,8 @@ export type WeatherDelayGroup = {
   avg_precip_mm: number | null;
 };
 
-/** One precipitation bucket (item 131) -- a finer, additive breakdown of the
- *  same matched service days as `wet`/`dry`, independent of the wet-day
+/** One precipitation bucket -- a finer, additive breakdown of the same
+ *  matched service days as `wet`/`dry`, independent of the wet-day
  *  threshold. `avg_delay_sec` is `null` exactly when the bucket has no
  *  matched days/samples, same convention as `WeatherDelayGroup`. */
 export type WeatherDelayBucket = {
@@ -284,8 +284,9 @@ export type WeatherDelayBucket = {
  *  non-rainy, seconds) is `null` when either side has no days, which is a
  *  real answer rather than missing data; `low_confidence` is set whenever
  *  either side is thin enough that the difference should not be read as a
- *  stable effect. `buckets` is absent from cached responses predating item
- *  131 and may be an empty array; treat both the same as "nothing to show". */
+ *  stable effect. `buckets` is absent from responses cached before the
+ *  backend started populating it, and may also be an empty array; treat
+ *  both the same as "nothing to show". */
 export type WeatherDelayResponse = {
   available: boolean;
   station: WeatherStation | null;
