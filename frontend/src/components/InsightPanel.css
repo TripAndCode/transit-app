@@ -1,0 +1,8 @@
+.insight-panel__view-button {
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.insight-panel__view-button:hover {
+  background: var(--accent);
+  color: var(--bg-surface);
+}

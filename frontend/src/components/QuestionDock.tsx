@@ -120,7 +120,7 @@ export function QuestionDock({
                   aria-pressed={active}
                   style={{
                     background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
-                    color: active ? "white" : "var(--text-primary, #1a1a1a)",
+                    color: active ? "var(--on-accent)" : "var(--text-primary, #1a1a1a)",
                     border: "1px solid",
                     borderColor: active
                       ? "var(--accent, #5b6cad)"
