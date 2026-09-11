@@ -209,11 +209,14 @@ def test_gather_git_facts_parses_branch_worktrees_and_stashes():
     assert stash_count == 1
 
 
+ONE_WORKTREE_PORCELAIN = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n"
+
+
 def test_gather_git_facts_empty_stash_list_counts_zero():
     runner = runner_from(
         {
             "git -C /repo rev-parse": FakeCompletedProcess(0, stdout="main\n"),
-            "git -C /repo worktree list": FakeCompletedProcess(0, stdout="worktree /repo\nHEAD abc\nbranch refs/heads/main\n"),
+            "git -C /repo worktree list": FakeCompletedProcess(0, stdout=ONE_WORKTREE_PORCELAIN),
             "git -C /repo stash list": FakeCompletedProcess(0, stdout=""),
         }
     )
@@ -226,7 +229,7 @@ def test_gather_git_facts_degrades_each_field_independently_on_failure():
     runner = runner_from(
         {
             "git -C /repo rev-parse": FakeCompletedProcess(128, stderr="not a git repository"),
-            "git -C /repo worktree list": FakeCompletedProcess(0, stdout="worktree /repo\nHEAD abc\nbranch refs/heads/main\n"),
+            "git -C /repo worktree list": FakeCompletedProcess(0, stdout=ONE_WORKTREE_PORCELAIN),
             "git -C /repo stash list": FakeCompletedProcess(128, stderr="not a git repository"),
         }
     )
@@ -347,8 +350,9 @@ def test_build_status_stale_past_stale_threshold():
 
 
 def test_build_status_failed_when_systemd_reports_failure_regardless_of_age():
+    # 1 minute ago, otherwise healthy -- reported_failure must override that.
     facts = make_facts(
-        health_report=make_health_report(last_successful_tick="2026-09-11T11:59:00Z"),  # 1 minute ago, otherwise healthy
+        health_report=make_health_report(last_successful_tick="2026-09-11T11:59:00Z"),
         systemd_reported_failure=True,
     )
     status = collector.build_vps_loop_status(facts)
@@ -425,12 +429,14 @@ def test_collect_vps_facts_raises_when_next_task_missing(tmp_path):
 def test_collect_vps_facts_end_to_end_with_injected_runners(tmp_path):
     next_task, timer = write_next_task(tmp_path, "- 2026-09-11T11:30:00Z: item 120 shipped as PR #1.\n")
 
-    systemd_runner = runner_from({"systemctl show": FakeCompletedProcess(0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\n")})
+    systemd_runner = runner_from(
+        {"systemctl show": FakeCompletedProcess(0, stdout="ActiveState=inactive\nSubState=dead\nResult=success\n")}
+    )
     process_runner = runner_from({"pgrep -f": FakeCompletedProcess(1)})
     git_runner = runner_from(
         {
             f"git -C {tmp_path} rev-parse": FakeCompletedProcess(0, stdout="vps-loop/item-120\n"),
-            f"git -C {tmp_path} worktree list": FakeCompletedProcess(0, stdout="worktree /repo\nHEAD abc\nbranch refs/heads/main\n"),
+            f"git -C {tmp_path} worktree list": FakeCompletedProcess(0, stdout=ONE_WORKTREE_PORCELAIN),
             f"git -C {tmp_path} stash list": FakeCompletedProcess(0, stdout=""),
         }
     )
