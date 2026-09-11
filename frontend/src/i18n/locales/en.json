@@ -1060,7 +1060,13 @@
         "dry": "Dry days"
       },
       "delta_label": "Difference (rainy − dry): {{value}}",
-      "delta_unavailable": "Not enough matching days on one side to compare for this range."
+      "delta_unavailable": "Not enough matching days on one side to compare for this range.",
+      "buckets": {
+        "title": "Delay by rainfall amount",
+        "no_data": "No data",
+        "sample_count": "{{count}} samples",
+        "bar_aria": "{{label}}: {{value}}, {{count}} samples"
+      }
     }
   },
   "insight_panel": {
