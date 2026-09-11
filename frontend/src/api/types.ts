@@ -239,6 +239,54 @@ export type PerformanceStandardsResponse = {
   disclaimer: string;
 };
 
+/** The one documented representative observation station an agency's rain-
+ *  vs-dry delay comparison is keyed to -- see
+ *  pipeline/reports/weather.py for why this is one station rather than an
+ *  area average. `note` is the operator's own record of why this station
+ *  represents the service area. */
+export type WeatherStation = {
+  station_id: string;
+  station_name: string;
+  note: string | null;
+};
+
+/** One side (rainy or non-rainy) of the comparison. `avg_delay_sec` is
+ *  pooled over every delay measurement on that side's days and is `null`
+ *  exactly when the side has no days/samples; `avg_precip_mm` counts each
+ *  matched day once, however many routes ran on it. */
+export type WeatherDelayGroup = {
+  days: number;
+  samples: number;
+  avg_delay_sec: number | null;
+  avg_precip_mm: number | null;
+};
+
+/** Observed rainfall matched to service days (item 129) -- see
+ *  pipeline/reports/weather.py's compute_rain_delay. This is a historical
+ *  observation, NOT a weather forecast and NOT a causal claim; `disclaimer`
+ *  must be surfaced verbatim wherever these figures are rendered, and
+ *  `attribution` must travel with them per the observation source's terms.
+ *
+ *  `available` is false when the agency has no representative station
+ *  configured, or no in-range service day could be matched to an
+ *  observation -- render nothing in that case. `delta_sec` (rainy minus
+ *  non-rainy, seconds) is `null` when either side has no days, which is a
+ *  real answer rather than missing data; `low_confidence` is set whenever
+ *  either side is thin enough that the difference should not be read as a
+ *  stable effect. */
+export type WeatherDelayResponse = {
+  available: boolean;
+  station: WeatherStation | null;
+  wet_day_threshold_mm: number;
+  wet: WeatherDelayGroup;
+  dry: WeatherDelayGroup;
+  delta_sec: number | null;
+  low_confidence: boolean;
+  ctx: ResponseCtx;
+  disclaimer: string;
+  attribution: string;
+};
+
 export type Suggestion = {
   report_type: string;
   route_code: string;

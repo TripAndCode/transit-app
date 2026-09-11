@@ -33,6 +33,7 @@ import type {
   RouteSummaryResponse,
   RouteTripsResponse,
   Suggestion,
+  WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
 
@@ -143,6 +144,24 @@ export function usePerformanceStandards(
       apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${ctxToQueryString(ctx)}`, {
         signal,
       }),
+    enabled: agencyId != null && enabled,
+  });
+}
+
+/** Observed rain-vs-dry delay comparison (item 129) -- meant to render
+ *  alongside the `on_time` report the same way `useHeadwayQuality` and
+ *  `usePerformanceStandards` do. `routes`/`dow` filters already apply
+ *  server-side via `ctxToQueryString`, so no params beyond `ctx` are
+ *  needed. */
+export function useWeatherDelay(
+  agencyId: number | null,
+  ctx: RangeCtx,
+  enabled: boolean,
+): UseQueryResult<WeatherDelayResponse> {
+  return useQuery({
+    queryKey: ["weather-delay", agencyId, ...ctxKey(ctx)],
+    queryFn: ({ signal }) =>
+      apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
   });
 }
