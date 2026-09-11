@@ -1,0 +1,38 @@
+name: R2 Storage Heartbeat Listener
+
+# Fired by the Oracle collector VM (oracle_cloud/v3/bin/storage-metrics.sh +
+# the same bin/publish-status.sh already used for the oracle_crawler
+# heartbeat, pointed at storage-metrics.sh's own output file/event type via
+# ORACLE_STATUS_FILE/ORACLE_STATUS_EVENT_TYPE) via `curl -X POST
+# .../dispatches -H "Authorization: Bearer $ORACLE_STATUS_GH_TOKEN"` -- the
+# same fine-grained PAT already used for the oracle-heartbeat channel, not a
+# new credential. `client_payload` is the operations-status document
+# storage-metrics.sh built (component "r2"; see scripts/ops_status.py for
+# the contract).
+#
+# Mirrors oracle-heartbeat-listener.yml exactly, as a separate workflow/event
+# type so the VPS's own already-authenticated `gh` can tell the two
+# heartbeats apart by which workflow's run log it reads (scripts/
+# collect_oracle_status.py vs scripts/collect_r2_status.py), rather than by
+# parsing `component` out of a shared log stream.
+on:
+  repository_dispatch:
+    types: [r2-storage-heartbeat]
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record the R2 storage metrics status document
+        # The payload comes from our own trusted Oracle dispatch, not
+        # third-party input, but it still goes through `env:` rather than
+        # being interpolated directly into the script body, per GitHub's own
+        # script-injection guidance for `${{ github.event.* }}` values.
+        env:
+          R2_STORAGE_STATUS_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          echo "R2 storage heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # toJson() always pretty-prints (multi-line, indented); re-compact
+          # with jq so the whole document survives as the single grep-able
+          # line the VPS-side reader expects.
+          echo "R2_STORAGE_STATUS $(echo "$R2_STORAGE_STATUS_JSON" | jq -c '.')"

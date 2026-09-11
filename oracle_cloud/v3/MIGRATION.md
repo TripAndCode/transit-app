@@ -201,6 +201,37 @@ intentionally turned off) still runs every other cron job exactly as before
 — nothing else in `crontab.snippet` depends on either of these two new
 lines succeeding.
 
+## 13. Storage metrics heartbeat
+`bin/storage-metrics.sh` (cron, every 30 min, offset from status-snapshot.sh)
+builds a second operations-status document, component `"r2"`, reporting this
+VM's own filesystem usage (`df` on `COLLECTOR_BASE`) and Cloudflare R2's
+object count/bytes split by the `rt/` and `static/` prefixes, each classified
+against configurable warning/critical thresholds
+(`DISK_WARN_PCT`/`DISK_CRIT_PCT`, default 80/90; `R2_BYTES_WARN_THRESHOLD`/
+`R2_BYTES_CRIT_THRESHOLD`, default 50/100 GiB). Unlike `status-snapshot.sh`,
+this DOES need `OBJECT_STORE_*` credentials of its own — nothing else in
+`bin/` already computes a whole-bucket object count/byte total — but leaving
+them unset is a supported configuration (`r2_state` reports
+`not_applicable` rather than dragging the document down), so a VM that
+hasn't been given R2 credentials yet still runs this job without error. Each
+prefix is listed independently via `aws s3api list-objects-v2 --no-paginate`
+with the script following `NextToken` itself page by page: a listing failure
+on one prefix (or a page that errors mid-listing) reports `r2_state=failed`
+with that prefix's numbers null, without hiding behind the other prefix's
+success. `.storage-metrics.last-success` records the last time both prefixes
+listed successfully, so a failed run still reports the last genuine
+success's timestamp rather than either fabricating a fresh one or losing it.
+
+The same `bin/publish-status.sh` used for the oracle_crawler heartbeat above
+sends this document to GitHub too — pointed at `storage-metrics.sh`'s own
+output file and a distinct event type via `ORACLE_STATUS_FILE`/
+`ORACLE_STATUS_EVENT_TYPE` (see `crontab.snippet`), not a second publisher
+script. `.github/workflows/r2-storage-heartbeat-listener.yml` and
+`scripts/collect_r2_status.py` are the GitHub-side and VPS-side legs,
+structurally identical to the oracle_crawler channel's own
+`oracle-heartbeat-listener.yml`/`collect_oracle_status.py` but keyed on
+component `"r2"` and their own independent replay watermark.
+
 ## Rollback (any point before step 10)
     sudo systemctl disable --now 'rt-poller@1' 'rt-poller@8' 'rt-poller@9' 'rt-poller@10'
     crontab /tmp/crontab.backup.*    # restores @reboot v1 line
