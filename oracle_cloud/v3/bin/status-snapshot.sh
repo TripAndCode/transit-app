@@ -118,12 +118,12 @@ if [ ! -f "$TSV" ]; then
     agencies_configured=0
 else
     agencies_configured=0
-    rt_missing_ever=0
-    rt_worst_ratio=-1
+    rt_worst_rank=-1
+    rt_worst_state=""
     rt_worst_epoch=""
     static_configured=0
-    static_missing_ever=0
-    static_worst_ratio=-1
+    static_worst_rank=-1
+    static_worst_state=""
     static_worst_epoch=""
 
     while IFS= read -r row || [ -n "${row:-}" ]; do
@@ -137,9 +137,9 @@ else
         rt_dir="$BASE_DIR/data/$id/rt"
         newest_rt=$(ls -1d "$rt_dir"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/TripUpdate_*.pb \
             2>/dev/null | sort | tail -1)
-        if [ -z "$newest_rt" ]; then
-            rt_missing_ever=1
-        else
+        agency_rt_state=unknown
+        agency_rt_epoch=""
+        if [ -n "$newest_rt" ]; then
             rt_epoch=$(file_epoch "$newest_rt")
             case "$interval" in
                 ''|*[!0-9]*|0) interval=1 ;;  # invalid config: don't crash, just treat as maximally strict
@@ -149,34 +149,44 @@ else
                 max=$(( interval * RT_STALE_FACTOR ))
                 [ "$max" -gt 0 ] || max=1
                 ratio=$(( age * 1000 / max ))
-                if [ "$ratio" -gt "$rt_worst_ratio" ]; then
-                    rt_worst_ratio="$ratio"
-                    rt_worst_epoch="$rt_epoch"
-                fi
-            else
-                rt_missing_ever=1
+                agency_rt_state=$(classify_ratio "$ratio")
+                agency_rt_epoch="$rt_epoch"
             fi
+        fi
+        # Classify this agency's own RT freshness first, then fold it into a
+        # running worst-of via severity_rank -- the same pattern used below to
+        # combine rt/static/r2 into the document-level state. This keeps one
+        # agency with no RT data yet from masking a *different* agency that is
+        # independently stale/failed: each agency's verdict is compared on its
+        # own severity, not flattened into a single missing/not-missing flag.
+        rank=$(severity_rank "$agency_rt_state")
+        if [ "$rank" -gt "$rt_worst_rank" ]; then
+            rt_worst_rank="$rank"
+            rt_worst_state="$agency_rt_state"
+            rt_worst_epoch="$agency_rt_epoch"
         fi
 
         [ -n "${static:-}" ] || continue
         static_configured=$((static_configured + 1))
         static_marker="$BASE_DIR/data/$id/static/.static-last-ok"
-        if [ ! -f "$static_marker" ]; then
-            static_missing_ever=1
-            continue
+        agency_static_state=unknown
+        agency_static_epoch=""
+        if [ -f "$static_marker" ]; then
+            static_epoch=$(file_epoch "$static_marker")
+            if [ -n "$static_epoch" ]; then
+                age=$(( NOW - static_epoch ))
+                max=$(( STATIC_MAX_STALE_DAYS * 86400 ))
+                [ "$max" -gt 0 ] || max=1
+                ratio=$(( age * 1000 / max ))
+                agency_static_state=$(classify_ratio "$ratio")
+                agency_static_epoch="$static_epoch"
+            fi
         fi
-        static_epoch=$(file_epoch "$static_marker")
-        if [ -z "$static_epoch" ]; then
-            static_missing_ever=1
-            continue
-        fi
-        age=$(( NOW - static_epoch ))
-        max=$(( STATIC_MAX_STALE_DAYS * 86400 ))
-        [ "$max" -gt 0 ] || max=1
-        ratio=$(( age * 1000 / max ))
-        if [ "$ratio" -gt "$static_worst_ratio" ]; then
-            static_worst_ratio="$ratio"
-            static_worst_epoch="$static_epoch"
+        rank=$(severity_rank "$agency_static_state")
+        if [ "$rank" -gt "$static_worst_rank" ]; then
+            static_worst_rank="$rank"
+            static_worst_state="$agency_static_state"
+            static_worst_epoch="$agency_static_epoch"
         fi
     done < "$TSV"
 
@@ -184,18 +194,12 @@ else
         rt_state=unknown; rt_epoch=""
         static_state=unknown; static_epoch=""
     else
-        if [ "$rt_missing_ever" -eq 1 ]; then
-            rt_state=unknown; rt_epoch=""
-        else
-            rt_state=$(classify_ratio "$rt_worst_ratio")
-            rt_epoch="$rt_worst_epoch"
-        fi
+        rt_state="$rt_worst_state"
+        rt_epoch="$rt_worst_epoch"
         if [ "$static_configured" -eq 0 ]; then
             static_state=not_applicable; static_epoch=""
-        elif [ "$static_missing_ever" -eq 1 ]; then
-            static_state=unknown; static_epoch=""
         else
-            static_state=$(classify_ratio "$static_worst_ratio")
+            static_state="$static_worst_state"
             static_epoch="$static_worst_epoch"
         fi
     fi
@@ -239,8 +243,8 @@ fi
 # timestamp exactly when verify_result is "fail", so it must never stand in
 # for "last success". verify_epoch is empty whenever there is no genuine
 # success on record to point to (never succeeded, or verify_state is itself
-# unknown), matching rt_missing_ever/static_missing_ever's own "no epoch
-# without a real timestamp" rule.
+# unknown), matching each agency's own rt/static classification above, which
+# likewise leaves its epoch empty whenever it has no real timestamp to report.
 verify_result="unknown"
 r2_object_total=""
 verify_success_epoch=""

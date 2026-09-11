@@ -32,7 +32,9 @@ jobs:
           echo "Oracle heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # toJson() always pretty-prints (multi-line, indented); re-compact
           # with jq so the whole document survives as the single grep-able
-          # line the VPS-side reader expects, matching vps-heartbeat-
-          # listener.yml's flat "HEALTH key=value" lines' own one-line-per-
-          # fact convention.
+          # line the VPS-side reader expects -- mirroring vps-heartbeat-
+          # listener.yml's own idea of a single log line as the payload's
+          # durable home, though that workflow spreads its facts across one
+          # "HEALTH key=value" line per field rather than one line per
+          # document.
           echo "ORACLE_STATUS $(echo "$ORACLE_STATUS_JSON" | jq -c '.')"

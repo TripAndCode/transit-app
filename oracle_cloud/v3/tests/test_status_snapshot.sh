@@ -92,6 +92,18 @@ run_snapshot
 grep -q '"state":"stale"' "$OUT" || fail "a 30-day-stale RT sample should push overall state to stale: $(cat "$OUT")"
 pass "a stale RT poller pushes the overall state to stale"
 
+# One agency has no RT samples on disk at all, while a *different* agency's RT
+# is independently stale: the combined rt_state must report the worse verdict
+# (stale), not be masked down to unknown by the agency with no RT data.
+seed_healthy
+rm -rf "$COLLECTOR_BASE/data/1/rt"
+touch -t "$old_ts" "$COLLECTOR_BASE/data/8/rt/$day/TripUpdate_010203.pb"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a mixed missing/stale RT roster should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"rt_state":"stale"' "$OUT" || \
+    fail "one agency with no RT data must not mask a different agency's genuine staleness: $(cat "$OUT")"
+pass "one agency with no RT data does not mask a different agency's stale rt_state"
+
 # An agency configured for static GTFS never had a successful fetch: unknown.
 seed_healthy
 rm -f "$COLLECTOR_BASE/data/8/static/.static-last-ok"
@@ -99,6 +111,24 @@ run_snapshot
 [ "$rc" -eq 0 ] || fail "a never-succeeded static fetch should still exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q '"state":"unknown"' "$OUT" || fail "a static fetch that never succeeded should report unknown: $(cat "$OUT")"
 pass "a static fetch that never succeeded pushes the overall state to unknown"
+
+# Two agencies are configured for static GTFS: one never had a successful
+# fetch (missing marker) while the other's fetch is independently stale. The
+# combined static_state must report the worse verdict (stale), not be masked
+# down to unknown by the agency with no marker at all.
+seed_healthy
+printf '9\thakodate\t60\thttp://feed.test/tu9.pb\thttp://feed.test/s9.zip\thttp://ping.test/9\n' \
+    >> "$COLLECTOR_BASE/etc/agencies.tsv"
+mkdir -p "$COLLECTOR_BASE/data/9/rt/$day" "$COLLECTOR_BASE/data/9/static"
+printf 'PBDATA-fresh' > "$COLLECTOR_BASE/data/9/rt/$day/TripUpdate_010203.pb"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$COLLECTOR_BASE/data/9/static/.static-last-ok"
+touch -t "$old_ts" "$COLLECTOR_BASE/data/9/static/.static-last-ok"
+rm -f "$COLLECTOR_BASE/data/8/static/.static-last-ok"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a mixed missing/stale static roster should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"static_state":"stale"' "$OUT" || \
+    fail "one agency with no static marker must not mask a different agency's genuine staleness: $(cat "$OUT")"
+pass "one agency with no static marker does not mask a different agency's stale static_state"
 
 # No agency has a static_url at all: static is not_applicable and must not
 # drag a healthy collector down to unknown/stale.
