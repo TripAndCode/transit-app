@@ -295,7 +295,6 @@ def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
     draft_count = 0
     conflicting_numbers: list[int] = []
     failing_numbers: list[int] = []
-    failing_required_numbers: list[int] = []
 
     for pr in prs:
         if not isinstance(pr, dict):
@@ -308,15 +307,12 @@ def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
             conflicting_numbers.append(number)
         checks = pr.get("statusCheckRollup")
         if isinstance(checks, list) and isinstance(number, int):
-            failing = [c for c in checks if isinstance(c, dict) and c.get("conclusion") in FAILING_CHECK_CONCLUSIONS]
+            failing = any(isinstance(c, dict) and c.get("conclusion") in FAILING_CHECK_CONCLUSIONS for c in checks)
             if failing:
                 failing_numbers.append(number)
-                if any(c.get("isRequired") for c in failing):
-                    failing_required_numbers.append(number)
 
     conflicting_numbers.sort()
     failing_numbers.sort()
-    failing_required_numbers.sort()
 
     return {
         "open_pr_count": len(prs),
@@ -326,7 +322,6 @@ def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
         "conflicting_pr_numbers": conflicting_numbers[: ops_status.MAX_DETAIL_LIST_LENGTH],
         "failing_checks_pr_count": len(failing_numbers),
         "failing_checks_pr_numbers": failing_numbers[: ops_status.MAX_DETAIL_LIST_LENGTH],
-        "failing_required_checks_pr_count": len(failing_required_numbers),
     }
 
 

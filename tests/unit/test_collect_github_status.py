@@ -166,9 +166,7 @@ OPEN_PRS_FIXTURE = json.dumps(
             "isDraft": False,
             "mergeable": "CONFLICTING",
             "mergeStateStatus": "DIRTY",
-            "statusCheckRollup": [
-                {"name": "backend-tests", "status": "COMPLETED", "conclusion": "SUCCESS", "isRequired": True}
-            ],
+            "statusCheckRollup": [{"name": "backend-tests", "status": "COMPLETED", "conclusion": "SUCCESS"}],
         },
         {
             "number": 403,
@@ -176,8 +174,8 @@ OPEN_PRS_FIXTURE = json.dumps(
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
             "statusCheckRollup": [
-                {"name": "backend-tests", "status": "COMPLETED", "conclusion": "FAILURE", "isRequired": True},
-                {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "isRequired": False},
+                {"name": "backend-tests", "status": "COMPLETED", "conclusion": "FAILURE"},
+                {"name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
             ],
         },
         {
@@ -185,9 +183,7 @@ OPEN_PRS_FIXTURE = json.dumps(
             "isDraft": False,
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
-            "statusCheckRollup": [
-                {"name": "optional-canary", "status": "COMPLETED", "conclusion": "FAILURE", "isRequired": False}
-            ],
+            "statusCheckRollup": [{"name": "optional-canary", "status": "COMPLETED", "conclusion": "FAILURE"}],
         },
     ]
 )
@@ -331,8 +327,7 @@ def test_summarize_prs_counts_draft_conflicting_and_failing_checks():
     assert summary["conflicting_pr_numbers"] == [402]
     assert summary["failing_checks_pr_count"] == 2
     assert summary["failing_checks_pr_numbers"] == [403, 404]
-    # Only PR 403's failing check is marked required; PR 404's is an optional canary.
-    assert summary["failing_required_checks_pr_count"] == 1
+    assert "failing_required_checks_pr_count" not in summary
 
 
 def test_summarize_prs_marks_truncated_when_at_limit():
