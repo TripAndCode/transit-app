@@ -144,19 +144,32 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 .definition-meta {
-  display: block;
-  max-width: 760px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  max-width: 800px;
   font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.55;
+  line-height: 1.45;
 }
-.definition-meta > span:not(:last-child)::after {
-  content: "·";
-  margin: 0 10px;
-  color: var(--text-tertiary);
+.definition-meta > span {
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.definition-meta > span::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 7px 2px 0;
+  border-radius: 50%;
+  background: var(--accent);
 }
 @media (max-width: 720px) {
-  .definition-meta { max-width: 100%; }
+  .definition-meta { grid-template-columns: 1fr; max-width: 100%; }
 }
 html, body, #root { height: 100%; margin: 0; }
 
