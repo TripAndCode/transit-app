@@ -234,6 +234,92 @@ grep -q "^rt/1/20260901.tar.gz.tmp$" "$RM_LOG" || fail "the malformed .tmp objec
 grep -q "^rt/1/20260901.tar.gz$" "$RM_LOG" && fail "the correctly-named object was deleted due to a prefix-match recheck collision"
 pass "the recheck picks the exact key, not a longer key that merely shares its prefix"
 
+# --- roster changed between the initial listing and the delete-time recheck -
+# rt/99/... is orphaned at the initial bucket-wide listing (id 99 absent from
+# the roster), but id 99 is re-added to the roster before this object's own
+# delete-time recheck runs. known_ids must be rebuilt from the roster right
+# before that recheck's classify call, not just once at the top of the run,
+# or this reclassification is a no-op and the object gets deleted anyway.
+seed_listing
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+: > "$AWS_LOG"; : > "$RM_LOG"
+cat > "$SHIM_DIR/aws" <<'SHIM'
+#!/usr/bin/env bash
+echo "$@" >> "$AWS_LOG"
+if [ "$1" = s3 ] && [ "$2" = ls ]; then
+    url="$3"
+    prefix="${url#s3://*/}"
+    if [ "$prefix" = "rt/99/20260901.tar.gz" ]; then
+        printf '99\tnewagency\t30\thttp://feed.test/tu99.pb\t\thttp://ping.test/99\n' \
+            >> "$COLLECTOR_BASE/etc/agencies.tsv"
+        echo "2026-09-01 00:00:00 444 rt/99/20260901.tar.gz"
+        exit 0
+    fi
+    printf '%s\n' "$LS_ALL" | awk -v p="$prefix" '$4 != "" && index($4, p) == 1'
+    exit 0
+fi
+if [ "$1" = s3 ] && [ "$2" = rm ]; then
+    key="${3#s3://*/}"
+    echo "$key" >> "$RM_LOG"
+    exit "${AWS_RM_EXIT:-0}"
+fi
+exit 0
+SHIM
+chmod +x "$SHIM_DIR/aws"
+run --execute
+[ "$rc" -eq 0 ] || fail "a roster change caught on recheck should not surface as a failure, got $rc: $(cat "$TEST_BASE/out.log")"
+grep -q "^rt/99/20260901.tar.gz$" "$RM_LOG" \
+    && fail "an object whose agency id was re-added to the roster before the recheck was deleted anyway (known_ids was not rebuilt before the recheck)"
+grep -q "rt/99/20260901.tar.gz reclassified as expected on recheck" "$TEST_BASE/out.log" \
+    || fail "the roster-change reclassification message is missing"
+pass "known_ids is rebuilt before the per-object recheck, so a roster change between listing and delete is caught"
+
+# --- SYNC_R2_MAX_STALE_DAYS validation --------------------------------------
+seed_listing
+: > "$AWS_LOG"; : > "$RM_LOG"
+cat > "$SHIM_DIR/aws" <<'SHIM'
+#!/usr/bin/env bash
+echo "$@" >> "$AWS_LOG"
+if [ "$1" = s3 ] && [ "$2" = ls ]; then
+    url="$3"
+    prefix="${url#s3://*/}"
+    printf '%s\n' "$LS_ALL" | awk -v p="$prefix" '$4 != "" && index($4, p) == 1'
+    exit 0
+fi
+if [ "$1" = s3 ] && [ "$2" = rm ]; then
+    key="${3#s3://*/}"
+    echo "$key" >> "$RM_LOG"
+    exit "${AWS_RM_EXIT:-0}"
+fi
+exit 0
+SHIM
+chmod +x "$SHIM_DIR/aws"
+
+set +e
+SYNC_R2_MAX_STALE_DAYS=nope ../bin/reconcile-r2.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "a non-numeric SYNC_R2_MAX_STALE_DAYS should exit 64, got $rc: $(cat "$TEST_BASE/out.log")"
+grep -q "MAX_STALE_DAYS must be a positive integer" "$TEST_BASE/out.log" \
+    || fail "rejection reason for a non-numeric SYNC_R2_MAX_STALE_DAYS is missing"
+[ -s "$AWS_LOG" ] && fail "aws was invoked despite an invalid SYNC_R2_MAX_STALE_DAYS"
+pass "a non-numeric SYNC_R2_MAX_STALE_DAYS is rejected instead of crashing the staleness arithmetic"
+
+# A leading-zero numeral ("010") must be read as decimal 10, not octal 8: a
+# marker 9 days old is fresh under a 10-day allowance but stale under an
+# 8-day one, so misreading "010" as octal would wrongly refuse to run.
+nine_days_marker_ts=$(date -u -v-9d +%Y%m%d%H%M 2>/dev/null || date -d "9 days ago" +%Y%m%d%H%M)
+touch -t "$nine_days_marker_ts" "$COLLECTOR_BASE/.sync-r2.last-ok"
+export LS_ALL="2026-09-01 00:00:00 112 rt/1/20260901.tar.gz
+2026-09-01 00:00:00 222 static/8/gtfs_static_20260901.zip"
+: > "$AWS_LOG"; : > "$RM_LOG"
+set +e
+SYNC_R2_MAX_STALE_DAYS=010 ../bin/reconcile-r2.sh --execute > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "SYNC_R2_MAX_STALE_DAYS=010 should be read as decimal 10 (a 9-day-old marker is fresh), got $rc: $(cat "$TEST_BASE/out.log")"
+pass "a leading-zero SYNC_R2_MAX_STALE_DAYS (010) is read as decimal 10, not octal 8"
+
 # --- overlap guard -----------------------------------------------------------
 # A concurrent holder of the lock file must make this run skip immediately
 # (exit 0, no aws calls at all), matching sync-r2.sh's own overlap guard.

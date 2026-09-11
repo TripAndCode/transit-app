@@ -93,6 +93,25 @@ if [ ! -f "$TSV" ]; then
     exit 64
 fi
 
+# Digits-only doesn't rule out a leading-zero numeral like "010" -- a plain
+# arithmetic context would otherwise treat that as octal (silently changing
+# its value, or aborting on an invalid octal digit like "018"). Normalize to
+# base-10 now so stale_after's arithmetic below only ever sees a clean
+# decimal value.
+case "$MAX_STALE_DAYS" in
+    ''|*[!0-9]*)
+        echo "reconcile-r2.sh: MAX_STALE_DAYS must be a positive integer, got" \
+            "'$MAX_STALE_DAYS'" >&2
+        exit 64
+        ;;
+esac
+if [ "$((10#$MAX_STALE_DAYS))" -le 0 ]; then
+    echo "reconcile-r2.sh: MAX_STALE_DAYS must be a positive integer, got" \
+        "'$MAX_STALE_DAYS'" >&2
+    exit 64
+fi
+printf -v MAX_STALE_DAYS '%d' "$((10#$MAX_STALE_DAYS))"
+
 if [ "$EXECUTE" -eq 1 ]; then
     if [ ! -f "$OK_MARKER" ]; then
         echo "reconcile-r2.sh: REFUSING to delete — $OK_MARKER is missing (sync-r2.sh has" \
@@ -114,15 +133,21 @@ if [ "$EXECUTE" -eq 1 ]; then
     fi
 fi
 
-# known_ids -- newline-separated set of every agency id currently in the
-# roster (including ids with no static_url configured -- an rt/<id>/ prefix
-# is still expected for those).
-known_ids=$'\n'
-while IFS= read -r row || [ -n "${row:-}" ]; do
-    agency_row_is_data "$row" || continue
-    split_agency_row "$row"
-    known_ids="${known_ids}${agency_id}"$'\n'
-done < "$TSV"
+# build_known_ids -- (re)sets known_ids to a newline-separated set of every
+# agency id currently in $TSV (including ids with no static_url configured --
+# an rt/<id>/ prefix is still expected for those). Called once up front and
+# again immediately before each per-object delete-time recheck, so a roster
+# edit landing between the initial bucket-wide listing and that object's own
+# recheck (the id got re-added) is actually reflected in is_known_id.
+build_known_ids() {
+    known_ids=$'\n'
+    while IFS= read -r row || [ -n "${row:-}" ]; do
+        agency_row_is_data "$row" || continue
+        split_agency_row "$row"
+        known_ids="${known_ids}${agency_id}"$'\n'
+    done < "$TSV"
+}
+build_known_ids
 
 is_known_id() {
     case "$known_ids" in
@@ -211,6 +236,7 @@ while read -r d t size key; do
         failed=1
         continue
     fi
+    build_known_ids
     recheck_result=$(classify "$key")
     if [ "$recheck_result" = "expected" ]; then
         echo "reconcile-r2.sh: $key reclassified as expected on recheck (roster changed?)" \
