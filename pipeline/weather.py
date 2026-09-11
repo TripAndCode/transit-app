@@ -36,6 +36,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import urllib.error
 from collections.abc import Mapping
@@ -79,6 +80,14 @@ def attribution(locale: str) -> str:
 
 
 _POINT_URL = "https://www.jma.go.jp/bosai/amedas/data/point/{station_id}/{ymd}_{hour:02d}.json"
+
+# Every real AMeDAS station number is exactly 5 digits. Enforcing that shape
+# up front -- not just percent-encoding whatever `agency_weather_stations`
+# holds -- is what actually pins the fetch to the point-observation document
+# the template names: percent-encoding leaves `.` untouched, so an encoded
+# `..` path segment still reaches the URL and most origin servers resolve it
+# a directory up from there.
+_STATION_ID_RE = re.compile(r"^[0-9]{5}$")
 
 # The source publishes point observations in 3-hour files: `_00` covers
 # 00:00-02:50, `_21` covers 21:00-23:50. A day's own eight files therefore
@@ -332,10 +341,20 @@ def _fetch_block(
     degrades to ``None``: that bounds the shape of what a caller merges into
     its running `readings` dict, independent of the body's byte size on the
     wire.
+
+    A ``station_id`` outside `_STATION_ID_RE`'s character set also degrades to
+    ``None`` before any URL is built: percent-encoding alone does not bound
+    which document is fetched, because `quote` leaves `.` untouched and an
+    encoded `..` path segment still resolves a directory up on most origin
+    servers.
     """
-    # station_id is percent-encoded because it comes from a hand-populated table
-    # and lands in the URL's path: an unencoded `/`, `?` or `#` in it would point
-    # the fetch at a different document on the host than this template names.
+    if not _STATION_ID_RE.match(station_id):
+        logger.warning("weather: rejecting station_id %r outside the allowed character set", station_id)
+        return None
+    # station_id is also percent-encoded, belt-and-braces with the character-set
+    # check above: it comes from a hand-populated table and lands in the URL's
+    # path, so an unencoded `/`, `?` or `#` in it would point the fetch at a
+    # different document on the host than this template names.
     url = _POINT_URL.format(station_id=quote(station_id, safe=""), ymd=day.strftime("%Y%m%d"), hour=hour)
     try:
         with safe_urlopen(url, timeout=timeout, max_bytes=max_bytes) as resp:

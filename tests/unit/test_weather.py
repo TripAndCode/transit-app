@@ -703,10 +703,10 @@ def test_fetch_block_accepts_a_mapping_exactly_at_the_shape_cap(monkeypatch):
     assert len(fetched[0]) == _MAX_READINGS_PER_BLOCK
 
 
-def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
-    """`station_id` is hand-populated and lands in the URL's path, so a value
-    carrying a `/` or `?` must not be able to steer the fetch at a different
-    document on the source host."""
+def test_fetch_block_percent_encodes_a_valid_station_id(monkeypatch):
+    """A `station_id` that already passes the character-set check is still
+    percent-encoded before landing in the URL's path, belt-and-braces with
+    that check."""
     import pipeline.weather as weather
 
     seen: list[str] = []
@@ -726,11 +726,37 @@ def test_fetch_block_percent_encodes_the_station_id(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(weather, "safe_urlopen", _fake_urlopen)
-    weather._fetch_block("47765/../../forecast", _DAY, 0, 1024)
+    weather._fetch_block("47765", _DAY, 0, 1024)
 
     assert len(seen) == 1
     url = seen[0]
-    assert "47765%2F..%2F..%2Fforecast" in url
-    # The path still resolves to the point-observation file the template names.
-    assert url.startswith("https://www.jma.go.jp/bosai/amedas/data/point/")
-    assert url.endswith("/20260401_00.json")
+    assert url == "https://www.jma.go.jp/bosai/amedas/data/point/47765/20260401_00.json"
+
+
+def test_fetch_block_rejects_a_station_id_with_a_path_separator(monkeypatch):
+    """`station_id` is hand-populated and lands in the URL's path. Percent-
+    encoding a `/` alone would not stop the value from naming a different
+    path once decoded server-side, so anything outside the digit-only
+    character set must be rejected before any fetch is attempted, not merely
+    encoded."""
+    import pipeline.weather as weather
+
+    seen: list[str] = []
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: seen.append(url))
+
+    assert weather._fetch_block("47765/forecast", _DAY, 0, 1024) is None
+    assert seen == []
+
+
+def test_fetch_block_rejects_a_dot_segment_station_id(monkeypatch):
+    """`quote(station_id, safe="")` does not encode `.`, so a `..` value
+    would survive into the URL path and resolve one directory up on most
+    origin servers -- the character-set check must catch this case even
+    though the wire-level encoding does not."""
+    import pipeline.weather as weather
+
+    seen: list[str] = []
+    monkeypatch.setattr(weather, "safe_urlopen", lambda url, *, timeout, max_bytes: seen.append(url))
+
+    assert weather._fetch_block("47765/../../forecast", _DAY, 0, 1024) is None
+    assert seen == []
