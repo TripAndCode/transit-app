@@ -142,6 +142,25 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+
+.definition-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: 760px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.definition-meta > span { min-width: 0; }
+.definition-meta > span + span::before {
+  content: "·";
+  margin-right: 12px;
+  color: var(--text-tertiary);
+}
+@media (max-width: 720px) {
+  .definition-meta { max-width: 100%; }
+}
 html, body, #root { height: 100%; margin: 0; }
 
 body {

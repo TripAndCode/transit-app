@@ -27,31 +27,26 @@ export function DefinitionMetaBlock({ definition }: Props) {
   return (
     <div
       data-testid="definition-meta"
+      className="definition-meta"
       style={{
-        fontSize: 11.5,
-        color: "var(--text-tertiary)",
-        lineHeight: 1.6,
         margin: "2px 0 14px",
       }}
     >
       {definition.preset != null && (
-        <>
-          {t("definitionMeta.tolerance_line", { preset: definition.preset, early, late })}
-          {" · "}
-        </>
+        <span>{t("definitionMeta.tolerance_line", { preset: definition.preset, early, late })}</span>
       )}
       {/* Translation-key suffix from the API's own identifier, mirroring
           ReportTable.tsx's `valueKey` pattern -- an unrecognized identifier
           falls back to rendering the raw value rather than silently
           reusing whatever text happened to be here before, so the two can
           never drift apart unnoticed. */}
-      {t(`definitionMeta.measurementPoint.${definition.measurement_point}`, {
-        defaultValue: definition.measurement_point,
-      })}
-      {" · "}
-      {t(`definitionMeta.dedupRule.${definition.dedup_rule}`, { defaultValue: definition.dedup_rule })}
-      {" · "}
-      {t("definitionMeta.exclusion_rule", { sec: definition.exclusion_threshold_sec })}
+      <span>
+        {t(`definitionMeta.measurementPoint.${definition.measurement_point}`, {
+          defaultValue: definition.measurement_point,
+        })}
+      </span>
+      <span>{t(`definitionMeta.dedupRule.${definition.dedup_rule}`, { defaultValue: definition.dedup_rule })}</span>
+      <span>{t("definitionMeta.exclusion_rule", { sec: definition.exclusion_threshold_sec })}</span>
     </div>
   );
 }
