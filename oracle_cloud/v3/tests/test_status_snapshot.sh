@@ -20,7 +20,8 @@ old_iso=$(date -u -v-30d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "30 days 
 # the real Aomori configuration); agency 8 has one.
 seed_healthy() {
     rm -rf "$COLLECTOR_BASE/data" "$COLLECTOR_BASE/.status"
-    rm -f "$COLLECTOR_BASE/.sync-r2.last-ok" "$COLLECTOR_BASE/.verify-r2.last-result"
+    rm -f "$COLLECTOR_BASE/.sync-r2.last-ok" "$COLLECTOR_BASE/.verify-r2.last-result" \
+        "$COLLECTOR_BASE/.verify-r2.last-success"
     printf '# id\tname\tinterval\tfeed_url\tstatic_url\tping_url\n' \
         > "$COLLECTOR_BASE/etc/agencies.tsv"
     printf '1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
@@ -38,6 +39,7 @@ seed_healthy() {
     date -u +%Y-%m-%dT%H:%M:%SZ > "$sdir/.static-last-ok"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$COLLECTOR_BASE/.sync-r2.last-ok"
     printf '%s ok 1234\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$COLLECTOR_BASE/.verify-r2.last-success"
 }
 
 run_snapshot() {
@@ -125,12 +127,34 @@ pass "a stale R2 sync marker pushes the overall state to stale"
 
 # verify-r2.sh's own last recorded result was a failure: reported as failed,
 # the one state a subsystem must explicitly report rather than infer from age.
+# With no genuine prior success on record (RESULT_MARKER is written on every
+# completed run, success or failure, so its own timestamp here belongs to the
+# failed run itself, not a success), last_success_at/age_seconds must be
+# null/absent rather than that failed run's own timestamp.
 seed_healthy
+rm -f "$COLLECTOR_BASE/.verify-r2.last-success"
 printf '%s fail 7\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
 run_snapshot
 [ "$rc" -eq 0 ] || fail "a failed verify-r2 result should still exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q '"state":"failed"' "$OUT" || fail "a recorded verify-r2 failure should report state=failed: $(cat "$OUT")"
+grep -q '"last_success_at":null' "$OUT" || fail "a verify-r2 failure with no prior success must report last_success_at:null, not the failed run's own timestamp: $(cat "$OUT")"
+grep -q '"age_seconds":null' "$OUT" || fail "a verify-r2 failure with no prior success must report age_seconds:null: $(cat "$OUT")"
 pass "verify-r2.sh's own recorded failure reports state=failed regardless of age"
+pass "a verify-r2 failure with no prior success reports last_success_at:null instead of the failed run's own timestamp"
+
+# Same failure, but with a genuine prior success on record (an older
+# SUCCESS_MARKER, distinct from the fresh failed-run timestamp in
+# RESULT_MARKER): last_success_at must reflect that real prior success, not
+# the failed run's own timestamp.
+seed_healthy
+prior_success_iso=$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "1 day ago" +%Y-%m-%dT%H:%M:%SZ)
+printf '%s\n' "$prior_success_iso" > "$COLLECTOR_BASE/.verify-r2.last-success"
+printf '%s fail 7\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
+run_snapshot
+[ "$rc" -eq 0 ] || fail "a failed verify-r2 result with a prior success should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"state":"failed"' "$OUT" || fail "a recorded verify-r2 failure should report state=failed even with a prior success on record: $(cat "$OUT")"
+grep -q "\"last_success_at\":\"$prior_success_iso\"" "$OUT" || fail "a verify-r2 failure with a genuine prior success should report that success's own timestamp, not the failed run's: $(cat "$OUT")"
+pass "a verify-r2 failure with a genuine prior success reports that success's own timestamp, not the failed run's"
 
 # verify-r2.sh has never run at all: unknown, not failed (no failure was ever
 # actually reported -- this is "cannot tell", not "confirmed broken").

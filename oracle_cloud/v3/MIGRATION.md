@@ -163,9 +163,18 @@ Verify before relying on it:
 document (see `scripts/ops_status.py` in the main repo checkout for the
 contract) from the same on-disk evidence `health-check.sh`/`verify-r2.sh`
 already produce — RT/static freshness, local disk usage, the `.sync-r2.last-
-ok` marker, and `verify-r2.sh`'s own `.verify-r2.last-result` marker (added
-alongside this: `<ISO8601> <ok|fail> <object_count>`, written on every
-completed run, not just successes) — and writes it atomically to
+ok` marker, and two markers `verify-r2.sh` writes: `.verify-r2.last-result`
+(`<ISO8601> <ok|fail> <object_count>`, written on every completed run,
+success or failure — this drives `verify_result`/the `failed` state) and
+`.verify-r2.last-success` (a bare `<ISO8601>` timestamp, written only when a
+run succeeds). The document's `last_success_at`/`age_seconds` for this
+subsystem always come from the success-only marker, never from
+`.last-result`'s own timestamp — otherwise a failed run's own completion time
+would masquerade as a success. When there is no genuine prior success on
+record (a first-ever failure, or the marker was never written), the document
+reports `last_success_at: null`/`age_seconds: null` alongside `state:
+"failed"`, the same way `rt_state`/`static_state` report `null`/`unknown` for
+"no evidence yet" — and writes it atomically to
 `data/../.status/oracle-crawler-status.json`. Unlike `health-check.sh` it
 never pages on its own; an unhealthy *reported* state is the normal, valid
 output of a successful run, not a script failure.

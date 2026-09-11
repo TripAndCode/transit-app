@@ -39,10 +39,18 @@
 # record, written on every completed run (not just successes), plus the total
 # object count already gathered for free while listing each agency's own
 # prefixes. status-snapshot.sh reads this to report R2 verify freshness
-# without ever needing R2 credentials or a listing call of its own. Written
-# best-effort: a marker write failure is logged but never changes this
-# script's own pass/fail verdict, since the marker only feeds an optional
-# downstream heartbeat, not this script's actual job.
+# without ever needing R2 credentials or a listing call of its own.
+#
+# RESULT_MARKER's timestamp is the last *completed run*, success or failure --
+# it is not safe to read as "last success". SUCCESS_MARKER is the success-only
+# counterpart (mirroring sync-r2.sh's OK_MARKER): written only when a run
+# passes, so its timestamp (or absence) is what status-snapshot.sh reads for
+# this subsystem's actual last-known-success, keeping a failed run's own
+# timestamp from ever masquerading as a success.
+#
+# Both markers are written best-effort: a marker write failure is logged but
+# never changes this script's own pass/fail verdict, since the markers only
+# feed an optional downstream heartbeat, not this script's actual job.
 set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -61,6 +69,7 @@ BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
 AWS="${AWS_CLI:-aws}"
 RESULT_MARKER="${VERIFY_R2_RESULT_MARKER:-$BASE_DIR/.verify-r2.last-result}"
+SUCCESS_MARKER="${VERIFY_R2_SUCCESS_MARKER:-$BASE_DIR/.verify-r2.last-success}"
 # Generous vs. the daily sync/rotate cadence: rotate-day.sh only tars
 # yesterday's (already-closed) day, so right after a normal sync the newest
 # rt/<id>/ object is well under a day old. Two days absorbs one missed or
@@ -131,20 +140,38 @@ count_lines() {
 }
 
 # record_result <ok|fail> — atomic best-effort write of
-# "<ISO8601 UTC> <ok|fail> <total_objects>" to RESULT_MARKER. Never changes
-# this script's own exit status: a failure here only degrades an optional
-# downstream heartbeat, not verify-r2.sh's actual verdict.
+# "<ISO8601 UTC> <ok|fail> <total_objects>" to RESULT_MARKER on every
+# completed run, then, only when the run succeeded, the same timestamp alone
+# to SUCCESS_MARKER. Never changes this script's own exit status: a failure
+# here only degrades an optional downstream heartbeat, not verify-r2.sh's
+# actual verdict.
 record_result() {
-    local result="$1" tmp
+    local result="$1" ts tmp
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
     tmp=$(mktemp "$RESULT_MARKER.XXXXXX" 2>/dev/null) || {
         echo "verify-r2.sh: could not create a temp file for $RESULT_MARKER" >&2
+        tmp=""
+    }
+    if [ -n "$tmp" ]; then
+        if printf '%s %s %s\n' "$ts" "$result" "$total_objects" > "$tmp" \
+            && mv -f "$tmp" "$RESULT_MARKER"; then
+            :
+        else
+            echo "verify-r2.sh: failed to write $RESULT_MARKER" >&2
+            rm -f "$tmp"
+        fi
+    fi
+
+    [ "$result" = ok ] || return 0
+    tmp=$(mktemp "$SUCCESS_MARKER.XXXXXX" 2>/dev/null) || {
+        echo "verify-r2.sh: could not create a temp file for $SUCCESS_MARKER" >&2
         return 0
     }
-    if printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$result" "$total_objects" > "$tmp" \
-        && mv -f "$tmp" "$RESULT_MARKER"; then
+    if printf '%s\n' "$ts" > "$tmp" && mv -f "$tmp" "$SUCCESS_MARKER"; then
         return 0
     fi
-    echo "verify-r2.sh: failed to write $RESULT_MARKER" >&2
+    echo "verify-r2.sh: failed to write $SUCCESS_MARKER" >&2
     rm -f "$tmp"
     return 0
 }

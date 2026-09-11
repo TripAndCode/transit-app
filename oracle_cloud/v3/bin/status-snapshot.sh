@@ -13,9 +13,9 @@
 # Rather than re-run health-check.sh's/verify-r2.sh's own checks, this reads
 # the same on-disk evidence they already produce (RT sample mtimes, the
 # `.static-last-ok` / `.sync-r2.last-ok` markers, verify-r2.sh's own
-# `.verify-r2.last-result` marker) so the numbers here can never disagree with
-# what those scripts alerted on, and so this never needs R2 credentials or a
-# network call of its own.
+# `.verify-r2.last-result` / `.verify-r2.last-success` markers) so the numbers
+# here can never disagree with what those scripts alerted on, and so this
+# never needs R2 credentials or a network call of its own.
 #
 # One `state` covers three independently-tracked subsystems (RT polling,
 # static fetching, the R2 mirror). Each is classified on its own thresholds
@@ -38,6 +38,7 @@ BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
 TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
 SYNC_OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 VERIFY_RESULT_MARKER="${VERIFY_R2_RESULT_MARKER:-$BASE_DIR/.verify-r2.last-result}"
+VERIFY_SUCCESS_MARKER="${VERIFY_R2_SUCCESS_MARKER:-$BASE_DIR/.verify-r2.last-success}"
 OUT_FILE="${ORACLE_STATUS_FILE:-$BASE_DIR/.status/oracle-crawler-status.json}"
 
 # Reused as-is from health-check.sh/verify-r2.sh so a threshold that pages a
@@ -228,15 +229,30 @@ else
     fi
 fi
 
-# --- R2 verify (verify-r2.sh's own result marker: "<iso> <ok|fail> <count>") ---
+# --- R2 verify ---
+# verify_result/verify_state (ok/fail/unknown, or the failed/stale/etc.
+# state derived from it) come from RESULT_MARKER: "<iso> <ok|fail> <count>",
+# written on every completed run. The *timestamp* this subsystem contributes
+# to the document's overall last_success_at/age_seconds, however, always
+# comes from SUCCESS_MARKER (a bare ISO8601 UTC timestamp, written only when
+# a run succeeds) -- RESULT_MARKER's own timestamp is a failed run's own
+# timestamp exactly when verify_result is "fail", so it must never stand in
+# for "last success". verify_epoch is empty whenever there is no genuine
+# success on record to point to (never succeeded, or verify_state is itself
+# unknown), matching rt_missing_ever/static_missing_ever's own "no epoch
+# without a real timestamp" rule.
 verify_result="unknown"
 r2_object_total=""
+verify_success_epoch=""
+if [ -f "$VERIFY_SUCCESS_MARKER" ]; then
+    verify_success_epoch=$(parse_iso_epoch "$(cat "$VERIFY_SUCCESS_MARKER" 2>/dev/null || true)")
+fi
 if [ ! -f "$VERIFY_RESULT_MARKER" ]; then
     verify_state=unknown; verify_epoch=""
 else
     read -r verify_ts verify_result verify_total < "$VERIFY_RESULT_MARKER" 2>/dev/null || true
-    verify_epoch=$(parse_iso_epoch "${verify_ts:-}")
-    if [ -z "$verify_epoch" ]; then
+    result_epoch=$(parse_iso_epoch "${verify_ts:-}")
+    if [ -z "$result_epoch" ]; then
         verify_state=unknown; verify_epoch=""; verify_result="unknown"
     else
         case "${verify_total:-}" in
@@ -244,12 +260,24 @@ else
             *) r2_object_total="$verify_total" ;;
         esac
         if [ "$verify_result" = "fail" ]; then
+            # The highest-severity state wins regardless of how old (or
+            # absent) the last real success is; verify_epoch carries that
+            # genuine prior success through (empty if there has never been
+            # one), never the failed run's own result_epoch.
             verify_state=failed
-        else
-            age=$(( NOW - verify_epoch ))
+            verify_epoch="$verify_success_epoch"
+        elif [ -n "$verify_success_epoch" ]; then
+            age=$(( NOW - verify_success_epoch ))
             max=$(( VERIFY_R2_MAX_STALE_DAYS * 86400 ))
             [ "$max" -gt 0 ] || max=1
             verify_state=$(classify_ratio $(( age * 1000 / max )))
+            verify_epoch="$verify_success_epoch"
+        else
+            # RESULT_MARKER says the last completed run succeeded, but there
+            # is no parseable SUCCESS_MARKER to trust for a timestamp (e.g. a
+            # marker write failure) -- unknown rather than a guessed
+            # freshness.
+            verify_state=unknown; verify_epoch=""
         fi
     fi
 fi
@@ -281,11 +309,16 @@ for pair in "rt:$rt_state:$rt_epoch" "static:$static_state:$static_epoch" "r2:$r
 done
 [ "$overall_rank" -ge 0 ] || { overall_state=unknown; overall_epoch=""; }
 
-# `overall_epoch` is empty exactly when `overall_state` is `unknown`: every
-# other reachable state (healthy/degraded/stale from a ratio classification,
-# or `failed` from verify-r2.sh's own explicit "fail" result) is only ever
-# assigned together with a real timestamp above.
-if [ "$overall_state" = unknown ]; then
+# `overall_epoch` is empty exactly when there is no real success timestamp to
+# report: always true for `unknown`, and also true for `failed` when the
+# failing subsystem (verify-r2.sh's R2 check) has never recorded a genuine
+# success. Every other reachable state/case is only ever assigned together
+# with a real timestamp above. The operations-status contract
+# (`_validate_freshness_invariants` in scripts/ops_status.py) accepts a null
+# `last_success_at` paired with either `unknown` or `failed`, so branching on
+# epoch emptiness here (rather than on `overall_state` alone) is what keeps
+# that invariant holding in both cases.
+if [ -z "$overall_epoch" ]; then
     last_success_json=null
     age_seconds_json=null
 else
