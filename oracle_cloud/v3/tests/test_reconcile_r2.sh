@@ -233,3 +233,46 @@ run --execute
 grep -q "^rt/1/20260901.tar.gz.tmp$" "$RM_LOG" || fail "the malformed .tmp object was not deleted despite an exact-size recheck match"
 grep -q "^rt/1/20260901.tar.gz$" "$RM_LOG" && fail "the correctly-named object was deleted due to a prefix-match recheck collision"
 pass "the recheck picks the exact key, not a longer key that merely shares its prefix"
+
+# --- overlap guard -----------------------------------------------------------
+# A concurrent holder of the lock file must make this run skip immediately
+# (exit 0, no aws calls at all), matching sync-r2.sh's own overlap guard.
+# Skips cleanly (not a failure) on a platform without `flock` (e.g. macOS).
+if command -v flock >/dev/null 2>&1; then
+    seed_listing
+    LOCK_FILE="$COLLECTOR_BASE/reconcile-r2.lock"
+    HELD_MARKER="$TEST_BASE/lock-held"
+    rm -f "$HELD_MARKER"
+    (
+        exec 9>"$LOCK_FILE"
+        flock 9
+        touch "$HELD_MARKER"
+        sleep 2
+    ) &
+    holder_pid=$!
+
+    acquired=0
+    for _ in $(seq 1 100); do
+        if [ -f "$HELD_MARKER" ]; then
+            acquired=1
+            break
+        fi
+        sleep 0.05
+    done
+    [ "$acquired" -eq 1 ] || fail "background lock holder never acquired the lock (test setup issue)"
+
+    : > "$AWS_LOG"; : > "$RM_LOG"
+    set +e
+    out=$(../bin/reconcile-r2.sh 2>&1)
+    code=$?
+    set -e
+    wait "$holder_pid"
+
+    [ "$code" -eq 0 ] || fail "a concurrent run should skip with exit 0, got $code"
+    [ -s "$AWS_LOG" ] && fail "aws was invoked despite another run holding the lock"
+    echo "$out" | grep -q "already in progress" \
+        || fail "skip message missing when lock was already held"
+    pass "a concurrent run skips cleanly while the lock is held"
+else
+    echo "SKIP: flock not installed on this platform, overlap-guard behavior not exercised"
+fi

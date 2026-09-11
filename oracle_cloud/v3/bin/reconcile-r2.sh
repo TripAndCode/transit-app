@@ -47,6 +47,7 @@ TSV="${AGENCIES_TSV:-$BASE_DIR/etc/agencies.tsv}"
 AWS="${AWS_CLI:-aws}"
 OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 MAX_STALE_DAYS="${SYNC_R2_MAX_STALE_DAYS-3}"
+LOCK_FILE="${RECONCILE_R2_LOCK:-$BASE_DIR/reconcile-r2.lock}"
 
 EXECUTE=0
 case "${RECONCILE_R2_EXECUTE:-0}" in
@@ -61,6 +62,23 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Prevent an overlapping run (e.g. a slow full-bucket listing still running
+# when the next weekly cron tick fires, or a manual --execute run started
+# while the report-only cron job is mid-scan) from racing this one against
+# the same objects -- matches sync-r2.sh/spool-cleanup.sh's own lock.
+# `flock -n` on our own fd: if another instance already holds the lock, exit
+# 0 immediately rather than failing the cron job. Degrades to "no locking"
+# with a warning where `flock` isn't available (macOS dev/test boxes).
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+        echo "reconcile-r2: another run is already in progress, skipping"
+        exit 0
+    fi
+else
+    echo "reconcile-r2: WARNING flock not found — running without an overlap guard" >&2
+fi
 
 : "${OBJECT_STORE_ENDPOINT:?OBJECT_STORE_ENDPOINT is required}"
 : "${OBJECT_STORE_BUCKET:?OBJECT_STORE_BUCKET is required}"
