@@ -94,6 +94,17 @@ window on R2 objects — see that script for why its defaults are so much
 longer than `prune.sh`'s local ones. Both are wrapped by `cron-wrap.sh` like
 `sync-r2.sh` and `prune.sh`, so a failure of either pages the same way.
 
+`bin/spool-cleanup.sh` runs daily right after `verify-r2.sh` and reclaims
+local disk file by file, the moment its own R2 listing confirms (byte-size
+match) that specific RT/static archive is uploaded — well before
+`prune.sh`'s much longer age-based window. A failed or partially uploaded
+archive is left in place for `sync-r2.sh` to retry; local spool bytes
+remaining after that reclaim are checked against the required
+`SPOOL_DISK_BUDGET_BYTES` env var, and exceeding it is reported as a
+failure, never as a further deletion. Set `SPOOL_DISK_BUDGET_BYTES` in
+`/etc/environment` alongside the `OBJECT_STORE_*` vars before enabling this
+line in cron.
+
 Known gap, unchanged from before: agency 1 (Aomori) has no `static_url` in
 `agencies.tsv` (see the note at the top of this file), so this VM never
 collects new Aomori static GTFS at all — sync-r2.sh only mirrors what the

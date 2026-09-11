@@ -10,6 +10,14 @@
 # permanent, unrecoverable loss. This turns "sync-r2.sh mirrors everything
 # before prune runs" from an assumption documented only in crontab.snippet's
 # comment into something this script actually checks.
+#
+# This is a coarse, time-based safety net, not the primary reclaim path:
+# spool-cleanup.sh (runs daily, right after sync-r2.sh/verify-r2.sh) already
+# removes each archive the moment R2 itself confirms that specific file is
+# uploaded, well before RETENTION_DAYS elapses. A file surviving long enough
+# for this script to consider it means spool-cleanup.sh could never confirm
+# it in R2 -- this window exists to bound that case too, not to be the normal
+# way local disk gets reclaimed.
 set -euo pipefail
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
