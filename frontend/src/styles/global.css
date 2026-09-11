@@ -141,6 +141,11 @@
   --skeleton-b: #30385A;
 }
 
+/* Keep native date controls legible on both themes. Without an explicit
+   color scheme, Chromium leaves the calendar glyph black in dark mode. */
+input[type="date"] { color-scheme: light; }
+:root[data-theme="dark"] input[type="date"] { color-scheme: dark; }
+
 *, *::before, *::after { box-sizing: border-box; }
 
 .definition-meta {
