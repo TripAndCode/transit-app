@@ -1042,6 +1042,25 @@
         "vehicle_km_delivered_pct": "走行キロ達成率（%）"
       },
       "scope_agency_note": "事業者全体の値（路線別の内訳はありません）"
+    },
+    "weather_delay": {
+      "title": "雨天時と晴天時の平均遅延",
+      "subtitle": "この事業者に設定された1つの観測地点について、降水が観測された日とない日の平均遅延を比較します。",
+      "unavailable": "この事業者には観測地点が設定されていません。または、この期間に対応する運行日のデータが見つかりませんでした。",
+      "station_label": "観測地点: {{name}}",
+      "low_confidence_badge": "信頼度が低い",
+      "col": {
+        "condition": "条件",
+        "avg_delay": "平均遅延",
+        "days": "日数",
+        "samples": "観測数"
+      },
+      "row": {
+        "wet": "雨天日",
+        "dry": "晴天日"
+      },
+      "delta_label": "差（雨天 − 晴天）: {{value}}",
+      "delta_unavailable": "この期間はどちらかの条件に十分な日数がなく、比較できません。"
     }
   },
   "insight_panel": {

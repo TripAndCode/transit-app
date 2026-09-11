@@ -1042,6 +1042,25 @@
         "vehicle_km_delivered_pct": "Vehicle-km delivered (%)"
       },
       "scope_agency_note": "Agency-wide figure (no per-route breakdown available)"
+    },
+    "weather_delay": {
+      "title": "Rain vs. dry average delay",
+      "subtitle": "Average recorded delay on days with observed rain compared to days without, for this agency's one documented weather station.",
+      "unavailable": "No observation station is configured for this agency, or no matching service days were found for this range.",
+      "station_label": "Station: {{name}}",
+      "low_confidence_badge": "Low confidence",
+      "col": {
+        "condition": "Condition",
+        "avg_delay": "Average delay",
+        "days": "Days",
+        "samples": "Samples"
+      },
+      "row": {
+        "wet": "Rainy days",
+        "dry": "Dry days"
+      },
+      "delta_label": "Difference (rainy − dry): {{value}}",
+      "delta_unavailable": "Not enough matching days on one side to compare for this range."
     }
   },
   "insight_panel": {
