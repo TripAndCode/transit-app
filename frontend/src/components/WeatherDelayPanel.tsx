@@ -132,9 +132,10 @@ const BUCKET_TRACK_HEIGHT = 96;
 /** Second chart in the panel: one bar per precipitation bucket
  *  from `pipeline.reports.weather.RAIN_BUCKET_LABELS`, additive alongside the
  *  wet/dry comparison above. Bar height and color both encode
- *  `avg_delay_sec` (a single sequential magnitude, per the dataviz skill --
- *  never a second/dual axis); the sample count is a direct label, not a
- *  second plotted scale. A bucket with no matched days/samples renders as a
+ *  `avg_delay_sec` as a single sequential magnitude -- a dual axis (height
+ *  for delay, a second scale for count) would force readers to hold two
+ *  units at once, so the sample count is carried as a direct text label
+ *  instead, not a second plotted scale. A bucket with no matched days/samples renders as a
  *  muted, minimal-height placeholder rather than being hidden, the same
  *  "zero is a real answer" convention `WeatherDelayGroup` already uses for
  *  the wet/dry sides. */
