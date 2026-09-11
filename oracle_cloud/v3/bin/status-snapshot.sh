@@ -257,13 +257,16 @@ else
     read -r verify_ts verify_result verify_total < "$VERIFY_RESULT_MARKER" 2>/dev/null || true
     # Constrain to the only two values record_result ever writes, so a
     # hand-edited or corrupted marker can't inject an unescaped/malformed
-    # value into the JSON document assembled below.
+    # value into the JSON document assembled below, and so the unrecognized
+    # case is tracked to route to verify_state=unknown just below rather than
+    # silently taking the classify_ratio path a genuine "ok" would.
+    verify_result_recognized=1
     case "${verify_result:-}" in
         ok|fail) ;;
-        *) verify_result="unknown" ;;
+        *) verify_result="unknown"; verify_result_recognized=0 ;;
     esac
     result_epoch=$(parse_iso_epoch "${verify_ts:-}")
-    if [ -z "$result_epoch" ]; then
+    if [ -z "$result_epoch" ] || [ "$verify_result_recognized" -eq 0 ]; then
         verify_state=unknown; verify_epoch=""; verify_result="unknown"
     else
         case "${verify_total:-}" in

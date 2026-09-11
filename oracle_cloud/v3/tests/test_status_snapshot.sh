@@ -256,15 +256,21 @@ fi
 
 # A hand-edited or corrupted .verify-r2.last-result marker (anything other
 # than the literal ok/fail record_result writes) must not flow unescaped
-# into the JSON document -- it is normalized to verify_result=unknown.
+# into the JSON document -- it is normalized to verify_result=unknown, and
+# that unrecognized-result case must also force verify_state (and therefore
+# r2_state) to unknown rather than falling through to classify_ratio as if
+# it were a genuine "ok" against the still-fresh .verify-r2.last-success
+# marker seed_healthy leaves in place.
 seed_healthy
 printf '%s "bogus\\n" 7\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COLLECTOR_BASE/.verify-r2.last-result"
 run_snapshot
 [ "$rc" -eq 0 ] || fail "a corrupted verify_result marker should still exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q '"verify_result":"unknown"' "$OUT" || \
     fail "a corrupted verify_result value should be normalized to unknown: $(cat "$OUT")"
+grep -q '"r2_state":"unknown"' "$OUT" || \
+    fail "an unreadable verify_result must force r2_state=unknown, not a ratio-derived state off a stale success epoch: $(cat "$OUT")"
 if [ "$have_python3" -eq 1 ]; then
     python3 -c "import json; json.load(open('$OUT'))" || \
         fail "a corrupted verify_result value must not break the document's JSON validity: $(cat "$OUT")"
 fi
-pass "a corrupted verify_result marker value is normalized to unknown instead of breaking the document"
+pass "a corrupted verify_result marker value is normalized to unknown and forces r2_state=unknown, instead of falling through to a ratio-derived state"
