@@ -39,6 +39,14 @@ CRON_TZ=Asia/Tokyo
 # not a 90-day rolling buffer) -- see the script for why the defaults differ
 # so much from prune.sh's.
 35 9 * * 0  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/prune-r2.sh    >> /home/opc/collector/cron.log 2>&1
+# reconcile-r2.sh covers what prune-r2.sh's own age-based sweep cannot: an R2
+# object under an agency id no longer in agencies.tsv, or one whose filename
+# doesn't match the rt/<id>/<YYYYMMDD>.tar.gz / static/<id>/gtfs_static_
+# <YYYYMMDD>.zip naming rule at all. Deliberately runs WITHOUT --execute here
+# -- it only reports orphans (a nonzero exit when it finds any, so cron-wrap
+# pages on it like any other problem) for a human to review in cron.log
+# before ever deleting anything; `--execute` is a separate, manual step.
+40 9 * * 0  set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws nice -n 10 /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/reconcile-r2.sh    >> /home/opc/collector/cron.log 2>&1
 # health-check.sh is deliberately NOT wrapped: it sends its own ok/fail pings,
 # and the wrapper would report every problem it finds a second time. Its
 # cadence is also what makes the check's own period/grace alarm meaningful --
