@@ -1,0 +1,3 @@
+# Synthetic GitHub App token in the collect_github_status parser test. The
+# fingerprint pins the exact historical finding instead of exempting the file.
+848e9f232f30ab68484e40f03b045afe0e78e8b2:tests/unit/test_collect_github_status.py:github-app-token:63

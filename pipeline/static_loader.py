@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 _STATIC_FILE_MAP = [
     ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),
     ("stop_times.txt", "static_stop_times", ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]),
-    ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id", "service_id"]),
+    ("trips.txt", "static_trips", ["trip_id", "route_id", "trip_headsign", "shape_id", "service_id", "direction_id"]),
     ("routes.txt", "static_routes", ["route_id", "route_short_name", "route_long_name"]),
     ("calendar_dates.txt", "static_calendar_dates", ["service_id", "date", "exception_type"]),
     ("shapes.txt", "static_shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]),
@@ -42,6 +42,7 @@ _DB_COLS = {
         "trip_headsign",
         "shape_id",
         "service_id",
+        "direction_id",
         "static_version_id",
     ],
     "static_routes": ["agency_id", "route_id", "route_short_name", "route_long_name"],
@@ -157,6 +158,9 @@ def load_static(path: str, agency_id: int, conn) -> None:
                 db_cols = _DB_COLS[table]
                 col_list = ", ".join(db_cols)
                 if table == "static_trips":
+                    for row in raw_rows:
+                        direction = row[-1]
+                        row[-1] = int(direction) if direction in {"0", "1"} else None
                     pg_rows = [[agency_id, *row, static_version_id] for row in raw_rows]
                 else:
                     pg_rows = [[agency_id, *row] for row in raw_rows]

@@ -1,19 +1,20 @@
 # Operations map
 
 The Operations map is a current-service triage workspace for analysts and
-transportation operators. It answers three questions on one screen:
+transportation operators. It answers four questions on one screen:
 
-1. Which routes need attention now?
-2. At which stop did each active trip most recently report a delay?
-3. Is the realtime feed fresh enough to trust?
+1. Which direction is the selected trip running?
+2. At which stop did each trip most recently report a delay?
+3. At which reported stops did that delay grow or recover?
+4. Is the realtime feed fresh enough to trust?
 
 It deliberately does not provide a second historical-map mode. Historical
 questions belong in Analysis, linked from the mode switch in the page header.
 
 ## Location semantics
 
-The map does not require or imply GPS vehicle positions. Oracle collectors
-ingest GTFS-Realtime `TripUpdate` messages every 30 to 60 seconds. For each
+The map does not require or imply GPS vehicle positions. Oracle collectors can
+capture GTFS-Realtime `TripUpdate` messages every 30 to 60 seconds. For each
 trip, the API selects the nearest stop update from its newest poll and locates
 that report using the static GTFS stop coordinates.
 
@@ -23,6 +24,11 @@ Resolution order:
 2. If the feed omits `stop_id`, resolve it through
    `(trip_id, stop_sequence)` in `static_stop_times`.
 3. Read `stop_lat` and `stop_lon` from `static_stops`.
+
+For a selected trip, `/delays/live-progress` applies the same nearest-stop rule
+to each source snapshot from the preceding six hours and keeps the newest
+report for each stop sequence. Its trail therefore means "reported progression"
+rather than a confirmed stop crossing.
 
 The marker therefore means "this trip's latest reported stop and delay," not
 "the vehicle is physically at this coordinate." The UI states this distinction
@@ -36,40 +42,44 @@ but are not plotted.
   agency and query string.
 - **Current** is the active mode. **Historical analysis** links to
   `/agencies/:agencyId/analysis/trend`.
-- Selecting a route emphasizes its latest trip reports and static GTFS shape.
+- With all routes selected, the right panel lists routes from the latest
+  observation by maximum delay instead of leaving the panel empty.
+- Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
+  back to `trip_headsign` when older static data has no direction field.
+- Selecting a trip emphasizes its latest report and reported stop trail.
 - Selecting **All routes** removes the route line and retains all trip markers.
+- Trips at the same map position cluster into a count marker until zoomed in.
 - Clicking a marker shows route, delay, reported stop, and update age.
-- The priority queue orders anomaly and watch routes and links to the existing
-  trip drill-down.
-- The client refetches current reports every 30 seconds and also offers manual
-  refresh.
+- The right panel shows stop-by-stop delay values, a trend chart, and the
+  largest delay growth/recovery insight for the selected trip.
+- The client refetches stored current reports and selected-trip progress every
+  30 seconds. Manual refresh performs the same reads immediately; it does not
+  directly trigger the Oracle collector or upstream provider.
 
 ## Data path
 
 | Frontend hook | Endpoint | Purpose |
 |---|---|---|
 | `useLiveTrips` | `GET /api/{agency_id}/delays/live` | One latest report per trip from the feed's rolling five-minute window, enriched with static stop coordinates and headsign |
+| `useLiveTripProgress` | `GET /api/{agency_id}/delays/live-progress?trip_id=...` | Nearest reported stop per source snapshot for one trip, compacted to one report per sequence |
 | `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Historical route average and p90 baseline used to classify current route delay as normal, watch, or anomaly |
 | `useRouteShape` | `GET /api/{agency_id}/route-shape` | Static GTFS geometry for the selected route |
-| `useRouteTrips` / `useRouteStopProfile` | `GET /api/{agency_id}/today/route/{route}/...` | Existing details shown from the priority queue |
 
-`/delays/live` deduplicates the newest five-minute feed window to one row per
-trip and returns at most 500 rows. Current severity uses the active trips'
-average delay. When a matching service-type baseline exists, anomaly means
-above its p90 and watch means above the midpoint between average and p90. A
-route without a baseline still appears: at least five minutes is anomaly and
-at least three minutes is watch.
+`/delays/live` deduplicates the newest five-minute feed window relative to the
+agency's latest stored observation to one row per trip and returns at most 500
+rows. This remains useful for replayed or delayed feeds, so the UI always shows
+the observation age and calls the count "trips in latest observation" rather
+than claiming stale rows are physically operating now.
 
 ## Key files
 
 | File | Role |
 |---|---|
 | `frontend/src/tabs/MapTab.tsx` | Operations workspace, MapLibre lifecycle, marker interactions, freshness, and route selection |
-| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Current-trip marker and selected-route GeoJSON layers |
+| `frontend/src/tabs/map/useOperationsMapLayers.ts` | Clustered trip markers, selected-route shape, and selected-trip report trail |
 | `frontend/src/tabs/map/currentRouteStatus.ts` | Current route aggregation and baseline classification |
-| `frontend/src/tabs/map/OperationsQueue.tsx` | Priority queue and route actions |
+| `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
-| `frontend/src/tabs/live/RouteDrilldown.tsx` | Existing trip detail reused by Operations |
 | `frontend/src/api/hooks.ts` | Current report, route baseline, shape, and detail queries |
 | `api/routers/map.py` | Current report enrichment and map/detail endpoints |
 
@@ -82,14 +92,14 @@ style change.
 
 Automated coverage:
 
-- `tests/api/test_api_map.py` verifies live-trip deduplication, schedule-time
-  normalization, and stop-coordinate fallback through `static_stop_times`.
+- `tests/api/test_api_map.py` verifies live-trip deduplication, report-history
+  compaction, schedule-time normalization, and static stop enrichment.
 - `frontend/src/tabs/map/useOperationsMapLayers.test.ts` verifies marker
   filtering, delay labels, route coloring, and overlay removal.
 - `frontend/src/tabs/map/currentRouteStatus.test.ts` verifies baseline and
   no-baseline classification, including service-type matching.
-- `frontend/src/tabs/map/OperationsQueue.test.tsx` verifies priority rendering
-  and route actions.
+- `frontend/src/tabs/map/OperationsTripPanel.test.tsx` verifies direction,
+  concurrent-trip selection, and stop progression.
 - `frontend/src/routes/legacyRedirects.test.tsx` verifies the `/live` redirect.
 
 Manual checks:
@@ -98,11 +108,10 @@ Manual checks:
 2. Confirm the freshness timestamp advances after collection and refresh.
 3. Compare marker stop names with the latest TripUpdate and static GTFS stop
    coordinates; do not compare them as GPS positions.
-4. Select a route and verify its shape and markers are emphasized.
+4. Select a route, direction, and trip; verify the report trail and chart.
 5. Select All routes and verify the route shape disappears.
 6. Switch basemaps and confirm markers and the route overlay reappear.
-7. Open a priority route and confirm its trip drill-down loads.
-8. Narrow the viewport to verify the queue stacks below the map on mobile.
+7. Narrow the viewport to verify the trip panel stacks below the map on mobile.
 
 ## Related historical map code
 

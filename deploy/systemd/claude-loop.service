@@ -7,9 +7,22 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/root/transit-app
 ExecStart=/root/claude-loop.sh
+# /root/claude-loop.env may also set CLAUDE_TICK_TIMEOUT_SEC (per-tick cap,
+# default 3300s, unchanged from before chaining), CLAUDE_LOOP_MAX_CHAIN_TICKS
+# (default 5), CLAUDE_LOOP_MAX_CHAIN_WALLCLOCK_SEC (default 14400 -- an
+# extra, wrapper-enforced ceiling independent of this unit's own
+# TimeoutStartSec below), CLAUDE_LOOP_CHAIN_DELAY_SEC (default 5, a small
+# delay between chained ticks), and CLAUDE_LOOP_BACKOFF_BASE_SEC/
+# CLAUDE_LOOP_BACKOFF_CAP_SEC (default 300/3600 -- the bounded-backoff
+# schedule after a blocked/idle/ambiguous tick). See
+# deploy/vps/claude-loop.sh and scripts/vps_loop_chain_state.py.
 EnvironmentFile=-/root/claude-loop.env
 Environment=HOME=/root
-TimeoutStartSec=3300
+# Must exceed CLAUDE_LOOP_MAX_CHAIN_WALLCLOCK_SEC plus one more full
+# per-tick timeout (the wrapper's wall-clock check only runs between ticks,
+# not mid-tick) plus headroom for the gh/python overhead each tick adds --
+# with the defaults above, worst case is ~14400 + 3330 = 17730s.
+TimeoutStartSec=18600
 KillMode=control-group
 StandardOutput=append:/root/claude-loop.log
 StandardError=append:/root/claude-loop.log
