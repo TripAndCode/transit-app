@@ -79,6 +79,27 @@ run_verify
 grep -q "2 agencies checked" "$TEST_BASE/out.log" || fail "success summary missing agency count"
 pass "a fresh, intact R2 mirror for every agency exits 0"
 
+# A successful run records a result marker: "<iso> ok <total_object_count>",
+# read by status-snapshot.sh for the oracle_crawler heartbeat -- 3 objects
+# here (rt/1, rt/8, static/8, one line each from seed_healthy's LS_ fixtures).
+marker="$COLLECTOR_BASE/.verify-r2.last-result"
+[ -f "$marker" ] || fail "verify-r2.sh did not write a result marker on success"
+read -r marker_ts marker_result marker_total < "$marker"
+[ "$marker_result" = "ok" ] || fail "a successful run should record result=ok, got '$marker_result'"
+[ "$marker_total" = "3" ] || fail "expected a total of 3 objects, got '$marker_total'"
+{ date -u -d "$marker_ts" +%s >/dev/null 2>&1 || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$marker_ts" +%s >/dev/null 2>&1; } \
+    || fail "the marker's timestamp is not a valid ISO 8601 UTC timestamp: $marker_ts"
+pass "a successful run records an ok result marker with the total object count"
+
+# A successful run also records a separate success-only marker -- the one
+# status-snapshot.sh reads for this subsystem's genuine last_success_at,
+# distinct from the result marker written on every completed run either way.
+success_marker="$COLLECTOR_BASE/.verify-r2.last-success"
+[ -f "$success_marker" ] || fail "verify-r2.sh did not write a success marker on success"
+success_ts=$(cat "$success_marker")
+[ "$success_ts" = "$marker_ts" ] || fail "the success marker's timestamp should match the result marker's on a successful run, got '$success_ts' vs '$marker_ts'"
+pass "a successful run records a success-only marker matching the result marker's timestamp"
+
 # Missing required env fails closed before calling aws.
 : > "$AWS_LOG"
 if OBJECT_STORE_ENDPOINT= OBJECT_STORE_BUCKET= OBJECT_STORE_ACCESS_KEY_ID= OBJECT_STORE_SECRET_ACCESS_KEY= \
@@ -95,6 +116,28 @@ run_verify
 [ "$rc" -eq 1 ] || fail "no RT objects in R2 should exit 1, got $rc"
 grep -q "no RT objects in R2 under rt/1/" "$TEST_BASE/out.log" || fail "missing-RT-objects reason absent"
 pass "an agency with no RT objects in R2 fails"
+
+# A failing run still records a result marker -- "fail", not silently absent,
+# so a heartbeat reading it can't mistake "never checked" for "just checked
+# and failed".
+read -r marker_ts marker_result marker_total < "$COLLECTOR_BASE/.verify-r2.last-result"
+[ "$marker_result" = "fail" ] || fail "a failing run should record result=fail, got '$marker_result'"
+pass "a failing run records a fail result marker rather than leaving none at all"
+
+# A failing run must NOT touch the success marker -- a genuine prior success
+# stays on record exactly as it was, rather than being silently lost or
+# overwritten with the failed run's own timestamp.
+[ "$(cat "$success_marker")" = "$success_ts" ] \
+    || fail "a failing run must not modify the success marker left by an earlier success"
+pass "a failing run leaves a prior success marker untouched"
+
+# A run that fails with no prior success on record at all must not create a
+# success marker out of thin air.
+rm -f "$success_marker"
+run_verify
+[ "$rc" -eq 1 ] || fail "expected the still-broken fixture (no RT objects for agency 1) to keep failing, got rc=$rc"
+[ ! -f "$success_marker" ] || fail "a failing run must not create a success marker when there has never been a real success"
+pass "a failing run with no prior success on record does not create a success marker"
 
 # Newest RT object in R2 is stale (rotate-day/sync-r2 stopped mirroring it).
 seed_healthy
