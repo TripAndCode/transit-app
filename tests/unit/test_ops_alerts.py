@@ -96,6 +96,52 @@ def test_transition_to_unknown_is_never_alerted_and_preserves_bookkeeping():
     assert updated["oracle_crawler"].last_alert_at == prior_alert_at
 
 
+def test_bad_to_unknown_to_same_bad_is_dedup_suppressed_not_entered():
+    # A poll landing on `unknown` mid-incident must not reset the "was this
+    # already alerted on" bookkeeping: failed -> unknown -> failed again
+    # (within the dedup window) is still the same ongoing incident, not a
+    # fresh `entered` transition.
+    prior_alert_at = ops_alerts._isoformat(T0 - timedelta(minutes=20))
+    state = AlertState(
+        components={
+            "oracle_crawler": ComponentAlertState(
+                last_observed_state="unknown", last_alerted_state="failed", last_alert_at=prior_alert_at
+            )
+        }
+    )
+    document = make_document({"oracle_crawler": "failed"})
+
+    alerts, updated = evaluate_components(document, state, now=T0, dedup_interval_seconds=1800)
+
+    assert alerts == []
+    assert updated["oracle_crawler"].last_observed_state == "failed"
+    assert updated["oracle_crawler"].last_alerted_state == "failed"
+    assert updated["oracle_crawler"].last_alert_at == prior_alert_at
+
+
+def test_bad_to_unknown_to_healthy_still_fires_recovered():
+    # Same setup as above, but the component actually recovers instead of
+    # going back to bad -- the intervening `unknown` poll must not swallow
+    # the recovery alert nor silently clear state with nobody told.
+    prior_alert_at = ops_alerts._isoformat(T0 - timedelta(minutes=20))
+    state = AlertState(
+        components={
+            "oracle_crawler": ComponentAlertState(
+                last_observed_state="unknown", last_alerted_state="failed", last_alert_at=prior_alert_at
+            )
+        }
+    )
+    document = make_document({"oracle_crawler": "healthy"})
+
+    alerts, updated = evaluate_components(document, state, now=T0)
+
+    assert len(alerts) == 1
+    assert alerts[0].kind == "recovered"
+    assert alerts[0].component == "oracle_crawler"
+    assert updated["oracle_crawler"].last_alerted_state is None
+    assert updated["oracle_crawler"].last_alert_at is None
+
+
 # ── recovery ────────────────────────────────────────────────────────────────
 
 
@@ -233,7 +279,7 @@ def test_multiple_simultaneous_transitions_are_grouped_into_one_notification():
     assert not notification.is_empty
     text = notification.render_text()
     assert "vps_loop" in text and "r2" in text
-    assert text.count("\n- ") == 2 or text.startswith("- ") is False  # sanity: one line per component alert
+    assert text.count("\n- ") == 2  # sanity: one line per component alert
 
 
 # ── monitor silence ──────────────────────────────────────────────────────

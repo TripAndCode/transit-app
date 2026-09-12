@@ -88,7 +88,8 @@ DEFAULT_DEDUP_INTERVAL_SECONDS = 1800.0
 DEFAULT_MONITOR_MAX_SILENCE_SECONDS = 3600.0
 
 # Only these three states are ever alerted on; `healthy` and `unknown` are
-# deliberately excluded (see the module docstring).
+# deliberately excluded because health cannot be alerted on or recovered from
+# when it cannot even be determined.
 BAD_STATES: frozenset[str] = frozenset({"degraded", "stale", "failed"})
 
 # Relative severity among BAD_STATES only, matching ops_status_page's/
@@ -261,7 +262,12 @@ def evaluate_components(
         name = component_doc["component"]
         current = component_doc["state"]
         prior = state.components.get(name, ComponentAlertState())
-        was_bad = prior.last_observed_state in BAD_STATES
+        # `last_observed_state` alone is not enough: a poll that lands on
+        # `unknown` deliberately preserves `last_alerted_state` while setting
+        # `last_observed_state` to `"unknown"` (see the `unknown` branch
+        # below), so an outstanding un-recovered alert must also count as
+        # "was bad" even though the raw last-observed state no longer says so.
+        was_bad = prior.last_observed_state in BAD_STATES or prior.last_alerted_state is not None
         is_bad = current in BAD_STATES
         reason = reasons.get(name)
         age_seconds = component_doc.get("age_seconds")
@@ -308,7 +314,10 @@ def evaluate_components(
                 last_observed_state=current, last_alerted_state=None, last_alert_at=None
             )
         else:
-            # unknown: bad-state bookkeeping untouched (see module docstring).
+            # unknown: bad-state bookkeeping (last_alerted_state/last_alert_at)
+            # is left untouched because health cannot be determined at all, so
+            # a later swing back to a real bad state is still judged against
+            # the last thing actually alerted on, not silently reset.
             updated[name] = ComponentAlertState(
                 last_observed_state=current,
                 last_alerted_state=prior.last_alerted_state,
