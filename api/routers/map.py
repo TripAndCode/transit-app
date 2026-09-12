@@ -316,8 +316,9 @@ async def live_trip_progress(
         agency_id,
         trip_id,
     )
-    static_rows = await conn.fetch(
-        """
+    static_rows = (
+        await conn.fetch(
+            """
         SELECT sst.stop_sequence, ss.stop_id, ss.stop_name,
                ss.stop_lat, ss.stop_lon
         FROM static_stop_times sst
@@ -326,10 +327,13 @@ async def live_trip_progress(
         WHERE sst.agency_id=$1 AND sst.trip_id=$2
           AND sst.stop_sequence = ANY($3::integer[])
         """,
-        agency_id,
-        trip_id,
-        list(by_sequence),
-    ) if by_sequence else []
+            agency_id,
+            trip_id,
+            list(by_sequence),
+        )
+        if by_sequence
+        else []
+    )
     static_by_sequence = {row["stop_sequence"]: row for row in static_rows}
     stops = []
     for sequence in sorted(by_sequence):
