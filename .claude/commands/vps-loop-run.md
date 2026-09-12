@@ -413,12 +413,24 @@ Walk items top to bottom:
   would simply fail against an existing head branch. So: run Step 5's full
   review fresh against the branch's *current* diff (not the stale closing
   statement), with the same fix-and-reverify cycle capped at 2 iterations on
-  a Major that Step 3b's procedure uses. Once clean, resume the same way the
-  log-empty case above does — skip 6.1–6.4 (the PR and its real number
-  already exist) and go straight to **Step 6.5**, reconstructing
-  `MAIN_SHA_AT_REVIEW` as `git -C <worktree-path> merge-base origin/main
-  vps-loop/item-<N>` from the branch's state right after this fresh review,
-  the same reconstruction the log-empty case uses. Without this, an item
+  a Major that Step 3b's procedure uses — that cycle's own fix commits are
+  local-only (Step 3b's Agent dispatch commits but never pushes). Once
+  clean, resume the same way the log-empty case above does for 6.1, 6.3, and
+  6.4 (skip them: the PR and its real number already exist) — but still run
+  **6.2's push** before proceeding, even though the log-empty case doesn't
+  need to: log-empty's own precondition (an unchanged tip) guarantees origin
+  already has nothing new, whereas this branch's fresh review may have just
+  added local fix commits that were never pushed. A push here is always safe
+  regardless of whether a fix iteration actually happened — "everything
+  up-to-date" is a harmless no-op when the reviewed tip already matches
+  origin, e.g. when the fresh review was clean on the first try. Skipping
+  this push would silently ship whatever stale, possibly-still-Major commit
+  origin already has instead of the just-reviewed one, since 6.5 reads
+  `headRefOid` from `origin`, not the local worktree. Then go straight to
+  **Step 6.5**, reconstructing `MAIN_SHA_AT_REVIEW` as `git -C
+  <worktree-path> merge-base origin/main vps-loop/item-<N>` from the
+  branch's state right after this fresh review (and its push), the same
+  reconstruction the log-empty case uses. Without this whole path, an item
   stuck in exactly this shape would sit open indefinitely: every future tick
   reads the same stale closing statement, finds the same uncovered later
   commit, and skips it again, forever, because nothing else in this file
