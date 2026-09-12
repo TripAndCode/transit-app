@@ -157,7 +157,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         # that's real but has nothing in the ctx window: 30 days off the
         # agency's own latest captured_at (not wall-clock "now") so it's
         # meaningful against old/replayed data too, matching the uniform
-        # bound used by route_trips/route_stop_profile below.
+        # bound used by route_trips/route_stop_profile in api.routers.map.
         agency_latest = await max_captured_at(ch, agency_id)
         if agency_latest is not None:
             fallback_bound = agency_latest - timedelta(days=30)
@@ -285,7 +285,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
         )
     static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
 
-    # Local, not the module-level `_round_half_up_int` above: this endpoint's
+    # Local, not `api.routers.map._round_half_up_int`: this endpoint's
     # `avg_min` is minutes to 2 decimal places (matches rankings.py's avg_min
     # display contract), not whole seconds, so it needs its own half-up
     # rounding at a different quantize scale.
