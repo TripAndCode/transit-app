@@ -113,7 +113,7 @@ function QueueSection({
     ? routes.slice(5).find((route) => route.route_code === selectedRoute)
     : undefined;
   const visibleRoutes = expanded ? routes : routes.slice(0, 5);
-  const hiddenCount = routes.length - visibleRoutes.length;
+  const hiddenCount = routes.length - visibleRoutes.length - (!expanded && selectedOutsidePreview ? 1 : 0);
   const routeCard = (route: RouteSummary) => {
     const trip = worstTripForRoute(trips, route.route_code);
     const deviation = route.deviation_sec;
@@ -166,7 +166,7 @@ function QueueSection({
           {routeCard(selectedOutsidePreview)}
         </div>
       )}
-      {routes.length > 5 && (
+      {routes.length > 5 && (expanded || hiddenCount > 0) && (
         <button type="button" className="ops-queue-section__more" onClick={onToggle}>
           {expanded
             ? t("operations.queue.show_less")
