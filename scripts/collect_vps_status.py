@@ -33,6 +33,11 @@ currently-running `claude` process is the strongest signal and wins outright
 circuit-breaker pause state means "paused"; otherwise an `"unknown"` process
 read means the loop's activity itself can't be determined; only once none of
 those apply is it "idle" -- the ordinary, expected state between ticks.
+
+`scripts/vps_loop_chain_state.py`'s own persisted bookkeeping (is a tick
+currently in flight, the consecutive-non-progress count, and the scheduled
+backoff, if any) is folded in as-is under `chain_*` `details` keys -- this
+module never recomputes or second-guesses that state, only surfaces it.
 """
 
 from __future__ import annotations
@@ -46,7 +51,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -70,9 +75,15 @@ def _load_sibling(name: str):
 
 ops_status = _load_sibling("ops_status")
 vps_loop_health = _load_sibling("vps_loop_health")
+vps_loop_chain_state = _load_sibling("vps_loop_chain_state")
 
 
 DEFAULT_SERVICE_UNIT = "claude-loop.service"
+# Not repo-relative like `next_task_path`'s default: this is `deploy/vps/
+# claude-loop.sh`'s own wrapper-level bookkeeping (see
+# `scripts/vps_loop_chain_state.py`), not tracked repo content, so it lives
+# alongside that wrapper's other VPS-local state under `/root/`.
+DEFAULT_CHAIN_STATE_FILE = Path("/root/vps-loop-chain-state.json")
 # Healthy up to 1.5 tick intervals (scheduling jitter past the top of the hour
 # is normal); stale past `vps_loop_health`'s own reduced-probe-cadence
 # threshold alone (`tick_interval * probe_multiplier`, default 3.0) -- 1.5x
@@ -117,6 +128,11 @@ class VpsFacts:
     stash_count: int | None
     disk_used_pct: float | None
     disk_free_bytes: int | None
+    # Typed loosely (like `health_report` above) rather than as
+    # `vps_loop_chain_state.ChainState`: that module is loaded dynamically
+    # via `_load_sibling`, so mypy has no static definition for its name to
+    # resolve a forward reference against.
+    chain_state: Any
 
 
 def classify_loop_activity(*, claude_process_state: str, repeated_without_progress: bool, paused: bool) -> str:
@@ -275,12 +291,14 @@ def build_vps_loop_status(
         paused=health["paused"],
     )
 
+    chain_state = facts.chain_state
     details = {
         "loop_activity": activity,
         "claude_process_state": facts.claude_process_state,
         "systemd_active_state": facts.systemd_active_state or "unknown",
         "systemd_sub_state": facts.systemd_sub_state or "unknown",
         "current_item": health["current_item"],
+        "last_tick_outcome": health.get("last_tick_outcome"),
         "blocker_class": health["blocker_class"],
         "paused": health["paused"],
         "repeated_without_progress": alerts["repeated_without_progress"],
@@ -290,6 +308,15 @@ def build_vps_loop_status(
         "stash_count": facts.stash_count,
         "disk_used_pct": facts.disk_used_pct,
         "disk_free_bytes": facts.disk_free_bytes,
+        # Guarded-continuation (chained-tick) bookkeeping -- see
+        # scripts/vps_loop_chain_state.py. `chain_in_progress` staying `True`
+        # here for longer than one tick's own timeout is itself a sign of a
+        # wedged wrapper process (the next invocation's own `gate` call would
+        # recover it, but this status snapshot can surface it sooner).
+        "chain_in_progress": chain_state.in_progress,
+        "chain_consecutive_non_progress": chain_state.consecutive_non_progress,
+        "chain_next_earliest_attempt": chain_state.next_earliest_attempt,
+        "chain_last_outcome": chain_state.last_outcome,
     }
 
     return ops_status.build_status(
@@ -309,6 +336,7 @@ def collect_vps_facts(
     repo: Path,
     next_task_path: Path | None = None,
     timer_path: Path | None = None,
+    chain_state_path: Path | None = None,
     service_unit: str = DEFAULT_SERVICE_UNIT,
     tick_interval_seconds: int | None = None,
     probe_multiplier: float = 3.0,
@@ -324,6 +352,7 @@ def collect_vps_facts(
     now = now or datetime.now(timezone.utc)
     next_task_path = next_task_path or (repo / "NEXT_TASK.md")
     timer_path = timer_path or (repo / "deploy" / "systemd" / "claude-loop.timer")
+    chain_state_path = chain_state_path or DEFAULT_CHAIN_STATE_FILE
 
     if not next_task_path.exists():
         raise VpsStatusUnavailable(f"{next_task_path} does not exist")
@@ -341,6 +370,11 @@ def collect_vps_facts(
     claude_process_state = check_claude_process(runner=process_runner)
     branch, worktree_count, stash_count = gather_git_facts(repo, runner=git_runner)
     disk_used_pct, disk_free_bytes = gather_disk_usage(repo, usage_fn=disk_usage_fn)
+    # A missing/corrupt chain-state file (first run ever, or a fresh VPS
+    # provision) degrades to a fresh default state, same as
+    # `vps_loop_chain_state.load_state` itself does for its own callers --
+    # never a reason to abort the whole status collection.
+    chain_state = vps_loop_chain_state.load_state(chain_state_path)
 
     return VpsFacts(
         now=now,
@@ -354,6 +388,7 @@ def collect_vps_facts(
         stash_count=stash_count,
         disk_used_pct=disk_used_pct,
         disk_free_bytes=disk_free_bytes,
+        chain_state=chain_state,
     )
 
 
@@ -387,6 +422,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="systemd timer unit to derive the tick interval from (default: <repo>/deploy/systemd/claude-loop.timer)",
     )
+    parser.add_argument(
+        "--chain-state-file",
+        type=Path,
+        default=DEFAULT_CHAIN_STATE_FILE,
+        help="scripts/vps_loop_chain_state.py state file (default: /root/vps-loop-chain-state.json)",
+    )
     parser.add_argument("--service-unit", default=DEFAULT_SERVICE_UNIT, help="systemd service unit to query")
     parser.add_argument("--tick-interval-seconds", type=int, default=None)
     parser.add_argument("--probe-multiplier", type=float, default=3.0)
@@ -405,6 +446,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             repo=repo,
             next_task_path=next_task_path,
             timer_path=timer_path,
+            chain_state_path=args.chain_state_file.resolve(),
             service_unit=args.service_unit,
             tick_interval_seconds=args.tick_interval_seconds,
             probe_multiplier=args.probe_multiplier,

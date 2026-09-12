@@ -19,6 +19,10 @@ it is cheap and safe to run every tick) and reports four health facts:
 - `current_item`: the item number the most recent entry names, falling back
   to the first backlog item without a terminal status marker
   (`DONE`/`MOOT`/`DO NOT START`) if no entry names one.
+- `last_tick_outcome`: `"progress"` / `"idle"` / `"blocked"` / `"paused"` /
+  `"unknown"` for the single most recent entry -- `deploy/vps/claude-loop.sh`
+  uses this to decide whether to chain immediately into another tick
+  (`"progress"`) or stop and back off (everything else).
 - `blocker_class`: the tag behind the current stop, if the tick is currently
   blocked or the loop is currently paused (a `Still paused` bookkeeping line
   carries no tag of its own, so this looks back to the tag that caused the
@@ -104,6 +108,10 @@ ITEM_MENTION_RE = re.compile(r"\bitems?\s+(\d+)\b", re.IGNORECASE)
 PAUSED_RE = re.compile(r"^\*\*PAUSED\b")
 STILL_PAUSED_RE = re.compile(r"^\*\*Still paused\b")
 RESUMED_RE = re.compile(r"^\*\*RESUMED\b")
+# Step 3's exact idle phrasing (`.claude/commands/vps-loop-run.md`) -- a
+# substring match against an entry's full raw block, not just its first line,
+# since it can appear after wrapped continuation text.
+IDLE_TICK_TEXT = "nothing actionable this run."
 ONCALENDAR_RE = re.compile(r"^\s*OnCalendar\s*=\s*(.+?)\s*$", re.MULTILINE)
 # The only shape `deploy/systemd/claude-loop.timer` currently uses: every
 # hour, at a fixed minute/second. A future timer using a different shape
@@ -280,6 +288,50 @@ def compute_last_successful_tick(entries: Sequence[StatusEntry]) -> str | None:
     return None
 
 
+def compute_last_tick_outcome(entries: Sequence[StatusEntry]) -> str:
+    """Classify the most recent Status log entry for `deploy/vps/claude-loop.sh`'s chain gate.
+
+    One of:
+    - `"progress"`: the tick shipped something, or otherwise ended normally with
+      no blocker and no idle marker (e.g. an item-skip entry) -- worth chaining
+      into another tick immediately rather than waiting for the next scheduled
+      invocation.
+    - `"idle"`: Step 3's "nothing actionable this run" -- the backlog is fully
+      claimed/blocked/DO-NOT-START; chaining again immediately would just
+      reproduce the same idle result, so the caller should stop and apply its
+      own (gentler, but still bounded) backoff.
+    - `"blocked"`: the entry carries its own `Blocker-tag` -- a genuine
+      failure/blocker per Step 0; the caller should stop and back off.
+    - `"paused"`: the entry is itself PAUSED-family bookkeeping (Step 0's
+      circuit breaker already tripped) -- stop and back off exactly like
+      `"blocked"`.
+    - `"unknown"`: no entries at all (fresh/empty Status log), or the last
+      entry is a bare `RESUMED` marker with no follow-on outcome yet (only
+      possible if the process died between logging `RESUMED` and logging that
+      attempt's own result) -- treat as ambiguous, same stop-and-backoff
+      handling as `"blocked"`.
+
+    Only the single most recent entry is examined: one external tick can log
+    several entries (e.g. Step 3b/2b item-skip lines before a final dispatch),
+    but by construction the last one written is always that tick's own
+    terminal outcome -- the same assumption `compute_current_item` and
+    `compute_blocker_class` already rely on.
+    """
+
+    if not entries:
+        return "unknown"
+    last = entries[-1]
+    if last.kind in ("paused", "still_paused"):
+        return "paused"
+    if last.kind == "resumed":
+        return "unknown"
+    if last.blocker_tag:
+        return "blocked"
+    if IDLE_TICK_TEXT in last.raw:
+        return "idle"
+    return "progress"
+
+
 def compute_current_item(entries: Sequence[StatusEntry], backlog_lines: Sequence[str]) -> int | None:
     """The item the loop is currently on: the most recent entry that names one.
 
@@ -362,6 +414,7 @@ def build_report(
     blocker_class = compute_blocker_class(entries, paused=paused)
     last_successful_tick = compute_last_successful_tick(entries)
     current_item = compute_current_item(entries, lines)
+    last_tick_outcome = compute_last_tick_outcome(entries)
 
     interval = tick_interval_seconds
     interval_source = "override"
@@ -385,6 +438,7 @@ def build_report(
     return {
         "last_successful_tick": last_successful_tick,
         "current_item": current_item,
+        "last_tick_outcome": last_tick_outcome,
         "blocker_class": blocker_class,
         "paused": paused,
         "paused_since": paused_entry.timestamp if paused_entry else None,
@@ -414,6 +468,7 @@ def format_shell(report: dict[str, object]) -> str:
     fields = {
         "VPS_LOOP_LAST_SUCCESSFUL_TICK": report["last_successful_tick"],
         "VPS_LOOP_CURRENT_ITEM": report["current_item"],
+        "VPS_LOOP_LAST_TICK_OUTCOME": report["last_tick_outcome"],
         "VPS_LOOP_BLOCKER_CLASS": report["blocker_class"],
         "VPS_LOOP_PAUSED": report["paused"],
         "VPS_LOOP_PAUSED_SINCE": report["paused_since"],

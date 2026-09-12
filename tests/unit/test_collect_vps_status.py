@@ -337,6 +337,7 @@ def make_facts(*, health_report: dict, now: datetime = T0, **overrides) -> "coll
         stash_count=0,
         disk_used_pct=42.0,
         disk_free_bytes=123456,
+        chain_state=collector.vps_loop_chain_state.ChainState(),
     )
     defaults.update(overrides)
     return collector.VpsFacts(**defaults)
@@ -411,6 +412,23 @@ def test_build_status_details_reflect_active_process():
     assert status.details["claude_process_state"] == "running"
 
 
+def test_build_status_details_reflect_chain_state_backoff():
+    facts = make_facts(
+        health_report=make_health_report(last_successful_tick="2026-09-11T11:30:00Z"),
+        chain_state=collector.vps_loop_chain_state.ChainState(
+            consecutive_non_progress=2,
+            next_earliest_attempt="2026-09-11T13:00:00Z",
+            last_outcome="idle",
+        ),
+    )
+    status = collector.build_vps_loop_status(facts)
+
+    assert status.details["chain_in_progress"] is False
+    assert status.details["chain_consecutive_non_progress"] == 2
+    assert status.details["chain_next_earliest_attempt"] == "2026-09-11T13:00:00Z"
+    assert status.details["chain_last_outcome"] == "idle"
+
+
 def test_build_status_document_is_contract_valid():
     facts = make_facts(health_report=make_health_report(last_successful_tick="2026-09-11T11:30:00Z"))
     status = collector.build_vps_loop_status(facts)
@@ -465,6 +483,7 @@ def test_collect_vps_facts_end_to_end_with_injected_runners(tmp_path):
         repo=tmp_path,
         next_task_path=next_task,
         timer_path=timer,
+        chain_state_path=tmp_path / "chain-state.json",
         now=T0,
         systemd_runner=systemd_runner,
         process_runner=process_runner,
@@ -476,6 +495,9 @@ def test_collect_vps_facts_end_to_end_with_injected_runners(tmp_path):
     assert facts.systemd_active_state == "inactive"
     assert facts.claude_process_state == "absent"
     assert facts.branch == "vps-loop/item-120"
+    # A never-yet-written chain-state file (fresh provision, or this test's
+    # own tmp_path) degrades to a fresh default rather than erroring.
+    assert facts.chain_state == collector.vps_loop_chain_state.ChainState()
     assert facts.worktree_count == 1
     assert facts.stash_count == 0
     assert facts.disk_used_pct == 10.0

@@ -241,6 +241,75 @@ def test_current_item_falls_back_to_first_non_terminal_backlog_item():
     assert health.compute_current_item([], lines) == 2
 
 
+# --- compute_last_tick_outcome -------------------------------------------------
+
+
+def test_last_tick_outcome_progress_on_shipped_entry():
+    entries = [entry("- 2026-09-01T00:00:00Z: item 1 merged as PR #12; both /review-branch passes clean.")]
+
+    assert health.compute_last_tick_outcome(entries) == "progress"
+
+
+def test_last_tick_outcome_progress_on_resumed_shipped_entry():
+    entries = [entry("- 2026-09-01T00:00:00Z: item 1 shipped as PR #12 (resumed from an interrupted prior run).")]
+
+    assert health.compute_last_tick_outcome(entries) == "progress"
+
+
+def test_last_tick_outcome_progress_on_ordinary_item_skip_with_no_tag():
+    entries = [
+        entry(
+            "- 2026-09-01T00:00:00Z: item 3 has leftover commits from closed PR #9; not resumed — "
+            "delete the branch or reopen the PR by hand."
+        )
+    ]
+
+    assert health.compute_last_tick_outcome(entries) == "progress"
+
+
+def test_last_tick_outcome_idle_on_nothing_actionable():
+    entries = [entry("- 2026-09-01T00:00:00Z: nothing actionable this run.")]
+
+    assert health.compute_last_tick_outcome(entries) == "idle"
+
+
+def test_last_tick_outcome_blocked_on_blocker_tag():
+    entries = [entry("- 2026-09-01T00:00:00Z: item 2 blocked. **Blocker-tag:** db-write-blocked")]
+
+    assert health.compute_last_tick_outcome(entries) == "blocked"
+
+
+def test_last_tick_outcome_paused_on_paused_bookkeeping():
+    entries = [entry("- 2026-09-01T00:00:00Z: **PAUSED after the last 3 ticks blocked on foo. Backing off.**")]
+
+    assert health.compute_last_tick_outcome(entries) == "paused"
+
+
+def test_last_tick_outcome_paused_on_still_paused_bookkeeping():
+    entries = [entry("- 2026-09-01T00:00:00Z: **Still paused — probe found foo unchanged.**")]
+
+    assert health.compute_last_tick_outcome(entries) == "paused"
+
+
+def test_last_tick_outcome_unknown_on_bare_resumed_entry():
+    entries = [entry("- 2026-09-01T00:00:00Z: **RESUMED — foo cleared (paused since 2026-08-31T00:00:00Z).**")]
+
+    assert health.compute_last_tick_outcome(entries) == "unknown"
+
+
+def test_last_tick_outcome_unknown_on_empty_log():
+    assert health.compute_last_tick_outcome([]) == "unknown"
+
+
+def test_last_tick_outcome_only_considers_most_recent_entry():
+    entries = [
+        entry("- 2026-09-01T00:00:00Z: item 2 blocked. **Blocker-tag:** db-write-blocked"),
+        entry("- 2026-09-01T01:00:00Z: item 3 merged as PR #7."),
+    ]
+
+    assert health.compute_last_tick_outcome(entries) == "progress"
+
+
 # --- parse_hourly_tick_interval_seconds / compute_stale_pause -----------------
 
 
@@ -320,6 +389,7 @@ def test_build_report_clean_state(tmp_path):
 
     assert report["last_successful_tick"] == "2026-09-01T00:00:00Z"
     assert report["current_item"] == 1
+    assert report["last_tick_outcome"] == "progress"
     assert report["blocker_class"] is None
     assert report["paused"] is False
     assert report["tick_interval_seconds"] == 3600
@@ -379,6 +449,7 @@ def test_format_shell_quotes_values_and_covers_every_field(tmp_path):
 
     assert "VPS_LOOP_LAST_SUCCESSFUL_TICK=2026-09-01T00:00:00Z" in rendered
     assert "VPS_LOOP_CURRENT_ITEM=1" in rendered
+    assert "VPS_LOOP_LAST_TICK_OUTCOME=progress" in rendered
     assert "VPS_LOOP_PAUSED=false" in rendered
     assert "VPS_LOOP_REPEATED_WITHOUT_PROGRESS=false" in rendered
 
@@ -387,6 +458,7 @@ def test_format_shell_quotes_shell_significant_values():
     report = {
         "last_successful_tick": None,
         "current_item": None,
+        "last_tick_outcome": "blocked",
         "blocker_class": "a shell-significant value; rm -rf /",
         "paused": False,
         "paused_since": None,
