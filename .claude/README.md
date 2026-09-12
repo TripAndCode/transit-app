@@ -17,7 +17,7 @@ what stage you are at.
 |---|---|---|
 | `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Read-only + proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
-| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → two full independent `/review-branch` passes → PR marked ready → squash-merge → `/cleanup-merged`, all gated on both passes being clean and the PR reporting mergeable/clean. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches, opens/readies/merges PRs via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → one full `/review-branch` pass → PR marked ready → squash-merge → `/cleanup-merged`, all gated on that pass being clean and the PR reporting mergeable/clean. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches, opens/readies/merges PRs via `gh`. |
 | `/cleanup-merged` | Post-merge maintenance: syncs `main`, runs an evidence-based dry run, removes only proven-stale local branches/worktrees, and can repeat on a VPS clone. | Deletes clean local refs/worktrees only; never deletes GitHub branches or files. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
@@ -92,7 +92,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   `CLAUDE.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead, except
   `/vps-loop-run`, which runs unattended: it may push feature branches, open,
-  ready, and squash-merge PRs once both required `/review-branch` passes are
+  ready, and squash-merge PRs once the required `/review-branch` pass is
   clean and the PR reports mergeable/clean — but it never pushes directly to
   `main` (only via a reviewed, merged PR) and never force-pushes.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
@@ -115,28 +115,77 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   installed.
 - A systemd timer invokes a single-flight `claude -p "/vps-loop-run"` wrapper; the command file owns
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
-  The timer cadence is longer than the wrapper's hard timeout, and systemd kills
-  the complete process group on timeout so a background worker cannot outlive its
-  coordinator. The wrapper is tracked at `deploy/vps/claude-loop.sh` and deployed
+  The wrapper is tracked at `deploy/vps/claude-loop.sh` and deployed
   to `/root/claude-loop.sh` on the VPS (only that deployed copy, plus the
   `deploy/systemd/claude-loop.{service,timer}` units, are VPS-local
-  installation state, not this repo's own tracked source) -- it runs the
-  invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  installation state, not this repo's own tracked source) -- it runs each
+  `claude -p` invocation with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
   so a dispatched Step-4 worker's background Agent task isn't killed by the
   CLI's default ~600s wait ceiling: `claude -p` is one-shot, so a "you'll be
   notified when it finishes" expectation after that ceiling can never be
   fulfilled, and the still-in-progress worker's uncommitted edits are lost
   when the parent process exits. A genuinely-hung worker is still caught by
   `vps-heartbeat-watchdog.yml`, since a stuck run never reaches the
-  heartbeat line either.
+  heartbeat line either. `KillMode=control-group` on the systemd unit means a
+  wrapper invocation that hits `TimeoutStartSec` takes its entire process
+  group down with it, including any still-running dispatched worker — a
+  background task can never outlive its own coordinator.
+- **Guarded continuation (chaining) instead of waiting for the next timer
+  firing.** A single `claude-loop.sh` invocation now runs a *loop* of ticks,
+  not just one: after a tick whose `NEXT_TASK.md` Status log entry shows real
+  progress (`scripts/vps_loop_health.py`'s `last_tick_outcome == "progress"`
+  — an item shipped, or an ordinary in-tick skip that isn't itself a
+  blocker), it immediately starts the next tick rather than waiting up to a
+  full timer interval. A tick that's idle (`"idle"`, nothing actionable),
+  blocked (`"blocked"`, a `Blocker-tag`), paused (`"paused"`, Step 0's own
+  circuit breaker already tripped), or ambiguous (`"unknown"`, e.g. the
+  `claude` invocation itself timed out or crashed) stops the chain for this
+  invocation instead. `scripts/vps_loop_chain_state.py` is the small,
+  separately unit-tested state machine behind this: it persists wrapper-only
+  bookkeeping (distinct from `NEXT_TASK.md`'s own Status log) at
+  `CLAUDE_LOOP_CHAIN_STATE_FILE` (default `/root/vps-loop-chain-state.json`)
+  and exposes three shell-eval'able subcommands the wrapper calls around
+  every tick: `gate` (may a new tick start now — also recovers a chain-state
+  file left stuck `in_progress` by a wrapper process that was hard-killed
+  mid-tick, before it could record an outcome, treating that recovery itself
+  as one more non-progress occurrence), `begin` (mark a tick in flight,
+  immediately before invoking `claude`), and `record-outcome` (clear the
+  flight flag and decide `continue` vs. `stop`, escalating an exponential,
+  capped backoff — `CLAUDE_LOOP_BACKOFF_BASE_SEC`/`CLAUDE_LOOP_BACKOFF_CAP_SEC`,
+  default 300s/3600s — on every non-`"progress"` outcome so a genuinely stuck
+  or genuinely idle loop backs off instead of retrying at full speed). The
+  chain is still bounded on every axis: `CLAUDE_LOOP_MAX_CHAIN_TICKS`
+  (default 5) caps the tick count, `CLAUDE_LOOP_MAX_CHAIN_WALLCLOCK_SEC`
+  (default 14400s) is a wrapper-enforced wall-clock ceiling independent of
+  systemd's own `TimeoutStartSec`, `CLAUDE_TICK_TIMEOUT_SEC` (default 3300s,
+  unchanged) still caps any *individual* tick exactly as before, and
+  `CLAUDE_LOOP_CHAIN_DELAY_SEC` (default 5s) sleeps between chained ticks so
+  a fast run of successes doesn't hammer the Claude API back to back. The
+  outer single-flight `flock` (`/tmp/claude-loop.lock`) is unchanged and
+  still guarantees two `claude-loop.sh` processes can never overlap; `gate`
+  is a second, independent layer on top that additionally throttles how soon
+  a *new* invocation is willing to retry after the previous one stopped
+  without progress. `deploy/systemd/claude-loop.service`'s `TimeoutStartSec`
+  was raised (see that file's own comment for the exact arithmetic) to fit a
+  full chain of ticks, not just one — this deliberately breaks the old
+  invariant that the timer's cadence exceeded the wrapper's hard timeout
+  (previously the only thing preventing two overlapping runs, before `flock`
+  was even reached). A long chain can now still be running when the next
+  hourly firing lands; overlap is prevented purely by `flock` plus systemd's
+  own refusal to start a second instance of an already-active `Type=oneshot`
+  unit, not by timing the two intervals apart anymore.
 - Every heartbeat also carries `scripts/vps_loop_health.py`'s report (last
-  successful tick, current item, blocker class, pause state, and its own
-  `repeated_without_progress`/`stale_pause` alert flags parsed straight from
-  `NEXT_TASK.md`'s Status log) as the dispatch's `client_payload`.
-  `vps-heartbeat-listener.yml` echoes it as plain `HEALTH key=value` lines in
-  its own run log — the only place a `repository_dispatch` payload survives
-  after the triggering run completes — and `vps-heartbeat-watchdog.yml`
-  greps the latest one on its own `schedule` trigger, failing (the same
+  successful tick, current item, `last_tick_outcome`, blocker class, pause
+  state, and its own `repeated_without_progress`/`stale_pause` alert flags
+  parsed straight from `NEXT_TASK.md`'s Status log), plus this tick's own
+  chain-loop bookkeeping (`chain_tick_outcome`, `chain_ticks_run` so far this
+  invocation, `chain_consecutive_non_progress`, `chain_next_earliest_attempt`)
+  as the dispatch's `client_payload`.
+  `vps-heartbeat-listener.yml` echoes the health fields as plain `HEALTH
+  key=value` lines in its own run log — the only place a `repository_dispatch`
+  payload survives after the triggering run completes — and
+  `vps-heartbeat-watchdog.yml` greps the latest one on its own `schedule`
+  trigger, failing (the same
   guaranteed-email path as its heartbeat-age check) when the loop is stuck on
   an identical blocker for 3+ ticks or has stayed paused past its own reduced
   probe cadence. This catches a loop that keeps ticking (so the plain
@@ -146,8 +195,10 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
-  the systemd timer. The loop operates on one item per tick and may merge its own PR once
-  both review passes are clean and it's mergeable/clean.
+  the systemd timer or a chain's own backoff to clear. Each individual tick still
+  operates on one item, and the loop may merge its own PR once the required review
+  pass is clean and it's mergeable/clean — see the guarded-continuation bullet above
+  for how consecutive successful ticks now chain within one invocation.
 - The pre-push backend timeout is 420 seconds — the full suite's legitimate
   wall-clock time leaves real headroom on a small VPS, which can run
   noticeably slower than a typical dev machine. A timeout with no test
@@ -163,7 +214,11 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   marker, default `/root/.daily_git_hygiene_last_success`) — the trigger is
   hourly specifically so that losing the `/tmp/claude-loop.lock` race
   against a live `/vps-loop-run` tick costs an hourly retry instead of
-  waiting a full day for the next attempt. It closes gaps `/vps-loop-run` either
+  waiting a full day for the next attempt (a chained run can now hold that
+  lock for one long stretch across several ticks rather than one short
+  tick, per the guarded-continuation bullet above, but the same-day
+  completion marker plus 24 hourly retries a day still make same-day success
+  overwhelmingly likely). It closes gaps `/vps-loop-run` either
   only handles reactively or never handles at all: local worktree/branch
   cleanup (handled reactively as a tick side effect, but not during long
   idle stretches or a stuck loop), merged `vps-loop/item-*` branches piling
