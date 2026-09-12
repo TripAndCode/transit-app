@@ -22,9 +22,13 @@ secret, and the test only ever asserts on gitleaks' own (redacted) output,
 never printing the fixture content itself.
 
 Skipped when `gitleaks` isn't on PATH (e.g. an unprovisioned sandbox worker
-per transit-app-gotchas) -- CI's secrets-scan.yml and a properly bootstrapped
-workstation/VPS clone (scripts/setup_git_hooks.sh) both have it installed,
-so this is the only environment where the check is silently absent.
+per transit-app-gotchas). `.github/workflows/ci.yml`'s `test` job installs
+the pinned gitleaks binary specifically so this module executes in CI
+instead of silently skipping -- `.github/workflows/secrets-scan.yml` also
+installs gitleaks, but only ever runs `gitleaks detect` directly and never
+runs pytest, so it does not exercise these assertions. A properly
+bootstrapped workstation/VPS clone (scripts/setup_git_hooks.sh) has
+gitleaks installed too.
 """
 
 from __future__ import annotations
