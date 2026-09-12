@@ -52,9 +52,19 @@ routine polling traffic never looks like a notification. A poll that finds
 something worth surfacing instead prints an `ALERT`-prefixed block and
 exits 1, which is the same "a scheduled run's own failure is the
 notification" delivery mechanism `.github/workflows/vps-heartbeat-
-watchdog.yml` already uses -- wiring this into a real paging channel is a
-matter of pointing something at that exit code, not something this module
-needs to know about.
+watchdog.yml` already uses.
+
+`_deliver_ping` additionally forwards every poll's outcome to an optional
+external endpoint, reusing the same healthchecks.io-style convention
+`oracle_cloud/v3/bin/alert-lib.sh` already implements for the Oracle
+collector side: a bare ping to `OPS_ALERT_PING_URL` means "quiet poll", a
+ping to `<url>/fail` (with the rendered notification as the request body)
+means "something is wrong". Leaving the variable unset is a supported
+configuration -- delivery becomes a no-op and `main`'s own exit code stays
+the only signal, exactly as before this was added. Delivery is always
+best-effort: a network failure while posting is logged to stderr and
+swallowed, never allowed to change `main`'s exit code or crash a poll that
+otherwise completed successfully.
 """
 
 from __future__ import annotations
@@ -63,6 +73,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -78,6 +89,8 @@ GITHUB_REPO_ENV_VAR = "OPS_ALERT_GITHUB_REPO"
 STATE_PATH_ENV_VAR = "OPS_ALERT_STATE_PATH"
 DEDUP_INTERVAL_ENV_VAR = "OPS_ALERT_DEDUP_INTERVAL_SECONDS"
 MONITOR_MAX_SILENCE_ENV_VAR = "OPS_ALERT_MONITOR_MAX_SILENCE_SECONDS"
+PING_URL_ENV_VAR = "OPS_ALERT_PING_URL"
+PING_TIMEOUT_SECONDS = 10
 
 # Ongoing-incident reminders are spaced out enough to stay meaningfully
 # different from a raw poll cadence (minutes) without going silent for the
@@ -447,6 +460,33 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _http_post(url: str, body: str) -> None:
+    request = urllib.request.Request(url, data=body.encode("utf-8"), method="POST")
+    with urllib.request.urlopen(request, timeout=PING_TIMEOUT_SECONDS):
+        pass
+
+
+def _deliver_ping(ping_url: str | None, *, ok: bool, body: str, post=None) -> None:
+    """Best-effort delivery to an optional healthchecks.io-style endpoint (see the
+    module docstring). `ping_url` unset is a supported, silent no-op -- this must
+    never be the only way a real anomaly is reported, only an optional forward of
+    what `main`'s own exit code already signals.
+
+    `post` defaults to this module's own `_http_post` looked up by name at call
+    time (not bound as a default argument), so tests can monkeypatch
+    `ops_alerts._http_post` directly, the same way the rest of this module's tests
+    monkeypatch `ops_alerts.ops_status_page.collect_all`."""
+
+    if not ping_url:
+        return
+    poster = post or _http_post
+    target = ping_url.rstrip("/") if ok else f"{ping_url.rstrip('/')}/fail"
+    try:
+        poster(target, body)
+    except Exception as exc:
+        print(f"ops-alerts: failed to deliver ping to the configured endpoint: {type(exc).__name__}", file=sys.stderr)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point, meant to run on a short, fixed schedule (cron/systemd
     timer). Exit code: 0 on a quiet poll (no alert -- ordinary heartbeat
@@ -496,13 +536,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     notification = build_notification(component_alerts, monitor_silence, now=now)
 
+    ping_url = os.environ.get(PING_URL_ENV_VAR)
+
     if notification.is_empty:
+        _deliver_ping(ping_url, ok=True, body=f"ops-alerts generated_at={notification.generated_at} no anomalies")
         if args.format == "json":
             print(json.dumps({"generated_at": notification.generated_at, "alert": False}))
         else:
             print(f"ops-alerts  generated_at={notification.generated_at}  no anomalies")
         return 0
 
+    _deliver_ping(ping_url, ok=False, body=notification.render_text())
     if args.format == "json":
         print(json.dumps(notification.to_dict(), indent=2))
     else:
