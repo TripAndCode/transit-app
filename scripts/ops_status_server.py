@@ -74,16 +74,20 @@ def create_app() -> FastAPI:
     # surface that doesn't belong on an internal ops tool.
     app = FastAPI(title="transit-app ops status", docs_url=None, redoc_url=None, openapi_url=None)
 
+    # Plain `def`, not `async def`: `_current_document()` does blocking subprocess I/O
+    # (`gh`/`aws` calls with multi-second-to-tens-of-seconds timeouts), and FastAPI only
+    # dispatches sync routes to its threadpool -- an `async def` route runs directly on
+    # the event loop, so one slow collector call would block every concurrent request.
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_require_token)])
-    async def status_page() -> str:
+    def status_page() -> str:
         return render_html(_current_document())
 
     @app.get("/status.txt", response_class=PlainTextResponse, dependencies=[Depends(_require_token)])
-    async def status_text() -> str:
+    def status_text() -> str:
         return render_text(_current_document())
 
     @app.get("/status.json", dependencies=[Depends(_require_token)])
-    async def status_json() -> JSONResponse:
+    def status_json() -> JSONResponse:
         return JSONResponse(_current_document())
 
     return app

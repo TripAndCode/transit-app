@@ -216,7 +216,9 @@ def test_unknown_status_scrubs_embedded_github_tokens():
     [
         (["healthy", "healthy", "healthy", "healthy"], "healthy"),
         (["healthy", "degraded", "healthy", "healthy"], "degraded"),
-        (["healthy", "degraded", "unknown", "healthy"], "unknown"),
+        (["healthy", "unknown", "healthy", "healthy"], "unknown"),
+        (["healthy", "degraded", "unknown", "healthy"], "degraded"),
+        (["healthy", "unknown", "degraded", "healthy"], "degraded"),
         (["unknown", "stale", "healthy", "healthy"], "stale"),
         (["stale", "failed", "healthy", "healthy"], "failed"),
         ([], "unknown"),

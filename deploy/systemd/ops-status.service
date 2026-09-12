@@ -20,6 +20,7 @@ After=network.target
 
 [Service]
 Type=simple
+User=root
 WorkingDirectory=/root/transit-app
 EnvironmentFile=-/etc/transit/ops-status.env
 ExecStart=/usr/bin/env poetry run python3 scripts/ops_status_server.py

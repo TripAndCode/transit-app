@@ -61,7 +61,7 @@ COMPONENT_ORDER: tuple[str, ...] = ("vps_loop", "github", "oracle_crawler", "r2"
 
 # failed > stale > degraded > unknown > healthy -- matches
 # oracle_cloud/v3/bin/status-snapshot.sh's own `severity_rank`.
-_STATE_SEVERITY: Mapping[str, int] = {"healthy": 0, "degraded": 1, "unknown": 2, "stale": 3, "failed": 4}
+_STATE_SEVERITY: Mapping[str, int] = {"healthy": 0, "unknown": 1, "degraded": 2, "stale": 3, "failed": 4}
 
 # Thresholds are irrelevant to the resulting state here: `last_success_at=None`
 # with `reported_failure=False` always classifies as `unknown` regardless of
@@ -440,9 +440,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--repo", type=Path, default=DEFAULT_LOCAL_REPO, help="Local checkout for vps_loop/github facts"
-    )
+    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Local checkout for vps_loop/github facts")
     parser.add_argument(
         "--github-repo",
         default=DEFAULT_GITHUB_REPO_SLUG,
