@@ -56,7 +56,7 @@ if ! bash scripts/setup_git_hooks.sh --check >/dev/null 2>&1; then
   fi
 fi
 
-# --- Guarded continuation (item 128) -----------------------------------------
+# --- Guarded continuation -----------------------------------------------------
 #
 # One systemd-timer firing used to run exactly one /vps-loop-run tick, so a
 # successful merge/cleanup still had to wait for the next scheduled firing
@@ -97,7 +97,9 @@ CHAIN_STATE_SCRIPT="scripts/vps_loop_chain_state.py"
 # recovers a chain-state left stuck `in_progress` by a hard-killed prior run.
 GATE_OUTPUT=$(python3 "$CHAIN_STATE_SCRIPT" gate \
   --state-file "$CLAUDE_LOOP_CHAIN_STATE_FILE" \
-  --max-stale-age-seconds "$CLAUDE_LOOP_MAX_STALE_AGE_SEC" 2>/root/vps-loop-chain-state.err)
+  --max-stale-age-seconds "$CLAUDE_LOOP_MAX_STALE_AGE_SEC" \
+  --backoff-base-seconds "$CLAUDE_LOOP_BACKOFF_BASE_SEC" \
+  --backoff-cap-seconds "$CLAUDE_LOOP_BACKOFF_CAP_SEC" 2>/root/vps-loop-chain-state.err)
 ALLOWED="false"
 REASON=""
 RECOVERED="false"
@@ -163,8 +165,8 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
     --backoff-base-seconds "$CLAUDE_LOOP_BACKOFF_BASE_SEC" \
     --backoff-cap-seconds "$CLAUDE_LOOP_BACKOFF_CAP_SEC" 2>>/root/vps-loop-chain-state.err)
   ACTION="stop"
-  CHAIN_NEXT_EARLIEST_ATTEMPT=""
-  CHAIN_CONSECUTIVE_NON_PROGRESS=""
+  NEXT_EARLIEST_ATTEMPT=""
+  CONSECUTIVE_NON_PROGRESS=""
   eval "$RECORD_OUTPUT"
 
   gh api repos/TripAndCode/transit-app/dispatches \
@@ -178,8 +180,8 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
     -F "client_payload[paused_since]=$VPS_LOOP_PAUSED_SINCE" \
     -F "client_payload[chain_tick_outcome]=$CHAIN_OUTCOME" \
     -F "client_payload[chain_ticks_run]=$TICKS_RUN" \
-    -F "client_payload[chain_consecutive_non_progress]=$CHAIN_CONSECUTIVE_NON_PROGRESS" \
-    -F "client_payload[chain_next_earliest_attempt]=$CHAIN_NEXT_EARLIEST_ATTEMPT" \
+    -F "client_payload[chain_consecutive_non_progress]=$CONSECUTIVE_NON_PROGRESS" \
+    -F "client_payload[chain_next_earliest_attempt]=$NEXT_EARLIEST_ATTEMPT" \
     >/dev/null 2>&1
 
   if [[ "$ACTION" != "continue" ]]; then

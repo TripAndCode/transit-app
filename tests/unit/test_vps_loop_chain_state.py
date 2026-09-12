@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "vps_loop_chain_state.py"
+WRAPPER_SCRIPT = ROOT / "deploy" / "vps" / "claude-loop.sh"
 SPEC = importlib.util.spec_from_file_location("vps_loop_chain_state", SCRIPT)
 assert SPEC and SPEC.loader
 chain = importlib.util.module_from_spec(SPEC)
@@ -108,6 +109,15 @@ def test_backoff_escalates_exponentially_and_is_capped():
     assert capped_earliest == NOW + timedelta(seconds=3600)
 
 
+def test_compute_backoff_seconds_never_overflows_for_extreme_streaks():
+    # A many-months-away edge case (~1000+ consecutive non-progress ticks)
+    # must still return the cap rather than raising OverflowError computing
+    # `2 ** exponent` uncapped.
+    seconds = chain.compute_backoff_seconds(consecutive_non_progress=10_000, base_seconds=300.0, cap_seconds=3600.0)
+
+    assert seconds == 3600.0
+
+
 def test_paused_outcome_stops_like_blocked():
     state, action = chain.record_outcome(chain.ChainState(), outcome="paused", now=NOW)
 
@@ -198,6 +208,24 @@ def test_recover_if_stale_clears_flag_and_counts_as_non_progress():
     assert recovered_state.consecutive_non_progress == 1
     assert recovered_state.last_outcome == "unknown"
     assert recovered_state.next_earliest_attempt is not None
+
+
+def test_recover_if_stale_honors_custom_backoff_params():
+    state = chain.begin(chain.ChainState(), pid=999, now=NOW)
+
+    recovered_state, recovered = chain.recover_if_stale(
+        state,
+        now=NOW + timedelta(seconds=10),
+        max_age_seconds=3300,
+        base_seconds=60,
+        cap_seconds=120,
+        pid_alive_fn=never_alive,
+    )
+
+    assert recovered is True
+    # One recovered crash is one consecutive non-progress tick: backoff_seconds
+    # = min(60 * 2**0, 120) = 60s, applied on top of the `now` passed in above.
+    assert recovered_state.next_earliest_attempt == "2026-09-12T12:01:10Z"
 
 
 def test_recover_if_stale_no_op_when_not_stale():
@@ -312,6 +340,34 @@ def test_cli_gate_recovers_stale_in_progress_and_still_reports_recovered(tmp_pat
     assert reloaded.in_progress is False
 
 
+def test_cli_gate_recovery_honors_custom_backoff_params(tmp_path, capsys):
+    state_file = tmp_path / "chain-state.json"
+    stale_state = chain.ChainState(in_progress=True, pid=999999999, started_at="2026-09-12T00:00:00Z")
+    chain.save_state(state_file, stale_state)
+
+    chain.main(
+        [
+            "gate",
+            "--state-file",
+            str(state_file),
+            "--max-stale-age-seconds",
+            "3300",
+            "--backoff-base-seconds",
+            "60",
+            "--backoff-cap-seconds",
+            "120",
+            "--now",
+            "2026-09-12T12:00:00Z",
+        ]
+    )
+    capsys.readouterr()
+
+    # The recovered crash must use the operator-configured backoff params
+    # passed on the CLI, not record_outcome's own hardcoded 300s/3600s defaults.
+    reloaded = chain.load_state(state_file)
+    assert reloaded.next_earliest_attempt == "2026-09-12T12:01:00Z"
+
+
 def test_cli_begin_then_gate_blocks(tmp_path, capsys):
     state_file = tmp_path / "chain-state.json"
 
@@ -360,6 +416,39 @@ def test_cli_record_outcome_rejects_unknown_outcome_value():
     # level instead.
     with pytest.raises(ValueError):
         chain.record_outcome(chain.ChainState(), outcome="not-a-real-outcome", now=NOW)
+
+
+def test_wrapper_uses_the_variable_names_record_outcome_actually_emits(tmp_path, capsys):
+    """Regression guard for `deploy/vps/claude-loop.sh` reading its own
+    never-assigned local placeholders instead of what `record-outcome` emits.
+
+    The wrapper `eval`s `record-outcome`'s shell output, so it must reference
+    exactly the field names that command's shell output assigns -- not a
+    differently-prefixed local of its own that `eval` can never touch.
+    """
+
+    state_file = tmp_path / "chain-state.json"
+    chain.main(
+        [
+            "record-outcome",
+            "--state-file",
+            str(state_file),
+            "--outcome",
+            "blocked",
+            "--now",
+            "2026-09-12T12:00:00Z",
+        ]
+    )
+    emitted_names = {line.split("=", 1)[0] for line in capsys.readouterr().out.splitlines() if line}
+    assert {"CONSECUTIVE_NON_PROGRESS", "NEXT_EARLIEST_ATTEMPT"} <= emitted_names
+
+    wrapper_source = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+    assert "$CONSECUTIVE_NON_PROGRESS" in wrapper_source
+    assert "$NEXT_EARLIEST_ATTEMPT" in wrapper_source
+    # A CHAIN_-prefixed variant here would silently never be assigned by the
+    # wrapper's `eval "$RECORD_OUTPUT"`, since record-outcome never emits it.
+    assert "CHAIN_CONSECUTIVE_NON_PROGRESS" not in wrapper_source
+    assert "CHAIN_NEXT_EARLIEST_ATTEMPT" not in wrapper_source
 
 
 def test_cli_show_json_reports_current_state_without_mutating(tmp_path, capsys):

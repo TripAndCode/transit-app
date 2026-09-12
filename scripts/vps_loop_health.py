@@ -108,13 +108,10 @@ ITEM_MENTION_RE = re.compile(r"\bitems?\s+(\d+)\b", re.IGNORECASE)
 PAUSED_RE = re.compile(r"^\*\*PAUSED\b")
 STILL_PAUSED_RE = re.compile(r"^\*\*Still paused\b")
 RESUMED_RE = re.compile(r"^\*\*RESUMED\b")
-# Step 3's exact idle phrasing (`.claude/commands/vps-loop-run.md`) and the two
-# phrasings a completed dispatch uses (Step 6.12's "merged as PR #", Step 3b's
-# own resumed-branch "shipped as PR #") -- substring matches against an
-# entry's full raw block, not just its first line, since either can appear
-# after wrapped continuation text.
+# Step 3's exact idle phrasing (`.claude/commands/vps-loop-run.md`) -- a
+# substring match against an entry's full raw block, not just its first line,
+# since it can appear after wrapped continuation text.
 IDLE_TICK_TEXT = "nothing actionable this run."
-SHIPPED_MARKERS = ("merged as PR #", "shipped as PR #")
 ONCALENDAR_RE = re.compile(r"^\s*OnCalendar\s*=\s*(.+?)\s*$", re.MULTILINE)
 # The only shape `deploy/systemd/claude-loop.timer` currently uses: every
 # hour, at a fixed minute/second. A future timer using a different shape

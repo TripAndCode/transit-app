@@ -38,7 +38,6 @@ to run (mirroring `vps_loop_health.py`'s "1 means look closer" convention),
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import os
 import shlex
@@ -142,9 +141,7 @@ def default_pid_alive(pid: int) -> bool:
     except PermissionError:
         # Process exists but is owned by someone else -- still alive.
         return True
-    except OSError as exc:
-        if exc.errno == errno.ESRCH:
-            return False
+    except OSError:
         return True
     return True
 
@@ -182,6 +179,8 @@ def recover_if_stale(
     *,
     now: datetime,
     max_age_seconds: float,
+    base_seconds: float = 300.0,
+    cap_seconds: float = 3600.0,
     pid_alive_fn: PidAliveFn = default_pid_alive,
 ) -> tuple[ChainState, bool]:
     """Clear a stale in-flight flag, folding the crash itself in as a non-progress outcome.
@@ -189,7 +188,10 @@ def recover_if_stale(
     A crash mid-tick is exactly as much "no progress" as a reported blocker --
     it still counts toward the backoff schedule (`record_outcome`'s own
     escalation), so a wrapper that keeps getting killed mid-tick still slows
-    itself down instead of retrying at full speed forever.
+    itself down instead of retrying at full speed forever. `base_seconds`/
+    `cap_seconds` are threaded through to that same `record_outcome` call so a
+    recovered crash honors the operator's configured backoff schedule instead
+    of silently reverting to `record_outcome`'s own defaults.
     """
 
     if not is_stale(state, now=now, max_age_seconds=max_age_seconds, pid_alive_fn=pid_alive_fn):
@@ -198,6 +200,8 @@ def recover_if_stale(
         replace(state, in_progress=False, pid=None, started_at=None),
         outcome="unknown",
         now=now,
+        base_seconds=base_seconds,
+        cap_seconds=cap_seconds,
     )
     return recovered_state, True
 
@@ -231,7 +235,14 @@ def compute_backoff_seconds(*, consecutive_non_progress: int, base_seconds: floa
 
     if consecutive_non_progress <= 0:
         return 0.0
-    return min(base_seconds * (2 ** (consecutive_non_progress - 1)), cap_seconds)
+    # Clamp the exponent before raising 2 to it: an astronomically large
+    # `consecutive_non_progress` would otherwise risk `OverflowError` computing
+    # `2 ** exponent` (or converting it to float) long before any realistic
+    # backoff schedule would ever reach that many consecutive non-progress
+    # ticks -- the cap below already makes any larger exponent behave
+    # identically anyway.
+    exponent = min(consecutive_non_progress - 1, 64)
+    return min(base_seconds * (2**exponent), cap_seconds)
 
 
 def record_outcome(
@@ -306,7 +317,13 @@ def _emit_shell(fields: dict[str, object]) -> None:
 def cmd_gate(args: argparse.Namespace) -> int:
     now = parse_timestamp(args.now) if args.now else datetime.now(timezone.utc)
     state = load_state(args.state_file)
-    state, recovered = recover_if_stale(state, now=now, max_age_seconds=args.max_stale_age_seconds)
+    state, recovered = recover_if_stale(
+        state,
+        now=now,
+        max_age_seconds=args.max_stale_age_seconds,
+        base_seconds=args.backoff_base_seconds,
+        cap_seconds=args.backoff_cap_seconds,
+    )
     if recovered:
         save_state(args.state_file, state)
     allowed, reason = gate(state, now=now)
@@ -393,6 +410,8 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="An in_progress flag older than this (or naming a dead pid) is recovered as a crash",
     )
+    gate_parser.add_argument("--backoff-base-seconds", type=float, default=300.0)
+    gate_parser.add_argument("--backoff-cap-seconds", type=float, default=3600.0)
     gate_parser.set_defaults(func=cmd_gate)
 
     begin_parser = subparsers.add_parser("begin", help="Mark a tick as in flight")
