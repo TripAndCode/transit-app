@@ -176,7 +176,13 @@ fi
 if [ "$RUN_BACKEND" -eq 1 ]; then
   if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p 5544 >/dev/null 2>&1; then
     echo "== poetry run pytest (DATABASE_URL -> :5544 test DB) ==" >>"$LOG"
-    if ! run_with_timeout 420 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
+    # The whole backend suite is this gate's long pole by an order of
+    # magnitude, and every test builds its schema against the throwaway DB,
+    # so the ceiling has to clear the suite's real wall-clock with room for
+    # it to keep growing. Set too tight, the timeout fires on every Python
+    # change and the gate never reports a genuine pass -- pushes then either
+    # look broken or get routed around, which is strictly worse than no gate.
+    if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
     fi
