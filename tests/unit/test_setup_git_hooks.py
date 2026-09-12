@@ -275,3 +275,89 @@ def test_fails_when_a_wrong_version_gitleaks_shadows_the_install_dir_on_path(tmp
     installed = install_dir / "gitleaks"
     assert installed.exists()
     assert subprocess.run([str(installed), "version"], capture_output=True, text=True).stdout.strip() == "8.18.4"
+
+
+def test_check_reports_installed_when_everything_is_correct(tmp_path):
+    """`--check` is the single source of truth `make doctor` and
+    deploy/vps/claude-loop.sh rely on -- it must report success once the
+    hook file is genuinely installed AND unqualified `gitleaks` resolves to
+    the pinned version, with no side effects of its own."""
+
+    result = _run_script(tmp_path, pre_commit_stub=PRE_COMMIT_STUB_GOOD)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{_minimal_path()}",
+        "HOME": str(tmp_path / "home"),
+    }
+    check_result = subprocess.run(
+        ["bash", str(SCRIPT), "--check"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert check_result.returncode == 0, check_result.stdout + check_result.stderr
+
+
+def test_check_fails_when_a_wrong_version_gitleaks_shadows_the_install_dir_on_path(tmp_path):
+    """A hook installed correctly can still stop being safe later: if a
+    different-version `gitleaks` starts shadowing the install dir on PATH
+    sometime after install (a later `brew install gitleaks`, a stray
+    package, a PATH-order change on a long-lived VPS clone), `--check` --
+    and therefore `make doctor` and claude-loop.sh's per-tick check -- must
+    detect that drift instead of only checking the hook file itself and
+    reporting success regardless of what unqualified `gitleaks` now
+    resolves to."""
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    _write_stub(tool_dir, "gitleaks", GITLEAKS_STUB)
+    _write_stub(tool_dir, "pre-commit", PRE_COMMIT_STUB_GOOD)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    install_env = {
+        "PATH": f"{tool_dir}{os.pathsep}{_minimal_path()}",
+        "HOME": str(home),
+    }
+    install_result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=repo,
+        env=install_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install_result.returncode == 0, install_result.stdout + install_result.stderr
+
+    shadow_dir = tmp_path / "shadow-gitleaks"
+    shadow_dir.mkdir()
+    _write_stub(shadow_dir, "gitleaks", WRONG_VERSION_GITLEAKS_STUB)
+
+    check_env = {
+        "PATH": os.pathsep.join([str(shadow_dir), str(tool_dir), _minimal_path()]),
+        "HOME": str(home),
+    }
+    check_result = subprocess.run(
+        ["bash", str(SCRIPT), "--check"],
+        cwd=repo,
+        env=check_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    combined = check_result.stdout + check_result.stderr
+    assert check_result.returncode != 0, combined
+    assert "a different gitleaks resolves earlier on path" in combined.lower()
+    assert str(shadow_dir) in combined

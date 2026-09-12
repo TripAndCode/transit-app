@@ -18,10 +18,11 @@
 #        scripts/setup_git_hooks.sh --check   # verify only, install nothing
 # Exits nonzero with an actionable message on any step it cannot complete.
 # --check runs only the "is the hook really installed" verification (exec
-# bit + pre-commit marker + no core.hooksPath override) and exits 0/1 with
-# no side effects -- the single source of truth for `make doctor` and
-# deploy/vps/claude-loop.sh's per-tick check, so they can't drift out of
-# sync with what install_hook itself considers "installed".
+# bit + pre-commit marker + no core.hooksPath override + unqualified
+# `gitleaks` on PATH still resolving to the pinned GITLEAKS_VERSION) and
+# exits 0/1 with no side effects -- the single source of truth for `make
+# doctor` and deploy/vps/claude-loop.sh's per-tick check, so they can't
+# drift out of sync with what install_hook itself considers "installed".
 set -euo pipefail
 
 # Pinned to match .pre-commit-config.yaml's `rev: v8.18.4` and
@@ -52,6 +53,24 @@ detect_platform() {
     *) fail "unsupported architecture $(uname -m) for automatic gitleaks install -- install gitleaks ${GITLEAKS_VERSION} manually and re-run this script" ;;
   esac
   printf '%s_%s' "$os" "$arch"
+}
+
+# Reason unqualified `gitleaks` -- what the pre-commit hook actually
+# invokes via PATH at commit time, not the absolute GITLEAKS_INSTALL_DIR
+# path -- resolves to something other than the pinned GITLEAKS_VERSION, or
+# empty string if it resolves to exactly that version. Does not distinguish
+# "not on PATH at all" (callers that care check `command -v gitleaks`
+# themselves first); only compares versions once something is found.
+# Shared by install_gitleaks's post-install check and hook_verify_reason so
+# the two can't independently drift on how they decide a PATH-shadowing
+# gitleaks counts as a problem.
+gitleaks_path_version_mismatch_reason() {
+  local resolved_path resolved_version
+  resolved_path="$(command -v gitleaks)"
+  resolved_version="$(gitleaks version 2>/dev/null | tr -d '[:space:]')"
+  if [ "$resolved_version" != "$GITLEAKS_VERSION" ]; then
+    echo "a different gitleaks resolves earlier on PATH at ${resolved_path} (version ${resolved_version:-unknown}), not the pinned ${GITLEAKS_VERSION} -- the pre-commit hook invokes unqualified 'gitleaks' and would silently run the wrong version; remove ${resolved_path} or reorder PATH so ${GITLEAKS_INSTALL_DIR} comes first, then re-run"
+  fi
 }
 
 install_gitleaks() {
@@ -98,12 +117,9 @@ install_gitleaks() {
   if ! command -v gitleaks >/dev/null 2>&1; then
     echo "-> NOTE: ${GITLEAKS_INSTALL_DIR} is not on PATH; add it to your shell profile so 'gitleaks' resolves outside this script"
   else
-    local resolved_path resolved_version
-    resolved_path="$(command -v gitleaks)"
-    resolved_version="$(gitleaks version 2>/dev/null | tr -d '[:space:]')"
-    if [ "$resolved_version" != "$GITLEAKS_VERSION" ]; then
-      fail "a different gitleaks resolves earlier on PATH at ${resolved_path} (version ${resolved_version:-unknown}), not the pinned ${GITLEAKS_VERSION} just installed to ${GITLEAKS_INSTALL_DIR}/gitleaks -- the pre-commit hook invokes unqualified 'gitleaks' and would silently run the wrong version; remove ${resolved_path} or reorder PATH so ${GITLEAKS_INSTALL_DIR} comes first, then re-run"
-    fi
+    local mismatch
+    mismatch="$(gitleaks_path_version_mismatch_reason)"
+    [ -z "$mismatch" ] || fail "$mismatch (just installed the pinned build to ${GITLEAKS_INSTALL_DIR}/gitleaks)"
   fi
 
   echo "-> installed gitleaks ${GITLEAKS_VERSION} to ${GITLEAKS_INSTALL_DIR}/gitleaks"
@@ -138,13 +154,17 @@ hook_file_path() {
 }
 
 # Single source of truth for "is the hook really installed": executable,
-# carries pre-commit's own generated marker, and not shadowed by a
-# core.hooksPath override. Echoes an empty string when the hook is fully
-# installed, otherwise echoes an actionable reason it isn't. Used both by
-# install_hook (which turns a non-empty reason into a hard `fail`) and by
-# `--check` mode (Makefile's `doctor` target, deploy/vps/claude-loop.sh),
-# so all three call sites can never drift out of sync on what "installed"
-# means.
+# carries pre-commit's own generated marker, not shadowed by a
+# core.hooksPath override, and unqualified `gitleaks` (what the hook
+# actually invokes via PATH at commit time) still resolves to the pinned
+# GITLEAKS_VERSION -- catching a different-version gitleaks that starts
+# shadowing the install dir on PATH sometime after a correct initial
+# install, not just at install time. Echoes an empty string when the hook
+# is fully installed, otherwise echoes an actionable reason it isn't. Used
+# both by install_hook (which turns a non-empty reason into a hard `fail`)
+# and by `--check` mode (Makefile's `doctor` target,
+# deploy/vps/claude-loop.sh), so all three call sites can never drift out
+# of sync on what "installed" means.
 hook_verify_reason() {
   local hook_file
   hook_file="$(hook_file_path)"
@@ -168,6 +188,14 @@ hook_verify_reason() {
     echo "git config core.hooksPath is set to '${hooks_path}', which overrides the standard hooks directory pre-commit just wrote to -- commits would bypass the gitleaks hook entirely. Unset it ('git config --unset core.hooksPath') and re-run"
     return
   fi
+
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "unqualified 'gitleaks' is not on PATH -- the pre-commit hook invokes it by name (not an absolute path) and would fail outright; install it (scripts/setup_git_hooks.sh) or add its install directory to PATH"
+    return
+  fi
+  local mismatch
+  mismatch="$(gitleaks_path_version_mismatch_reason)"
+  [ -z "$mismatch" ] || { echo "$mismatch"; return; }
 }
 
 install_hook() {
