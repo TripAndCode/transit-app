@@ -16,9 +16,11 @@ import type { Agency } from "../api/types";
 // --transition ever grows past this.
 const SELECT_TRANSITION_MS = 250;
 
-/** Owns the "/" landing decision: a first-time visitor with no auth session
- *  is sent to "/welcome" instead of ever seeing the dashboard or agency
- *  picker below; everyone else falls through to the pre-existing behavior.
+/** Owns the "/" landing decision: a first-time visitor with a confirmed-absent
+ *  auth session is sent to "/welcome" instead of ever seeing the dashboard or
+ *  agency picker below; everyone else — including a session check that errors
+ *  rather than confirming anonymity — falls through to the pre-existing
+ *  behavior.
  *  Once past that gate, while agencies load, show the existing placeholder;
  *  once loaded, instantly redirect (via the declarative <Navigate> element —
  *  this runs at render time, so calling useNavigate() imperatively here
@@ -28,7 +30,7 @@ const SELECT_TRANSITION_MS = 250;
 export function OnboardingGate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data: session, isLoading: isSessionLoading } = useSession();
+  const { data: session, isLoading: isSessionLoading, isError: isSessionError } = useSession();
   const { data: agencies, isLoading, isError, error, refetch } = useAgencies();
   // Hooks must run unconditionally on every render (Rules of Hooks) — declared
   // here, above the early returns below, rather than next to select() where
@@ -65,12 +67,14 @@ export function OnboardingGate() {
   }, []);
 
   if (isSessionLoading) return <IndexLoadingPlaceholder />;
-  // Only a confirmed "unseen" triggers the redirect. A browser where the flag
-  // can't be read (localStorage blocked/throwing) falls through to the
-  // dashboard/picker below instead of looping back to "/welcome" on every
-  // mount — the same degrade-to-working-page behavior as a lastAgency read
-  // failure, rather than an unbreakable redirect loop.
-  if (!session && welcomeSeenState === "unseen") return <Navigate to="/welcome" replace />;
+  // Only a confirmed "unseen" AND a confirmed-anonymous session trigger the
+  // redirect. `!session` alone is ambiguous: a failed /api/me probe (5xx,
+  // aborted request, network error) also settles as `data: undefined` once
+  // react-query exhausts its retries, indistinguishable from a real anonymous
+  // visitor. Requiring `!isSessionError` treats that failure the same as the
+  // localStorage-read-failure case below — fail open to the dashboard/picker
+  // rather than risk misrouting a signed-in visitor to "/welcome".
+  if (!session && !isSessionError && welcomeSeenState === "unseen") return <Navigate to="/welcome" replace />;
 
   if (isLoading) return <IndexLoadingPlaceholder />;
   // Only surface the error banner when there's no usable fallback: react-query

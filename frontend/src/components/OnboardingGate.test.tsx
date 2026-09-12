@@ -185,6 +185,15 @@ describe("OnboardingGate", () => {
       expect(screen.getByText("First")).toBeTruthy();
     });
 
+    it("does not redirect when the session check errors instead of confirming anonymity", () => {
+      localStorage.clear();
+      useSessionMock.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+      renderGate();
+      expect(screen.queryByText("landed:welcome")).toBeNull();
+      expect(screen.getByText("First")).toBeTruthy();
+    });
+
     it("does not redirect a returning anonymous visitor who already has the flag set", () => {
       localStorage.clear();
       localStorage.setItem("transit.welcomeSeen", "1");

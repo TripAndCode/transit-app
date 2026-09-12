@@ -24,7 +24,12 @@ visit.
 
 - A visitor with an active auth session (`useSession()` from
   `frontend/src/api/auth.ts`) is never redirected, regardless of the
-  flag's state.
+  flag's state. Only a confirmed-anonymous session (`useSession()` settled
+  with no error and no data) counts as anonymous for this gate — a session
+  check that errors instead (a non-401 `/api/me` failure, surfaced after
+  react-query exhausts its retry) falls through to the dashboard/picker
+  rather than risk misrouting a signed-in visitor whose probe merely
+  hiccupped.
 - An anonymous visitor with the flag unset is redirected to `/welcome`
   instead of ever seeing the dashboard or the multi-agency picker overlay.
 - A visitor whose flag can't be reliably read or written falls through to
