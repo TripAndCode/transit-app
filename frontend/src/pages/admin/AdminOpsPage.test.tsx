@@ -3,8 +3,8 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
-import i18n from "../../../i18n";
-import { AdminOpsPage } from "../AdminOpsPage";
+import i18n from "../../i18n";
+import { AdminOpsPage } from "./AdminOpsPage";
 
 // Mock state to control what useAdminOps returns
 let mockReturnValue: any = {
@@ -29,7 +29,7 @@ let mockReturnValue: any = {
   error: null,
 };
 
-vi.mock("../../../api/admin", () => ({
+vi.mock("../../api/admin", () => ({
   useAdminOps: () => mockReturnValue,
 }));
 

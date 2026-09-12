@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGet, formatApiError } from "../api/client";
-import { usePatchUser, useDeleteUser } from "../api/admin";
-import { useSession } from "../api/auth";
-import { AdminButton } from "./admin/adminControls";
+import { apiGet, formatApiError } from "../../api/client";
+import { usePatchUser, useDeleteUser } from "../../api/admin";
+import { useSession } from "../../api/auth";
+import { AdminButton } from "./adminControls";
 
 type Detail = {
   user_id: number;

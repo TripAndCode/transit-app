@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
-import i18n from "../../../i18n";
-import { AdminAgenciesPage } from "../AdminAgenciesPage";
+import i18n from "../../i18n";
+import { AdminAgenciesPage } from "./AdminAgenciesPage";
 
 const createMutateAsync = vi.fn().mockResolvedValue({});
 const patchMutateAsync = vi.fn().mockResolvedValue({});
@@ -18,7 +18,7 @@ let delState: { isPending: boolean; variables: number | undefined } = { isPendin
 let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
 
 // Mock the admin API module
-vi.mock("../../../api/admin", () => ({
+vi.mock("../../api/admin", () => ({
   useAdminAgencies: () => ({
     data: [
       {

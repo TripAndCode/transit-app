@@ -3,15 +3,15 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
-import i18n from "../../../i18n";
-import { AdminArchitecturePage } from "../AdminArchitecturePage";
+import i18n from "../../i18n";
+import { AdminArchitecturePage } from "./AdminArchitecturePage";
 
 // The Mermaid renderer itself (does it produce a real <svg>?) is covered by
 // MarkdownMermaid.test.tsx -- this page test only cares about the doc-list
 // wiring (fetch, select, render), so `mermaidMarkdownComponents` is mocked
 // down to plain passthrough rendering, keeping this suite independent of
 // the `mermaid` package/its async render lifecycle entirely.
-vi.mock("../../../components/MarkdownMermaid", () => ({
+vi.mock("../../components/MarkdownMermaid", () => ({
   mermaidMarkdownComponents: {},
 }));
 
@@ -23,7 +23,7 @@ let docsReturnValue: any;
 // no-op click handler.
 let docsBySlug: Record<string, any>;
 
-vi.mock("../../../api/admin", () => ({
+vi.mock("../../api/admin", () => ({
   useArchitectureDocs: () => docsReturnValue,
   useArchitectureDoc: (slug: string | null) =>
     slug == null ? { data: undefined, error: null } : docsBySlug[slug],

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useAdminUsers, useDeleteUser, usePatchUser } from "../api/admin";
-import { useSession } from "../api/auth";
-import { formatApiError } from "../api/client";
-import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./admin/adminControls";
-import { pageItems } from "./admin/pageItems";
+import { useAdminUsers, useDeleteUser, usePatchUser } from "../../api/admin";
+import { useSession } from "../../api/auth";
+import { formatApiError } from "../../api/client";
+import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
+import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
