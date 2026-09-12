@@ -254,7 +254,7 @@ async def live_trip_progress(
     or proof that the vehicle physically crossed the stop.
     """
     latest_ts = await max_captured_at(ch, agency_id)
-    empty = {
+    empty: dict[str, Any] = {
         "trip_id": trip_id,
         "route_code": None,
         "headsign": None,
@@ -303,12 +303,15 @@ async def live_trip_progress(
     # polls. Keep its latest report so the timeline stays compact.
     by_sequence: dict[int, dict] = {}
     for captured_at, _file_name, stop_sequence, stop_id, scheduled_time, dep_delay in progress_result.result_rows:
+        reported_at = _as_utc(captured_at)
+        if reported_at is None:
+            continue
         by_sequence[stop_sequence] = {
             "stop_sequence": stop_sequence,
             "stop_id": stop_id or None,
             "scheduled_time": f"{scheduled_time}:00" if scheduled_time and len(scheduled_time) < 8 else scheduled_time,
             "dep_delay": dep_delay,
-            "reported_at": _as_utc(captured_at).isoformat(),
+            "reported_at": reported_at.isoformat(),
         }
 
     metadata = await conn.fetchrow(
