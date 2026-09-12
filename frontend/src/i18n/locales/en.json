@@ -484,7 +484,7 @@
     "context": {
       "route_selected": "Showing: {{route}}",
       "all_routes": "Showing: all routes",
-      "selected_hint": "The map is filtered to the selected route; the queue lists routes needing attention.",
+      "selected_hint": "Trips on the selected route are emphasized; the queue lists routes needing attention.",
       "all_hint": "The map shows all routes; the queue lists anomalies and watch items only. Normal routes are counted below."
     },
     "freshness": {

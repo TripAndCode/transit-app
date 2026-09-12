@@ -193,15 +193,17 @@ export function MapTab() {
     setRefreshMessage(t("operations.refreshing"));
     const [liveResult, summaryResult] = await Promise.all([liveQuery.refetch(), summaryQuery.refetch()]);
     if (liveResult.isError || summaryResult.isError) {
-      setRefreshMessage(t("operations.refresh_failed"));
+      const message = t("operations.refresh_failed");
+      setRefreshMessage(message);
+      window.setTimeout(() => setRefreshMessage((current) => current === message ? null : current), 8_000);
       return;
     }
     const nextObservation = liveResult.data?.latest_captured_at ?? null;
-    setRefreshMessage(
-      nextObservation && nextObservation !== previousObservation
-        ? t("operations.refresh_updated", { when: relativeTime(nextObservation) })
-        : t("operations.refresh_unchanged"),
-    );
+    const message = nextObservation && nextObservation !== previousObservation
+      ? t("operations.refresh_updated", { when: relativeTime(nextObservation) })
+      : t("operations.refresh_unchanged");
+    setRefreshMessage(message);
+    window.setTimeout(() => setRefreshMessage((current) => current === message ? null : current), 8_000);
   }
 
   const anomalyCount = activeSummaries.filter((route) => route.bucket === "anomaly").length;

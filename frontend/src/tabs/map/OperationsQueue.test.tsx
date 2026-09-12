@@ -126,4 +126,22 @@ describe("OperationsQueue", () => {
     expect(screen.getAllByText("R6")).toHaveLength(2);
     expect(screen.getAllByText("R7")).toHaveLength(2);
   });
+
+  it("keeps a selected route visible when it ranks below the initial five", () => {
+    const routes = Array.from({ length: 7 }, (_, index) => summary({ route_code: `R${index + 1}` }));
+    render(
+      <OperationsQueue
+        routes={routes}
+        trips={[]}
+        selectedRoute="R7"
+        formatRoute={(code) => code}
+        onSelectRoute={() => {}}
+        onOpenRoute={() => {}}
+        t={t}
+      />,
+    );
+
+    expect(screen.getAllByText("R7")).toHaveLength(2);
+    expect(screen.queryByText("R5")).not.toBeInTheDocument();
+  });
 });
