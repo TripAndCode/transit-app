@@ -47,9 +47,7 @@ PROJECT_CONFIG = ROOT / ".gitleaks.toml"
 # Read out of the fixture itself rather than duplicated as a literal here:
 # a literal of this shape in this file would itself trip gitleaks' own
 # aws-access-token rule on every commit that touches this test.
-POSITIVE_SECRET = (
-    (FIXTURES_DIR / "positive_control_credential.txt").read_text().strip().rsplit("=", 1)[-1]
-)
+POSITIVE_SECRET = (FIXTURES_DIR / "positive_control_credential.txt").read_text().strip().rsplit("=", 1)[-1]
 
 pytestmark = pytest.mark.skipif(
     shutil.which("gitleaks") is None,
@@ -89,9 +87,7 @@ def _bare_config(tmp_path: Path) -> Path:
 
 def test_positive_control_is_detected_and_redacted_by_default_rules():
     with tempfile.TemporaryDirectory() as tmp:
-        result = _run_gitleaks(
-            FIXTURES_DIR / "positive_control_credential.txt", _bare_config(Path(tmp))
-        )
+        result = _run_gitleaks(FIXTURES_DIR / "positive_control_credential.txt", _bare_config(Path(tmp)))
 
     assert result.returncode != 0, (
         "gitleaks did not flag the positive-control fixture under the default "
@@ -100,8 +96,7 @@ def test_positive_control_is_detected_and_redacted_by_default_rules():
     )
     combined_output = result.stdout + result.stderr
     assert POSITIVE_SECRET not in combined_output, (
-        "gitleaks printed the raw fixture secret instead of redacting it "
-        "(--redact should have suppressed this)"
+        "gitleaks printed the raw fixture secret instead of redacting it (--redact should have suppressed this)"
     )
     assert "REDACTED" in combined_output
 
@@ -120,9 +115,7 @@ def test_positive_control_is_excluded_from_the_routine_project_scan():
 
 
 def test_negative_control_is_suppressed_by_the_project_allowlist():
-    result = _run_gitleaks(
-        FIXTURES_DIR / "negative_control_allowed_placeholder.txt", PROJECT_CONFIG
-    )
+    result = _run_gitleaks(FIXTURES_DIR / "negative_control_allowed_placeholder.txt", PROJECT_CONFIG)
 
     assert result.returncode == 0, (
         "gitleaks flagged the negative-control fixture even though its path "
@@ -138,9 +131,7 @@ def test_negative_control_would_be_flagged_without_the_allowlist():
     the credential shape)."""
 
     with tempfile.TemporaryDirectory() as tmp:
-        result = _run_gitleaks(
-            FIXTURES_DIR / "negative_control_allowed_placeholder.txt", _bare_config(Path(tmp))
-        )
+        result = _run_gitleaks(FIXTURES_DIR / "negative_control_allowed_placeholder.txt", _bare_config(Path(tmp)))
 
     assert result.returncode != 0, (
         "negative-control fixture wasn't detected even without the project "

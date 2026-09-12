@@ -48,6 +48,51 @@ fi
 exit 0
 """
 
+WRONG_VERSION_GITLEAKS_STUB = """#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo "1.2.3"
+  exit 0
+fi
+exit 0
+"""
+
+# Fakes the download step so the shadowed-PATH scenario below stays
+# hermetic (no real network access reachable in this test environment):
+# writes a placeholder in place of a real archive. Paired with FAKE_TAR,
+# which ignores that placeholder and materializes a real, correctly
+# versioned gitleaks binary directly at the requested destination -- what a
+# genuine `tar -xzf ... gitleaks` would produce from the pinned release.
+FAKE_CURL = """#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+: > "$out"
+"""
+
+FAKE_TAR = """#!/bin/sh
+dest=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-C" ]; then
+    dest="$arg"
+  fi
+  prev="$arg"
+done
+cat > "$dest/gitleaks" <<'BIN'
+#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo "8.18.4"
+  exit 0
+fi
+exit 0
+BIN
+chmod +x "$dest/gitleaks"
+"""
+
 # Simulates a broken/unexpected pre-commit install that writes a hook file
 # without the marker pre-commit normally stamps -- the script must refuse
 # to call this success.
@@ -175,3 +220,58 @@ def test_fails_when_core_hooks_path_overrides_the_standard_hooks_dir(tmp_path):
 
     assert result.returncode != 0
     assert "core.hooksPath" in (result.stdout + result.stderr)
+
+
+def test_fails_when_a_wrong_version_gitleaks_shadows_the_install_dir_on_path(tmp_path):
+    """The pre-commit hook invokes unqualified `gitleaks` (language: system
+    in .pre-commit-config.yaml), resolved via PATH at commit time -- not
+    the absolute GITLEAKS_INSTALL_DIR path this script installs to. If a
+    different-version gitleaks (e.g. a stray `brew install gitleaks`)
+    resolves earlier on PATH than GITLEAKS_INSTALL_DIR, the script must not
+    report success just because the pinned build landed at the install
+    path: the hook would still silently run the wrong version."""
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+
+    shadow_dir = tmp_path / "shadow-gitleaks"
+    shadow_dir.mkdir()
+    _write_stub(shadow_dir, "gitleaks", WRONG_VERSION_GITLEAKS_STUB)
+
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    _write_stub(tool_dir, "curl", FAKE_CURL)
+    _write_stub(tool_dir, "tar", FAKE_TAR)
+    _write_stub(tool_dir, "pre-commit", PRE_COMMIT_STUB_GOOD)
+
+    install_dir = tmp_path / "install-dir"
+
+    env = {
+        "PATH": os.pathsep.join([str(shadow_dir), str(tool_dir), str(install_dir), _minimal_path()]),
+        "HOME": str(tmp_path / "home"),
+        "GITLEAKS_INSTALL_DIR": str(install_dir),
+    }
+    (tmp_path / "home").mkdir(exist_ok=True)
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "a different gitleaks resolves earlier on path" in combined.lower()
+    assert str(shadow_dir) in combined
+    # The pinned binary must actually have been installed to the install
+    # dir -- this failure is specifically about the unqualified `gitleaks`
+    # PATH resolution, not about the install itself failing.
+    installed = install_dir / "gitleaks"
+    assert installed.exists()
+    assert subprocess.run([str(installed), "version"], capture_output=True, text=True).stdout.strip() == "8.18.4"
