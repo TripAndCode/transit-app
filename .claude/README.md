@@ -103,6 +103,16 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
 
 ## VPS operations
 
+- Provisioning the VPS's persistent clone must include one `make hooks` (or
+  `make bootstrap`) run, which installs the pinned, mandatory gitleaks
+  pre-commit hook via `scripts/setup_git_hooks.sh` — it fails loudly rather
+  than silently skip if gitleaks/pre-commit can't be installed. `git
+  worktree`s share a single `.git/hooks` directory (it lives in the common
+  git dir, not per-worktree), so this one run also covers every
+  `/vps-loop-run` worker worktree cut from that clone afterward; a worker
+  never needs to (and, per the sandbox limitations below, usually can't)
+  install it itself. `make doctor` reports whether the hook is currently
+  installed.
 - A systemd timer invokes a single-flight `claude -p "/vps-loop-run"` wrapper; the command file owns
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
   The timer cadence is longer than the wrapper's hard timeout, and systemd kills

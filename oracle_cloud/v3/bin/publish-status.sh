@@ -79,4 +79,8 @@ if ! "$CURL" -fsS -m 15 --retry 3 -o /dev/null \
     exit 1
 fi
 
-echo "publish-status: published oracle_crawler status to ${GH_REPO} (event ${EVENT_TYPE})"
+# Derived from the document itself, not hardcoded: this script is generic
+# across every component's heartbeat (oracle_crawler, r2, ...), selected
+# only by which document ORACLE_STATUS_FILE points at.
+component=$(printf '%s' "$document" | sed -n 's/.*"component":"\([a-z_]*\)".*/\1/p')
+echo "publish-status: published ${component:-unknown} status to ${GH_REPO} (event ${EVENT_TYPE})"
