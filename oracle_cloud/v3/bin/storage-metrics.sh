@@ -154,11 +154,12 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 
     # r2_list_prefix <prefix> -- prints "<count>\t<bytes>" and returns 0 on a
-    # successful listing; returns 1 (printing nothing) if `aws s3 ls` itself
-    # exits nonzero, leaving the caller's captured stderr as the only
-    # diagnostic. `aws s3 ls --recursive` paginates the whole prefix
-    # internally, so one call always sees the complete listing or fails
-    # outright -- there is no partial-page case to guard against here.
+    # successful listing; returns 1 if `aws s3 ls` itself exits nonzero, with
+    # the captured `aws` stderr text (not the "<count>\t<bytes>" format) as
+    # this function's own stdout, so the caller can report the real failure
+    # reason. `aws s3 ls --recursive` paginates the whole prefix internally,
+    # so one call always sees the complete listing or fails outright -- there
+    # is no partial-page case to guard against here.
     r2_list_prefix() {
         local prefix="$1" listing count=0 bytes=0 size rc stdout_file
         stdout_file=$(mktemp) || { printf 'mktemp failed'; return 1; }
