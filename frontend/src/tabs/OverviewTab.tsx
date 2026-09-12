@@ -7,7 +7,7 @@ import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorBanner } from "../components/ErrorBanner";
+import { AsyncSection } from "../components/AsyncSection";
 import { OverviewHeroRow } from "../components/OverviewHeroRow";
 import { OverviewModal } from "../components/OverviewModal";
 import { PeakHourModal } from "../components/PeakHourModal";
@@ -54,12 +54,10 @@ export function OverviewTab() {
   // pipeline/reports/overview.py's _peak_hour docstring), so it ignores
   // ctx's date range entirely and stays non-null for any range once an
   // agency has ever had data — it can never signal "no data in THIS range".
-  const hasAnyData =
-    !!data && (
-      data.headline.samples > 0 ||
-      data.concentration.top_routes.length > 0 ||
-      Object.keys(data.service_split).length > 0
-    );
+  const hasAnyData = (summary: NonNullable<typeof data>) =>
+    summary.headline.samples > 0 ||
+    summary.concentration.top_routes.length > 0 ||
+    Object.keys(summary.service_split).length > 0;
 
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
     concentration: "overview.modal.concentration",
@@ -71,12 +69,16 @@ export function OverviewTab() {
     <>
       <TabFilterBar />
       <div className="ov-page">
-        {isPending && <Skeleton height={400} />}
-        {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
-        {data && !hasAnyData && (
-          <EmptyState title={t("overview.empty")} />
-        )}
-        {data && hasAnyData && (
+        <AsyncSection
+          loading={isPending}
+          error={error}
+          onRetry={() => refetch()}
+          data={data}
+          hasContent={hasAnyData}
+          empty={<EmptyState title={t("overview.empty")} />}
+          skeleton={<Skeleton height={400} />}
+        >
+          {(data) => (
           <>
             <OverviewHeroRow
               headline={data.headline}
@@ -109,7 +111,8 @@ export function OverviewTab() {
               )}
             </details>
           </>
-        )}
+          )}
+        </AsyncSection>
       </div>
 
       <OverviewModal
