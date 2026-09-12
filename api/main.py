@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
@@ -272,13 +273,22 @@ app.include_router(static_router)
 app.include_router(internal_router)
 
 
-@app.get("/health")
+class HealthStatus(BaseModel):
+    status: str
+
+
+class ClientConfig(BaseModel):
+    auth_enabled: bool
+    local_admin_enabled: bool
+
+
+@app.get("/health", response_model=HealthStatus)
 async def health():
     """Liveness probe. Returns ``{"status": "ok"}`` once the app is responding."""
     return {"status": "ok"}
 
 
-@app.get("/api/config")
+@app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
     and separately show/hide the break-glass local-admin password form."""
