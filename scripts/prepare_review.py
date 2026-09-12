@@ -221,6 +221,7 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     ".claude/settings.json",
     ".github/workflows/*",
     ".pre-commit-config.yaml",
+    "scripts/setup_git_hooks.sh",
     "pyproject.toml",
     "frontend/eslint.config.js",
     "frontend/package.json",

@@ -239,6 +239,7 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
     "path",
     [
         ".pre-commit-config.yaml",
+        "scripts/setup_git_hooks.sh",
         "frontend/package.json",
         "scripts/cleanup_git_state.py",
         "scripts/daily_git_hygiene.py",
