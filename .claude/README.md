@@ -184,8 +184,8 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   `vps-heartbeat-listener.yml` echoes the health fields as plain `HEALTH
   key=value` lines in its own run log — the only place a `repository_dispatch`
   payload survives after the triggering run completes — and
-  `vps-heartbeat-watchdog.yml`
-  greps the latest one on its own `schedule` trigger, failing (the same
+  `vps-heartbeat-watchdog.yml` greps the latest one on its own `schedule`
+  trigger, failing (the same
   guaranteed-email path as its heartbeat-age check) when the loop is stuck on
   an identical blocker for 3+ ticks or has stayed paused past its own reduced
   probe cadence. This catches a loop that keeps ticking (so the plain

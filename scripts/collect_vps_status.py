@@ -33,6 +33,11 @@ currently-running `claude` process is the strongest signal and wins outright
 circuit-breaker pause state means "paused"; otherwise an `"unknown"` process
 read means the loop's activity itself can't be determined; only once none of
 those apply is it "idle" -- the ordinary, expected state between ticks.
+
+`scripts/vps_loop_chain_state.py`'s own persisted bookkeeping (is a tick
+currently in flight, the consecutive-non-progress count, and the scheduled
+backoff, if any) is folded in as-is under `chain_*` `details` keys -- this
+module never recomputes or second-guesses that state, only surfaces it.
 """
 
 from __future__ import annotations

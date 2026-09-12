@@ -210,12 +210,17 @@ def is_test_path(path: str) -> bool:
 # own basename marks it as a `check-*`/`check_*` gate (a repo-wide naming
 # convention, not just top-level scripts/ — e.g. frontend/scripts/check-
 # entry-chunk.mjs and its test), plus specific non-`check-`-named
-# deletion-safety scripts and this review script itself (a diff that quietly
-# weakens this very list is exactly the class of change enforcement review
-# exists to catch), along with each of those scripts' own tests, since a
-# weakened test is just as dangerous as a weakened script. `is_excluded`'s
-# path-or-basename fnmatch already does exactly the matching this needs, so
-# it's reused rather than duplicated here.
+# deletion-safety scripts, the autonomous loop's own chained-tick wrapper and
+# systemd unit (`deploy/vps/claude-loop.sh`/`claude-loop.service`) and the
+# decision logic behind them (`scripts/vps_loop_chain_state.py` — a diff
+# quietly loosening its bounded-backoff/stale-lock handling could let the
+# loop merge PRs unattended more aggressively than intended), and this
+# review script itself (a diff that quietly weakens this very list is
+# exactly the class of change enforcement review exists to catch), along
+# with each of those scripts' own tests, since a weakened test is just as
+# dangerous as a weakened script. `is_excluded`'s path-or-basename fnmatch
+# already does exactly the matching this needs, so it's reused rather than
+# duplicated here.
 ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     ".claude/hooks/*",
     ".claude/settings.json",
@@ -230,10 +235,14 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     "scripts/cleanup_git_state.py",
     "scripts/daily_git_hygiene.py",
     "scripts/prepare_review.py",
+    "deploy/vps/claude-loop.sh",
+    "deploy/systemd/claude-loop.service",
+    "scripts/vps_loop_chain_state.py",
     "tests/unit/test_prepare_review.py",
     "tests/unit/test_cleanup_git_state.py",
     "tests/unit/test_daily_git_hygiene.py",
     "tests/unit/test_setup_git_hooks.py",
+    "tests/unit/test_vps_loop_chain_state.py",
     ".gitleaks.toml",
     "tests/unit/test_gitleaks_allowlist_scope.py",
     "tests/unit/test_gitleaks_version_pin.py",

@@ -41,6 +41,7 @@ import argparse
 import errno
 import json
 import os
+import shlex
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, replace
@@ -55,10 +56,6 @@ TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # other outcome stops the chain for this invocation.
 CONTINUE_OUTCOMES = frozenset({"progress"})
 KNOWN_OUTCOMES = frozenset({"progress", "idle", "blocked", "paused", "unknown"})
-
-
-class ChainStateError(RuntimeError):
-    """Raised when the state file exists but is not a well-formed chain state document."""
 
 
 @dataclass(frozen=True)
@@ -302,8 +299,6 @@ def _scalar(value: object) -> str:
 
 
 def _emit_shell(fields: dict[str, object]) -> None:
-    import shlex
-
     for name, value in fields.items():
         sys.stdout.write(f"{name}={shlex.quote(_scalar(value))}\n")
 
