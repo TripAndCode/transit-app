@@ -41,9 +41,9 @@ export function OnboardingGate() {
   const [remembered] = useState(() => readLastAgency());
   // Snapshotted once at mount for the same reason as `remembered` above: the
   // mount effect below writes this flag on every visit (including this one),
-  // and a live read would immediately flip to true and mask the very first
+  // and a live read would immediately flip to "seen" and mask the very first
   // redirect this render is responsible for deciding.
-  const [welcomeSeen] = useState(() => readWelcomeSeen());
+  const [welcomeSeenState] = useState(() => readWelcomeSeen());
 
   // Deferred navigate lives in an effect (not the click handler's own
   // setTimeout) so an unmount inside the delay window cleans up the timer
@@ -65,7 +65,12 @@ export function OnboardingGate() {
   }, []);
 
   if (isSessionLoading) return <IndexLoadingPlaceholder />;
-  if (!session && !welcomeSeen) return <Navigate to="/welcome" replace />;
+  // Only a confirmed "unseen" triggers the redirect. A browser where the flag
+  // can't be read (localStorage blocked/throwing) falls through to the
+  // dashboard/picker below instead of looping back to "/welcome" on every
+  // mount — the same degrade-to-working-page behavior as a lastAgency read
+  // failure, rather than an unbreakable redirect loop.
+  if (!session && welcomeSeenState === "unseen") return <Navigate to="/welcome" replace />;
 
   if (isLoading) return <IndexLoadingPlaceholder />;
   // Only surface the error banner when there's no usable fallback: react-query

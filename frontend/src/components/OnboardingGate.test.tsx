@@ -202,5 +202,17 @@ describe("OnboardingGate", () => {
       expect(screen.queryByText("landed:welcome")).toBeNull();
       expect(screen.queryByText(/^landed:\d/)).toBeNull();
     });
+
+    it("does not redirect (and so cannot loop) for an anonymous visitor when localStorage.getItem throws", () => {
+      const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("localStorage unavailable");
+      });
+      useSessionMock.mockReturnValue({ data: null, isLoading: false });
+      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+      renderGate();
+      expect(screen.queryByText("landed:welcome")).toBeNull();
+      expect(screen.getByText("First")).toBeTruthy();
+      spy.mockRestore();
+    });
   });
 });
