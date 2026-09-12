@@ -143,6 +143,7 @@ describe("OperationsQueue", () => {
 
     expect(screen.getAllByText("R7")).toHaveLength(2);
     expect(screen.getAllByText("R5")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "operations.queue.show_more" })).not.toBeInTheDocument();
+    expect(screen.getByText("operations.queue.selected_route")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "operations.queue.show_more" })).toBeInTheDocument();
   });
 });

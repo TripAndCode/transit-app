@@ -514,6 +514,7 @@
       "open_trip": "便を開く",
       "show_more": "残り{{count}}路線を表示",
       "show_less": "折りたたむ",
+      "selected_route": "選択中の系統",
       "clear_title": "現在、要対応の路線はありません",
       "clear_body": "最新報告を30秒ごとに確認しています。",
       "normal_routes": "平常運行 {{count}}路線"

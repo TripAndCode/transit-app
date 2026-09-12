@@ -88,8 +88,8 @@ export function MapTab() {
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = routeSelection.agencyId === id ? routeSelection.route : null;
-  // Route selection must reflect explicit operator input; until then the
-  // map, counters, and queue all describe the whole feed.
+  // Selection only emphasizes matching trip markers and loads that route's
+  // shape; the counters and priority queue continue to describe the whole feed.
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;

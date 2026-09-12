@@ -514,6 +514,7 @@
       "open_trip": "Open trips",
       "show_more": "Show {{count}} more routes",
       "show_less": "Show less",
+      "selected_route": "Selected route",
       "clear_title": "No routes currently need attention",
       "clear_body": "Latest reports are checked every 30 seconds.",
       "normal_routes": "{{count}} routes operating normally"

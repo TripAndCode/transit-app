@@ -109,10 +109,48 @@ function QueueSection({
   onToggle: () => void;
 }) {
   if (routes.length === 0) return null;
-  const selectedIndex = selectedRoute ? routes.findIndex((route) => route.route_code === selectedRoute) : -1;
-  const selectedOutsidePreview = selectedIndex >= 5;
-  const visibleRoutes = expanded || selectedOutsidePreview ? routes : routes.slice(0, 5);
+  const selectedOutsidePreview = selectedRoute
+    ? routes.slice(5).find((route) => route.route_code === selectedRoute)
+    : undefined;
+  const visibleRoutes = expanded ? routes : routes.slice(0, 5);
   const hiddenCount = routes.length - visibleRoutes.length;
+  const routeCard = (route: RouteSummary) => {
+    const trip = worstTripForRoute(trips, route.route_code);
+    const deviation = route.deviation_sec;
+    return (
+      <article
+        key={`${route.route_code}|${route.service_type}`}
+        className={`ops-route-card ${selectedRoute === route.route_code ? "is-selected" : ""}`}
+      >
+        <button className="ops-route-card__main" type="button" onClick={() => onSelectRoute(route.route_code)}>
+          <span className="ops-route-card__badge">{route.route_code.slice(0, 4)}</span>
+          <span className="ops-route-card__copy">
+            <strong>{formatRoute(route.route_code)}</strong>
+            <b>
+              {deviation == null
+                ? t("operations.queue.current_delay", { delay: signedMin(route.avg_delay_sec, t) })
+                : t("operations.queue.deviation", { delay: signedMin(deviation, t) })}
+            </b>
+            <span>
+              <MapPin size={13} aria-hidden="true" />
+              {trip?.stop_name
+                ? t("operations.queue.reported_stop", { stop: trip.stop_name })
+                : t("operations.queue.location_unavailable")}
+            </span>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+        <div className="ops-route-card__actions">
+          <button type="button" onClick={() => onSelectRoute(route.route_code)}>
+            <MapPin size={14} aria-hidden="true" /> {t("operations.queue.show_on_map")}
+          </button>
+          <button type="button" onClick={() => onOpenRoute(route)}>
+            <RouteIcon size={14} aria-hidden="true" /> {t("operations.queue.open_trip")}
+          </button>
+        </div>
+      </article>
+    );
+  };
   return (
     <section className={`ops-queue-section ops-queue-section--${bucket}`}>
       <h3>
@@ -120,45 +158,15 @@ function QueueSection({
         {t(`live.bucket.${bucket}`)} <span>{routes.length}</span>
       </h3>
       <div className="ops-queue-section__items">
-        {visibleRoutes.map((route) => {
-          const trip = worstTripForRoute(trips, route.route_code);
-          const deviation = route.deviation_sec;
-          return (
-            <article
-              key={`${route.route_code}|${route.service_type}`}
-              className={`ops-route-card ${selectedRoute === route.route_code ? "is-selected" : ""}`}
-            >
-              <button className="ops-route-card__main" type="button" onClick={() => onSelectRoute(route.route_code)}>
-                <span className="ops-route-card__badge">{route.route_code.slice(0, 4)}</span>
-                <span className="ops-route-card__copy">
-                  <strong>{formatRoute(route.route_code)}</strong>
-                  <b>
-                    {deviation == null
-                      ? t("operations.queue.current_delay", { delay: signedMin(route.avg_delay_sec, t) })
-                      : t("operations.queue.deviation", { delay: signedMin(deviation, t) })}
-                  </b>
-                  <span>
-                    <MapPin size={13} aria-hidden="true" />
-                    {trip?.stop_name
-                      ? t("operations.queue.reported_stop", { stop: trip.stop_name })
-                      : t("operations.queue.location_unavailable")}
-                  </span>
-                </span>
-                <ChevronRight size={18} aria-hidden="true" />
-              </button>
-              <div className="ops-route-card__actions">
-                <button type="button" onClick={() => onSelectRoute(route.route_code)}>
-                  <MapPin size={14} aria-hidden="true" /> {t("operations.queue.show_on_map")}
-                </button>
-                <button type="button" onClick={() => onOpenRoute(route)}>
-                  <RouteIcon size={14} aria-hidden="true" /> {t("operations.queue.open_trip")}
-                </button>
-              </div>
-            </article>
-          );
-        })}
+        {visibleRoutes.map(routeCard)}
       </div>
-      {routes.length > 5 && !selectedOutsidePreview && (
+      {selectedOutsidePreview && !expanded && (
+        <div className="ops-queue-section__selected">
+          <span>{t("operations.queue.selected_route")}</span>
+          {routeCard(selectedOutsidePreview)}
+        </div>
+      )}
+      {routes.length > 5 && (
         <button type="button" className="ops-queue-section__more" onClick={onToggle}>
           {expanded
             ? t("operations.queue.show_less")
