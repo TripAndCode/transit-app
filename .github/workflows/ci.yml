@@ -140,8 +140,9 @@ jobs:
       # skips itself when gitleaks isn't on PATH, so install it here or
       # those assertions silently never run. Mirrors secrets-scan.yml's own
       # pinned install; tests/unit/test_gitleaks_version_pin.py keeps this
-      # GITLEAKS_VERSION in sync with the other three pin sites
-      # (.pre-commit-config.yaml, secrets-scan.yml, scripts/setup_git_hooks.sh).
+      # GITLEAKS_VERSION in sync with every other pin site it checks
+      # (.pre-commit-config.yaml, secrets-scan.yml, secrets-scan-full-history.yml,
+      # scripts/setup_git_hooks.sh) -- see that test for the authoritative list.
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: 8.18.4

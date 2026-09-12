@@ -28,7 +28,8 @@ set -euo pipefail
 # Pinned to match .pre-commit-config.yaml's `rev: v8.18.4` and
 # .github/workflows/secrets-scan.yml's GITLEAKS_VERSION so local, hook, and
 # CI scans always agree on which ruleset/binary version ran.
-# tests/unit/test_gitleaks_version_pin.py asserts these three stay in sync.
+# tests/unit/test_gitleaks_version_pin.py asserts every pin site it checks
+# stays in sync -- see that test for the authoritative list.
 GITLEAKS_VERSION="8.18.4"
 GITLEAKS_INSTALL_DIR="${GITLEAKS_INSTALL_DIR:-$HOME/.local/bin}"
 
