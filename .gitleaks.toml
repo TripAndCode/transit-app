@@ -19,10 +19,15 @@ paths = [
     '''tests/api/test_api_me_llm_key\.py$''',
     '''tests/db/test_user_llm_keys_db\.py$''',
     '''tests/unit/test_user_llm_keys\.py$''',
-    # Negative-control fixture (tests/unit/test_gitleaks_fixtures.py): an
-    # approved placeholder credential that would otherwise trip the same
-    # rule as tests/fixtures/secrets/positive_control_credential.txt,
-    # proving this allowlist mechanism itself suppresses a known-safe
-    # example without disabling detection elsewhere.
+    # Positive/negative control fixtures for the gitleaks hook itself
+    # (tests/unit/test_gitleaks_fixtures.py). Both intentionally contain a
+    # real-shaped example credential (AWS's own published, non-functional
+    # placeholder) and must stay allowlisted here so the routine full-repo
+    # scan (`make verify-secrets`, CI's secrets-scan.yml) doesn't
+    # perpetually flag a fixture that's supposed to be there forever. The
+    # fixtures test instead re-scans each one directly with an
+    # allowlist-free config, proving gitleaks' ruleset really does catch
+    # and redact this credential shape independent of this allowlist.
+    '''tests/fixtures/secrets/positive_control_credential\.txt$''',
     '''tests/fixtures/secrets/negative_control_allowed_placeholder\.txt$''',
 ]

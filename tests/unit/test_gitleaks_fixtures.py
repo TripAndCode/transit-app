@@ -5,9 +5,17 @@ and CI's secrets-scan.yml invoke) against two repository-safe fixtures under
 tests/fixtures/secrets/:
 
 - positive_control_credential.txt: a real-shaped (but AWS-documented,
-  non-functional) example credential that must be detected and redacted.
+  non-functional) example credential that gitleaks' default ruleset must
+  detect and redact.
 - negative_control_allowed_placeholder.txt: the same credential shape, at a
-  path .gitleaks.toml explicitly allowlists, which must NOT be flagged.
+  path .gitleaks.toml's project allowlist explicitly covers.
+
+Both fixture paths are ALSO in .gitleaks.toml's own allowlist (see that
+file), so the routine full-repo scan (`make verify-secrets`, CI's
+secrets-scan.yml) never perpetually flags them -- they're meant to stay
+tracked in the repo forever. To still prove real detection happens, the
+positive-control checks below deliberately scan with a bare, allowlist-free
+config instead of the project's real one.
 
 Both fixtures are safe to commit and to print: neither contains a live
 secret, and the test only ever asserts on gitleaks' own (redacted) output,
@@ -23,14 +31,21 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES_DIR = ROOT / "tests" / "fixtures" / "secrets"
-GITLEAKS_CONFIG = ROOT / ".gitleaks.toml"
-POSITIVE_SECRET = "AKIAIOSFODNN7EXAMPLE"
+PROJECT_CONFIG = ROOT / ".gitleaks.toml"
+
+# Read out of the fixture itself rather than duplicated as a literal here:
+# a literal of this shape in this file would itself trip gitleaks' own
+# aws-access-token rule on every commit that touches this test.
+POSITIVE_SECRET = (
+    (FIXTURES_DIR / "positive_control_credential.txt").read_text().strip().rsplit("=", 1)[-1]
+)
 
 pytestmark = pytest.mark.skipif(
     shutil.which("gitleaks") is None,
@@ -38,7 +53,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run_gitleaks(source: Path) -> subprocess.CompletedProcess[str]:
+def _run_gitleaks(source: Path, config: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             "gitleaks",
@@ -48,7 +63,7 @@ def _run_gitleaks(source: Path) -> subprocess.CompletedProcess[str]:
             "--no-git",
             "--verbose",
             "--config",
-            str(GITLEAKS_CONFIG),
+            str(config),
             "--source",
             str(source),
         ],
@@ -58,12 +73,26 @@ def _run_gitleaks(source: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_positive_control_is_detected_and_redacted():
-    result = _run_gitleaks(FIXTURES_DIR / "positive_control_credential.txt")
+def _bare_config(tmp_path: Path) -> Path:
+    """Default ruleset only, no project-specific allowlist -- proves
+    detection is a property of gitleaks' rules, not an artifact of
+    .gitleaks.toml happening to not exclude this path (yet)."""
+
+    config = tmp_path / "bare.toml"
+    config.write_text("[extend]\nuseDefault = true\n")
+    return config
+
+
+def test_positive_control_is_detected_and_redacted_by_default_rules():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_gitleaks(
+            FIXTURES_DIR / "positive_control_credential.txt", _bare_config(Path(tmp))
+        )
 
     assert result.returncode != 0, (
-        "gitleaks did not flag the positive-control fixture; the hook would "
-        f"silently miss a real secret of this shape.\nstdout={result.stdout}"
+        "gitleaks did not flag the positive-control fixture under the default "
+        f"ruleset; the hook would silently miss a real secret of this shape.\n"
+        f"stdout={result.stdout}"
     )
     combined_output = result.stdout + result.stderr
     assert POSITIVE_SECRET not in combined_output, (
@@ -73,8 +102,23 @@ def test_positive_control_is_detected_and_redacted():
     assert "REDACTED" in combined_output
 
 
-def test_negative_control_placeholder_is_not_flagged():
-    result = _run_gitleaks(FIXTURES_DIR / "negative_control_allowed_placeholder.txt")
+def test_positive_control_is_excluded_from_the_routine_project_scan():
+    """Confirms .gitleaks.toml's own allowlist covers this fixture, so
+    `make verify-secrets`/CI's secrets-scan.yml don't perpetually fail on a
+    fixture that's meant to stay in the repo forever."""
+
+    result = _run_gitleaks(FIXTURES_DIR / "positive_control_credential.txt", PROJECT_CONFIG)
+    assert result.returncode == 0, (
+        "the positive-control fixture is flagged by the project's real "
+        ".gitleaks.toml -- add it to the allowlist so routine scans stay "
+        f"green.\nstdout={result.stdout}"
+    )
+
+
+def test_negative_control_is_suppressed_by_the_project_allowlist():
+    result = _run_gitleaks(
+        FIXTURES_DIR / "negative_control_allowed_placeholder.txt", PROJECT_CONFIG
+    )
 
     assert result.returncode == 0, (
         "gitleaks flagged the negative-control fixture even though its path "
@@ -84,36 +128,16 @@ def test_negative_control_placeholder_is_not_flagged():
     )
 
 
-def test_positive_control_alone_would_also_fail_the_allowlist_path():
-    """Sanity check that the negative control's clean result above comes
-    from the allowlist, not from the fixture failing to match the rule at
-    all (e.g. a typo in the credential shape)."""
+def test_negative_control_would_be_flagged_without_the_allowlist():
+    """Sanity check that the clean result above comes from the allowlist,
+    not from the fixture failing to match the rule at all (e.g. a typo in
+    the credential shape)."""
 
-    with_config = _run_gitleaks(FIXTURES_DIR / "negative_control_allowed_placeholder.txt")
-
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp_config_dir:
-        empty_config = Path(tmp_config_dir) / "empty.toml"
-        empty_config.write_text("[extend]\nuseDefault = true\n")
-        result = subprocess.run(
-            [
-                "gitleaks",
-                "detect",
-                "--redact",
-                "--no-banner",
-                "--no-git",
-                "--config",
-                str(empty_config),
-                "--source",
-                str(FIXTURES_DIR / "negative_control_allowed_placeholder.txt"),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_gitleaks(
+            FIXTURES_DIR / "negative_control_allowed_placeholder.txt", _bare_config(Path(tmp))
         )
 
-    assert with_config.returncode == 0
     assert result.returncode != 0, (
         "negative-control fixture wasn't detected even without the project "
         "allowlist -- it no longer matches gitleaks' aws-access-token rule, "
