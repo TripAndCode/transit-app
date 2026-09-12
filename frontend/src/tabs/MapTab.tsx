@@ -195,6 +195,10 @@ export function MapTab() {
 
   async function refreshOperations() {
     const previousObservation = liveQuery.data?.latest_captured_at ?? null;
+    if (refreshMessageTimerRef.current != null) {
+      window.clearTimeout(refreshMessageTimerRef.current);
+      refreshMessageTimerRef.current = null;
+    }
     setRefreshMessage(t("operations.refreshing"));
     const [liveResult, summaryResult] = await Promise.all([liveQuery.refetch(), summaryQuery.refetch()]);
     if (liveResult.isError || summaryResult.isError) {
