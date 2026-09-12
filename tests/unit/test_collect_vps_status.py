@@ -524,7 +524,18 @@ def test_main_exit_code_0_for_a_freshly_shipped_tick(tmp_path, capsys):
     recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     next_task, timer = write_next_task(tmp_path, f"- {recent}: item 120 shipped as PR #1.\n")
 
-    exit_code = collector.main(["--repo", str(tmp_path), "--file", str(next_task), "--timer-file", str(timer)])
+    exit_code = collector.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--file",
+            str(next_task),
+            "--timer-file",
+            str(timer),
+            "--chain-state-file",
+            str(tmp_path / "chain-state.json"),
+        ]
+    )
 
     payload = capsys.readouterr().out
     assert exit_code == 0
@@ -535,7 +546,18 @@ def test_main_exit_code_0_for_a_freshly_shipped_tick(tmp_path, capsys):
 def test_main_exit_code_1_when_never_observed_a_success(tmp_path, capsys):
     next_task, timer = write_next_task(tmp_path, "")
 
-    exit_code = collector.main(["--repo", str(tmp_path), "--file", str(next_task), "--timer-file", str(timer)])
+    exit_code = collector.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--file",
+            str(next_task),
+            "--timer-file",
+            str(timer),
+            "--chain-state-file",
+            str(tmp_path / "chain-state.json"),
+        ]
+    )
 
     payload = capsys.readouterr().out
     assert exit_code == 1
