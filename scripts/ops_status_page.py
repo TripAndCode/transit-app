@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Assemble the four operations-status collectors (items 119-122) into one combined,
+"""Assemble the four operations-status collectors into one combined,
 read-only operations-status document, and render it three ways: a compact text view
-for SSH, an HTML page, and a JSON document for automation (item 123).
+for SSH, an HTML page, and a JSON document for automation.
 
 Each collector (`scripts/collect_vps_status.py`, `collect_github_status.py`,
 `collect_oracle_status.py`, `collect_r2_status.py`) already returns one
@@ -265,7 +265,7 @@ def _oracle_crawler_reason(details: Mapping[str, object]) -> str | None:
 def _r2_reason(details: Mapping[str, object]) -> str | None:
     parts: list[str] = []
     if details.get("disk_state") not in (None, "healthy"):
-        parts.append(f"disk usage is {details.get('disk_used_pct')}% ({details.get('disk_state')})")
+        parts.append(f"disk usage is {_present(details, 'disk_used_pct')}% ({details.get('disk_state')})")
     if details.get("r2_state") not in (None, "healthy", "not_applicable"):
         parts.append(f"R2 listing is {details.get('r2_state')} ({details.get('r2_listing_result')})")
     return "; ".join(parts) or None
@@ -325,12 +325,22 @@ def _oracle_crawler_highlight(details: Mapping[str, object]) -> str:
     )
 
 
+def _present(details: Mapping[str, object], key: str, placeholder: str = "?") -> object:
+    """Like `details.get(key, placeholder)`, but also substitutes `placeholder` when the
+    key is present with an explicit `None` -- the expected shape whenever a collector's
+    own metric genuinely has no value (e.g. R2 not configured on this box, or a `df`
+    read failing), not only when the key is absent entirely."""
+
+    value = details.get(key)
+    return placeholder if value is None else value
+
+
 def _r2_highlight(details: Mapping[str, object]) -> str:
     return (
-        f"disk={details.get('disk_used_pct', '?')}% "
-        f"rt_bytes={details.get('rt_bytes', '?')} "
-        f"static_bytes={details.get('static_bytes', '?')} "
-        f"total_bytes={details.get('r2_bytes_total', '?')}"
+        f"disk={_present(details, 'disk_used_pct')}% "
+        f"rt_bytes={_present(details, 'rt_bytes')} "
+        f"static_bytes={_present(details, 'static_bytes')} "
+        f"total_bytes={_present(details, 'r2_bytes_total')}"
     )
 
 
@@ -343,8 +353,9 @@ _HIGHLIGHT_BUILDERS: Mapping[str, Callable[[Mapping[str, object]], str]] = {
 
 
 def highlight_for(document: dict) -> str:
-    """A short, always-present (healthy or not) summary of the facts item 123 calls out
-    by name: current task, CI/PR summary, crawler freshness, disk/R2 usage."""
+    """A short, always-present (healthy or not) summary of the operationally relevant
+    facts for this component: current task, CI/PR summary, crawler freshness, disk/R2
+    usage."""
 
     builder = _HIGHLIGHT_BUILDERS.get(document.get("component", ""))
     if builder is None:

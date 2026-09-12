@@ -1,4 +1,4 @@
-# ops-status.service — authenticated, read-only VPS operations-status page (item 123).
+# ops-status.service — authenticated, read-only VPS operations-status page.
 #
 # Install (on the VPS):
 #   1. Create the token env file (NOT committed):
@@ -6,7 +6,9 @@
 #        echo "OPS_STATUS_TOKEN=$(openssl rand -hex 32)" | sudo tee /etc/transit/ops-status.env
 #      (see deploy/systemd/ops-status.env.example)
 #   2. Adjust WorkingDirectory/ExecStart/User below for the deployed checkout if it
-#      differs from /root/transit-app.
+#      differs from /root/transit-app, and also set OPS_STATUS_REPO to the same path
+#      in the env file (see ops-status.env.example) -- the collectors read that
+#      variable, not WorkingDirectory, to locate the checkout.
 #   3. sudo cp deploy/systemd/ops-status.service /etc/systemd/system/
 #   4. sudo systemctl daemon-reload && sudo systemctl enable --now ops-status.service
 # Inspect: systemctl status ops-status.service ; journalctl -u ops-status.service
@@ -15,7 +17,7 @@
 # Binds to localhost only by default -- reach it from off-box via an SSH tunnel
 # (ssh -L 8642:127.0.0.1:8642 <vps>) rather than exposing the port directly.
 [Unit]
-Description=Operations status page (item 123)
+Description=Operations status page
 After=network.target
 
 [Service]

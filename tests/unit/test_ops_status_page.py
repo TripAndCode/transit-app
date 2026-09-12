@@ -1,5 +1,5 @@
-"""Tests for scripts/ops_status_page.py: the item-123 aggregator that combines the four
-independent operations-status collectors (items 119-122) into one combined document, and
+"""Tests for scripts/ops_status_page.py: the aggregator that combines the four
+independent operations-status collectors into one combined document, and
 renders it as compact text / HTML / (via `build_document`'s own dict) JSON.
 """
 
@@ -391,6 +391,39 @@ def test_reason_for_generic_unknown_never_succeeded():
 def test_highlight_for_vps_loop():
     doc = make_component("vps_loop", state_kwargs={"details": {"current_item": 123, "loop_activity": "idle"}})
     assert ops_status_page.highlight_for(doc) == "current_item=123 activity=idle"
+
+
+def test_highlight_for_r2_shows_placeholder_when_metrics_are_null():
+    # r2_configured=false (or a `df` read failure) leaves these keys present but null,
+    # not absent -- a plain `.get(key, '?')` would render the literal string "None".
+    doc = make_component(
+        "r2",
+        state_kwargs={
+            "details": {
+                "disk_used_pct": None,
+                "rt_bytes": None,
+                "static_bytes": None,
+                "r2_bytes_total": None,
+            }
+        },
+    )
+    highlight = ops_status_page.highlight_for(doc)
+    assert "None" not in highlight
+    assert highlight == "disk=?% rt_bytes=? static_bytes=? total_bytes=?"
+
+
+def test_reason_for_r2_shows_placeholder_when_disk_used_pct_is_null():
+    doc = make_component(
+        "r2",
+        state_kwargs={
+            "reported_failure": True,
+            "details": {"disk_state": "unknown", "disk_used_pct": None},
+        },
+    )
+    reason = ops_status_page.reason_for(doc)
+    assert reason is not None
+    assert "None" not in reason
+    assert "disk usage is ?% (unknown)" in reason
 
 
 def test_highlight_for_unrecognized_component_is_empty():

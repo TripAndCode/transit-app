@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Authenticated HTTP front end for the combined operations-status document (item 123):
+"""Authenticated HTTP front end for the combined operations-status document:
 one HTML page, a compact text view, and a JSON endpoint, all gated behind the same
 shared-secret check and all read-only -- every route is a `GET`, and none of them can
 mutate anything (there is no write path in this app at all).
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -43,6 +44,7 @@ from scripts.ops_status_page import (
 TOKEN_ENV_VAR = "OPS_STATUS_TOKEN"
 HOST_ENV_VAR = "OPS_STATUS_HOST"
 PORT_ENV_VAR = "OPS_STATUS_PORT"
+REPO_ENV_VAR = "OPS_STATUS_REPO"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8642
 
@@ -64,7 +66,8 @@ def _require_token(credentials: HTTPBasicCredentials = Depends(_basic_auth)) -> 
 
 
 def _current_document() -> dict:
-    documents = collect_all(local_repo=DEFAULT_LOCAL_REPO, github_repo_slug=DEFAULT_GITHUB_REPO_SLUG)
+    local_repo = Path(os.environ[REPO_ENV_VAR]) if os.environ.get(REPO_ENV_VAR) else DEFAULT_LOCAL_REPO
+    documents = collect_all(local_repo=local_repo, github_repo_slug=DEFAULT_GITHUB_REPO_SLUG)
     return build_document(documents)
 
 

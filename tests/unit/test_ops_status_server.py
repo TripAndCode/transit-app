@@ -108,7 +108,7 @@ def test_status_text_requires_auth(monkeypatch):
 
 def test_no_write_routes_exist():
     """This app has exactly three read-only GET routes -- no POST/PUT/PATCH/DELETE
-    exists anywhere in it, structurally enforcing item 123's "no write operations"
+    exists anywhere in it, structurally enforcing the "no write operations"
     requirement rather than merely documenting it."""
 
     write_methods = {"POST", "PUT", "PATCH", "DELETE"}
