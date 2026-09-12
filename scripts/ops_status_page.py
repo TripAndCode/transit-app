@@ -44,7 +44,7 @@ from typing import Callable, Mapping, Sequence
 
 from scripts import ops_status
 from scripts.collect_github_status import DEFAULT_CACHE_BASENAME as GITHUB_DEFAULT_CACHE_BASENAME
-from scripts.collect_github_status import collect_github_status
+from scripts.collect_github_status import collect_github_status, redact_secrets
 from scripts.collect_oracle_status import DEFAULT_CACHE_PATH as ORACLE_DEFAULT_CACHE_PATH
 from scripts.collect_oracle_status import DEFAULT_REPO as ORACLE_DEFAULT_GITHUB_REPO_SLUG
 from scripts.collect_oracle_status import OracleStatusReplayed, collect_oracle_status
@@ -88,7 +88,11 @@ def _unknown_status(component: str, *, now: datetime, reason: str) -> dict:
     run. Never fabricates a healthy/degraded/stale/failed verdict, and never carries more
     than a short, truncated summary of the failure -- `validate_details` would reject a
     raw traceback or credential-shaped key outright, but this stays well inside its bounds
-    on purpose, not merely by luck of what `validate_details` happens to catch."""
+    on purpose, not merely by luck of what `validate_details` happens to catch. Also runs
+    the same GitHub-token scrub `collect_github_status.py` applies to its own diagnostic
+    text: an exception surfaced from a `gh`/`aws` subprocess failure could otherwise echo
+    a credential embedded in a URL or header back into this bounded-but-still-visible
+    detail field."""
 
     status = ops_status.build_status(
         component=component,
@@ -96,7 +100,7 @@ def _unknown_status(component: str, *, now: datetime, reason: str) -> dict:
         last_success_at=None,
         healthy_max_age_seconds=_SYNTHETIC_UNKNOWN_THRESHOLD_SECONDS,
         stale_max_age_seconds=_SYNTHETIC_UNKNOWN_THRESHOLD_SECONDS,
-        details={"collector_error": _truncate(reason)},
+        details={"collector_error": _truncate(redact_secrets(reason))},
         now=now,
     )
     return ops_status.to_json_dict(status)
