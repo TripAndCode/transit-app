@@ -27,6 +27,17 @@ visit.
   flag's state.
 - An anonymous visitor with the flag unset is redirected to `/welcome`
   instead of ever seeing the dashboard or the multi-agency picker overlay.
+- A visitor whose flag can't be reliably read or written falls through to
+  the dashboard/picker instead of redirecting. This covers a store whose
+  `getItem` throws outright, and separately, a store whose `setItem` throws
+  or silently fails to persist (e.g. quota already exhausted by other keys)
+  while `getItem` keeps working — `writeWelcomeSeen()` reads the value back
+  after writing it and remembers, in memory for the rest of the tab session,
+  that the write didn't actually land, so `readWelcomeSeen()` reports
+  `"unavailable"` rather than `"unseen"` on the next mount. Without that
+  memory, a write-only failure would look identical to a genuine first visit
+  on every subsequent mount and redirect to `/welcome` forever, including
+  right after "Continue as a guest".
 - The flag is set unconditionally the moment `OnboardingGate` mounts —
   whichever branch that particular render takes (the redirect to
   `/welcome`, the dashboard, or the picker) — so a browser is only ever

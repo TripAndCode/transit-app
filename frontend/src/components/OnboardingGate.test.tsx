@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OnboardingGate } from "./OnboardingGate";
 import * as hooks from "../api/hooks";
+import { resetWelcomeSeenMemoryForTests } from "../api/welcomeSeen";
 import type { Agency } from "../api/types";
 
 const useSessionMock = vi.fn();
@@ -53,6 +54,7 @@ function mockAgencies(
 describe("OnboardingGate", () => {
   beforeEach(() => {
     localStorage.clear();
+    resetWelcomeSeenMemoryForTests();
     // Every pre-existing test in this file exercises the agency-picker
     // behavior below the welcome gate, not the gate itself — default to an
     // anonymous, already-past-the-gate visitor (flag set, no session) so
@@ -209,6 +211,25 @@ describe("OnboardingGate", () => {
       });
       useSessionMock.mockReturnValue({ data: null, isLoading: false });
       mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+      renderGate();
+      expect(screen.queryByText("landed:welcome")).toBeNull();
+      expect(screen.getByText("First")).toBeTruthy();
+      spy.mockRestore();
+    });
+
+    it("breaks the loop on a second mount when only localStorage.setItem throws (write never lands, reads still succeed)", () => {
+      localStorage.clear();
+      const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("localStorage unavailable");
+      });
+      useSessionMock.mockReturnValue({ data: null, isLoading: false });
+      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+
+      const first = renderGate();
+      expect(screen.getByText("landed:welcome")).toBeTruthy();
+      expect(localStorage.getItem("transit.welcomeSeen")).toBeNull();
+      first.unmount();
+
       renderGate();
       expect(screen.queryByText("landed:welcome")).toBeNull();
       expect(screen.getByText("First")).toBeTruthy();
