@@ -147,7 +147,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
   the systemd timer. The loop operates on one item per tick and may merge its own PR once
-  both review passes are clean and it's mergeable/clean.
+  the required review pass is clean and it's mergeable/clean.
 - The pre-push backend timeout is 420 seconds — the full suite's legitimate
   wall-clock time leaves real headroom on a small VPS, which can run
   noticeably slower than a typical dev machine. A timeout with no test
