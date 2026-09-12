@@ -66,12 +66,17 @@ export function OnboardingGate() {
     writeWelcomeSeen();
   }, []);
 
-  if (isSessionLoading) return <IndexLoadingPlaceholder />;
-  // `!session` alone is ambiguous -- a failed /api/me probe also settles as
-  // `data: undefined`, indistinguishable from a real anonymous visitor -- so
-  // only a confirmed "unseen" AND `!isSessionError` redirect; a probe failure
-  // fails open to the dashboard/picker, same as a localStorage failure below.
-  if (!session && !isSessionError && welcomeSeenState === "unseen") return <Navigate to="/welcome" replace />;
+  // Only a not-yet-seen visitor can possibly redirect, so only that case
+  // waits on the session probe -- a returning/signed-in visitor's render
+  // isn't held up by `/api/me` just to reach a check that can't fire for them.
+  if (welcomeSeenState === "unseen") {
+    if (isSessionLoading) return <IndexLoadingPlaceholder />;
+    // `!session` alone is ambiguous -- a failed /api/me probe also settles as
+    // `data: undefined`, indistinguishable from a real anonymous visitor --
+    // so only `!isSessionError` redirects; a probe failure fails open to the
+    // dashboard/picker, same as a localStorage failure below.
+    if (!session && !isSessionError) return <Navigate to="/welcome" replace />;
+  }
 
   if (isLoading) return <IndexLoadingPlaceholder />;
   // Only surface the error banner when there's no usable fallback: react-query
