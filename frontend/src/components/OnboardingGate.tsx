@@ -67,13 +67,10 @@ export function OnboardingGate() {
   }, []);
 
   if (isSessionLoading) return <IndexLoadingPlaceholder />;
-  // Only a confirmed "unseen" AND a confirmed-anonymous session trigger the
-  // redirect. `!session` alone is ambiguous: a failed /api/me probe (5xx,
-  // aborted request, network error) also settles as `data: undefined` once
-  // react-query exhausts its retries, indistinguishable from a real anonymous
-  // visitor. Requiring `!isSessionError` treats that failure the same as the
-  // localStorage-read-failure case below — fail open to the dashboard/picker
-  // rather than risk misrouting a signed-in visitor to "/welcome".
+  // `!session` alone is ambiguous -- a failed /api/me probe also settles as
+  // `data: undefined`, indistinguishable from a real anonymous visitor -- so
+  // only a confirmed "unseen" AND `!isSessionError` redirect; a probe failure
+  // fails open to the dashboard/picker, same as a localStorage failure below.
   if (!session && !isSessionError && welcomeSeenState === "unseen") return <Navigate to="/welcome" replace />;
 
   if (isLoading) return <IndexLoadingPlaceholder />;
