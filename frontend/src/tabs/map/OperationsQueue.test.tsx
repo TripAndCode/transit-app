@@ -105,4 +105,25 @@ describe("OperationsQueue", () => {
 
     expect(screen.getByText('operations.queue.normal_routes:{"count":2}')).toBeInTheDocument();
   });
+
+  it("keeps long priority groups compact until the operator expands them", async () => {
+    const routes = Array.from({ length: 7 }, (_, index) => summary({ route_code: `R${index + 1}` }));
+    render(
+      <OperationsQueue
+        routes={routes}
+        trips={[]}
+        selectedRoute={null}
+        formatRoute={(code) => code}
+        onSelectRoute={() => {}}
+        onOpenRoute={() => {}}
+        t={t}
+      />,
+    );
+
+    expect(screen.getAllByText("R5")).toHaveLength(2);
+    expect(screen.queryByText("R6")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "operations.queue.show_more" }));
+    expect(screen.getAllByText("R6")).toHaveLength(2);
+    expect(screen.getAllByText("R7")).toHaveLength(2);
+  });
 });

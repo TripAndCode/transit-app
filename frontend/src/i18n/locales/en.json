@@ -468,7 +468,11 @@
     "all_routes": "All routes",
     "last_updated": "Last updated {{when}}",
     "no_update": "No update received",
-    "refresh": "Refresh operations",
+    "refresh": "Reload the latest stored observation",
+    "refreshing": "Reloading…",
+    "refresh_updated": "New observation loaded ({{when}})",
+    "refresh_unchanged": "Reloaded; no newer observation available",
+    "refresh_failed": "Reload failed",
     "summary_label": "Current operations summary",
     "loading": "Loading the latest operations...",
     "stats": {
@@ -476,6 +480,12 @@
       "anomaly": "Anomalies",
       "watch": "Watch",
       "freshness": "Data freshness"
+    },
+    "context": {
+      "route_selected": "Showing: {{route}}",
+      "all_routes": "Showing: all routes",
+      "selected_hint": "The map is filtered to the selected route; the queue lists routes needing attention.",
+      "all_hint": "The map shows all routes; the queue lists anomalies and watch items only. Normal routes are counted below."
     },
     "freshness": {
       "normal": "Healthy",
@@ -488,18 +498,22 @@
       "delay": "Delay {{delay}}",
       "reported_stop": "Reported stop: {{stop}}",
       "updated": "Updated {{when}}",
-      "disclosure": "{{located}} of {{total}} trips shown at their latest TripUpdate stop (static GTFS coordinates, not GPS positions)"
+      "disclosure": "{{located}} of {{total}} trips shown at their latest GTFS-RT TripUpdate stop (observed {{when}}; static GTFS coordinates, not GPS positions)"
     },
     "queue": {
       "eyebrow": "PRIORITY ORDER",
       "title": "Needs attention",
       "total": "{{count}} routes",
+      "explain_title": "How to read this queue",
+      "explain_body": "Anomaly means above baseline; watch means a delay trend. Normal routes are represented on the map and in the count below.",
       "deviation": "{{delay}} vs baseline",
       "current_delay": "Current {{delay}}",
       "reported_stop": "Reported stop: {{stop}}",
       "location_unavailable": "Stop location unavailable",
       "show_on_map": "Show on map",
       "open_trip": "Open trips",
+      "show_more": "Show {{count}} more routes",
+      "show_less": "Show less",
       "clear_title": "No routes currently need attention",
       "clear_body": "Latest reports are checked every 30 seconds.",
       "normal_routes": "{{count}} routes operating normally"
