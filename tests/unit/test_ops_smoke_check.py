@@ -52,14 +52,14 @@ def test_check_documents_reports_an_unexpected_component():
     # collector output is simulated by mutating a valid document's field instead.
     bogus = dict(ALL_FOUR[0])
     bogus["component"] = "bogus"
-    problems = ops_smoke_check.check_documents(ALL_FOUR + [bogus])
+    problems = ops_smoke_check.check_documents([*ALL_FOUR, bogus])
     assert any("unexpected" in problem and "bogus" in problem for problem in problems)
 
 
 def test_check_documents_reports_a_schema_violation():
     broken = dict(ALL_FOUR[0])
     broken["state"] = "not_a_real_state"
-    problems = ops_smoke_check.check_documents([broken] + ALL_FOUR[1:])
+    problems = ops_smoke_check.check_documents([broken, *ALL_FOUR[1:]])
     assert any("failed contract validation" in problem for problem in problems)
 
 

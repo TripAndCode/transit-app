@@ -3,8 +3,11 @@
 # Install (on the VPS):
 #   1. Optionally create an overrides env file (see ops-alerts.env.example):
 #        sudo install -m 600 -o root -g root /dev/null /etc/transit/ops-alerts.env
-#      Only needed to change defaults (repo path, dedup interval, silence
-#      threshold) -- there is no secret to generate here, unlike ops-status.env.
+#      Set OPS_ALERT_PING_URL there to forward every poll to a real
+#      notification endpoint (see ops-alerts.env.example for the convention
+#      and docs/ops-monitoring-deploy.md for setup) -- optional, and the only
+#      secret-shaped value this file's own setup can involve; leaving it unset
+#      keeps the pre-existing log-only behavior.
 #   2. Adjust WorkingDirectory/ExecStart/User below for the deployed checkout if
 #      it differs from /root/transit-app.
 #   3. sudo cp deploy/systemd/ops-alerts.service deploy/systemd/ops-alerts.timer \
@@ -14,8 +17,16 @@
 #
 # Exit code 1 (an anomaly notification was produced) makes this run show as a
 # *failed* systemd unit -- `systemctl status`/`journalctl -p err` surface it
-# without any extra plumbing, and an OnFailure= unit can be pointed at a real
-# paging channel later without changing this file's own logic.
+# without any extra plumbing. `scripts/ops_alerts.py` also delivers the same
+# outcome directly to OPS_ALERT_PING_URL when configured (see that module's
+# docstring), so an OnFailure= unit is not required for basic notification.
+#
+# Deliberately no StartLimitIntervalSec=/StartLimitBurst= here, unlike
+# ops-status.service: exit 1 is this unit's *expected* outcome for as long as
+# a real anomaly is ongoing, so a start limit tripping mid-incident would
+# have systemd stop letting ops-alerts.timer start new polls at all --
+# silencing the one alerting path meant to keep firing throughout an
+# ongoing incident, which is worse than the crash-loop it would guard against.
 [Unit]
 Description=Operations anomaly alerting (one poll)
 After=network.target

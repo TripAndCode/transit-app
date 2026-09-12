@@ -16,9 +16,16 @@
 # each gated behind HTTP Basic auth checked against OPS_STATUS_TOKEN (any username).
 # Binds to localhost only by default -- reach it from off-box via an SSH tunnel
 # (ssh -L 8642:127.0.0.1:8642 <vps>) rather than exposing the port directly.
+# See docs/ops-monitoring-deploy.md for log rotation, the smoke check, and rollback.
 [Unit]
 Description=Operations status page
 After=network.target
+# Bounds a crash-loop: 6 restarts within 5 minutes stops systemd from
+# retrying at all (`systemctl status` then shows `failed` instead of an
+# endless `activating`/`Restart=on-failure` cycle) rather than restarting
+# forever on, e.g., a bad EnvironmentFile or a port already in use.
+StartLimitIntervalSec=300
+StartLimitBurst=6
 
 [Service]
 Type=simple

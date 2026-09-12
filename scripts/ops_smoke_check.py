@@ -47,7 +47,7 @@ def check_documents(documents: Sequence[dict]) -> list[str]:
 
     problems: list[str] = []
 
-    seen = [doc.get("component") for doc in documents]
+    seen: list[str] = [doc.get("component") or "<unknown>" for doc in documents]
     missing = sorted(ops_status.COMPONENTS - set(seen))
     if missing:
         problems.append(f"missing component(s) in the collected output: {', '.join(missing)}")
@@ -81,7 +81,9 @@ def check_collector_warnings(documents: Sequence[dict]) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", type=Path, default=DEFAULT_LOCAL_REPO, help="Local checkout for vps_loop/github facts")
+    parser.add_argument(
+        "--repo", type=Path, default=DEFAULT_LOCAL_REPO, help="Local checkout for vps_loop/github facts"
+    )
     parser.add_argument(
         "--github-repo",
         default=DEFAULT_GITHUB_REPO_SLUG,
