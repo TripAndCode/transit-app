@@ -8,8 +8,8 @@ domain. No box to harden, no Caddy, no SSH.
 **Point every Railway service at the `production` branch, not `main`.**
 This repo runs an autonomous VPS loop (see CLAUDE.md "Autonomous VPS loop")
 that continuously opens PRs against `main`, and — since 2026-08-28 — both the
-loop and interactive sessions may squash-merge a PR themselves once both
-required `/review-branch` passes are clean and it's mergeable/clean, with no
+loop and interactive sessions may squash-merge a PR themselves once the
+required `/review-branch` pass is clean and it's mergeable/clean, with no
 separate human go-ahead required. If Railway watched `main` directly, every
 one of those merges — reviewed but not yet soak-tested in a real deploy —
 would auto-deploy and run `preDeployCommand` migrations immediately, with no

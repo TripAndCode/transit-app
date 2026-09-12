@@ -17,7 +17,7 @@ what stage you are at.
 |---|---|---|
 | `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Read-only + proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
-| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → two full independent `/review-branch` passes → PR marked ready → squash-merge → `/cleanup-merged`, all gated on both passes being clean and the PR reporting mergeable/clean. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches, opens/readies/merges PRs via `gh`. |
+| `/vps-loop-run` | Coordinator for one autonomous VPS-loop tick: state check → sync `main` → pick one item → isolated worker → one full `/review-branch` pass → PR marked ready → squash-merge → `/cleanup-merged`, all gated on that pass being clean and the PR reporting mergeable/clean. | Reads `NEXT_TASK.md`, appends its Status log; pushes feature branches, opens/readies/merges PRs via `gh`. |
 | `/cleanup-merged` | Post-merge maintenance: syncs `main`, runs an evidence-based dry run, removes only proven-stale local branches/worktrees, and can repeat on a VPS clone. | Deletes clean local refs/worktrees only; never deletes GitHub branches or files. |
 | `/address-my-pr-comments` | Pulls unresolved review threads on your own PR (REST + GraphQL for resolve-state), judges each vs current code, drafts replies/fixes, **waits for per-thread approval** before posting or editing anything. Never resolves threads itself. | Reads via `gh`; writes only after explicit approval. |
 
@@ -92,7 +92,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   `CLAUDE.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead, except
   `/vps-loop-run`, which runs unattended: it may push feature branches, open,
-  ready, and squash-merge PRs once both required `/review-branch` passes are
+  ready, and squash-merge PRs once the required `/review-branch` pass is
   clean and the PR reports mergeable/clean — but it never pushes directly to
   `main` (only via a reviewed, merged PR) and never force-pushes.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
@@ -147,7 +147,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
 - To trigger early, SSH to the VPS and run `/root/claude-loop.sh`; otherwise wait for
   the systemd timer. The loop operates on one item per tick and may merge its own PR once
-  both review passes are clean and it's mergeable/clean.
+  the required review pass is clean and it's mergeable/clean.
 - The pre-push backend timeout is 420 seconds — the full suite's legitimate
   wall-clock time leaves real headroom on a small VPS, which can run
   noticeably slower than a typical dev machine. A timeout with no test
