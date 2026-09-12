@@ -73,9 +73,11 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
   const [openRoute, setOpenRoute] = useState<RouteSummary | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
+  const refreshMessageTimerRef = useRef<number | null>(null);
   const firstStyleRunRef = useRef(true);
   const initialLanguageRef = useRef(i18n.language);
 
@@ -85,14 +87,12 @@ export function MapTab() {
   const liveRows = liveQuery.data?.rows ?? [];
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
-  const priorityRoute = [...activeSummaries]
-    .sort((a, b) => (b.deviation_sec ?? b.avg_delay_sec) - (a.deviation_sec ?? a.avg_delay_sec))[0];
   const requestedRoute = routeSelection.agencyId === id ? routeSelection.route : null;
-  const effectiveRoute = requestedRoute === "all"
-    ? null
-    : requestedRoute && activeRouteCodes.has(requestedRoute)
-      ? requestedRoute
-      : priorityRoute?.route_code ?? liveRows.find((trip) => trip.route_code)?.route_code ?? null;
+  // Selection only emphasizes matching trip markers and loads that route's
+  // shape; the counters and priority queue continue to describe the whole feed.
+  const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
+    ? requestedRoute
+    : null;
   const selectedSummary = activeSummaries.find((route) => route.route_code === effectiveRoute);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const freshness = freshnessFor(liveQuery.data?.latest_captured_at);
@@ -138,6 +138,19 @@ export function MapTab() {
     };
   }, []);
 
+  useEffect(() => () => {
+    if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -178,6 +191,34 @@ export function MapTab() {
     if (trip && mapRef.current) {
       mapRef.current.easeTo({ center: [trip.stop_lon!, trip.stop_lat!], zoom: Math.max(mapRef.current.getZoom(), 13), duration: 500 });
     }
+  }
+
+  async function refreshOperations() {
+    const previousObservation = liveQuery.data?.latest_captured_at ?? null;
+    if (refreshMessageTimerRef.current != null) {
+      window.clearTimeout(refreshMessageTimerRef.current);
+      refreshMessageTimerRef.current = null;
+    }
+    setRefreshMessage(t("operations.refreshing"));
+    const [liveResult, summaryResult] = await Promise.all([liveQuery.refetch(), summaryQuery.refetch()]);
+    if (liveResult.isError || summaryResult.isError) {
+      showRefreshMessage(t("operations.refresh_failed"));
+      return;
+    }
+    const nextObservation = liveResult.data?.latest_captured_at ?? null;
+    const message = nextObservation && nextObservation !== previousObservation
+      ? t("operations.refresh_updated", { when: relativeTime(nextObservation) })
+      : t("operations.refresh_unchanged");
+    showRefreshMessage(message);
+  }
+
+  function showRefreshMessage(message: string) {
+    if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+    setRefreshMessage(message);
+    refreshMessageTimerRef.current = window.setTimeout(() => {
+      setRefreshMessage(null);
+      refreshMessageTimerRef.current = null;
+    }, 8_000);
   }
 
   const anomalyCount = activeSummaries.filter((route) => route.bucket === "anomaly").length;
@@ -222,11 +263,14 @@ export function MapTab() {
           type="button"
           className="ops-refresh"
           aria-label={t("operations.refresh")}
-          onClick={() => { void Promise.all([liveQuery.refetch(), summaryQuery.refetch()]); }}
+          onClick={() => { void refreshOperations(); }}
           disabled={liveQuery.isFetching || summaryQuery.isFetching}
         >
           <RefreshCw size={17} aria-hidden="true" />
         </button>
+        {refreshMessage && (
+          <span className="ops-refresh-result" aria-live="polite">{refreshMessage}</span>
+        )}
       </header>
 
       <section className="ops-stats" aria-label={t("operations.summary_label")}>
@@ -235,6 +279,20 @@ export function MapTab() {
         <Stat icon={<Clock3 />} label={t("operations.stats.watch")} value={watchCount} tone="warn" />
         <Stat icon={<Wifi />} label={t("operations.stats.freshness")} value={t(`operations.freshness.${freshness}`)} tone={freshness === "normal" ? "ok" : freshness === "stale" ? "danger" : "warn"} />
       </section>
+
+      <div className="ops-context" role="status">
+        <span className="ops-context__route">
+          <RouteIcon size={15} aria-hidden="true" />
+          {effectiveRoute
+            ? t("operations.context.route_selected", { route: routeNames.format(effectiveRoute) })
+            : t("operations.context.all_routes")}
+        </span>
+        <span className="ops-context__hint">
+          {effectiveRoute
+            ? t("operations.context.selected_hint")
+            : t("operations.context.all_hint")}
+        </span>
+      </div>
 
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
@@ -255,7 +313,11 @@ export function MapTab() {
           )}
           <div className="ops-map__disclosure">
             <Radio size={15} aria-hidden="true" />
-            <span>{t("operations.map.disclosure", { located: locatedTrips, total: liveRows.length })}</span>
+            <span>{t("operations.map.disclosure", {
+              located: locatedTrips,
+              total: liveRows.length,
+              when: liveQuery.data?.latest_captured_at ? relativeTime(liveQuery.data.latest_captured_at) : t("operations.no_update"),
+            })}</span>
           </div>
         </section>
 

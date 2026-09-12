@@ -468,7 +468,11 @@
     "all_routes": "すべての路線",
     "last_updated": "最終更新 {{when}}",
     "no_update": "最終更新なし",
-    "refresh": "運行状況を更新",
+    "refresh": "保存済みの最新観測を再取得",
+    "refreshing": "再取得中…",
+    "refresh_updated": "新しい観測を取得（{{when}}）",
+    "refresh_unchanged": "再取得済み・新しい観測はありません",
+    "refresh_failed": "再取得できませんでした",
     "summary_label": "現在の運行サマリー",
     "loading": "最新の運行状況を取得中...",
     "stats": {
@@ -476,6 +480,12 @@
       "anomaly": "異常",
       "watch": "注意",
       "freshness": "データ鮮度"
+    },
+    "context": {
+      "route_selected": "表示中: {{route}}",
+      "all_routes": "表示中: 全路線",
+      "selected_hint": "地図は選択系統の便を強調し、右側は異常・注意の系統を表示しています。",
+      "all_hint": "地図は全路線。右側は異常・注意のみで、正常路線は下部の件数に含まれます。"
     },
     "freshness": {
       "normal": "正常",
@@ -488,18 +498,23 @@
       "delay": "遅延 {{delay}}",
       "reported_stop": "報告停留所: {{stop}}",
       "updated": "更新 {{when}}",
-      "disclosure": "{{located}}/{{total}}便をTripUpdateの最新報告停留所に表示（静的GTFS座標・GPS位置ではありません）"
+      "disclosure": "{{located}}/{{total}}便をGTFS-RT TripUpdateの最新報告停留所に表示（観測 {{when}}・静的GTFS座標・GPS位置ではありません）"
     },
     "queue": {
       "eyebrow": "優先順位順",
       "title": "要対応",
       "total": "{{count}}路線",
+      "explain_title": "この一覧の見方",
+      "explain_body": "異常=基準値を超過、注意=遅延傾向あり。正常路線は地図と下部の件数で確認できます。",
       "deviation": "基準より {{delay}}",
       "current_delay": "現在 {{delay}}",
       "reported_stop": "報告停留所: {{stop}}",
       "location_unavailable": "停留所位置を解決できません",
       "show_on_map": "地図で確認",
       "open_trip": "便を開く",
+      "show_more": "残り{{count}}路線を表示",
+      "show_less": "折りたたむ",
+      "selected_route": "選択中の系統",
       "clear_title": "現在、要対応の路線はありません",
       "clear_body": "最新報告を30秒ごとに確認しています。",
       "normal_routes": "平常運行 {{count}}路線"
