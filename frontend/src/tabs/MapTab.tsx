@@ -77,6 +77,7 @@ export function MapTab() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
+  const refreshMessageTimerRef = useRef<number | null>(null);
   const firstStyleRunRef = useRef(true);
   const initialLanguageRef = useRef(i18n.language);
 
@@ -137,6 +138,10 @@ export function MapTab() {
     };
   }, []);
 
+  useEffect(() => () => {
+    if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+  }, []);
+
   useEffect(() => {
     const map = mapRef.current;
     const container = mapContainerRef.current;
@@ -193,17 +198,23 @@ export function MapTab() {
     setRefreshMessage(t("operations.refreshing"));
     const [liveResult, summaryResult] = await Promise.all([liveQuery.refetch(), summaryQuery.refetch()]);
     if (liveResult.isError || summaryResult.isError) {
-      const message = t("operations.refresh_failed");
-      setRefreshMessage(message);
-      window.setTimeout(() => setRefreshMessage((current) => current === message ? null : current), 8_000);
+      showRefreshMessage(t("operations.refresh_failed"));
       return;
     }
     const nextObservation = liveResult.data?.latest_captured_at ?? null;
     const message = nextObservation && nextObservation !== previousObservation
       ? t("operations.refresh_updated", { when: relativeTime(nextObservation) })
       : t("operations.refresh_unchanged");
+    showRefreshMessage(message);
+  }
+
+  function showRefreshMessage(message: string) {
+    if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
     setRefreshMessage(message);
-    window.setTimeout(() => setRefreshMessage((current) => current === message ? null : current), 8_000);
+    refreshMessageTimerRef.current = window.setTimeout(() => {
+      setRefreshMessage(null);
+      refreshMessageTimerRef.current = null;
+    }, 8_000);
   }
 
   const anomalyCount = activeSummaries.filter((route) => route.bucket === "anomaly").length;
