@@ -41,9 +41,13 @@ fi
 # directory, so this check (and lazy install) against the persistent
 # clone's common git dir covers every worker worktree the loop cuts below,
 # without each dispatched worker needing its own install permissions.
-# --check is the same three-part verification (executable + pre-commit
-# marker + no core.hooksPath override) install_hook itself uses, so this
-# can't silently drift into a narrower check than what "installed" means.
+# --check is the same verification install_hook itself uses (executable +
+# pre-commit marker + no core.hooksPath override + unqualified `gitleaks`
+# on PATH still resolving to the pinned GITLEAKS_VERSION), so this can't
+# silently drift into a narrower check than what "installed" means -- in
+# particular it still catches a different-version gitleaks that starts
+# shadowing the install dir on PATH sometime after this VPS clone's last
+# successful install.
 if ! bash scripts/setup_git_hooks.sh --check >/dev/null 2>&1; then
   echo "gitleaks pre-commit hook missing or invalid; installing via scripts/setup_git_hooks.sh"
   if ! bash scripts/setup_git_hooks.sh; then
