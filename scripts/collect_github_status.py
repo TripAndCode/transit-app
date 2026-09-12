@@ -236,9 +236,11 @@ def gather_stale_branches(
     max_branches: int,
     git_runner: Runner = _run,
     remote_protection_truncated: bool = False,
-) -> tuple[str, ...] | None:
-    """Return up to `max_branches` non-protected branch names whose last commit is at
-    least `stale_days` old (oldest first), or `None` if the underlying git call failed.
+) -> tuple[tuple[str, ...], bool] | None:
+    """Return `(names, truncated)` for up to `max_branches` non-protected branch names
+    whose last commit is at least `stale_days` old (oldest first), or `None` if the
+    underlying git call failed. `truncated` is True when more than `max_branches`
+    qualifying stale branches were found, meaning `names` omits some.
 
     Uses local git (already-fetched remote-tracking refs), not a per-branch GitHub API
     call -- the branches API alone doesn't return a last-commit date, and fetching it
@@ -302,7 +304,7 @@ def gather_stale_branches(
             stale.append((age_days, name))
 
     stale.sort(key=lambda pair: (-pair[0], pair[1]))
-    return tuple(name for _, name in stale[:max_branches])
+    return tuple(name for _, name in stale[:max_branches]), len(stale) > max_branches
 
 
 def summarize_prs(prs: Sequence[dict], *, limit: int) -> dict[str, object]:
@@ -391,6 +393,7 @@ class GithubFacts:
     branch_protection_known: bool
     branch_page_truncated: bool
     stale_branches: tuple[str, ...] | None
+    stale_unprotected_branches_truncated: bool | None
     cached_document: dict | None
 
 
@@ -411,12 +414,25 @@ def build_github_status(
                 "stale_unprotected_branches", ()
             )
 
+        fresh_stale_branches = facts.stale_branches
         stale_unprotected_branches = (
-            list(facts.stale_branches)
-            if facts.stale_branches is not None
+            list(fresh_stale_branches)
+            if fresh_stale_branches is not None
             else [name for name in cached_stale_branches if isinstance(name, str)]
             if isinstance(cached_stale_branches, list)
             else []
+        )
+        cached_stale_branches_truncated = False
+        if facts.cached_document is not None:
+            cached_stale_branches_truncated = bool(
+                ops_status.from_json_dict(facts.cached_document).details.get(
+                    "stale_unprotected_branches_truncated", False
+                )
+            )
+        stale_unprotected_branches_truncated = (
+            facts.stale_unprotected_branches_truncated
+            if fresh_stale_branches is not None
+            else cached_stale_branches_truncated
         )
         details = {
             **summarize_prs(facts.prs, limit=facts.pr_limit),
@@ -424,6 +440,7 @@ def build_github_status(
             "branch_page_truncated": facts.branch_page_truncated,
             "stale_branches_known": facts.stale_branches is not None,
             "stale_unprotected_branches": stale_unprotected_branches,
+            "stale_unprotected_branches_truncated": stale_unprotected_branches_truncated,
         }
         return ops_status.build_status(
             component="github",
@@ -443,6 +460,7 @@ def build_github_status(
         details["branch_page_truncated"] = facts.branch_page_truncated
         if facts.stale_branches is not None:
             details["stale_unprotected_branches"] = list(facts.stale_branches)
+            details["stale_unprotected_branches_truncated"] = facts.stale_unprotected_branches_truncated
         details["stale_branches_known"] = facts.stale_branches is not None
         details["last_error_kind"] = facts.pr_error_kind or "unknown_error"
         if facts.pr_error_detail:
@@ -463,6 +481,7 @@ def build_github_status(
         "branch_page_truncated": facts.branch_page_truncated,
         "stale_branches_known": facts.stale_branches is not None,
         "stale_unprotected_branches": list(facts.stale_branches or ()),
+        "stale_unprotected_branches_truncated": bool(facts.stale_unprotected_branches_truncated),
         "last_error_kind": facts.pr_error_kind or "unknown_error",
     }
     if facts.pr_error_detail:
@@ -512,7 +531,7 @@ def collect_github_facts(
         else:
             branch_protection = None
 
-    stale_branches = gather_stale_branches(
+    stale_branches_result = gather_stale_branches(
         repo=repo,
         now=now,
         protected_names=always_protected,
@@ -522,6 +541,11 @@ def collect_github_facts(
         max_branches=ops_status.MAX_DETAIL_LIST_LENGTH,
         git_runner=git_runner,
     )
+    if stale_branches_result is not None:
+        stale_branches, stale_unprotected_branches_truncated = stale_branches_result
+    else:
+        stale_branches = None
+        stale_unprotected_branches_truncated = False
 
     cached_document = load_cached_document(cache_path) if cache_path is not None else None
 
@@ -534,6 +558,7 @@ def collect_github_facts(
         branch_protection_known=branch_protection is not None,
         branch_page_truncated=branch_page_truncated,
         stale_branches=stale_branches,
+        stale_unprotected_branches_truncated=stale_unprotected_branches_truncated,
         cached_document=cached_document,
     )
 

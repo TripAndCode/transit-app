@@ -385,7 +385,7 @@ FOR_EACH_REF_FIXTURE = "\n".join(
 
 def test_gather_stale_branches_filters_protected_and_recent():
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
-    stale = collector.gather_stale_branches(
+    stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
@@ -398,6 +398,7 @@ def test_gather_stale_branches_filters_protected_and_recent():
     # "main"/"production" excluded as always-protected; "fix/dark-mode-ui-pass" is
     # only ~1 day old (not stale); the two vps-loop branches are both >30 days old.
     assert stale == ("vps-loop/item-1", "vps-loop/item-2")
+    assert truncated is False
 
 
 def test_gather_stale_branches_excludes_all_non_hardcoded_branches_when_protection_fetch_failed():
@@ -407,7 +408,7 @@ def test_gather_stale_branches_excludes_all_non_hardcoded_branches_when_protecti
     # `protected_names` has unknown protection status and must be excluded, the same
     # conservative treatment as the truncated-page case, not assumed unprotected.
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
-    stale = collector.gather_stale_branches(
+    stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
@@ -418,11 +419,12 @@ def test_gather_stale_branches_excludes_all_non_hardcoded_branches_when_protecti
     )
 
     assert stale == ()
+    assert truncated is False
 
 
 def test_gather_stale_branches_respects_remote_protection_flag():
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
-    stale = collector.gather_stale_branches(
+    stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
@@ -433,6 +435,7 @@ def test_gather_stale_branches_respects_remote_protection_flag():
     )
 
     assert stale == ("vps-loop/item-2",)
+    assert truncated is False
 
 
 def test_gather_stale_branches_excludes_branches_missing_from_truncated_protection_page():
@@ -440,7 +443,7 @@ def test_gather_stale_branches_excludes_branches_missing_from_truncated_protecti
     # page), so its protection status is unknown -- it must not be assumed unprotected
     # and included in the stale list, unlike the untruncated case above.
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout=FOR_EACH_REF_FIXTURE)})
-    stale = collector.gather_stale_branches(
+    stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset({"main", "production"}),
@@ -452,12 +455,13 @@ def test_gather_stale_branches_excludes_branches_missing_from_truncated_protecti
     )
 
     assert stale == ()
+    assert truncated is False
 
 
 def test_gather_stale_branches_caps_at_max_branches_oldest_first():
     lines = [f"origin/branch-{i}\t2026-01-01T00:00:00+00:00" for i in range(15)]
     runner = runner_from({"git -C /repo for-each-ref": FakeCompletedProcess(0, stdout="\n".join(lines))})
-    stale = collector.gather_stale_branches(
+    stale, truncated = collector.gather_stale_branches(
         repo=Path("/repo"),
         now=T0,
         protected_names=frozenset(),
@@ -468,6 +472,7 @@ def test_gather_stale_branches_caps_at_max_branches_oldest_first():
     )
 
     assert len(stale) == 10
+    assert truncated is True
 
 
 def test_gather_stale_branches_none_on_git_failure():
@@ -560,6 +565,7 @@ def make_facts(
     branch_protection_known: bool = True,
     branch_page_truncated: bool = False,
     stale_branches: tuple[str, ...] | None = (),
+    stale_unprotected_branches_truncated: bool | None = False,
     cached_document: dict | None = None,
 ) -> "collector.GithubFacts":
     return collector.GithubFacts(
@@ -571,6 +577,7 @@ def make_facts(
         branch_protection_known=branch_protection_known,
         branch_page_truncated=branch_page_truncated,
         stale_branches=stale_branches,
+        stale_unprotected_branches_truncated=stale_unprotected_branches_truncated,
         cached_document=cached_document,
     )
 
