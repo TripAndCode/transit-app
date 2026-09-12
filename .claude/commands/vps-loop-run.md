@@ -355,16 +355,14 @@ Walk items top to bottom:
   *finished*: this PR's own branch — not `main`'s checkout — holds the durable
   record Steps 4/6 write; the entry doesn't land on `main` until merge. Read it
   with `git show origin/vps-loop/item-<N>:docs/refactor-log.md` (works even
-  with no local worktree). Require an explicit closing statement that **both**
-  passes completed (e.g. "both required `/review-branch` passes are now
-  clean" / "Pass 2 ... complete" language) — an interim milestone like "Pass 1
-  is now clean" is NOT enough and must NOT be read as satisfying this; real
-  entries commonly log Pass 1 clean well before Pass 2 even starts, and
-  mistaking that for completion would ready/merge a PR whose mandatory second
-  pass never ran. Treat any ambiguity as "not yet clean" (fall through to the
-  skip-as-in-progress behavior below) — same conservative bias as Step 2b's
+  with no local worktree). Require an explicit closing statement that the
+  required `/review-branch` pass completed clean (e.g. "the required
+  `/review-branch` pass is now clean" language) — an interim, mid-fix-cycle
+  note is NOT enough and must NOT be read as satisfying this. Treat any
+  ambiguity as "not yet clean" (fall through to the skip-as-in-progress
+  behavior below) — same conservative bias as Step 2b's
   own "treat this judgment as possibly wrong" caveat.
-  If the entry clearly shows both passes complete: this PR was shipped (Steps
+  If the entry clearly shows the pass complete: this PR was shipped (Steps
   6.1–6.4) by a tick that ended before reaching 6.5–6.12, and nothing in this
   file otherwise routes a later tick back to finish readying/merging it — it
   would sit open indefinitely, since Step 3's ordinary `OPEN` handling never
@@ -384,9 +382,9 @@ Walk items top to bottom:
   tip. Next, confirm the worktree Steps 6.1–6.4 used still exists (`git
   worktree list`) — mirroring Step 2b/3b's own "worktree exists vs. branch
   only" fork: if it's gone, this is not safely resumable from here; log `-
-  <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows both
-  passes clean, but its worktree no longer exists — needs a human to reattach
-  one before Step 6 can be resumed.
+  <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows the
+  review pass clean, but its worktree no longer exists — needs a human to
+  reattach one before Step 6 can be resumed.
   **Blocker-tag:** branch-without-worktree` and stop this tick — a tick stop,
   not an ordinary item skip, for the same reason Step 3b's own "branch only,
   no worktree" case stops rather than continuing to a different item: moving
@@ -406,7 +404,7 @@ Walk items top to bottom:
   reviewed, masking a real "main advanced" case. 6.5 itself still re-verifies
   identity, and 6.6 still re-derives whether `main` has advanced since that
   reconstructed baseline, exactly as it would for a same-tick completion. If
-  the refactor-log entry does NOT show both passes clean (review genuinely
+  the refactor-log entry does NOT show the review pass clean (review genuinely
   still in progress, mid fix-iteration, or never started), the original
   behavior applies: skip item N this tick as in-progress, same as before.
 - If the item text has `Depends on: item <M>`, run the same exact-head query for M with
@@ -469,14 +467,12 @@ worktree, so it resolves against current `main`).
   **Blocker-tag:** branch-without-worktree` and stop this tick.
 - *Worktree exists:* resume and ship it yourself. Do NOT dispatch an
   `isolation: "worktree"` worker; that creates a separate, unrelated worktree.
-  1. Run Step 5's full **Pass 1 then Pass 2** review sequence against this
-     worktree/branch — the two-pass rule applies here exactly as it does to a
-     freshly-dispatched item; a resumed branch is not exempt. Neither pass's own
-     "dispatch the worker" sub-branch applies here, though — both route to the
-     Step 4 `isolation: "worktree"` pattern, which doesn't fit a resume; use item
-     3 below instead for a Major on either pass. Re-verifying is cheap and is the
-     trust boundary before anything is pushed.
-  2. **Clean (no Major findings on either pass):** run **Step 6** as written, with
+  1. Run Step 5's full review against this worktree/branch — a resumed branch is
+     not exempt. The "dispatch the worker" sub-branch in Step 5 doesn't apply
+     here, though — it routes to the Step 4 `isolation: "worktree"` pattern,
+     which doesn't fit a resume; use item 3 below instead for a Major finding.
+     Re-verifying is cheap and is the trust boundary before anything is pushed.
+  2. **Clean (no Major findings):** run **Step 6** as written, with
      two adjustments: note in the PR body that this resumed an interrupted prior
      run, and replace Step 6.12's status line with `- <UTC timestamp>: item N
      shipped as PR #<number> (resumed from an interrupted prior run's existing
@@ -484,13 +480,11 @@ worktree, so it resolves against current `main`).
      Status log wording in 6.12 changes here. Step 6.4 is conditional — an
      interrupted worker may never have written the `(PR #pending)` placeholder.
      This run is done; do not also dispatch a new item.
-  3. **Major findings (either pass):** dispatch a plain general-purpose Agent (NOT
+  3. **Major findings:** dispatch a plain general-purpose Agent (NOT
      `isolation: "worktree"`) whose prompt tells it to `cd` into the existing worktree
-     path first, fix the listed findings there, and commit. Cap at 2 fix iterations
-     per pass, same as Step 5. Clean after that → resume at whichever pass found the
-     findings (finish Pass 2 if Pass 1 was the one fixed; if Pass 2 was the one
-     fixed, that fix-and-reverify cycle *is* Pass 2 — no further pass needed) before
-     doing item 2. Still not clean after that pass's cap → append residual findings
+     path first, fix the listed findings there, and commit. Cap at 2 fix iterations,
+     same as Step 5. Clean after that → re-verify only the affected review group
+     before doing item 2. Still not clean after the cap → append residual findings
      + worktree path to the Status log, plus a `**Blocker-tag:**` line per Step 0
      (e.g. `review-major-unresolved`), no push, no PR, stop.
 
@@ -568,38 +562,19 @@ the current worktree `HEAD` and `merge-base HEAD main` exactly match those SHAs.
 Otherwise the security group must be reviewed again; never use a result from a
 different branch tip or base.
 
-Per CLAUDE.md, every PR gets **at least two full, independent `/review-branch`
-invocations** before Step 6 — unconditionally, even when the first finds nothing.
-Run them as a strict sequence, not a single branching decision:
+Per CLAUDE.md, every PR gets one full `/review-branch` invocation before Step 6.
 
-1. **Pass 1** — the full invocation above.
-   - Major findings → dispatch the worker once more (same Agent pattern, same
-     worktree) with only those findings, then re-verify only the affected review
-     group. Cap at 2 fix iterations (`review-branch.md`'s own per-invocation cap).
-     Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
-     blocked — /review-branch still reports Major findings after 2 fix
-     iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
-     <summary>.
-     **Blocker-tag:** review-major-unresolved`, no push, no PR, stop.
-   - Once pass 1 is clean — whether immediately, or only after the
-     fix-and-reverify cycle above — proceed to pass 2. Do not skip to Step 6
-     here even though pass 1 is clean; the second pass is mandatory regardless.
-2. **Pass 2** — a second, fully independent invocation: fresh `prepare_review.py`
-   manifest, fresh dispatch per `review-branch.md`'s routing for this diff's tier
-   (not necessarily "two reviewer groups" — follow whatever tier the diff
-   actually routes to), run on the current (possibly pass-1-fixed) diff.
-   - Clean → Step 6.
-   - Major findings → same fix-and-reverify cycle as pass 1, capped at 2 fix
-     iterations for pass 2. Once clean, proceed to Step 6 — a Major caught and
-     fixed on pass 2 still satisfies the two-pass bar; do not run a third full
-     pass just to reach the count. Still Major after 2 fix iterations on pass 2:
-     same blocked-and-stop logging as pass 1, above (including the
-     `**Blocker-tag:** review-major-unresolved` line).
+Major findings → dispatch the worker once more (same Agent pattern, same
+worktree) with only those findings, then re-verify only the affected review
+group. Cap at 2 fix iterations (`review-branch.md`'s own per-invocation cap).
+Still Major after 2 fix iterations: append `- <UTC timestamp>: item N
+blocked — /review-branch still reports Major findings after 2 fix
+iterations. Worktree: <path>, branch: vps-loop/item-<N>. Findings:
+<summary>.
+**Blocker-tag:** review-major-unresolved`, no push, no PR, stop.
 
-(Doubling the mandatory full-pass count roughly doubles this step's reviewer-agent
-cost for every item, including trivial ones — accepted deliberately, since a
-second independent pass catching something pass 1 missed is worth more than the
-extra tokens for how infrequently this coordinator runs.)
+Once clean — whether immediately, or only after the fix-and-reverify cycle
+above — proceed to Step 6.
 
 ## Step 6 — Ship it
 
@@ -611,7 +586,7 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
 
 6.1. Before pushing, record `origin/main`'s current SHA (`git rev-parse
      origin/main`) as `MAIN_SHA_AT_REVIEW` — this is the `main` that Step 5's
-     passes actually reviewed against.
+     pass actually reviewed against.
 6.2. `git push -u origin vps-loop/item-<N>`.
 6.3. `gh pr create --draft`, per `pr-github.md`'s description style (`gh pr
      create` has no `--json` output mode, so don't try to parse its stdout
@@ -629,7 +604,7 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
 6.6. Re-fetch `origin/main` and compare its SHA to `MAIN_SHA_AT_REVIEW` (6.1).
      If `main` has advanced at all — not only if GitHub reports a textual
      conflict — treat Step 5's review as stale: merge the new `main` into the
-     branch (resolving any conflicts), re-run Step 5's full two-pass review on
+     branch (resolving any conflicts), re-run Step 5's full review on
      the merged result, push, update `MAIN_SHA_AT_REVIEW`, and restart from
      6.5. A change reviewed only against an old `main` must not merge just
      because it happens to still apply cleanly. Cap re-syncs from 6.6/6.8 at 2
@@ -639,8 +614,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      merge — main kept advancing / mergeability wouldn't settle after 2
      re-sync attempts. PR #<number> left ready, not merged.
      **Blocker-tag:** merge-resync-unsettled` rather than retrying indefinitely.
-6.7. `gh pr ready <number>`. Step 5 already completed both required
-     `/review-branch` passes clean, and 6.6 just confirmed `main` hasn't moved
+6.7. `gh pr ready <number>`. Step 5 already completed the required
+     `/review-branch` pass clean, and 6.6 just confirmed `main` hasn't moved
      since — mark it ready rather than leaving it in draft.
 6.8. `gh pr view <number> --json mergeable,mergeStateStatus`. Only proceed to
      6.9 if `mergeable` is `MERGEABLE` and `mergeStateStatus` is `CLEAN`. Do
@@ -654,7 +629,7 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      refuses instead of silently merging something unreviewed. This and 6.7
      are the exceptions to "never mark its own PR ready or merge" that used
      to apply here: both are authorized specifically because Step 5's
-     two-pass gate is unconditional and 6.5/6.6/6.8 just re-confirmed nothing
+     review gate is unconditional and 6.5/6.6/6.8 just re-confirmed nothing
      slipped in since — not a general grant to skip review or force through a
      bad state.
 6.10. Run `/cleanup-merged` (this repo) to remove the now-merged local
@@ -685,8 +660,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
       same edit automatically on a *later* tick if it's ever missed here — e.g. a
       tick that dies between 6.9 and 6.11 — but doing it here directly keeps the
       file correct without waiting for that next tick.)
-6.12. Append: `- <UTC timestamp>: item N merged as PR #<number>; both
-      /review-branch passes clean, mergeable/clean confirmed, squash-merged and
+6.12. Append: `- <UTC timestamp>: item N merged as PR #<number>;
+      /review-branch pass clean, mergeable/clean confirmed, squash-merged and
       cleaned up.`
 
 ## Boundaries
@@ -695,10 +670,10 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
   never `git reset --hard`, never delete anything found in Step 1 (stash, don't
   discard).
 - Marking a PR ready and merging it (Step 6.7/6.9) are authorized, but only after
-  Step 5's two full independent `/review-branch` passes are clean, GitHub reports
-  the PR mergeable/clean, AND `main` hasn't advanced since those passes ran (Step
+  Step 5's `/review-branch` pass is clean, GitHub reports
+  the PR mergeable/clean, AND `main` hasn't advanced since that pass ran (Step
   6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
-  moved on, and never skip or shortcut the two-pass gate to reach a merge.
+  moved on, and never skip or shortcut the review gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
   (worktree path/branch if one was created) — don't guess or retry blindly. This is
