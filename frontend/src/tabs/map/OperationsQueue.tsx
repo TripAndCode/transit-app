@@ -109,12 +109,9 @@ function QueueSection({
   onToggle: () => void;
 }) {
   if (routes.length === 0) return null;
-  const selected = selectedRoute ? routes.find((route) => route.route_code === selectedRoute) : undefined;
-  const visibleRoutes = expanded
-    ? routes
-    : selected && !routes.slice(0, 5).includes(selected)
-      ? [selected, ...routes.filter((route) => route !== selected).slice(0, 4)]
-      : routes.slice(0, 5);
+  const selectedIndex = selectedRoute ? routes.findIndex((route) => route.route_code === selectedRoute) : -1;
+  const selectedOutsidePreview = selectedIndex >= 5;
+  const visibleRoutes = expanded || selectedOutsidePreview ? routes : routes.slice(0, 5);
   const hiddenCount = routes.length - visibleRoutes.length;
   return (
     <section className={`ops-queue-section ops-queue-section--${bucket}`}>
@@ -161,7 +158,7 @@ function QueueSection({
           );
         })}
       </div>
-      {routes.length > 5 && (
+      {routes.length > 5 && !selectedOutsidePreview && (
         <button type="button" className="ops-queue-section__more" onClick={onToggle}>
           {expanded
             ? t("operations.queue.show_less")

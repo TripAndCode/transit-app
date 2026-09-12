@@ -2,7 +2,7 @@
   --ops-navy: #111625;
   --ops-navy-soft: #192034;
   display: flex;
-  min-height: 620px;
+  min-height: 0;
   height: 100%;
   flex-direction: column;
   gap: 14px;
@@ -85,7 +85,7 @@
 .ops-context__route svg { color: var(--accent); }
 .ops-context__hint { color: var(--text-tertiary); }
 
-.ops-workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(360px, 420px); flex: 1 1 auto; height: min(760px, calc(100dvh - 330px)); min-height: 500px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 14px 40px rgba(0,0,0,.1); }
+.ops-workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(360px, 420px); flex: 1 1 auto; min-height: 0; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 14px 40px rgba(0,0,0,.1); }
 .ops-map { position: relative; min-width: 0; overflow: hidden; }
 .ops-map__canvas { position: absolute; inset: 0; }
 .ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: #2a2a2a; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(0,0,0,.18); font-size: 12px; }
