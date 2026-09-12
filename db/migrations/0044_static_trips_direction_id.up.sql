@@ -1,0 +1,2 @@
+ALTER TABLE static_trips
+ADD COLUMN IF NOT EXISTS direction_id SMALLINT;

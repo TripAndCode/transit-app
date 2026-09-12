@@ -1,7 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { describe, expect, it } from "vitest";
-import type { LiveTrip, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
+import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
 import { makeMockMap, type MockLayer } from "../../test/mockMap";
 import {
   LIVE_TRIPS_LABEL_LAYER,
@@ -43,6 +43,18 @@ const SHAPE: RouteShapeResponse = {
   unobserved_stops: [],
 };
 
+const PROGRESS: LiveTripProgressResponse = {
+  trip_id: "trip-1",
+  route_code: "12",
+  headsign: "市役所前",
+  direction_id: 0,
+  latest_captured_at: "2026-09-11T01:00:00Z",
+  stops: [
+    { stop_sequence: 2, stop_id: "S0", stop_name: "中央", stop_lat: 40.79, stop_lon: 140.69, scheduled_time: "09:55:00", dep_delay: 60, reported_at: "2026-09-11T00:55:00Z" },
+    { stop_sequence: 3, stop_id: "S1", stop_name: "中央駅", stop_lat: 40.8, stop_lon: 140.7, scheduled_time: "10:00:00", dep_delay: 420, reported_at: "2026-09-11T01:00:00Z" },
+  ],
+};
+
 describe("useOperationsMapLayers", () => {
   it("maps only located TripUpdates and labels their signed delay", () => {
     const map = makeMockMap();
@@ -73,6 +85,21 @@ describe("useOperationsMapLayers", () => {
     const routeLayer = map.getLayer("active-route-line") as MockLayer;
     expect(routeLayer.paint?.["line-color"]).toBe("#d92121");
     expect(routeLayer.paint?.["line-color"]).not.toContain("var(");
+  });
+
+  it("clusters overlapping active trips and draws the selected trip report trail", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
+    });
+
+    expect((map.getSource(LIVE_TRIPS_SOURCE) as { cluster: boolean }).cluster).toBe(true);
+    const progress = map.getSource("trip-progress") as { data: GeoJSON.FeatureCollection };
+    expect(progress.data.features).toHaveLength(3);
+    expect(map.getLayer("trip-progress-line")).toBeDefined();
+    expect(map.getLayer("trip-progress-direction")).toBeDefined();
+    expect(map.getLayer("trip-progress-stops")).toBeDefined();
   });
 
   it("removes the route overlay when all routes are selected", () => {
