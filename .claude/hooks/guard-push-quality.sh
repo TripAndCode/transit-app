@@ -2,8 +2,8 @@
 # PreToolUse(Bash) hook: gate `git push` on lint/test passing first.
 # Lint/format checks are scoped to files changed vs `main` (the repo has
 # pre-existing lint/format debt elsewhere, so a whole-repo gate would block
-# every push); tests and frontend checks run whole-project since those can't
-# be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
+# every push); tests, mypy, and frontend checks run whole-project since those
+# can't be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
 # determine what changed or can't run a required check, it blocks (exit 2)
 # rather than silently letting the push through — set PUSH_GATE_SKIP_TESTS=1
 # for a deliberate, visible opt-out of the DB-dependent backend tests only,
@@ -141,10 +141,24 @@ if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   } >>"$LOG" 2>&1
 fi
 
-# Fail fast on the cheap check before paying for the full backend + frontend
+# mypy runs whole-project, not file-scoped: a type error is a property of a
+# module and of everything importing it, so checking only the changed files
+# would miss the breakage a changed signature causes in its callers. Unlike
+# ruff (which has pre-existing debt outside the changed set, hence the file
+# scoping above), the configured mypy scope in pyproject.toml is clean, so a
+# whole-project run blocks only on a real regression. Same trigger as the
+# backend tests below — Python changed, or scope couldn't be resolved.
+if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ]; then
+  {
+    echo "== poetry run mypy (whole configured scope) =="
+    run_with_timeout 180 poetry run -- mypy || FAIL=1
+  } >>"$LOG" 2>&1
+fi
+
+# Fail fast on the cheap checks before paying for the full backend + frontend
 # suites — a one-line format nit shouldn't cost a multi-minute double run.
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — ruff format/lint failed (skipping tests). Last 80 lines:" >&2
+  echo "BLOCKED: git push — ruff format/lint or mypy failed (skipping tests). Last 80 lines:" >&2
   tail -80 "$LOG" >&2
   exit 2
 fi
