@@ -138,6 +138,10 @@ def test_bad_to_unknown_to_healthy_still_fires_recovered():
     assert len(alerts) == 1
     assert alerts[0].kind == "recovered"
     assert alerts[0].component == "oracle_crawler"
+    # previous_state must reflect the real prior bad state ("failed"), not
+    # the transient "unknown" that was merely last observed.
+    assert alerts[0].previous_state == "failed"
+    assert alerts[0].render_line() == "- oracle_crawler: recovered -> healthy (was failed)"
     assert updated["oracle_crawler"].last_alerted_state is None
     assert updated["oracle_crawler"].last_alert_at is None
 

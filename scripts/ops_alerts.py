@@ -271,23 +271,30 @@ def evaluate_components(
         is_bad = current in BAD_STATES
         reason = reasons.get(name)
         age_seconds = component_doc.get("age_seconds")
+        # The state actually alerted on takes precedence over the raw
+        # last-observed state: a bad state can still be sitting unresolved
+        # behind an intervening `unknown` poll (last_observed_state ==
+        # "unknown" but last_alerted_state == "failed"), and every alert
+        # kind below must report that real prior state, not the transient
+        # "unknown" that happened to be observed most recently.
+        previous_state = prior.last_alerted_state or prior.last_observed_state
 
         alert: ComponentAlert | None = None
         if is_bad and not was_bad:
-            alert = ComponentAlert(name, "entered", current, prior.last_observed_state, reason, age_seconds)
+            alert = ComponentAlert(name, "entered", current, previous_state, reason, age_seconds)
         elif current == "healthy" and was_bad:
             if prior.last_alerted_state is not None:
-                alert = ComponentAlert(name, "recovered", current, prior.last_observed_state, reason, age_seconds)
+                alert = ComponentAlert(name, "recovered", current, previous_state, reason, age_seconds)
         elif is_bad and was_bad:
             prior_severity = _BAD_STATE_SEVERITY.get(prior.last_alerted_state or "", 0)
             current_severity = _BAD_STATE_SEVERITY[current]
             if current_severity > prior_severity:
-                alert = ComponentAlert(name, "escalated", current, prior.last_observed_state, reason, age_seconds)
+                alert = ComponentAlert(name, "escalated", current, previous_state, reason, age_seconds)
             else:
                 last_alert_at = _parse_iso(prior.last_alert_at)
                 elapsed = (now - last_alert_at).total_seconds() if last_alert_at is not None else None
                 if elapsed is None or elapsed >= dedup_interval_seconds:
-                    alert = ComponentAlert(name, "reminder", current, prior.last_observed_state, reason, age_seconds)
+                    alert = ComponentAlert(name, "reminder", current, previous_state, reason, age_seconds)
 
         if is_bad:
             if alert is not None:
