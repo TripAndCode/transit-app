@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useSession } from "../api/auth";
 import { useAgencies } from "../api/hooks";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+import { readWelcomeSeen, writeWelcomeSeen } from "../api/welcomeSeen";
 import { IndexLoadingPlaceholder } from "./RoutePlaceholders";
 import { ErrorBanner } from "./ErrorBanner";
 import type { Agency } from "../api/types";
@@ -14,16 +16,21 @@ import type { Agency } from "../api/types";
 // --transition ever grows past this.
 const SELECT_TRANSITION_MS = 250;
 
-/** Owns the "/" landing decision: while agencies load, show the existing
- *  placeholder; once loaded, instantly redirect (via the declarative
- *  <Navigate> element — this runs at render time, so calling useNavigate()
- *  imperatively here instead would violate render purity) for the
- *  single-agency or remembered-choice case, identical to the old silent
- *  auto-redirect; only render the picker overlay when there's a real choice
- *  to make. */
+/** Owns the "/" landing decision: a first-time visitor with a confirmed-absent
+ *  auth session is sent to "/welcome" instead of ever seeing the dashboard or
+ *  agency picker below; everyone else — including a session check that errors
+ *  rather than confirming anonymity — falls through to the pre-existing
+ *  behavior.
+ *  Once past that gate, while agencies load, show the existing placeholder;
+ *  once loaded, instantly redirect (via the declarative <Navigate> element —
+ *  this runs at render time, so calling useNavigate() imperatively here
+ *  instead would violate render purity) for the single-agency or
+ *  remembered-choice case, identical to the old silent auto-redirect; only
+ *  render the picker overlay when there's a real choice to make. */
 export function OnboardingGate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { data: session, isLoading: isSessionLoading, isError: isSessionError } = useSession();
   const { data: agencies, isLoading, isError, error, refetch } = useAgencies();
   // Hooks must run unconditionally on every render (Rules of Hooks) — declared
   // here, above the early returns below, rather than next to select() where
@@ -34,6 +41,11 @@ export function OnboardingGate() {
   // live read here would immediately match that write on the next render,
   // short-circuiting straight to <Navigate> and skipping the transition.
   const [remembered] = useState(() => readLastAgency());
+  // Snapshotted once at mount for the same reason as `remembered` above: the
+  // mount effect below writes this flag on every visit (including this one),
+  // and a live read would immediately flip to "seen" and mask the very first
+  // redirect this render is responsible for deciding.
+  const [welcomeSeenState] = useState(() => readWelcomeSeen());
 
   // Deferred navigate lives in an effect (not the click handler's own
   // setTimeout) so an unmount inside the delay window cleans up the timer
@@ -43,6 +55,28 @@ export function OnboardingGate() {
     const id = setTimeout(() => navigate(`/agencies/${selectedId}/map`, { replace: true }), SELECT_TRANSITION_MS);
     return () => clearTimeout(id);
   }, [selectedId, navigate]);
+
+  // "/" counts as reached the moment this component mounts, whether that
+  // mount renders the dashboard, the agency picker, or (this one time, for a
+  // fresh browser) the redirect to "/welcome" below — so this always runs,
+  // unconditionally, marking the flag before any of those branches return.
+  // Runs in an effect rather than during render to keep the component pure;
+  // it sets no React state, so it does not trip set-state-in-effect.
+  useEffect(() => {
+    writeWelcomeSeen();
+  }, []);
+
+  // Only a not-yet-seen visitor can possibly redirect, so only that case
+  // waits on the session probe -- a returning/signed-in visitor's render
+  // isn't held up by `/api/me` just to reach a check that can't fire for them.
+  if (welcomeSeenState === "unseen") {
+    if (isSessionLoading) return <IndexLoadingPlaceholder />;
+    // `!session` alone is ambiguous -- a failed /api/me probe also settles as
+    // `data: undefined`, indistinguishable from a real anonymous visitor --
+    // so only `!isSessionError` redirects; a probe failure fails open to the
+    // dashboard/picker, same as a localStorage failure below.
+    if (!session && !isSessionError) return <Navigate to="/welcome" replace />;
+  }
 
   if (isLoading) return <IndexLoadingPlaceholder />;
   // Only surface the error banner when there's no usable fallback: react-query
