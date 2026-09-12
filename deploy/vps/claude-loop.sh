@@ -89,6 +89,57 @@ CLAUDE_LOOP_MAX_STALE_AGE_SEC=${CLAUDE_LOOP_MAX_STALE_AGE_SEC:-$((CLAUDE_TICK_TI
 
 CHAIN_STATE_SCRIPT="scripts/vps_loop_chain_state.py"
 
+# Populates the VPS_LOOP_* globals from scripts/vps_loop_health.py's own
+# `--format shell` output: parses NEXT_TASK.md's Status log for
+# last_successful_tick/current_item/last_tick_outcome/blocker_class/paused
+# state and the repeated_without_progress/stale_pause alert flags. Defaults
+# are set before the eval so a parse error there (it fails closed, non-zero
+# exit, empty stdout) never leaves a variable unset under this script's own
+# `set -u`. Shared by the per-tick heartbeat below and the gated-exit
+# heartbeat, so both report the same fields the same way.
+collect_vps_loop_health() {
+  VPS_LOOP_LAST_SUCCESSFUL_TICK=""
+  VPS_LOOP_CURRENT_ITEM=""
+  VPS_LOOP_LAST_TICK_OUTCOME=""
+  VPS_LOOP_BLOCKER_CLASS=""
+  VPS_LOOP_PAUSED="false"
+  VPS_LOOP_PAUSED_SINCE=""
+  VPS_LOOP_REPEATED_WITHOUT_PROGRESS="false"
+  VPS_LOOP_STALE_PAUSE="false"
+  local health_shell_output
+  health_shell_output=$(python3 scripts/vps_loop_health.py --repo /root/transit-app \
+    --out /root/vps-loop-health.json --format shell 2>/root/vps-loop-health.err) || true
+  eval "$health_shell_output"
+}
+
+# Fires the same GitHub `vps-heartbeat` repository_dispatch every invocation
+# is expected to send -- including a gated/denied one that never runs a tick
+# -- so vps-heartbeat-watchdog.yml keeps seeing accurate blocker_class/paused/
+# backoff state through a long idle/blocked stretch instead of reading
+# silence as "the loop may have stopped". Assumes collect_vps_loop_health
+# already populated the VPS_LOOP_* globals this invocation.
+dispatch_heartbeat() {
+  local chain_tick_outcome="$1"
+  local chain_ticks_run="$2"
+  local chain_consecutive_non_progress="$3"
+  local chain_next_earliest_attempt="$4"
+
+  gh api repos/TripAndCode/transit-app/dispatches \
+    -f event_type=vps-heartbeat \
+    -F "client_payload[paused]=$VPS_LOOP_PAUSED" \
+    -F "client_payload[repeated_without_progress]=$VPS_LOOP_REPEATED_WITHOUT_PROGRESS" \
+    -F "client_payload[stale_pause]=$VPS_LOOP_STALE_PAUSE" \
+    -F "client_payload[blocker_class]=$VPS_LOOP_BLOCKER_CLASS" \
+    -F "client_payload[current_item]=$VPS_LOOP_CURRENT_ITEM" \
+    -F "client_payload[last_successful_tick]=$VPS_LOOP_LAST_SUCCESSFUL_TICK" \
+    -F "client_payload[paused_since]=$VPS_LOOP_PAUSED_SINCE" \
+    -F "client_payload[chain_tick_outcome]=$chain_tick_outcome" \
+    -F "client_payload[chain_ticks_run]=$chain_ticks_run" \
+    -F "client_payload[chain_consecutive_non_progress]=$chain_consecutive_non_progress" \
+    -F "client_payload[chain_next_earliest_attempt]=$chain_next_earliest_attempt" \
+    >/dev/null 2>&1
+}
+
 # Re-check the gate (bounded backoff + stale-lock recovery) before this
 # invocation does anything else. The single-flight `flock` above already
 # guarantees no second `claude-loop.sh` process is running concurrently;
@@ -103,6 +154,8 @@ GATE_OUTPUT=$(python3 "$CHAIN_STATE_SCRIPT" gate \
 ALLOWED="false"
 REASON=""
 RECOVERED="false"
+CONSECUTIVE_NON_PROGRESS=""
+NEXT_EARLIEST_ATTEMPT=""
 eval "$GATE_OUTPUT"
 
 if [[ "$RECOVERED" == "true" ]]; then
@@ -110,6 +163,16 @@ if [[ "$RECOVERED" == "true" ]]; then
 fi
 if [[ "$ALLOWED" != "true" ]]; then
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): skipping this invocation — $REASON"
+  # No tick runs this invocation, but the heartbeat still fires (see
+  # dispatch_heartbeat above) -- otherwise a saturated backoff (capped at
+  # CLAUDE_LOOP_BACKOFF_CAP_SEC, which defaults to exactly one systemd-timer
+  # interval) settles into a ~2x-timer-interval heartbeat cadence that trips
+  # vps-heartbeat-watchdog.yml's freshness alarm during ordinary idle/blocked
+  # backlog stretches, not just a genuinely stopped loop. CONSECUTIVE_NON_PROGRESS
+  # and NEXT_EARLIEST_ATTEMPT here are the gate's own pre-tick view of that
+  # state, since record-outcome never runs this invocation.
+  collect_vps_loop_health
+  dispatch_heartbeat "gated" 0 "$CONSECUTIVE_NON_PROGRESS" "$NEXT_EARLIEST_ATTEMPT"
   exit 0
 fi
 
@@ -133,23 +196,8 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
   FINAL_EXIT=$CLAUDE_EXIT
   TICKS_RUN=$((TICKS_RUN + 1))
 
-  # Fold vps-loop-run's own progress signal into the heartbeat: scripts/vps_loop_health.py
-  # parses NEXT_TASK.md's Status log for last_successful_tick/current_item/last_tick_outcome/
-  # blocker_class/paused state and the repeated_without_progress/stale_pause alert flags.
-  # Pre-declare defaults before eval'ing its --format shell output so a parse error there
-  # (it fails closed, non-zero exit, empty stdout) never leaves a variable unset under this
-  # script's own `set -u`.
-  VPS_LOOP_LAST_SUCCESSFUL_TICK=""
-  VPS_LOOP_CURRENT_ITEM=""
-  VPS_LOOP_LAST_TICK_OUTCOME=""
-  VPS_LOOP_BLOCKER_CLASS=""
-  VPS_LOOP_PAUSED="false"
-  VPS_LOOP_PAUSED_SINCE=""
-  VPS_LOOP_REPEATED_WITHOUT_PROGRESS="false"
-  VPS_LOOP_STALE_PAUSE="false"
-  HEALTH_SHELL_OUTPUT=$(python3 scripts/vps_loop_health.py --repo /root/transit-app \
-    --out /root/vps-loop-health.json --format shell 2>/root/vps-loop-health.err) || true
-  eval "$HEALTH_SHELL_OUTPUT"
+  # Fold vps-loop-run's own progress signal into the heartbeat.
+  collect_vps_loop_health
 
   # A non-zero `claude` exit (the tick's own hard timeout, a crash) overrides
   # whatever the Status log happens to say -- that log entry may predate the
@@ -169,20 +217,7 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
   CONSECUTIVE_NON_PROGRESS=""
   eval "$RECORD_OUTPUT"
 
-  gh api repos/TripAndCode/transit-app/dispatches \
-    -f event_type=vps-heartbeat \
-    -F "client_payload[paused]=$VPS_LOOP_PAUSED" \
-    -F "client_payload[repeated_without_progress]=$VPS_LOOP_REPEATED_WITHOUT_PROGRESS" \
-    -F "client_payload[stale_pause]=$VPS_LOOP_STALE_PAUSE" \
-    -F "client_payload[blocker_class]=$VPS_LOOP_BLOCKER_CLASS" \
-    -F "client_payload[current_item]=$VPS_LOOP_CURRENT_ITEM" \
-    -F "client_payload[last_successful_tick]=$VPS_LOOP_LAST_SUCCESSFUL_TICK" \
-    -F "client_payload[paused_since]=$VPS_LOOP_PAUSED_SINCE" \
-    -F "client_payload[chain_tick_outcome]=$CHAIN_OUTCOME" \
-    -F "client_payload[chain_ticks_run]=$TICKS_RUN" \
-    -F "client_payload[chain_consecutive_non_progress]=$CONSECUTIVE_NON_PROGRESS" \
-    -F "client_payload[chain_next_earliest_attempt]=$NEXT_EARLIEST_ATTEMPT" \
-    >/dev/null 2>&1
+  dispatch_heartbeat "$CHAIN_OUTCOME" "$TICKS_RUN" "$CONSECUTIVE_NON_PROGRESS" "$NEXT_EARLIEST_ATTEMPT"
 
   if [[ "$ACTION" != "continue" ]]; then
     break

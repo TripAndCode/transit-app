@@ -19,8 +19,9 @@ consecutive ticks in a row made no progress, and when the next attempt is
 allowed -- so the shell wrapper can decide "chain again right now" vs. "stop
 and wait" without parsing prose.
 
-Three CLI subcommands, each emitting `KEY='value'` shell-eval lines like
-`vps_loop_health.py --format shell`:
+Four CLI subcommands. `gate`, `begin`, and `record-outcome` are the ones the
+wrapper calls around every tick, each emitting `KEY='value'` shell-eval lines
+like `vps_loop_health.py --format shell`:
 
 - `gate`: may a new tick start right now? Also recovers a stale `in_progress`
   flag left behind by a tick that crashed (or was killed on its own timeout)
@@ -29,6 +30,10 @@ Three CLI subcommands, each emitting `KEY='value'` shell-eval lines like
 - `record-outcome`: given the tick's own outcome (`vps_loop_health.py`'s
   `last_tick_outcome`, or `"unknown"` if the `claude` invocation itself exited
   non-zero), clear the in-flight flag and decide `continue` vs. `stop`.
+
+A fourth, `show`, is a read-only inspector for manual/ops use (not called by
+the wrapper itself): it prints the current state, in the same `KEY='value'`
+shell form under `--format shell` or as JSON (the default).
 
 Exit code: 0 normally; `gate` additionally exits 1 when not currently allowed
 to run (mirroring `vps_loop_health.py`'s "1 means look closer" convention),

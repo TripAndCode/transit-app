@@ -214,7 +214,9 @@ def is_test_path(path: str) -> bool:
 # systemd unit (`deploy/vps/claude-loop.sh`/`claude-loop.service`) and the
 # decision logic behind them (`scripts/vps_loop_chain_state.py` — a diff
 # quietly loosening its bounded-backoff/stale-lock handling could let the
-# loop merge PRs unattended more aggressively than intended), and this
+# loop merge PRs unattended more aggressively than intended — and
+# `scripts/vps_loop_health.py`, whose `compute_last_tick_outcome` is the sole
+# classifier feeding that continue/stop decision), and this
 # review script itself (a diff that quietly weakens this very list is
 # exactly the class of change enforcement review exists to catch), along
 # with each of those scripts' own tests, since a weakened test is just as
@@ -238,11 +240,13 @@ ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     "deploy/vps/claude-loop.sh",
     "deploy/systemd/claude-loop.service",
     "scripts/vps_loop_chain_state.py",
+    "scripts/vps_loop_health.py",
     "tests/unit/test_prepare_review.py",
     "tests/unit/test_cleanup_git_state.py",
     "tests/unit/test_daily_git_hygiene.py",
     "tests/unit/test_setup_git_hooks.py",
     "tests/unit/test_vps_loop_chain_state.py",
+    "tests/unit/test_vps_loop_health.py",
     ".gitleaks.toml",
     "tests/unit/test_gitleaks_allowlist_scope.py",
     "tests/unit/test_gitleaks_version_pin.py",

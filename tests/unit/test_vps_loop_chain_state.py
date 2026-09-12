@@ -451,6 +451,35 @@ def test_wrapper_uses_the_variable_names_record_outcome_actually_emits(tmp_path,
     assert "CHAIN_NEXT_EARLIEST_ATTEMPT" not in wrapper_source
 
 
+def test_wrapper_gated_exit_still_dispatches_a_heartbeat():
+    """Regression guard for a gated/denied invocation silently skipping the
+    heartbeat dispatch entirely.
+
+    `gh api ... dispatches -f event_type=vps-heartbeat` only ever appears
+    once in the wrapper, inside `dispatch_heartbeat()`. The gated-exit branch
+    (`if [[ "$ALLOWED" != "true" ]]; then ... exit 0`) must call that
+    function before its `exit 0` -- otherwise a saturated backoff (capped at
+    the same interval as the systemd timer) silently settles into a
+    heartbeat cadence slow enough to trip the watchdog's freshness alarm
+    during ordinary idle/blocked backlog stretches, not just a genuinely
+    stopped loop.
+    """
+
+    wrapper_source = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+    assert wrapper_source.count("gh api repos/TripAndCode/transit-app/dispatches") == 1
+    dispatch_fn_start = wrapper_source.index("dispatch_heartbeat() {")
+    dispatch_fn_end = wrapper_source.index("\n}", dispatch_fn_start)
+    dispatch_fn_body = wrapper_source[dispatch_fn_start:dispatch_fn_end]
+    assert "gh api repos/TripAndCode/transit-app/dispatches" in dispatch_fn_body
+
+    gated_branch_start = wrapper_source.index('if [[ "$ALLOWED" != "true" ]]; then')
+    gated_branch_end = wrapper_source.index("\nfi", gated_branch_start)
+    gated_branch_body = wrapper_source[gated_branch_start:gated_branch_end]
+    assert "dispatch_heartbeat" in gated_branch_body
+    assert "exit 0" in gated_branch_body
+
+
 def test_cli_show_json_reports_current_state_without_mutating(tmp_path, capsys):
     state_file = tmp_path / "chain-state.json"
     original = chain.ChainState(consecutive_non_progress=1, last_outcome="idle")
