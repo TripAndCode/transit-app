@@ -1,0 +1,30 @@
+# ops-alerts.service — one poll of scripts/ops_alerts.py, run by ops-alerts.timer.
+#
+# Install (on the VPS):
+#   1. Optionally create an overrides env file (see ops-alerts.env.example):
+#        sudo install -m 600 -o root -g root /dev/null /etc/transit/ops-alerts.env
+#      Only needed to change defaults (repo path, dedup interval, silence
+#      threshold) -- there is no secret to generate here, unlike ops-status.env.
+#   2. Adjust WorkingDirectory/ExecStart/User below for the deployed checkout if
+#      it differs from /root/transit-app.
+#   3. sudo cp deploy/systemd/ops-alerts.service deploy/systemd/ops-alerts.timer \
+#        /etc/systemd/system/
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now ops-alerts.timer
+# Inspect: systemctl status ops-alerts.timer ops-alerts.service ; journalctl -u ops-alerts.service
+#
+# Exit code 1 (an anomaly notification was produced) makes this run show as a
+# *failed* systemd unit -- `systemctl status`/`journalctl -p err` surface it
+# without any extra plumbing, and an OnFailure= unit can be pointed at a real
+# paging channel later without changing this file's own logic.
+[Unit]
+Description=Operations anomaly alerting (one poll)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/transit-app
+EnvironmentFile=-/etc/transit/ops-alerts.env
+ExecStart=/usr/bin/env poetry run python3 scripts/ops_alerts.py
+StandardOutput=append:/var/log/ops-alerts.log
+StandardError=append:/var/log/ops-alerts.log
