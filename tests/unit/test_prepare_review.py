@@ -248,6 +248,10 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
         "tests/unit/test_cleanup_git_state.py",
         "tests/unit/test_daily_git_hygiene.py",
         "tests/unit/test_setup_git_hooks.py",
+        ".gitleaks.toml",
+        "tests/unit/test_gitleaks_allowlist_scope.py",
+        "tests/unit/test_gitleaks_version_pin.py",
+        "tests/unit/test_gitleaks_fixtures.py",
     ],
 )
 def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path: Path, path: str):

@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets hooks geosql-up geosql-down git-cleanup git-cleanup-apply
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -249,6 +249,16 @@ frontend-build:
 verify-secrets:
 	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
 	gitleaks detect --redact --no-banner --source .
+
+# Reproduces .github/workflows/secrets-scan-full-history.yml locally: fetches
+# every branch and tag, then scans history reachable from any of them, not
+# just HEAD's. `verify-secrets` above only ever sees HEAD's own ancestry, so
+# it can't catch a secret that only exists on some other branch.
+verify-secrets-all-branches:
+	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
+	git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+	git fetch --tags origin
+	gitleaks detect --redact --no-banner --source . --log-opts="--all"
 
 # Mandatory local first line of defense: installs the pinned gitleaks binary
 # (if missing) and the pre-commit hook that runs it on every commit, then
