@@ -96,16 +96,22 @@ install_pre_commit() {
     return 0
   fi
   echo "-> pre-commit not found; attempting install"
+  # Deliberately not a poetry/project dependency: pre-commit must run
+  # standalone from the git hook (invoked directly by git, outside any
+  # `poetry run`), so it needs its own interpreter's package to be
+  # importable at hook-run time -- installing it into this project's
+  # poetry-managed virtualenv would only make it resolvable via
+  # `poetry run pre-commit`, not from the hook script git itself invokes.
   if command -v pipx >/dev/null 2>&1; then
     pipx install pre-commit || fail "'pipx install pre-commit' failed -- install pre-commit manually (https://pre-commit.com/#installation) and re-run"
   elif command -v pip3 >/dev/null 2>&1; then
     pip3 install --user pre-commit || fail "'pip3 install --user pre-commit' failed -- install pre-commit manually (https://pre-commit.com/#installation) and re-run"
-  elif command -v poetry >/dev/null 2>&1; then
-    poetry run pip install --user pre-commit || fail "could not install pre-commit via poetry's environment -- install pre-commit manually (https://pre-commit.com/#installation) and re-run"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m pip install --user pre-commit || fail "'python3 -m pip install --user pre-commit' failed -- install pre-commit manually (https://pre-commit.com/#installation) and re-run"
   else
-    fail "no supported installer (pipx/pip3/poetry) found to install pre-commit -- install it manually (https://pre-commit.com/#installation) and re-run"
+    fail "no supported installer (pipx/pip3/python3 -m pip) found to install pre-commit -- install it manually (https://pre-commit.com/#installation) and re-run"
   fi
-  command -v pre-commit >/dev/null 2>&1 || fail "pre-commit install command succeeded but 'pre-commit' is still not on PATH -- check your installer's bin directory is on PATH and re-run"
+  command -v pre-commit >/dev/null 2>&1 || fail "pre-commit install command succeeded but 'pre-commit' is still not on PATH -- its installer's bin directory (e.g. ~/.local/bin) likely isn't on PATH; add it and re-run"
 }
 
 install_hook() {
