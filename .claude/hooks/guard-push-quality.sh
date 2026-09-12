@@ -182,6 +182,14 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
     # it to keep growing. Set too tight, the timeout fires on every Python
     # change and the gate never reports a genuine pass -- pushes then either
     # look broken or get routed around, which is strictly worse than no gate.
+    #
+    # Every ceiling in this script is bounded by one more: the `timeout` on
+    # this hook's entry in .claude/settings.json, enforced by the harness
+    # rather than by this script. If the ceilings here can sum past it, the
+    # harness kills the script before it reaches its own exit, and whether
+    # that blocks the push or lets it through is outside this script's
+    # control -- the one outcome its fail-closed design cannot guarantee.
+    # Raise that entry alongside any ceiling raised here.
     if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
