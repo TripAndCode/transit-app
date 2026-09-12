@@ -67,3 +67,18 @@ CRON_TZ=Asia/Tokyo
 # health-check.sh do.
 5,35 * * * * /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/status-snapshot.sh >> /home/opc/collector/cron.log 2>&1
 7,37 * * * * set -a; . /etc/environment; set +a; /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/publish-status.sh >> /home/opc/collector/cron.log 2>&1
+# storage-metrics.sh is the same kind of pure report as status-snapshot.sh,
+# but for component "r2": it lists R2 itself (needs OBJECT_STORE_* — unlike
+# status-snapshot.sh, which only ever reads other scripts' own markers) to
+# report filesystem usage and R2 object count/bytes split by rt/ and static/
+# against configurable warning/critical thresholds. Leaving OBJECT_STORE_*
+# unset is a supported configuration (r2_state reports not_applicable), so
+# this never blocks on secrets not yet being provisioned. The generic
+# publish-status.sh (same script as the oracle_crawler heartbeat above) sends
+# this one to GitHub too, pointed at storage-metrics.sh's own output file and
+# a distinct event type via ORACLE_STATUS_FILE/ORACLE_STATUS_EVENT_TYPE —
+# not a second publisher script — offset a few minutes from the
+# oracle_crawler heartbeat pair so the two publishes never race each other's
+# ORACLE_STATUS_GH_TOKEN use.
+10,40 * * * * set -a; . /etc/environment; set +a; env AWS_CLI=/usr/local/bin/aws /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/storage-metrics.sh >> /home/opc/collector/cron.log 2>&1
+12,42 * * * * set -a; . /etc/environment; set +a; env ORACLE_STATUS_FILE=/home/opc/collector/.status/r2-storage-status.json ORACLE_STATUS_EVENT_TYPE=r2-storage-heartbeat /home/opc/collector/bin/cron-wrap.sh /home/opc/collector/bin/publish-status.sh >> /home/opc/collector/cron.log 2>&1
