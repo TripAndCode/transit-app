@@ -10,6 +10,10 @@ raw_archives/
 raw_archives_static/
 .env
 .cloudflare_api.txt
+# Ops-status collectors' local cache files (e.g. scripts/collect_github_status.py's
+# --cache-file default), keyed by component name -- a resilience aid for a single
+# checkout, never repo content.
+.cache/ops-status-*.json
 # Claude Code — commit shared tools, ignore personal/runtime/docs
 .claude/*
 !.claude/commands/
