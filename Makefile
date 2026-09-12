@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets geosql-up geosql-down git-cleanup git-cleanup-apply
+.PHONY: all bootstrap doctor bake install test fmt lint check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets hooks geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -30,12 +30,8 @@ bootstrap:
 	@echo "→ building SPA + baking into api/static/ for single-origin serve"
 	@$(MAKE) frontend-build
 	@$(MAKE) bake
-	@if command -v pre-commit >/dev/null; then \
-		pre-commit install >/dev/null && echo "→ installed pre-commit hooks" \
-			|| echo "→ WARNING: pre-commit found but 'pre-commit install' failed — run it manually"; \
-	else \
-		echo "→ skipping pre-commit hook install (run 'brew install pre-commit' to enable)"; \
-	fi
+	@echo "→ installing the gitleaks pre-commit hook (mandatory — see scripts/setup_git_hooks.sh)"
+	@$(MAKE) hooks
 	@echo ""
 	@echo "✓ bootstrap done. Next:"
 	@echo "    make doctor       # sanity check"
@@ -79,6 +75,12 @@ doctor:
 	@echo "── api/static ──"
 	@test -d api/static && echo "  baked SPA present (single-origin works)" \
 		|| echo "  not baked — \`make bake\` or run Vite via \`make frontend-dev\`"
+	@echo "── git hooks ──"
+	@if bash scripts/setup_git_hooks.sh --check >/dev/null 2>&1; then \
+			echo "  gitleaks pre-commit hook installed"; \
+		else \
+			echo "  gitleaks pre-commit hook MISSING or invalid — \`make hooks\` (commits are NOT scanned locally)"; \
+		fi
 
 install:
 	poetry install
@@ -247,6 +249,18 @@ frontend-build:
 verify-secrets:
 	@command -v gitleaks >/dev/null || { echo "ERROR: gitleaks not installed. brew install gitleaks"; exit 1; }
 	gitleaks detect --redact --no-banner --source .
+
+# Mandatory local first line of defense: installs the pinned gitleaks binary
+# (if missing) and the pre-commit hook that runs it on every commit, then
+# verifies the installed hook is real (executable, pre-commit-managed, not
+# shadowed by a core.hooksPath override). Fails the target — and therefore
+# `make bootstrap`, which depends on it — if any step can't complete; a
+# workstation or VPS clone with no local hook has no secret-scanning gate
+# until the next push reaches CI. `git worktree`s share one .git/hooks
+# directory, so one run against a VPS's persistent checkout covers every
+# /vps-loop-run worker worktree cut from it too.
+hooks:
+	@bash scripts/setup_git_hooks.sh
 
 # ── Ask eval (CI gate) ────────────────────────────────────────────────────────
 # Verifies builder_coverage = 100% against the gold JSONL (the chip gate is

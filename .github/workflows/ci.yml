@@ -134,6 +134,24 @@ jobs:
       - name: Type check
         run: poetry run mypy
 
+      # tests/unit/test_gitleaks_fixtures.py shells out to the real, pinned
+      # gitleaks binary to prove the control fixtures are actually detected
+      # (and redacted/allowlisted) rather than mocking the scanner -- it
+      # skips itself when gitleaks isn't on PATH, so install it here or
+      # those assertions silently never run. Mirrors secrets-scan.yml's own
+      # pinned install; tests/unit/test_gitleaks_version_pin.py keeps this
+      # GITLEAKS_VERSION in sync with the other three pin sites
+      # (.pre-commit-config.yaml, secrets-scan.yml, scripts/setup_git_hooks.sh).
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit

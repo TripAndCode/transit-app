@@ -105,7 +105,8 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline |
 | `make check-aggs` | Detect stale aggregate tables |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
-| `make verify-secrets` | Check required secret configuration |
+| `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
+| `make verify-secrets` | On-demand gitleaks scan of the full git history |
 | `make git-cleanup` | Preview stale local Git cleanup |
 | `make git-cleanup-apply` | Apply safe local Git cleanup |
 
@@ -204,6 +205,18 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
+
+### Secret scanning
+
+`make bootstrap` installs a mandatory gitleaks pre-commit hook (see
+`.pre-commit-config.yaml`) that scans every commit's staged content before it's
+created; bootstrap fails if the hook can't be installed. Re-run `make hooks` on
+its own after a clean checkout, a new machine, or a VPS clone — worktrees of the
+same clone share one `.git/hooks` directory, so one run covers all of them.
+`make doctor` reports whether the hook is currently installed. `make
+verify-secrets` runs the same scanner against the full git history on demand,
+and CI's `secrets-scan.yml` runs it again on every push/PR as a backstop for
+commits made without the hook installed.
 
 ## Deployment
 

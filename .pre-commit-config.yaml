@@ -1,10 +1,21 @@
 # Defense-in-depth: scan every commit and push for secret patterns.
 # Run `make verify-secrets` for an on-demand full-repo scan.
+#
+# Installation is mandatory, not opt-in: `make bootstrap` (workstation) and
+# `make hooks` (VPS clone) both call scripts/setup_git_hooks.sh, which fails
+# the whole target if the hook cannot be installed -- see that script for
+# why a silently-skipped hook is treated as a setup failure.
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
     hooks:
-      - id: gitleaks
+      # gitleaks-system (not the repo's default "gitleaks" id) invokes the
+      # `gitleaks` binary already on PATH instead of `language: golang`,
+      # which would otherwise make `pre-commit install`'s first real run
+      # build gitleaks from source via a local Go toolchain -- an extra,
+      # easy-to-break dependency this repo has no other use for.
+      # scripts/setup_git_hooks.sh installs the matching pinned binary.
+      - id: gitleaks-system
         name: gitleaks
         # --redact keeps any flagged value from being echoed to the
         # terminal. The hook scans staged content only.

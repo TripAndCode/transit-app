@@ -239,6 +239,7 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
     "path",
     [
         ".pre-commit-config.yaml",
+        "scripts/setup_git_hooks.sh",
         "frontend/package.json",
         "scripts/cleanup_git_state.py",
         "scripts/daily_git_hygiene.py",
@@ -246,6 +247,7 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
         "tests/unit/test_prepare_review.py",
         "tests/unit/test_cleanup_git_state.py",
         "tests/unit/test_daily_git_hygiene.py",
+        "tests/unit/test_setup_git_hooks.py",
     ],
 )
 def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path: Path, path: str):
@@ -254,8 +256,9 @@ def test_enforcement_pattern_targets_are_each_flagged(repository: Path, tmp_path
     tuple (a typo, or someone "cleaning up" what looks like a redundant
     entry) would otherwise silently drop one with nothing failing. Covers
     the review-tooling self-reference (scripts/prepare_review.py and its own
-    test) and the two deletion-safety scripts' tests, none of which the
-    `check-*`/`check_*` basename glob happens to catch."""
+    test) and the enforcement-relevant scripts' own test files (deletion
+    safety, git-hygiene, hook setup), none of which the `check-*`/`check_*`
+    basename glob happens to catch."""
 
     target = repository / path
     target.parent.mkdir(parents=True, exist_ok=True)
