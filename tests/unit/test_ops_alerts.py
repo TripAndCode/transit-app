@@ -408,3 +408,94 @@ def test_main_reports_monitor_silence_from_a_stale_state_file(tmp_path: Path, mo
     assert exit_code == 1
     assert "ops_alerts monitor" in out
     assert "silent for" in out
+
+
+# ── ping delivery ───────────────────────────────────────────────────────────
+
+
+def test_deliver_ping_is_a_noop_when_url_unset():
+    calls = []
+    ops_alerts._deliver_ping(None, ok=True, body="quiet", post=lambda url, body: calls.append((url, body)))
+    assert calls == []
+
+
+def test_deliver_ping_posts_to_bare_url_on_ok():
+    calls = []
+    ops_alerts._deliver_ping(
+        "https://example.test/ping/abc", ok=True, body="quiet", post=lambda url, body: calls.append((url, body))
+    )
+    assert calls == [("https://example.test/ping/abc", "quiet")]
+
+
+def test_deliver_ping_posts_to_fail_suffix_on_anomaly():
+    calls = []
+    ops_alerts._deliver_ping(
+        "https://example.test/ping/abc", ok=False, body="ALERT", post=lambda url, body: calls.append((url, body))
+    )
+    assert calls == [("https://example.test/ping/abc/fail", "ALERT")]
+
+
+def test_deliver_ping_strips_trailing_slash_before_appending_fail():
+    calls = []
+    ops_alerts._deliver_ping(
+        "https://example.test/ping/abc/", ok=False, body="ALERT", post=lambda url, body: calls.append((url, body))
+    )
+    assert calls == [("https://example.test/ping/abc/fail", "ALERT")]
+
+
+def test_deliver_ping_swallows_a_delivery_failure(capsys):
+    def _raise(url, body):
+        raise OSError("network unreachable")
+
+    # Must not raise -- a delivery failure is logged, never allowed to crash a
+    # poll that otherwise completed successfully or change its exit code.
+    ops_alerts._deliver_ping("https://example.test/ping/abc", ok=True, body="quiet", post=_raise)
+    assert "failed to deliver ping" in capsys.readouterr().err
+
+
+def test_main_delivers_ok_ping_on_a_quiet_poll(tmp_path: Path, monkeypatch):
+    state_path = tmp_path / "alert-state.json"
+    document = make_document({"vps_loop": "healthy"})
+    monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
+    monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
+    monkeypatch.setenv(ops_alerts.PING_URL_ENV_VAR, "https://example.test/ping/quiet")
+    calls = []
+    monkeypatch.setattr(ops_alerts, "_http_post", lambda url, body: calls.append((url, body)))
+
+    exit_code = ops_alerts.main(["--state-path", str(state_path), "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert calls[0][0] == "https://example.test/ping/quiet"
+
+
+def test_main_delivers_fail_ping_on_an_anomaly(tmp_path: Path, monkeypatch):
+    state_path = tmp_path / "alert-state.json"
+    document = make_document({"vps_loop": "failed"}, reasons={"vps_loop": "circuit-breaker paused"})
+    monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
+    monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
+    monkeypatch.setenv(ops_alerts.PING_URL_ENV_VAR, "https://example.test/ping/quiet")
+    calls = []
+    monkeypatch.setattr(ops_alerts, "_http_post", lambda url, body: calls.append((url, body)))
+
+    exit_code = ops_alerts.main(["--state-path", str(state_path), "--repo", str(tmp_path)])
+
+    assert exit_code == 1
+    assert len(calls) == 1
+    assert calls[0][0] == "https://example.test/ping/quiet/fail"
+    assert "vps_loop" in calls[0][1]
+
+
+def test_main_delivers_no_ping_when_url_unset(tmp_path: Path, monkeypatch):
+    state_path = tmp_path / "alert-state.json"
+    document = make_document({"vps_loop": "healthy"})
+    monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
+    monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
+    monkeypatch.delenv(ops_alerts.PING_URL_ENV_VAR, raising=False)
+    calls = []
+    monkeypatch.setattr(ops_alerts, "_http_post", lambda url, body: calls.append((url, body)))
+
+    exit_code = ops_alerts.main(["--state-path", str(state_path), "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    assert calls == []

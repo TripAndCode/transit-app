@@ -26,6 +26,7 @@ raw_archives_static/
 .claude/**/.DS_Store
 docs/*
 !docs/deploy-railway.md
+!docs/ops-monitoring-deploy.md
 !docs/refactor-log.md
 !docs/features/
 specs/
