@@ -166,8 +166,7 @@ def test_is_stale_false_for_fresh_in_progress_tick():
     state = chain.begin(chain.ChainState(), pid=999, now=NOW)
 
     assert (
-        chain.is_stale(state, now=NOW + timedelta(seconds=10), max_age_seconds=3300, pid_alive_fn=always_alive)
-        is False
+        chain.is_stale(state, now=NOW + timedelta(seconds=10), max_age_seconds=3300, pid_alive_fn=always_alive) is False
     )
 
 
@@ -175,8 +174,7 @@ def test_is_stale_true_when_pid_is_dead():
     state = chain.begin(chain.ChainState(), pid=999, now=NOW)
 
     assert (
-        chain.is_stale(state, now=NOW + timedelta(seconds=10), max_age_seconds=3300, pid_alive_fn=never_alive)
-        is True
+        chain.is_stale(state, now=NOW + timedelta(seconds=10), max_age_seconds=3300, pid_alive_fn=never_alive) is True
     )
 
 

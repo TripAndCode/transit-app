@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type Map as MLMap } from "maplibre-gl";
-import type { LiveTripsResponse, RouteShapeResponse } from "../../api/types";
+import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
 import { delayColorResolved, severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
@@ -8,10 +8,17 @@ import { whenStyleReady } from "./styleReady";
 export const LIVE_TRIPS_SOURCE = "live-trips";
 export const LIVE_TRIPS_LAYER = "live-trip-markers";
 export const LIVE_TRIPS_LABEL_LAYER = "live-trip-labels";
+export const LIVE_TRIPS_CLUSTER_LAYER = "live-trip-clusters";
 const LIVE_TRIPS_CASING_LAYER = "live-trip-casing";
+const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
 const ACTIVE_ROUTE_SOURCE = "active-route";
 const ACTIVE_ROUTE_CASING_LAYER = "active-route-casing";
 const ACTIVE_ROUTE_LAYER = "active-route-line";
+const TRIP_PROGRESS_SOURCE = "trip-progress";
+const TRIP_PROGRESS_LINE_LAYER = "trip-progress-line";
+const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
+const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
+const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
 
 function delayLabel(seconds: number): string {
   const minutes = Math.round(seconds / 60);
@@ -27,6 +34,8 @@ export function useOperationsMapLayers(
   selectedDelaySec: number,
   agencyId: number | null,
   styleEpoch: number,
+  selectedTripId: string | null = null,
+  progress?: LiveTripProgressResponse,
 ): void {
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
@@ -45,7 +54,9 @@ export function useOperationsMapLayers(
           route_code: trip.route_code ?? "",
           delay_sec: trip.dep_delay,
           delay_label: delayLabel(trip.dep_delay),
-          selected: trip.route_code != null && trip.route_code === selectedRoute,
+          trip_label: `${trip.scheduled_time?.slice(0, 5) ?? "--:--"}  ${delayLabel(trip.dep_delay)}`,
+          route_selected: trip.route_code != null && trip.route_code === selectedRoute,
+          selected: selectedTripId ? trip.trip_id === selectedTripId : trip.route_code != null && trip.route_code === selectedRoute,
         },
       }));
     const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
@@ -55,11 +66,32 @@ export function useOperationsMapLayers(
       if (existing) {
         existing.setData(collection);
       } else {
-        map.addSource(LIVE_TRIPS_SOURCE, { type: "geojson", data: collection });
+        map.addSource(LIVE_TRIPS_SOURCE, { type: "geojson", data: collection, cluster: true, clusterMaxZoom: 15, clusterRadius: 28 });
+        map.addLayer({
+          id: LIVE_TRIPS_CLUSTER_LAYER,
+          type: "circle",
+          source: LIVE_TRIPS_SOURCE,
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-radius": 24,
+            "circle-color": "#2bc5aa",
+            "circle-stroke-color": "#f4fffd",
+            "circle-stroke-width": 3,
+          },
+        });
+        map.addLayer({
+          id: LIVE_TRIPS_CLUSTER_COUNT_LAYER,
+          type: "symbol",
+          source: LIVE_TRIPS_SOURCE,
+          filter: ["has", "point_count"],
+          layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 },
+          paint: { "text-color": "#071916" },
+        });
         map.addLayer({
           id: LIVE_TRIPS_CASING_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
+          filter: ["!", ["has", "point_count"]],
           paint: {
             "circle-radius": ["case", ["boolean", ["get", "selected"], false], 18, 14],
             "circle-color": "rgba(0,0,0,0)",
@@ -71,6 +103,7 @@ export function useOperationsMapLayers(
           id: LIVE_TRIPS_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
+          filter: ["!", ["has", "point_count"]],
           paint: {
             "circle-radius": ["case", ["boolean", ["get", "selected"], false], 18, 14],
             "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
@@ -82,11 +115,16 @@ export function useOperationsMapLayers(
           id: LIVE_TRIPS_LABEL_LAYER,
           type: "symbol",
           source: LIVE_TRIPS_SOURCE,
+          filter: ["!", ["has", "point_count"]],
           layout: {
-            "text-field": ["get", "delay_label"],
+            "text-field": ["get", "trip_label"],
             "text-font": ["Noto Sans Regular"],
             "text-size": ["case", ["boolean", ["get", "selected"], false], 12, 10],
-            "text-allow-overlap": true,
+            "text-offset": [0, 2.1],
+            "text-anchor": "top",
+            "text-allow-overlap": false,
+            "text-optional": true,
+            "symbol-sort-key": ["case", ["boolean", ["get", "selected"], false], 0, 1],
           },
           paint: {
             "text-color": "#ffffff",
@@ -103,7 +141,7 @@ export function useOperationsMapLayers(
         fittedAgencyRef.current = agencyId;
       }
     });
-  }, [agencyId, live, mapRef, selectedRoute, styleEpoch, theme]);
+  }, [agencyId, live, mapRef, selectedRoute, selectedTripId, styleEpoch, theme]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -147,4 +185,88 @@ export function useOperationsMapLayers(
       }, beforeId);
     });
   }, [mapRef, selectedDelaySec, selectedRoute, shape, styleEpoch, theme]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const located = progress?.stops.filter((stop) => stop.stop_lon != null && stop.stop_lat != null) ?? [];
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = located.map((stop, index) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [stop.stop_lon!, stop.stop_lat!] },
+      properties: {
+        stop_sequence: stop.stop_sequence,
+        stop_name: stop.stop_name ?? `#${stop.stop_sequence}`,
+        delay_sec: stop.dep_delay,
+        delay_label: delayLabel(stop.dep_delay),
+        latest: index === located.length - 1,
+      },
+    }));
+    const line: GeoJSON.Feature<GeoJSON.LineString> | null = features.length >= 2 ? {
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: features.map((feature) => feature.geometry.coordinates) },
+    } : null;
+    const collection: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [...(line ? [line] : []), ...features] };
+
+    return whenStyleReady(map, () => {
+      const existing = map.getSource(TRIP_PROGRESS_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (existing) {
+        existing.setData(collection);
+        return;
+      }
+      map.addSource(TRIP_PROGRESS_SOURCE, { type: "geojson", data: collection });
+      const beforeId = map.getLayer(LIVE_TRIPS_CASING_LAYER) ? LIVE_TRIPS_CASING_LAYER : undefined;
+      map.addLayer({
+        id: TRIP_PROGRESS_LINE_LAYER,
+        type: "line",
+        source: TRIP_PROGRESS_SOURCE,
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#2bc5aa", "line-width": 6, "line-opacity": 0.9 },
+      }, beforeId);
+      map.addLayer({
+        id: TRIP_PROGRESS_DIRECTION_LAYER,
+        type: "symbol",
+        source: TRIP_PROGRESS_SOURCE,
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: {
+          "symbol-placement": "line",
+          "symbol-spacing": 80,
+          "text-field": "›",
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 18,
+          "text-keep-upright": false,
+          "text-rotation-alignment": "map",
+        },
+        paint: { "text-color": "#071916", "text-halo-color": "#dffbf5", "text-halo-width": 1 },
+      }, beforeId);
+      map.addLayer({
+        id: TRIP_PROGRESS_STOPS_LAYER,
+        type: "circle",
+        source: TRIP_PROGRESS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
+          "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
+        },
+      }, beforeId);
+      map.addLayer({
+        id: TRIP_PROGRESS_LABELS_LAYER,
+        type: "symbol",
+        source: TRIP_PROGRESS_SOURCE,
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": ["concat", ["get", "stop_name"], "  ", ["get", "delay_label"]],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "text-offset": [0, 1.5],
+          "text-anchor": "top",
+          "text-optional": true,
+        },
+        paint: { "text-color": "#f8fbff", "text-halo-color": "rgba(12,18,31,.9)", "text-halo-width": 2 },
+      });
+    });
+  }, [mapRef, progress, styleEpoch, theme]);
 }

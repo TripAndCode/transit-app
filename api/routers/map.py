@@ -193,7 +193,8 @@ async def live_delays(
                        COALESCE(rt_stop.stop_name, scheduled_stop.stop_name) AS stop_name,
                        COALESCE(rt_stop.stop_lat, scheduled_stop.stop_lat) AS stop_lat,
                        COALESCE(rt_stop.stop_lon, scheduled_stop.stop_lon) AS stop_lon,
-                       st.trip_headsign
+                       st.trip_headsign,
+                       st.direction_id
                 FROM live
                 LEFT JOIN static_stop_times sst
                   ON sst.agency_id = $1
@@ -228,9 +229,135 @@ async def live_delays(
         row["stop_lat"] = metadata.get("stop_lat")
         row["stop_lon"] = metadata.get("stop_lon")
         row["headsign"] = metadata.get("trip_headsign")
+        row["direction_id"] = metadata.get("direction_id")
     return {
         "latest_captured_at": latest_ts.isoformat(),
         "rows": out_rows,
+    }
+
+
+@router.get("/delays/live-progress")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def live_trip_progress(
+    request: Request,
+    trip_id: str = Query(min_length=1, max_length=300),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ch=Depends(get_ch),
+):
+    """Reported progress for one trip that is present in the live window.
+
+    GTFS-RT TripUpdates commonly contain several upcoming stops. For each
+    source snapshot we therefore retain only its lowest stop_sequence — the
+    same nearest-reported-stop rule used by ``/delays/live`` — then keep the
+    newest report for each sequence. This is a report trail, not a GPS trace
+    or proof that the vehicle physically crossed the stop.
+    """
+    latest_ts = await max_captured_at(ch, agency_id)
+    empty: dict[str, Any] = {
+        "trip_id": trip_id,
+        "route_code": None,
+        "headsign": None,
+        "direction_id": None,
+        "latest_captured_at": latest_ts.isoformat() if latest_ts else None,
+        "stops": [],
+    }
+    if latest_ts is None:
+        return empty
+
+    # Restrict this endpoint to trips in the same five-minute live window as
+    # /delays/live. Besides matching the UI contract, this prevents arbitrary
+    # trip IDs from triggering a wider history scan.
+    active_result = await ch.query(
+        "SELECT argMax(route_code, (captured_at, file_name)) AS route_code "
+        "FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
+        "AND dep_delay IS NOT NULL AND captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE",
+        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+    )
+    if not active_result.result_rows or not active_result.result_rows[0][0]:
+        return empty
+    route_code = active_result.result_rows[0][0]
+
+    progress_result = await ch.query(
+        """
+        SELECT captured_at, file_name, winner.1 AS stop_sequence, winner.2 AS stop_id,
+               winner.3 AS scheduled_time, winner.4 AS dep_delay
+        FROM (
+            SELECT captured_at, file_name,
+                   argMin(
+                       tuple(stop_sequence, stop_id, scheduled_time, dep_delay),
+                       toInt32(stop_sequence)
+                   ) AS winner
+            FROM updates
+            WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String}
+              AND dep_delay IS NOT NULL
+              AND captured_at >= {latest_ts:DateTime64} - INTERVAL 6 HOUR
+            GROUP BY captured_at, file_name
+        ) AS snapshots
+        ORDER BY captured_at, file_name
+        """,
+        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+    )
+
+    # A vehicle can remain at the same nearest reported stop for several
+    # polls. Keep its latest report so the timeline stays compact.
+    by_sequence: dict[int, dict] = {}
+    for captured_at, _file_name, stop_sequence, stop_id, scheduled_time, dep_delay in progress_result.result_rows:
+        reported_at = _as_utc(captured_at)
+        if reported_at is None:
+            continue
+        by_sequence[stop_sequence] = {
+            "stop_sequence": stop_sequence,
+            "stop_id": stop_id or None,
+            "scheduled_time": f"{scheduled_time}:00" if scheduled_time and len(scheduled_time) < 8 else scheduled_time,
+            "dep_delay": dep_delay,
+            "reported_at": reported_at.isoformat(),
+        }
+
+    metadata = await conn.fetchrow(
+        "SELECT trip_headsign, direction_id FROM static_trips WHERE agency_id=$1 AND trip_id=$2",
+        agency_id,
+        trip_id,
+    )
+    static_rows = (
+        await conn.fetch(
+            """
+        SELECT sst.stop_sequence, ss.stop_id, ss.stop_name,
+               ss.stop_lat, ss.stop_lon
+        FROM static_stop_times sst
+        LEFT JOIN static_stops ss
+          ON ss.agency_id=sst.agency_id AND ss.stop_id=sst.stop_id
+        WHERE sst.agency_id=$1 AND sst.trip_id=$2
+          AND sst.stop_sequence = ANY($3::integer[])
+        """,
+            agency_id,
+            trip_id,
+            list(by_sequence),
+        )
+        if by_sequence
+        else []
+    )
+    static_by_sequence = {row["stop_sequence"]: row for row in static_rows}
+    stops = []
+    for sequence in sorted(by_sequence):
+        stop = by_sequence[sequence]
+        static = static_by_sequence.get(sequence)
+        if static:
+            stop["stop_id"] = stop["stop_id"] or static["stop_id"]
+            stop["stop_name"] = static["stop_name"]
+            stop["stop_lat"] = float(static["stop_lat"]) if static["stop_lat"] is not None else None
+            stop["stop_lon"] = float(static["stop_lon"]) if static["stop_lon"] is not None else None
+        else:
+            stop.update({"stop_name": None, "stop_lat": None, "stop_lon": None})
+        stops.append(stop)
+
+    return {
+        "trip_id": trip_id,
+        "route_code": route_code,
+        "headsign": metadata["trip_headsign"] if metadata else None,
+        "direction_id": metadata["direction_id"] if metadata else None,
+        "latest_captured_at": latest_ts.isoformat(),
+        "stops": stops,
     }
 
 

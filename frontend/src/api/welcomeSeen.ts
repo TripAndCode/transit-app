@@ -4,7 +4,7 @@ const KEY = "transit.welcomeSeen";
  *  an unreadable flag instead of treating it as a confirmed first visit —
  *  collapsing the two would redirect the same browser to "/welcome" on every
  *  mount, forever, whenever localStorage throws. */
-export type WelcomeSeenState = "seen" | "unseen" | "unavailable";
+type WelcomeSeenState = "seen" | "unseen" | "unavailable";
 
 /** Set the moment a write is confirmed not to have landed — either
  *  `setItem` threw, or it silently no-op'd (e.g. quota already exhausted by
