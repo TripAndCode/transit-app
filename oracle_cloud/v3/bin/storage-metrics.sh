@@ -34,12 +34,15 @@
 # count/bytes in `details`; the failed one reports null rather than a stale
 # number from a previous run.
 #
-# Each prefix is listed via `aws s3api list-objects-v2 --no-paginate`,
-# followed page by page with our own `--starting-token` loop (rather than
-# letting the CLI's own default auto-pagination hide every page but the
-# first behind a single call) -- explicit pagination is what lets one bad
-# page fail the listing without silently under-reporting a partial total as
-# though it were complete.
+# Each prefix is listed with a single `aws s3 ls --recursive` call, mirroring
+# spool-cleanup.sh's own `r2_list()` -- the high-level `s3 ls` subcommand
+# paginates internally with no manual NextToken bookkeeping needed (unlike
+# `s3api list-objects-v2`, whose own manual pagination can't be combined with
+# `--no-paginate` at all). Object count and byte total are derived by summing
+# over the `<date> <time> <size> <key>` lines the listing prints; a nonzero
+# exit from that one call is the only failure mode left to handle, so it
+# alone marks the prefix as failed rather than silently reporting nothing or
+# a partial total as though it were complete.
 set -uo pipefail
 
 BASE_DIR="${COLLECTOR_BASE:-/home/opc/collector}"
@@ -56,12 +59,8 @@ DISK_CRIT_PCT="${DISK_CRIT_PCT-90}"
 # is known.
 R2_BYTES_WARN_THRESHOLD="${R2_BYTES_WARN_THRESHOLD-53687091200}"   # 50 GiB
 R2_BYTES_CRIT_THRESHOLD="${R2_BYTES_CRIT_THRESHOLD-107374182400}"  # 100 GiB
-# Hard cap on pages followed per prefix -- a defensive bound against a
-# misbehaving/faked NextToken looping forever, not a real-world limit (at
-# 1000 objects/page this is 10M objects per prefix).
-STORAGE_METRICS_MAX_PAGES="${STORAGE_METRICS_MAX_PAGES-10000}"
 
-for var in DISK_WARN_PCT DISK_CRIT_PCT R2_BYTES_WARN_THRESHOLD R2_BYTES_CRIT_THRESHOLD STORAGE_METRICS_MAX_PAGES; do
+for var in DISK_WARN_PCT DISK_CRIT_PCT R2_BYTES_WARN_THRESHOLD R2_BYTES_CRIT_THRESHOLD; do
     value="${!var}"
     case "$value" in
         ''|*[!0-9]*)
@@ -155,54 +154,34 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 
     # r2_list_prefix <prefix> -- prints "<count>\t<bytes>" and returns 0 on a
-    # complete listing (every page followed to its end); returns 1 the moment
-    # any single page's `aws` call fails, WITHOUT printing a partial total --
-    # a partial count silently reported as though it were the true total
-    # would understate real R2 usage exactly when something has already gone
-    # wrong.
+    # successful listing; returns 1 (printing nothing) if `aws s3 ls` itself
+    # exits nonzero, leaving the caller's captured stderr as the only
+    # diagnostic. `aws s3 ls --recursive` paginates the whole prefix
+    # internally, so one call always sees the complete listing or fails
+    # outright -- there is no partial-page case to guard against here.
     r2_list_prefix() {
-        local prefix="$1" token="" pages=0 count=0 bytes=0
-        local line rc next page_count page_bytes
-        while :; do
-            pages=$((pages + 1))
-            if [ "$pages" -gt "$STORAGE_METRICS_MAX_PAGES" ]; then
-                echo "storage-metrics: prefix '$prefix' exceeded $STORAGE_METRICS_MAX_PAGES pages -- treating as a failed listing rather than looping forever" >&2
-                return 1
-            fi
-            if [ -n "$token" ]; then
-                line=$("$AWS" s3api list-objects-v2 --no-paginate \
-                    --bucket "$OBJECT_STORE_BUCKET" --prefix "$prefix" \
-                    --endpoint-url "$OBJECT_STORE_ENDPOINT" --starting-token "$token" \
-                    --query '[NextToken, length(Contents[] || `[]`), sum(Contents[].Size || `[]`)]' \
-                    --output text 2>/dev/null)
-                rc=$?
-            else
-                line=$("$AWS" s3api list-objects-v2 --no-paginate \
-                    --bucket "$OBJECT_STORE_BUCKET" --prefix "$prefix" \
-                    --endpoint-url "$OBJECT_STORE_ENDPOINT" \
-                    --query '[NextToken, length(Contents[] || `[]`), sum(Contents[].Size || `[]`)]' \
-                    --output text 2>/dev/null)
-                rc=$?
-            fi
-            [ "$rc" -eq 0 ] || return 1
-
-            IFS=$'\t' read -r next page_count page_bytes <<< "$line"
-            case "$page_count" in
-                None|'') page_count=0 ;;
-                *[!0-9]*) return 1 ;;
+        local prefix="$1" listing count=0 bytes=0 size rc stdout_file
+        stdout_file=$(mktemp) || { printf 'mktemp failed'; return 1; }
+        # Swap fds so `listing` captures stderr while the actual object
+        # listing lands in stdout_file -- lets a failure report the real
+        # `aws` error text instead of discarding it.
+        listing=$("$AWS" s3 ls --recursive --endpoint-url "$OBJECT_STORE_ENDPOINT" \
+            "s3://$OBJECT_STORE_BUCKET/$prefix" 2>&1 >"$stdout_file")
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            rm -f "$stdout_file"
+            printf '%s' "$listing"
+            return 1
+        fi
+        while read -r _date _time size _key; do
+            [ -n "${size:-}" ] || continue
+            case "$size" in
+                *[!0-9]*) continue ;;
             esac
-            case "$page_bytes" in
-                None|'') page_bytes=0 ;;
-                *[!0-9]*) return 1 ;;
-            esac
-            count=$(( count + 10#$page_count ))
-            bytes=$(( bytes + 10#$page_bytes ))
-
-            if [ "$next" = "None" ] || [ -z "$next" ]; then
-                break
-            fi
-            token="$next"
-        done
+            count=$((count + 1))
+            bytes=$(( bytes + 10#$size ))
+        done < "$stdout_file"
+        rm -f "$stdout_file"
         printf '%s\t%s\n' "$count" "$bytes"
     }
 
@@ -230,8 +209,8 @@ if [ -n "${OBJECT_STORE_ENDPOINT:-}" ] && [ -n "${OBJECT_STORE_BUCKET:-}" ] \
     else
         r2_listing_result=fail
         r2_state=failed
-        [ "$rt_ok" -eq 0 ] || echo "storage-metrics: listing rt/ failed" >&2
-        [ "$static_ok" -eq 0 ] || echo "storage-metrics: listing static/ failed" >&2
+        [ "$rt_ok" -eq 0 ] || echo "storage-metrics: listing rt/ failed: $(printf '%s' "$rt_result" | tail -c 500)" >&2
+        [ "$static_ok" -eq 0 ] || echo "storage-metrics: listing static/ failed: $(printf '%s' "$static_result" | tail -c 500)" >&2
         if [ -f "$SUCCESS_MARKER" ]; then
             marker_ts=$(cat "$SUCCESS_MARKER" 2>/dev/null || true)
             r2_epoch=$(date -u -d "$marker_ts" +%s 2>/dev/null \

@@ -214,13 +214,16 @@ this DOES need `OBJECT_STORE_*` credentials of its own — nothing else in
 them unset is a supported configuration (`r2_state` reports
 `not_applicable` rather than dragging the document down), so a VM that
 hasn't been given R2 credentials yet still runs this job without error. Each
-prefix is listed independently via `aws s3api list-objects-v2 --no-paginate`
-with the script following `NextToken` itself page by page: a listing failure
-on one prefix (or a page that errors mid-listing) reports `r2_state=failed`
-with that prefix's numbers null, without hiding behind the other prefix's
-success. `.storage-metrics.last-success` records the last time both prefixes
-listed successfully, so a failed run still reports the last genuine
-success's timestamp rather than either fabricating a fresh one or losing it.
+prefix is listed with a single `aws s3 ls --recursive` call (mirroring
+`spool-cleanup.sh`'s own `r2_list()`), which paginates the whole prefix
+internally with no manual `NextToken` bookkeeping; object count and byte
+total come from summing that listing's own `<date> <time> <size> <key>`
+lines. A listing failure on one prefix reports `r2_state=failed` with that
+prefix's numbers null (its captured stderr logged alongside), without hiding
+behind the other prefix's success. `.storage-metrics.last-success` records
+the last time both prefixes listed successfully, so a failed run still
+reports the last genuine success's timestamp rather than either fabricating
+a fresh one or losing it.
 
 The same `bin/publish-status.sh` used for the oracle_crawler heartbeat above
 sends this document to GitHub too — pointed at `storage-metrics.sh`'s own
