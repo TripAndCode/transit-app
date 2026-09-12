@@ -2,10 +2,37 @@
 
 Pre-authentication marketing/landing page rendered outside `<App />` (no
 Header, sidebar, or guest-prompt strip — see `frontend/src/main.tsx`). It
-exists purely to make a first impression before login; it is not on the
-path any signed-in or guest user actually needs to pass through, since the
-root route (`/`, `frontend/src/components/OnboardingGate.tsx`) already
-renders the real dashboard with no auth guard.
+exists to make a first impression before login. A signed-in visitor, or an
+anonymous visitor who has already passed through it once, is never routed
+here and can reach the root route (`/`,
+`frontend/src/components/OnboardingGate.tsx`) directly, which renders the
+real dashboard with no auth guard — but a genuinely first-time anonymous
+visitor is redirected here from `/` (see "First-time redirect from `/`"
+below), so this page is the first thing a new anonymous visitor actually
+sees.
+
+## First-time redirect from `/`
+
+`OnboardingGate` (`frontend/src/components/OnboardingGate.tsx`) gates every
+visit to `/` on a dedicated localStorage flag,
+`frontend/src/api/welcomeSeen.ts` (`readWelcomeSeen`/`writeWelcomeSeen`,
+key `transit.welcomeSeen`) — deliberately separate from
+`frontend/src/api/lastAgency.ts`'s stored agency choice, since "Continue as
+a guest" lands on `/` without ever picking an agency, so gating on
+`lastAgency` alone would loop straight back to `/welcome` on the very next
+visit.
+
+- A visitor with an active auth session (`useSession()` from
+  `frontend/src/api/auth.ts`) is never redirected, regardless of the
+  flag's state.
+- An anonymous visitor with the flag unset is redirected to `/welcome`
+  instead of ever seeing the dashboard or the multi-agency picker overlay.
+- The flag is set unconditionally the moment `OnboardingGate` mounts —
+  whichever branch that particular render takes (the redirect to
+  `/welcome`, the dashboard, or the picker) — so a browser is only ever
+  sent to `/welcome` once. This covers every path that reaches `/`: the
+  welcome page's own "Continue as a guest" link, a `/login` success
+  redirect, and a direct deep link straight to `/`.
 
 ## Two entry paths, one real destination
 
@@ -123,7 +150,8 @@ duplicating that flow here.
 | `frontend/src/pages/landing/CityMapHero.tsx` | Animated background scene behind the hero text |
 | `frontend/src/pages/landing/DashboardPreview.tsx` | Auto-advancing mock dashboard shell below the hero |
 | `frontend/src/pages/landing/previewData.ts` | Static fixture data consumed by every preview panel |
-| `frontend/src/components/OnboardingGate.tsx` | What `/` actually renders — the real, guest-accessible dashboard entry |
+| `frontend/src/components/OnboardingGate.tsx` | What `/` actually renders — the real, guest-accessible dashboard entry; redirects a genuinely first-time anonymous visitor to `/welcome` |
+| `frontend/src/api/welcomeSeen.ts` | localStorage-backed "has this browser passed the welcome step" flag consulted by `OnboardingGate` |
 | `frontend/src/components/GuestPrompt.tsx` | Persistent, dismissible guest-login nudge shown inside the real app shell |
 | `api/middleware/ratelimit.py` | `FREE_LIMIT`/`PRO_LIMIT` generic tiers; anonymous Ask daily quota (`ask_anon_daily_limit`, `check_and_consume_anon_quota`) |
 | `frontend/src/api/conversationsAnon.ts` | localStorage-backed anon Ask conversation store |
@@ -150,3 +178,10 @@ rather than a `landing`-scoped one.
    visible as a dismissible banner rather than a hard gate.
 5. Automated coverage: `frontend/src/pages/LandingPage.test.tsx` asserts
    both links and their `href`s independently.
+6. First-time redirect: clear the browser's localStorage (or open a private
+   window), log out if signed in, then navigate straight to `/` — expect an
+   immediate redirect to `/welcome`. Click "Continue as a guest" and confirm
+   it lands on the dashboard; navigate to `/` again in the same
+   browser/tab and confirm it no longer redirects. Automated coverage:
+   `frontend/src/components/OnboardingGate.test.tsx`'s "welcome redirect"
+   suite.
