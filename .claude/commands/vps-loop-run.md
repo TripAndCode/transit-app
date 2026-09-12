@@ -407,20 +407,27 @@ Walk items top to bottom:
   attempt):** do NOT resume at 6.5 on the strength of that stale statement —
   but this is not automatically an ambiguous, skip-forever case either.
   Confirm the worktree still exists (`git worktree list`): if it does, this is
-  resumable the same way Step 3b resumes a leftover branch with real,
-  unreviewed commits — follow Step 3b's "Log non-empty — real commits exist" /
-  "Worktree exists" procedure verbatim for this PR (run Step 5's full review
-  fresh against the branch's *current* diff, not the stale closing statement;
-  fix-and-reverify capped at 2 iterations on a Major; proceed to Step 6 once
-  clean). Without this, an item stuck in exactly this shape would sit open
-  indefinitely: every future tick reads the same stale closing statement,
-  finds the same uncovered later commit, and skips it again, forever, because
-  nothing else in this file ever re-reviews just the new delta and resumes
-  it. If the worktree is gone instead, this is not safely resumable from here
-  either — same stop as the log-empty case above: log `- <UTC timestamp>:
-  item N's PR #<number> is OPEN with an unreviewed commit after its
-  refactor-log closing statement, but its worktree no longer exists — needs a
-  human to reattach one before this can be resumed.
+  resumable. Unlike Step 3b's own "real commits exist, worktree exists" case
+  (which has no PR yet, so its "run Step 6 as written" instruction correctly
+  starts at 6.3's `gh pr create`), this PR already exists — `gh pr create`
+  would simply fail against an existing head branch. So: run Step 5's full
+  review fresh against the branch's *current* diff (not the stale closing
+  statement), with the same fix-and-reverify cycle capped at 2 iterations on
+  a Major that Step 3b's procedure uses. Once clean, resume the same way the
+  log-empty case above does — skip 6.1–6.4 (the PR and its real number
+  already exist) and go straight to **Step 6.5**, reconstructing
+  `MAIN_SHA_AT_REVIEW` as `git -C <worktree-path> merge-base origin/main
+  vps-loop/item-<N>` from the branch's state right after this fresh review,
+  the same reconstruction the log-empty case uses. Without this, an item
+  stuck in exactly this shape would sit open indefinitely: every future tick
+  reads the same stale closing statement, finds the same uncovered later
+  commit, and skips it again, forever, because nothing else in this file
+  ever re-reviews just the new delta and resumes it. If the worktree is gone
+  instead, this is not safely resumable from here either — same stop as the
+  log-empty case above: log `- <UTC timestamp>: item N's PR #<number> is
+  OPEN with an unreviewed commit after its refactor-log closing statement,
+  but its worktree no longer exists — needs a human to reattach one before
+  this can be resumed.
   **Blocker-tag:** branch-without-worktree` and stop this tick.
 
   If the refactor-log entry does NOT show the review pass clean at all
