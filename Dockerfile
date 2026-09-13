@@ -20,8 +20,22 @@ WORKDIR /app
 RUN pip install --no-cache-dir poetry==1.8.5
 
 COPY pyproject.toml poetry.lock ./
+# sentence-transformers' unpinned transitive `torch` dependency resolves to
+# PyPI's default Linux wheel, which bundles the full CUDA runtime the
+# embedder never uses here (see pipeline/query/embeddings.py — CPU only).
+# Swapping it for the PyTorch project's own CPU-only build cuts several GB
+# off the image. This must stay in the same RUN as `poetry install` — a
+# separate later layer would still carry the already-committed GPU wheel's
+# bytes even after reinstalling over it, since Docker layers are additive.
+# Not done via pyproject.toml/poetry.lock: Poetry 1.8's per-platform `source`
+# selection for a single dependency doesn't reliably carry its marker into
+# the lock file, so local (non-Linux) installs failed outright — this stays
+# Linux/Docker-only instead, where no such cross-platform ambiguity exists.
 RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-root --no-interaction
+    && poetry install --only main --no-root --no-interaction \
+    && pip install --no-cache-dir --force-reinstall \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch==$(python -c 'import torch; print(torch.__version__.split("+")[0])')"
 
 # Bake the Ask-tab embedder into the image. Without this the container downloads
 # the model (~hundreds of MB) from HuggingFace on every cold start — a ~50s boot
