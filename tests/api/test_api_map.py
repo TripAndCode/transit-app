@@ -311,6 +311,68 @@ async def test_stops_list_empty(map_client):
 
 
 @pytest.mark.asyncio
+async def test_routes_list_exposes_every_documented_field(map_app):
+    """A response model silently drops any field it does not name, so the
+    catalogue's exact shape needs pinning rather than just its type."""
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
+            "VALUES ($1, '国道・古川線(1021)', '1021', '国道・古川線')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id, trip_headsign) "
+            "VALUES ($1, 'T1', '国道・古川線(1021)', 'S', '古川行')",
+            agency_id,
+        )
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/routes")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "route_id": "国道・古川線(1021)",
+            "route_short_name": "1021",
+            "route_long_name": "国道・古川線",
+            # Extracted from the parenthesised tail of route_id.
+            "route_code": "1021",
+            "trip_headsigns": ["古川行"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stops_list_exposes_every_documented_field(map_app):
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon) "
+            "VALUES ($1, 'S1', '駅前', 40.5, 140.5)",
+            agency_id,
+        )
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/stops")
+    assert resp.status_code == 200
+    assert resp.json() == [{"stop_id": "S1", "stop_name": "駅前", "stop_lat": 40.5, "stop_lon": 140.5}]
+
+
+@pytest.mark.asyncio
+async def test_stops_list_tolerates_a_stop_with_no_name_or_position(map_app):
+    """GTFS makes stop_name and the coordinates optional, so the model must not
+    reject a sparse row with a 500."""
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await conn.execute("INSERT INTO static_stops (agency_id, stop_id) VALUES ($1, 'S2')", agency_id)
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/stops")
+    assert resp.status_code == 200
+    assert resp.json() == [{"stop_id": "S2", "stop_name": None, "stop_lat": None, "stop_lon": None}]
+
+
+@pytest.mark.asyncio
 async def test_heatmap_route_filter_from_aggregate(map_app):
     """Route-filtered heatmap reads agg_route_stop_daily (not raw updates): one dot
     per stop with the route's avg delay; the route_codes label comes from the agg."""
