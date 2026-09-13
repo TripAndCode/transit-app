@@ -40,6 +40,22 @@ describe("AsyncSection", () => {
     expect(screen.queryByText("nothing here")).not.toBeInTheDocument();
   });
 
+  it("shows the skeleton over already-fetched data during a refetch", () => {
+    // isFetching-fed loading must replace stale data with the skeleton, not
+    // just fill an otherwise-empty slot — that's the entire reason `loading`
+    // is a plain boolean instead of being derived from `data === undefined`.
+    renderSection({ loading: true });
+    expect(screen.getByTestId("skel")).toBeInTheDocument();
+    expect(screen.queryByText(/^rows:/)).not.toBeInTheDocument();
+  });
+
+  it("renders nothing when not loading, not errored, and data is undefined", () => {
+    renderSection({ data: undefined });
+    expect(screen.queryByTestId("skel")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^rows:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("nothing here")).not.toBeInTheDocument();
+  });
+
   it("renders the empty node instead of children when the data has no content", () => {
     renderSection({ data: [], hasContent: (rows) => rows.length > 0 });
     expect(screen.getByText("nothing here")).toBeInTheDocument();
