@@ -77,13 +77,17 @@ def _ingest_live_agency(agency_id: int) -> int:
         collector_data_dir = os.environ.get("COLLECTOR_DATA_DIR")
         if oracle_host and oracle_key and collector_data_dir and pathlib.Path(oracle_key).is_file():
             remote_dir = f"{collector_data_dir.rstrip('/')}/{agency_id}/rt"
-            find_cmd = (
-                f"find {remote_dir!r} -type f -name 'TripUpdate_*.pb' "
-                "-printf '%T@ %p\\n' | sort -nr | head -1"
-            )
+            find_cmd = f"find {remote_dir!r} -type f -name 'TripUpdate_*.pb' -printf '%T@ %p\\n' | sort -nr | head -1"
             ssh_opts = [
-                "-4", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                "-o", "StrictHostKeyChecking=no", "-i", oracle_key,
+                "-4",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-i",
+                oracle_key,
             ]
             latest_record = subprocess.run(
                 ["ssh", *ssh_opts, f"{oracle_user}@{oracle_host}", find_cmd],
