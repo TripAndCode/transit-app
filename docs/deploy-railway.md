@@ -72,7 +72,14 @@ exists when you wire the app.
    POSTGRES_USER=transit
    POSTGRES_PASSWORD=<openssl rand -hex 24>
    POSTGRES_DB=transit
+   PGDATA=/var/lib/postgresql/data/pgdata
    ```
+   `PGDATA` must be a subdirectory of the volume mount below, not the mount
+   path itself: Railway's block-storage volumes arrive pre-populated with a
+   `lost+found` directory, and `initdb` refuses to treat a non-empty
+   directory as fresh — every first boot crash-loops on `initdb: error:
+   directory "/var/lib/postgresql/data" exists but is not empty` without
+   this.
 6. `db` → **Settings → Volumes → + Volume**, mount path:
    ```
    /var/lib/postgresql/data
