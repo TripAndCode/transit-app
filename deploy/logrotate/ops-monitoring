@@ -1,0 +1,23 @@
+# Log rotation for ops-status.service and ops-alerts.service.
+#
+# Install (on the VPS):
+#   sudo cp deploy/logrotate/ops-monitoring /etc/logrotate.d/ops-monitoring
+#   sudo logrotate -d /etc/logrotate.d/ops-monitoring   # dry run, verify no errors
+#
+# `copytruncate` (not the default rename+reopen) is required here: both units
+# write via a plain systemd `StandardOutput=append:`/`StandardError=append:`
+# redirect, not by opening the log file themselves, so nothing in either
+# process ever reopens the path after a rename -- an ordinary rotation would
+# leave both services writing forever into a now-unlinked, ever-growing inode
+# that `du`/`df` on this box would never see freed. `copytruncate` avoids that
+# by copying the current contents out, then truncating the original file in
+# place, so the already-open file descriptor keeps writing to the same inode.
+/var/log/ops-status.log /var/log/ops-alerts.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

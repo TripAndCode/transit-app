@@ -90,6 +90,27 @@ export type LiveTrip = {
   stop_lat: number | null;
   stop_lon: number | null;
   headsign: string | null;
+  direction_id?: number | null;
+};
+
+export type LiveTripProgressStop = {
+  stop_sequence: number;
+  stop_id: string | null;
+  stop_name: string | null;
+  stop_lat: number | null;
+  stop_lon: number | null;
+  scheduled_time: string | null;
+  dep_delay: number;
+  reported_at: string;
+};
+
+export type LiveTripProgressResponse = {
+  trip_id: string;
+  route_code: string | null;
+  headsign: string | null;
+  direction_id: number | null;
+  latest_captured_at: string | null;
+  stops: LiveTripProgressStop[];
 };
 
 export type LiveTripsResponse = {

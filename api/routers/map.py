@@ -17,24 +17,115 @@ so the displayed colors match what compute_ranking et al. show under
 the same filter.
 """
 
+import asyncio
 import logging
+import os
+import pathlib
+import re
+import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, get_range_ctx
+from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
+
+
+def _ingest_live_agency(agency_id: int) -> int:
+    """Fetch one agency's current GTFS-RT data and write it to ClickHouse.
+
+    This runs in a worker thread because both the feed fetch and the pipeline
+    clients are synchronous. The Postgres advisory lock prevents a manual
+    refresh from racing the scheduled ingest/analyze job. Local development
+    prefers the Oracle collector's newest loose protobuf; environments without
+    the local-dev SSH transport fall back to the agency's live feed URL.
+    """
+    import psycopg2
+
+    from pipeline.clickhouse import get_client
+    from pipeline.ingest import ingest, ingest_live
+    from pipeline.locks import try_lock_ingest_analyze
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    conn = None
+    ch_client = None
+    try:
+        conn = psycopg2.connect(db_url)
+        if not try_lock_ingest_analyze(conn):
+            raise HTTPException(status_code=409, detail="A data refresh is already in progress")
+        ch_client = get_client()
+        oracle_host = os.environ.get("ORACLE_HOST")
+        oracle_user = os.environ.get("ORACLE_USER", "opc")
+        oracle_key = os.environ.get("ORACLE_SSH_KEY_PATH")
+        collector_data_dir = os.environ.get("COLLECTOR_DATA_DIR")
+        if oracle_host and oracle_key and collector_data_dir and pathlib.Path(oracle_key).is_file():
+            remote_dir = f"{collector_data_dir.rstrip('/')}/{agency_id}/rt"
+            find_cmd = f"find {remote_dir!r} -type f -name 'TripUpdate_*.pb' -printf '%T@ %p\\n' | sort -nr | head -1"
+            ssh_opts = [
+                "-4",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-i",
+                oracle_key,
+            ]
+            latest_record = subprocess.run(
+                ["ssh", *ssh_opts, f"{oracle_user}@{oracle_host}", find_cmd],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            ).stdout.strip()
+            try:
+                mtime_text, latest = latest_record.split(" ", 1)
+                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(ZoneInfo("Asia/Tokyo"))
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise RuntimeError("Oracle collector returned an invalid live-file timestamp") from exc
+            match = re.fullmatch(r".*/(\d{8})/(TripUpdate_\d{6}\.pb)", latest)
+            if not match:
+                raise RuntimeError(f"Oracle collector has no usable live file for agency {agency_id}")
+            raw = subprocess.run(
+                ["ssh", *ssh_opts, f"{oracle_user}@{oracle_host}", "cat", "--", latest],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            ).stdout
+            with tempfile.TemporaryDirectory(prefix="transit-live-") as temp_dir:
+                # Oracle's rt-poller names files with UTC (`date -u`), while
+                # the archive ingest convention treats names as JST. Rename
+                # the temporary copy into the equivalent JST path so
+                # pipeline.ingest writes the actual UTC instant to CH.
+                live_dir = pathlib.Path(temp_dir) / captured_at.strftime("%Y%m%d")
+                live_dir.mkdir()
+                live_file = live_dir / f"TripUpdate_{captured_at.strftime('%H%M%S')}.pb"
+                live_file.write_bytes(raw)
+                return ingest(temp_dir, agency_id, conn, ch_client)
+        return ingest_live(agency_id, conn, ch_client)
+    finally:
+        if conn is not None:
+            conn.close()
+        if ch_client is not None:
+            ch_client.close()
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -166,7 +257,8 @@ async def live_delays(
                        COALESCE(rt_stop.stop_name, scheduled_stop.stop_name) AS stop_name,
                        COALESCE(rt_stop.stop_lat, scheduled_stop.stop_lat) AS stop_lat,
                        COALESCE(rt_stop.stop_lon, scheduled_stop.stop_lon) AS stop_lon,
-                       st.trip_headsign
+                       st.trip_headsign,
+                       st.direction_id
                 FROM live
                 LEFT JOIN static_stop_times sst
                   ON sst.agency_id = $1
@@ -201,9 +293,153 @@ async def live_delays(
         row["stop_lat"] = metadata.get("stop_lat")
         row["stop_lon"] = metadata.get("stop_lon")
         row["headsign"] = metadata.get("trip_headsign")
+        row["direction_id"] = metadata.get("direction_id")
     return {
         "latest_captured_at": latest_ts.isoformat(),
         "rows": out_rows,
+    }
+
+
+@router.post("/delays/refresh")
+@limiter.limit("5/minute")
+async def refresh_live_delays(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+):
+    """Fetch the agency's current GTFS-RT feed and persist it before reading."""
+    csrf_guard(request)
+    try:
+        inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("manual live refresh failed for agency %s", agency_id)
+        raise HTTPException(status_code=502, detail="Live feed refresh failed") from exc
+    return {"status": "updated", "inserted": inserted}
+
+
+@router.get("/delays/live-progress")
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def live_trip_progress(
+    request: Request,
+    trip_id: str = Query(min_length=1, max_length=300),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ch=Depends(get_ch),
+):
+    """Reported progress for one trip that is present in the live window.
+
+    GTFS-RT TripUpdates commonly contain several upcoming stops. For each
+    source snapshot we therefore retain only its lowest stop_sequence — the
+    same nearest-reported-stop rule used by ``/delays/live`` — then keep the
+    newest report for each sequence. This is a report trail, not a GPS trace
+    or proof that the vehicle physically crossed the stop.
+    """
+    latest_ts = await max_captured_at(ch, agency_id)
+    empty: dict[str, Any] = {
+        "trip_id": trip_id,
+        "route_code": None,
+        "headsign": None,
+        "direction_id": None,
+        "latest_captured_at": latest_ts.isoformat() if latest_ts else None,
+        "stops": [],
+    }
+    if latest_ts is None:
+        return empty
+
+    # Restrict this endpoint to trips in the same five-minute live window as
+    # /delays/live. Besides matching the UI contract, this prevents arbitrary
+    # trip IDs from triggering a wider history scan.
+    active_result = await ch.query(
+        "SELECT argMax(route_code, (captured_at, file_name)) AS route_code "
+        "FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
+        "AND dep_delay IS NOT NULL AND captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE",
+        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+    )
+    if not active_result.result_rows or not active_result.result_rows[0][0]:
+        return empty
+    route_code = active_result.result_rows[0][0]
+
+    progress_result = await ch.query(
+        """
+        SELECT captured_at, file_name, winner.1 AS stop_sequence, winner.2 AS stop_id,
+               winner.3 AS scheduled_time, winner.4 AS dep_delay
+        FROM (
+            SELECT captured_at, file_name,
+                   argMin(
+                       tuple(stop_sequence, stop_id, scheduled_time, dep_delay),
+                       toInt32(stop_sequence)
+                   ) AS winner
+            FROM updates
+            WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String}
+              AND dep_delay IS NOT NULL
+              AND captured_at >= {latest_ts:DateTime64} - INTERVAL 6 HOUR
+            GROUP BY captured_at, file_name
+        ) AS snapshots
+        ORDER BY captured_at, file_name
+        """,
+        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+    )
+
+    # A vehicle can remain at the same nearest reported stop for several
+    # polls. Keep its latest report so the timeline stays compact.
+    by_sequence: dict[int, dict] = {}
+    for captured_at, _file_name, stop_sequence, stop_id, scheduled_time, dep_delay in progress_result.result_rows:
+        reported_at = _as_utc(captured_at)
+        if reported_at is None:
+            continue
+        by_sequence[stop_sequence] = {
+            "stop_sequence": stop_sequence,
+            "stop_id": stop_id or None,
+            "scheduled_time": f"{scheduled_time}:00" if scheduled_time and len(scheduled_time) < 8 else scheduled_time,
+            "dep_delay": dep_delay,
+            "reported_at": reported_at.isoformat(),
+        }
+
+    metadata = await conn.fetchrow(
+        "SELECT trip_headsign, direction_id FROM static_trips WHERE agency_id=$1 AND trip_id=$2",
+        agency_id,
+        trip_id,
+    )
+    static_rows = (
+        await conn.fetch(
+            """
+        SELECT sst.stop_sequence, ss.stop_id, ss.stop_name,
+               ss.stop_lat, ss.stop_lon
+        FROM static_stop_times sst
+        LEFT JOIN static_stops ss
+          ON ss.agency_id=sst.agency_id AND ss.stop_id=sst.stop_id
+        WHERE sst.agency_id=$1 AND sst.trip_id=$2
+          AND sst.stop_sequence = ANY($3::integer[])
+        """,
+            agency_id,
+            trip_id,
+            list(by_sequence),
+        )
+        if by_sequence
+        else []
+    )
+    static_by_sequence = {row["stop_sequence"]: row for row in static_rows}
+    stops = []
+    for sequence in sorted(by_sequence):
+        stop = by_sequence[sequence]
+        static = static_by_sequence.get(sequence)
+        if static:
+            stop["stop_id"] = stop["stop_id"] or static["stop_id"]
+            stop["stop_name"] = static["stop_name"]
+            stop["stop_lat"] = float(static["stop_lat"]) if static["stop_lat"] is not None else None
+            stop["stop_lon"] = float(static["stop_lon"]) if static["stop_lon"] is not None else None
+        else:
+            stop.update({"stop_name": None, "stop_lat": None, "stop_lon": None})
+        stops.append(stop)
+
+    return {
+        "trip_id": trip_id,
+        "route_code": route_code,
+        "headsign": metadata["trip_headsign"] if metadata else None,
+        "direction_id": metadata["direction_id"] if metadata else None,
+        "latest_captured_at": latest_ts.isoformat(),
+        "stops": stops,
     }
 
 
