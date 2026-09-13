@@ -53,7 +53,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Literal, Sequence
+from typing import IO, TYPE_CHECKING, Literal, Sequence
 
 # Import cleanup_git_state.py directly (not a shell-out) so this script
 # reuses its exact, already-reviewed planning/apply safety logic for local
@@ -66,8 +66,17 @@ cleanup_git_state = importlib.util.module_from_spec(_CLEANUP_SPEC)
 sys.modules[_CLEANUP_SPEC.name] = cleanup_git_state
 _CLEANUP_SPEC.loader.exec_module(cleanup_git_state)
 
-PullRequest = cleanup_git_state.PullRequest
-CleanupError = cleanup_git_state.CleanupError
+# `importlib` hands a type checker a bare `ModuleType`, so an attribute read
+# off `cleanup_git_state` is an untyped value -- usable at runtime, but not
+# valid in an annotation. The static import below names the same two objects
+# from the same file so signatures referring to them stay checkable; the
+# runtime branch keeps using the dynamically loaded module object, which is
+# the only one that exists when `scripts/` isn't importable as a package.
+if TYPE_CHECKING:
+    from scripts.cleanup_git_state import CleanupError, PullRequest
+else:
+    PullRequest = cleanup_git_state.PullRequest
+    CleanupError = cleanup_git_state.CleanupError
 
 DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")

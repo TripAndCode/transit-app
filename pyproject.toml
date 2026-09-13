@@ -47,7 +47,7 @@ markers = [
 ]
 
 [tool.mypy]
-files = ["api", "pipeline", "db"]
+files = ["api", "pipeline", "db", "scripts", "gtfs_pipeline.py"]
 explicit_package_bases = true
 ignore_missing_imports = true
 check_untyped_defs = true

@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 _PREFIX_BY_SUFFIX = {".py": "#", ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//"}
@@ -143,18 +144,22 @@ def find_violations(path, lines, max_block=6, only_lines=None, hunks=()):
     # Each entry pairs a violation with the span that produced it: one line for
     # a per-line rule, the whole block for a long one. `only_lines` needs the
     # span to tell a block this diff lengthened from one it merely touched.
-    found = []
-    start = None
+    found: list[tuple[Violation, Sequence[int]]] = []
+    start: int | None = None
     run = 0
 
     def close_block():
-        if run > max_block:
-            violations.append(
-                (
-                    Violation(start, "long-block", f"{run}-line comment block"),
-                    range(start, start + run),
-                )
+        # `start` is set by the first line of a run, so it is only ever None
+        # while `run` is 0 -- well below `max_block`. The explicit check states
+        # that invariant rather than relying on the reader to derive it.
+        if start is None or run <= max_block:
+            return
+        violations.append(
+            (
+                Violation(start, "long-block", f"{run}-line comment block"),
+                range(start, start + run),
             )
+        )
 
     violations = found
     for number, line in enumerate(lines, start=1):
@@ -201,7 +206,7 @@ def parse_hunks(diff_text):
     show up as added lines, but only a rewrite pairs them with a deletion, and
     only an insertion makes the surrounding block longer.
     """
-    hunks = {}
+    hunks: dict[str, list[Hunk]] = {}
     path = None
     for line in diff_text.splitlines():
         header = _DIFF_FILE.match(line)
