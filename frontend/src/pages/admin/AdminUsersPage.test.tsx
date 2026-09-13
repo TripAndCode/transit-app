@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
-import i18n from "../i18n";
+import i18n from "../../i18n";
 import { AdminUsersPage } from "./AdminUsersPage";
 
 const patchMutate = vi.fn();
@@ -14,7 +14,7 @@ const delReset = vi.fn();
 const useAdminUsersMock = vi.fn();
 const useSessionMock = vi.fn();
 
-vi.mock("../api/admin", () => ({
+vi.mock("../../api/admin", () => ({
   useAdminUsers: (params: unknown) => useAdminUsersMock(params),
   usePatchUser: () => ({ mutate: patchMutate, reset: patchReset, error: null, isPending: false, variables: undefined }),
   useDeleteUser: () => ({ mutate: delMutate, reset: delReset, error: null, isPending: false, variables: undefined }),
@@ -22,7 +22,7 @@ vi.mock("../api/admin", () => ({
 
 // A signed-in admin who is not one of the two rendered users (user_id 999),
 // so existing tests exercise the normal (not self-mutation-blocked) path.
-vi.mock("../api/auth", () => ({
+vi.mock("../../api/auth", () => ({
   useSession: () => useSessionMock(),
 }));
 
