@@ -4,6 +4,7 @@ import { initReactI18next } from "react-i18next";
 
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
+import { design } from "./design";
 
 export const SUPPORTED_LOCALES = ["ja", "en"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
@@ -13,8 +14,8 @@ void i18n
   .use(initReactI18next)
   .init({
     resources: {
-      ja: { translation: ja },
-      en: { translation: en },
+      ja: { translation: ja, design: design.ja },
+      en: { translation: en, design: design.en },
     },
     fallbackLng: "ja",
     supportedLngs: SUPPORTED_LOCALES,
