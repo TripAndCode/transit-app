@@ -45,6 +45,7 @@ PENDING = {
     "GET /api/{agency_id}/ask/followup-enabled",
     "GET /api/{agency_id}/copilot/enabled",
     "GET /api/{agency_id}/delays/live",
+    "GET /api/{agency_id}/delays/live-progress",
     "GET /api/{agency_id}/route-shape",
     "GET /api/{agency_id}/today/route-summary",
     "GET /api/{agency_id}/today/route/{route_code}/trips",
