@@ -52,9 +52,11 @@ but are not plotted.
 - Clicking a marker shows route, delay, reported stop, and update age.
 - The right panel shows stop-by-stop delay values, a trend chart, and the
   largest delay growth/recovery insight for the selected trip.
-- The client refetches stored current reports and selected-trip progress every
-  30 seconds. Manual refresh performs the same reads immediately; it does not
-  directly trigger the Oracle collector or upstream provider.
+- The client refetches current reports and selected-trip progress every 30
+  seconds. Manual refresh first pulls the Oracle collector's newest loose
+  protobuf into ClickHouse when the local-dev SSH transport is configured;
+  environments without that transport use the agency's live feed URL as a
+  fallback, then the client reads the newly persisted data.
 
 ## Data path
 

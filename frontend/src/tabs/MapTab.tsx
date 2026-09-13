@@ -10,6 +10,7 @@ import { useLiveTripProgress, useLiveTrips, useRouteShape, useTodayRouteSummary 
 import { useRangeContext } from "../api/rangeContext";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
+import { ApiError, apiPost } from "../api/client";
 import { relativeTime } from "../utils/relativeTime";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
@@ -98,6 +99,7 @@ export function MapTab() {
   const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
@@ -288,26 +290,39 @@ export function MapTab() {
   }
 
   async function refreshOperations() {
-    const previousObservation = liveQuery.data?.latest_captured_at ?? null;
+    if (isRefreshing || id == null) return;
     if (refreshMessageTimerRef.current != null) {
       window.clearTimeout(refreshMessageTimerRef.current);
       refreshMessageTimerRef.current = null;
     }
     setRefreshMessage(t("operations.refreshing"));
-    const [liveResult, summaryResult, progressResult] = await Promise.all([
-      liveQuery.refetch(),
-      summaryQuery.refetch(),
-      effectiveTrip ? progressQuery.refetch() : Promise.resolve(null),
-    ]);
-    if (liveResult.isError || summaryResult.isError || progressResult?.isError) {
-      showRefreshMessage(t("operations.refresh_failed"));
-      return;
+    setIsRefreshing(true);
+    try {
+      const refreshResult = await apiPost<{ status: string; inserted: number }>(`/api/${id}/delays/refresh`, {});
+      const [liveResult, summaryResult, progressResult] = await Promise.all([
+        liveQuery.refetch(),
+        summaryQuery.refetch(),
+        effectiveTrip ? progressQuery.refetch() : Promise.resolve(null),
+      ]);
+      if (liveResult.isError || summaryResult.isError || progressResult?.isError) {
+        showRefreshMessage(t("operations.refresh_failed"));
+        return;
+      }
+      const nextObservation = liveResult.data?.latest_captured_at ?? null;
+      const message = refreshResult.inserted > 0 && nextObservation
+        ? t("operations.refresh_updated", {
+          when: relativeTime(nextObservation),
+          count: refreshResult.inserted,
+        })
+        : t("operations.refresh_unchanged");
+      showRefreshMessage(message);
+    } catch (error) {
+      showRefreshMessage(error instanceof ApiError && error.status === 429
+        ? t("operations.refresh_rate_limited")
+        : t("operations.refresh_failed"));
+    } finally {
+      setIsRefreshing(false);
     }
-    const nextObservation = liveResult.data?.latest_captured_at ?? null;
-    const message = nextObservation && nextObservation !== previousObservation
-      ? t("operations.refresh_updated", { when: relativeTime(nextObservation) })
-      : t("operations.refresh_unchanged");
-    showRefreshMessage(message);
   }
 
   function showRefreshMessage(message: string) {
@@ -368,10 +383,11 @@ export function MapTab() {
           className="ops-refresh"
           aria-label={t("operations.refresh")}
           onClick={() => { void refreshOperations(); }}
-          disabled={liveQuery.isFetching || summaryQuery.isFetching}
+          disabled={isRefreshing || liveQuery.isFetching || summaryQuery.isFetching}
+          aria-busy={isRefreshing}
         >
           <RefreshCw size={17} aria-hidden="true" />
-          <span className="ops-refresh__label">{t("operations.refresh_now")}</span>
+          <span className="ops-refresh__label">{isRefreshing ? t("operations.refreshing") : t("operations.refresh_now")}</span>
         </button>
         {refreshMessage && (
           <span className="ops-refresh-result" aria-live="polite">{refreshMessage}</span>

@@ -17,24 +17,111 @@ so the displayed colors match what compute_ranking et al. show under
 the same filter.
 """
 
+import asyncio
 import json
 import logging
+import os
+import pathlib
+import re
+import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, build_updates_filter_ch, get_range_ctx
+from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
+
+
+def _ingest_live_agency(agency_id: int) -> int:
+    """Fetch one agency's current GTFS-RT data and write it to ClickHouse.
+
+    This runs in a worker thread because both the feed fetch and the pipeline
+    clients are synchronous. The Postgres advisory lock prevents a manual
+    refresh from racing the scheduled ingest/analyze job. Local development
+    prefers the Oracle collector's newest loose protobuf; environments without
+    the local-dev SSH transport fall back to the agency's live feed URL.
+    """
+    import psycopg2
+
+    from pipeline.clickhouse import get_client
+    from pipeline.ingest import ingest, ingest_live
+    from pipeline.locks import try_lock_ingest_analyze
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    conn = None
+    ch_client = None
+    try:
+        conn = psycopg2.connect(db_url)
+        if not try_lock_ingest_analyze(conn):
+            raise HTTPException(status_code=409, detail="A data refresh is already in progress")
+        ch_client = get_client()
+        oracle_host = os.environ.get("ORACLE_HOST")
+        oracle_user = os.environ.get("ORACLE_USER", "opc")
+        oracle_key = os.environ.get("ORACLE_SSH_KEY_PATH")
+        collector_data_dir = os.environ.get("COLLECTOR_DATA_DIR")
+        if oracle_host and oracle_key and collector_data_dir and pathlib.Path(oracle_key).is_file():
+            remote_dir = f"{collector_data_dir.rstrip('/')}/{agency_id}/rt"
+            find_cmd = (
+                f"find {remote_dir!r} -type f -name 'TripUpdate_*.pb' "
+                "-printf '%T@ %p\\n' | sort -nr | head -1"
+            )
+            ssh_opts = [
+                "-4", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                "-o", "StrictHostKeyChecking=no", "-i", oracle_key,
+            ]
+            latest_record = subprocess.run(
+                ["ssh", *ssh_opts, f"{oracle_user}@{oracle_host}", find_cmd],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            ).stdout.strip()
+            try:
+                mtime_text, latest = latest_record.split(" ", 1)
+                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(ZoneInfo("Asia/Tokyo"))
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise RuntimeError("Oracle collector returned an invalid live-file timestamp") from exc
+            match = re.fullmatch(r".*/(\d{8})/(TripUpdate_\d{6}\.pb)", latest)
+            if not match:
+                raise RuntimeError(f"Oracle collector has no usable live file for agency {agency_id}")
+            raw = subprocess.run(
+                ["ssh", *ssh_opts, f"{oracle_user}@{oracle_host}", "cat", "--", latest],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            ).stdout
+            with tempfile.TemporaryDirectory(prefix="transit-live-") as temp_dir:
+                # Oracle's rt-poller names files with UTC (`date -u`), while
+                # the archive ingest convention treats names as JST. Rename
+                # the temporary copy into the equivalent JST path so
+                # pipeline.ingest writes the actual UTC instant to CH.
+                live_dir = pathlib.Path(temp_dir) / captured_at.strftime("%Y%m%d")
+                live_dir.mkdir()
+                live_file = live_dir / f"TripUpdate_{captured_at.strftime('%H%M%S')}.pb"
+                live_file.write_bytes(raw)
+                return ingest(temp_dir, agency_id, conn, ch_client)
+        return ingest_live(agency_id, conn, ch_client)
+    finally:
+        if conn is not None:
+            conn.close()
+        if ch_client is not None:
+            ch_client.close()
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
@@ -234,6 +321,24 @@ async def live_delays(
         "latest_captured_at": latest_ts.isoformat(),
         "rows": out_rows,
     }
+
+
+@router.post("/delays/refresh")
+@limiter.limit("5/minute")
+async def refresh_live_delays(
+    request: Request,
+    agency_id: int = Depends(get_agency),
+):
+    """Fetch the agency's current GTFS-RT feed and persist it before reading."""
+    csrf_guard(request)
+    try:
+        inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("manual live refresh failed for agency %s", agency_id)
+        raise HTTPException(status_code=502, detail="Live feed refresh failed") from exc
+    return {"status": "updated", "inserted": inserted}
 
 
 @router.get("/delays/live-progress")
