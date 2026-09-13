@@ -113,7 +113,16 @@ test:
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
+# Keeps dev's `updates` fresh without an Oracle collector or a manual refresh
+# click: re-runs `ingest_live` (all configured agencies) on a fixed interval,
+# backgrounded alongside uvicorn and killed with it. Opt out per-run with
+# `LOCAL_RT_POLL=0 make serve` (e.g. offline work, or avoiding load on real
+# agency feeds while just editing unrelated code).
 serve:
+	@trap 'kill 0' EXIT; \
+	if [ "$${LOCAL_RT_POLL:-1}" = "1" ]; then \
+		LOCAL_RT_POLL_INTERVAL_SEC=$${LOCAL_RT_POLL_INTERVAL_SEC:-30} bash scripts/dev/local_rt_poller.sh >>/tmp/transit-local-rt-poller.log 2>&1 & \
+	fi; \
 	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
 
 # ── Database ─────────────────────────────────────────────────────────────────

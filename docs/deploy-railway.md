@@ -90,16 +90,62 @@ exists when you wire the app.
 
 ---
 
+## 1b. Create the ClickHouse service
+
+Raw GTFS-RT `updates` lives in ClickHouse, not Postgres (see CLAUDE.md ▸
+Architecture pointers) — `db` above only covers the OLTP/aggregate/pgvector
+side. Unlike `db`, ClickHouse needs no custom extensions, so this service
+deploys straight from the official image: no Dockerfile, no repo checkout.
+
+1. **+ New → Empty Service**. Name it `clickhouse`.
+2. `clickhouse` → **Settings → Source → Source Image**: set it to
+   `clickhouse/clickhouse-server:26.3` — the same tag `compose.yml` and the
+   Makefile's `ch-test` pin locally, so dev and production run identical
+   ClickHouse behavior.
+3. `clickhouse` → **Variables** (the official image's own bootstrap vars,
+   read once on first start):
+   ```
+   CLICKHOUSE_USER=transit
+   CLICKHOUSE_PASSWORD=<openssl rand -hex 24>
+   CLICKHOUSE_DB=transit
+   ```
+4. `clickhouse` → **Settings → Volumes → + Volume**, mount path:
+   ```
+   /var/lib/clickhouse
+   ```
+   Same reason as `db`'s volume: without it, every redeploy starts from an
+   empty `updates` table.
+5. Deploy `clickhouse`. Wait until it's running.
+
+> Like `db`, ClickHouse is reachable **only** on the private network — no
+> TCP proxy, no public port. Reference it from other services as
+> `${{clickhouse.RAILWAY_PRIVATE_DOMAIN}}`, Railway's own variable-
+> interpolation syntax, rather than hardcoding a `.railway.internal` name:
+> the exact hostname is Railway's implementation detail, and the reference
+> stays correct if that ever changes. `app`'s pre-deploy command (step 2.3)
+> applies the ClickHouse schema the same way `migrate up` applies Postgres's,
+> so there's no separate manual bootstrap step here beyond this service
+> existing and being reachable.
+
+---
+
 ## 2. Create the app service
 
 1. **+ New → GitHub Repo → the same `transit-app`**. Name it `app`.
 2. `app` → **Settings → Source → Branch**: change it from the default
    (`main`) to **`production`** (see the note at the top of this guide).
 3. Railway auto-detects `railway.json` → Dockerfile builder + `/health`
-   healthcheck + the `migrate up` pre-deploy command. Nothing to configure.
+   healthcheck + the pre-deploy command (applies Postgres migrations, then
+   the ClickHouse schema from step 1b). Nothing to configure.
 4. `app` → **Variables**:
    ```
    DATABASE_URL=postgresql://transit:<the POSTGRES_PASSWORD from step 1.5>@db.railway.internal:5432/transit
+   CLICKHOUSE_HOST=${{clickhouse.RAILWAY_PRIVATE_DOMAIN}}
+   CLICKHOUSE_PORT=8123
+   CLICKHOUSE_USER=transit
+   CLICKHOUSE_PASSWORD=<the CLICKHOUSE_PASSWORD from step 1b.3>
+   CLICKHOUSE_DATABASE=transit
+   CLICKHOUSE_SECURE=false                 # private network, no TLS needed internally
    GROQ_API_KEY=gsk_...
    CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
    CHAT_PROVIDERS=cerebras,groq            # add CEREBRAS_API_KEY too if using it
@@ -227,10 +273,17 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    python gtfs_pipeline.py analyze_all
    # retention: aggregates are materialized, so old raw rows can go. analyze
    # full-rebuilds, so history == this window (reports max range is 365d).
-   psql "$DATABASE_URL" -c "DELETE FROM updates WHERE captured_at < now() - interval '${RETENTION_DAYS:-400} days'"
+   # `updates` lives in ClickHouse, not Postgres — DELETE is a mutation there.
+   python -c "
+   from pipeline.clickhouse import get_client
+   import os
+   days = int(os.environ.get('RETENTION_DAYS', 400))
+   get_client().command(f'ALTER TABLE updates DELETE WHERE captured_at < now() - INTERVAL {days} DAY')
+   "
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
-   `OBJECT_STORE_*` creds and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+   same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
+   creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
 
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
@@ -262,6 +315,18 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > `POST /internal/cron/ingest` (gated by `CRON_SECRET`), which runs
 > `ingest_live` + `analyze` in a background task — poke it from any external
 > scheduler. It's the lower-fidelity live-sample path, not the primary one.
+
+> **Continuous freshness (optional, replaces the daily batch's RT lag).**
+> Everything above lands RT data once a day. If the Oracle collector VM is
+> already running, its pollers can stream every successful protobuf poll
+> straight into `app`'s ClickHouse instead — see `oracle_cloud/v3/MIGRATION.md`
+> ▸ "9c. Continuous Oracle → application ingest" for the exact
+> `COLLECTOR_INGEST_URL`/`COLLECTOR_INGEST_SECRET` wiring. Set
+> `COLLECTOR_INGEST_URL` to `app`'s public domain (step 2.5) plus
+> `/internal/collector`, generate a shared `COLLECTOR_INGEST_SECRET` on both
+> Oracle and `app`, and restart the Oracle poller units. This is additive —
+> the daily batch job above still runs as the durable, replayable archive
+> path even once streaming is on.
 
 ---
 
