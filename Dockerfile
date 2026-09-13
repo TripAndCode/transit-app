@@ -34,9 +34,13 @@ COPY pyproject.toml poetry.lock ./
 # selection for a single dependency doesn't reliably carry its marker into
 # the lock file, so local (non-Linux) installs failed outright — this stays
 # Linux/Docker-only instead, where no such cross-platform ambiguity exists.
+# --no-deps: poetry already installed correct, locked versions of torch's own
+# runtime deps (filelock, sympy, jinja2, ...); without it, --force-reinstall
+# re-resolves them from this separate CPU-only mirror instead, which drifts
+# independently of poetry.lock.
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction \
-    && pip install --no-cache-dir --force-reinstall \
+    && pip install --no-cache-dir --force-reinstall --no-deps \
         --index-url https://download.pytorch.org/whl/cpu \
         "torch==$(python -c 'import torch; print(torch.__version__.split("+")[0])')" \
     && pip freeze | grep -E '^(nvidia-|triton==)' | cut -d '=' -f1 | xargs -r pip uninstall -y
