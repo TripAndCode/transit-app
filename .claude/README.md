@@ -199,11 +199,13 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   operates on one item, and the loop may merge its own PR once the required review
   pass is clean and it's mergeable/clean — see the guarded-continuation bullet above
   for how consecutive successful ticks now chain within one invocation.
-- The pre-push backend timeout is 420 seconds — the full suite's legitimate
-  wall-clock time leaves real headroom on a small VPS, which can run
-  noticeably slower than a typical dev machine. A timeout with no test
-  failure is an infrastructure limitation, not evidence that tests failed;
-  resolve it before weakening the gate.
+- The pre-push backend timeout lives in `.claude/hooks/guard-push-quality.sh`
+  (read the ceiling there, not a hardcoded figure here). It is sized to clear
+  the full suite's legitimate wall-clock with headroom, including on a small
+  VPS, which can run noticeably slower than a typical dev machine; that
+  script's own `.claude/settings.json` entry bounds the sum of every ceiling
+  in it. A timeout with no test failure is an infrastructure limitation, not
+  evidence that tests failed; resolve it before weakening the gate.
 - An hourly crontab entry (`15 * * * *`, JST — the VPS's system timezone —
   distinct from `/vps-loop-run`'s own cron cadence — see `crontab -l` for the
   current interval, not a hardcoded figure here — and from the Oracle

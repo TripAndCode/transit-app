@@ -2,8 +2,8 @@
 # PreToolUse(Bash) hook: gate `git push` on lint/test passing first.
 # Lint/format checks are scoped to files changed vs `main` (the repo has
 # pre-existing lint/format debt elsewhere, so a whole-repo gate would block
-# every push); tests and frontend checks run whole-project since those can't
-# be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
+# every push); tests, mypy, and frontend checks run whole-project since those
+# can't be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
 # determine what changed or can't run a required check, it blocks (exit 2)
 # rather than silently letting the push through — set PUSH_GATE_SKIP_TESTS=1
 # for a deliberate, visible opt-out of the DB-dependent backend tests only,
@@ -141,10 +141,24 @@ if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   } >>"$LOG" 2>&1
 fi
 
-# Fail fast on the cheap check before paying for the full backend + frontend
+# mypy runs whole-project, not file-scoped: a type error is a property of a
+# module and of everything importing it, so checking only the changed files
+# would miss the breakage a changed signature causes in its callers. Unlike
+# ruff (which has pre-existing debt outside the changed set, hence the file
+# scoping above), the configured mypy scope in pyproject.toml is clean, so a
+# whole-project run blocks only on a real regression. Same trigger as the
+# backend tests below — Python changed, or scope couldn't be resolved.
+if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ]; then
+  {
+    echo "== poetry run mypy (whole configured scope) =="
+    run_with_timeout 180 poetry run -- mypy || FAIL=1
+  } >>"$LOG" 2>&1
+fi
+
+# Fail fast on the cheap checks before paying for the full backend + frontend
 # suites — a one-line format nit shouldn't cost a multi-minute double run.
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — ruff format/lint failed (skipping tests). Last 80 lines:" >&2
+  echo "BLOCKED: git push — ruff format/lint or mypy failed (skipping tests). Last 80 lines:" >&2
   tail -80 "$LOG" >&2
   exit 2
 fi
@@ -162,7 +176,21 @@ fi
 if [ "$RUN_BACKEND" -eq 1 ]; then
   if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p 5544 >/dev/null 2>&1; then
     echo "== poetry run pytest (DATABASE_URL -> :5544 test DB) ==" >>"$LOG"
-    if ! run_with_timeout 420 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
+    # The whole backend suite is this gate's long pole by an order of
+    # magnitude, and every test builds its schema against the throwaway DB,
+    # so the ceiling has to clear the suite's real wall-clock with room for
+    # it to keep growing. Set too tight, the timeout fires on every Python
+    # change and the gate never reports a genuine pass -- pushes then either
+    # look broken or get routed around, which is strictly worse than no gate.
+    #
+    # Every ceiling in this script is bounded by one more: the `timeout` on
+    # this hook's entry in .claude/settings.json, enforced by the harness
+    # rather than by this script. If the ceilings here can sum past it, the
+    # harness kills the script before it reaches its own exit, and whether
+    # that blocks the push or lets it through is outside this script's
+    # control -- the one outcome its fail-closed design cannot guarantee.
+    # Raise that entry alongside any ceiling raised here.
+    if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
     fi
