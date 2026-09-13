@@ -79,12 +79,15 @@ exists when you wire the app.
    ```
    **Without this the database is wiped on every redeploy.** This is the
    one stateful piece of the whole deploy.
-7. Deploy `db`. Wait until it's running. Note its private hostname under
-   **Settings → Networking → Private Networking**: `db.railway.internal`.
+7. Deploy `db`. Wait until it's running.
 
-> Postgres is reachable **only** on the private network (`*.railway.internal`,
-> port 5432). Don't add a public TCP proxy to it — the app talks to it
-> internally, same as the compose `db` service. The daily ingest + backup
+> Postgres is reachable **only** on the private network. Don't add a public
+> TCP proxy to it — the app talks to it internally, same as the compose
+> `db` service. Reference it from other services as `${{db.RAILWAY_PRIVATE_DOMAIN}}`
+> (Railway's own variable-interpolation syntax) rather than a hardcoded
+> `db.railway.internal` name — the exact hostname is Railway's implementation
+> detail, and the reference stays correct if that ever changes; step 1b's
+> `clickhouse` service uses the same convention. The daily ingest + backup
 > jobs (steps 4 and 7) also run **inside** the project, so nothing external
 > ever needs to reach the DB.
 
@@ -139,7 +142,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    the ClickHouse schema from step 1b). Nothing to configure.
 4. `app` → **Variables**:
    ```
-   DATABASE_URL=postgresql://transit:<the POSTGRES_PASSWORD from step 1.5>@db.railway.internal:5432/transit
+   DATABASE_URL=postgresql://transit:<the POSTGRES_PASSWORD from step 1.5>@${{db.RAILWAY_PRIVATE_DOMAIN}}:5432/transit
    CLICKHOUSE_HOST=${{clickhouse.RAILWAY_PRIVATE_DOMAIN}}
    CLICKHOUSE_PORT=8123
    CLICKHOUSE_USER=transit
@@ -401,8 +404,8 @@ Skip entirely if it's only demo data.
 | Symptom | Check |
 |---------|-------|
 | DB empty after redeploy | Volume not mounted at `/var/lib/postgresql/data` on the `db` service (step 1.6). |
-| App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must be `db.railway.internal`, port `5432`) or a missing provider key. |
-| `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of `*.railway.internal`. |
+| App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must resolve `${{db.RAILWAY_PRIVATE_DOMAIN}}`, port `5432`) or a missing provider key. |
+| `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | Cron returns 401 | `CRON_SECRET` mismatch between Railway Variables and the GH repo secret. |
 | Out of memory at boot | The e5-small embedder (torch) is heavy (~1–2 GB resident — the model is baked into the image, but it still loads into RAM). Bump the app service's memory, or set `ASK_ROUTER_ENABLED=false` to skip loading it (Ask falls through to the LLM — Stages 1 & 3 still work). |
