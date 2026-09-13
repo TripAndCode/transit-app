@@ -46,6 +46,7 @@ from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
 from api.routers.copilot import router as copilot_router
 from api.routers.debug import router as debug_router
+from api.routers.internal import collector_router
 from api.routers.internal import router as internal_router
 from api.routers.map import router as map_router
 from api.routers.me import router as me_router
@@ -271,6 +272,7 @@ app.include_router(overview_router)
 app.include_router(reports_router)
 app.include_router(static_router)
 app.include_router(internal_router)
+app.include_router(collector_router)
 
 
 class HealthStatus(BaseModel):
