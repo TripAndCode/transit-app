@@ -46,17 +46,19 @@ export default function App() {
             persistent until dismissed, but a warning about the data itself
             should outrank a suggestion to sign in when more than one banner
             is showing at once. */}
-        <DataStalenessBanner />
-        <FeedHealthBanner />
-        <GuestPrompt />
+        <div className="app-notice-stack">
+          <DataStalenessBanner />
+          <FeedHealthBanner />
+          <GuestPrompt />
+          <ActivityStrip />
+        </div>
         <HelpHint />
-        <ActivityStrip />
         {/* flex: 1, not height: "100%" — main is now a flex column whose
             other children (the banners/strip above) take variable height, so
             a percentage here would overflow main's box; flex: 1 fills
             exactly what's left, same trick the outer app shell used before
             this block moved inside main. */}
-        <div style={{ padding: 24, flex: 1, boxSizing: "border-box" }}>
+        <div style={{ display: "flex", flexDirection: "column", padding: 24, flex: 1, minHeight: 0, boxSizing: "border-box" }}>
           <Outlet key={agencyId ?? "root"} />
         </div>
       </main>

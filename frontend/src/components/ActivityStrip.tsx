@@ -14,9 +14,8 @@
  * Grace period: 80 ms before showing, so cache-hit mutations don't
  * produce a visible blink. 200 ms CSS fade-out for smooth disappearance.
  *
- * Layout contract: a 24 px row is reserved at all times (via a 1 px
- * transparent border) so the content below does not shift when the strip
- * appears or disappears.
+ * The strip is rendered inside the fixed app notice stack, so it never pushes
+ * the active tab down or reserves blank space when idle.
  */
 import { useEffect, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
@@ -103,7 +102,7 @@ export function ActivityStrip() {
         borderBottom: visible
           ? "1px solid rgba(91, 108, 173, 0.25)"
           : "1px solid transparent",
-        display: "flex",
+        display: visible ? "flex" : "none",
         alignItems: "center",
         gap: 10,
         padding: "0 16px",

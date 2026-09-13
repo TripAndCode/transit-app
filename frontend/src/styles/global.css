@@ -178,6 +178,36 @@ input[type="date"] { color-scheme: light; }
 }
 html, body, #root { height: 100%; margin: 0; }
 
+/* Notices are supplementary UI. Keep them available without pushing the
+   active tab's primary visualization below the fold. Individual notices keep
+   their own dismiss controls; the stack itself does not block the page. */
+.app-notice-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 400;
+  display: flex;
+  width: min(520px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.app-notice-stack > * {
+  pointer-events: auto;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+@media (max-width: 560px) {
+  .app-notice-stack {
+    top: 8px;
+    right: 8px;
+    width: calc(100vw - 16px);
+  }
+}
+
 body {
   font-family: var(--font-body);
   font-size: 15px;
