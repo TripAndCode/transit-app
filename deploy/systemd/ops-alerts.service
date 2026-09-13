@@ -1,0 +1,41 @@
+# ops-alerts.service — one poll of scripts/ops_alerts.py, run by ops-alerts.timer.
+#
+# Install (on the VPS):
+#   1. Optionally create an overrides env file (see ops-alerts.env.example):
+#        sudo install -m 600 -o root -g root /dev/null /etc/transit/ops-alerts.env
+#      Set OPS_ALERT_PING_URL there to forward every poll to a real
+#      notification endpoint (see ops-alerts.env.example for the convention
+#      and docs/ops-monitoring-deploy.md for setup) -- optional, and the only
+#      secret-shaped value this file's own setup can involve; leaving it unset
+#      keeps the pre-existing log-only behavior.
+#   2. Adjust WorkingDirectory/ExecStart/User below for the deployed checkout if
+#      it differs from /root/transit-app.
+#   3. sudo cp deploy/systemd/ops-alerts.service deploy/systemd/ops-alerts.timer \
+#        /etc/systemd/system/
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now ops-alerts.timer
+# Inspect: systemctl status ops-alerts.timer ops-alerts.service ; journalctl -u ops-alerts.service
+#
+# Exit code 1 (an anomaly notification was produced) makes this run show as a
+# *failed* systemd unit -- `systemctl status`/`journalctl -p err` surface it
+# without any extra plumbing. `scripts/ops_alerts.py` also delivers the same
+# outcome directly to OPS_ALERT_PING_URL when configured (see that module's
+# docstring), so an OnFailure= unit is not required for basic notification.
+#
+# Deliberately no StartLimitIntervalSec=/StartLimitBurst= here, unlike
+# ops-status.service: exit 1 is this unit's *expected* outcome for as long as
+# a real anomaly is ongoing, so a start limit tripping mid-incident would
+# have systemd stop letting ops-alerts.timer start new polls at all --
+# silencing the one alerting path meant to keep firing throughout an
+# ongoing incident, which is worse than the crash-loop it would guard against.
+[Unit]
+Description=Operations anomaly alerting (one poll)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/transit-app
+EnvironmentFile=-/etc/transit/ops-alerts.env
+ExecStart=/usr/bin/env poetry run python3 scripts/ops_alerts.py
+StandardOutput=append:/var/log/ops-alerts.log
+StandardError=append:/var/log/ops-alerts.log

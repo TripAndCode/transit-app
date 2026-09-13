@@ -21,6 +21,7 @@ import type {
   ForecastOverview,
   HeadwayQualityResponse,
   HeatmapCollection,
+  LiveTripProgressResponse,
   LiveTripsResponse,
   NetworkSummary,
   OverviewSummary,
@@ -278,6 +279,21 @@ export function useLiveTrips(
     queryFn: ({ signal }) => apiGet<LiveTripsResponse>(`/api/${agencyId}/delays/live`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+export function useLiveTripProgress(
+  agencyId: number | null,
+  tripId: string | null,
+): UseQueryResult<LiveTripProgressResponse> {
+  return useQuery({
+    queryKey: ["live_trip_progress", agencyId, tripId],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams({ trip_id: tripId! });
+      return apiGet<LiveTripProgressResponse>(`/api/${agencyId}/delays/live-progress?${qs.toString()}`, { signal });
+    },
+    enabled: agencyId != null && !!tripId,
+    refetchInterval: 30_000,
   });
 }
 

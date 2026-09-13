@@ -203,6 +203,53 @@ async def test_live_delays_resolves_stop_location_from_static_schedule(map_app_c
 
 
 @pytest.mark.asyncio
+async def test_live_trip_progress_returns_nearest_reported_stop_trail(map_app_ch, ch_client):
+    """Each poll contributes only its nearest upcoming stop, producing a
+    compact report trail without presenting future StopTimeUpdates as GPS."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, trip_headsign, direction_id) "
+            "VALUES ($1, 'T_PROGRESS', 'R_PROGRESS', '新町', 1)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) VALUES "
+            "($1, 'S1', '中央病院', 40.81, 140.71, ST_SetSRID(ST_MakePoint(140.71, 40.81), 4326)), "
+            "($1, 'S2', '市役所前', 40.82, 140.72, ST_SetSRID(ST_MakePoint(140.72, 40.82), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES "
+            "($1, 'T_PROGRESS', 1, 'S1'), ($1, 'T_PROGRESS', 2, 'S2')",
+            agency_id,
+        )
+    insert_updates(
+        ch_client,
+        agency_id=agency_id,
+        rows=[
+            ("poll-1.pb", "2026-09-12T06:00:00Z", "T_PROGRESS", "weekday", "15:00", "R_PROGRESS", 1, 60),
+            ("poll-1.pb", "2026-09-12T06:00:00Z", "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 240),
+            ("poll-2.pb", "2026-09-12T06:02:00Z", "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 180),
+        ],
+    )
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/live-progress", params={"trip_id": "T_PROGRESS"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["route_code"] == "R_PROGRESS"
+    assert payload["headsign"] == "新町"
+    assert payload["direction_id"] == 1
+    assert [(row["stop_sequence"], row["dep_delay"]) for row in payload["stops"]] == [(1, 60), (2, 180)]
+    assert payload["stops"][0]["stop_name"] == "中央病院"
+    assert payload["stops"][1]["stop_lon"] == 140.72
+
+
+@pytest.mark.asyncio
 async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_client):
     """Regression for a 500: the freshness probe (`latest_ts`) has no
     `dep_delay` filter, but the rows query adds `AND dep_delay IS NOT NULL`.

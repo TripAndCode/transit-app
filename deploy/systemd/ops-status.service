@@ -1,0 +1,42 @@
+# ops-status.service — authenticated, read-only VPS operations-status page.
+#
+# Install (on the VPS):
+#   1. Create the token env file (NOT committed):
+#        sudo install -m 600 -o root -g root /dev/null /etc/transit/ops-status.env
+#        echo "OPS_STATUS_TOKEN=$(openssl rand -hex 32)" | sudo tee /etc/transit/ops-status.env
+#      (see deploy/systemd/ops-status.env.example)
+#   2. Adjust WorkingDirectory/ExecStart/User below for the deployed checkout if it
+#      differs from /root/transit-app, and also set OPS_STATUS_REPO to the same path
+#      in the env file (see ops-status.env.example) -- the collectors read that
+#      variable, not WorkingDirectory, to locate the checkout.
+#   3. sudo cp deploy/systemd/ops-status.service /etc/systemd/system/
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now ops-status.service
+# Inspect: systemctl status ops-status.service ; journalctl -u ops-status.service
+# Serves http://127.0.0.1:8642/ (HTML), /status.txt (plain text), /status.json (JSON),
+# each gated behind HTTP Basic auth checked against OPS_STATUS_TOKEN (any username).
+# Binds to localhost only by default -- reach it from off-box via an SSH tunnel
+# (ssh -L 8642:127.0.0.1:8642 <vps>) rather than exposing the port directly.
+# See docs/ops-monitoring-deploy.md for log rotation, the smoke check, and rollback.
+[Unit]
+Description=Operations status page
+After=network.target
+# Bounds a crash-loop: 6 restarts within 5 minutes stops systemd from
+# retrying at all (`systemctl status` then shows `failed` instead of an
+# endless `activating`/`Restart=on-failure` cycle) rather than restarting
+# forever on, e.g., a bad EnvironmentFile or a port already in use.
+StartLimitIntervalSec=300
+StartLimitBurst=6
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/transit-app
+EnvironmentFile=-/etc/transit/ops-status.env
+ExecStart=/usr/bin/env poetry run python3 scripts/ops_status_server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/ops-status.log
+StandardError=append:/var/log/ops-status.log
+
+[Install]
+WantedBy=multi-user.target

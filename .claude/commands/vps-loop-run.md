@@ -373,18 +373,15 @@ Walk items top to bottom:
   commit rather than the exact commit that wrote the closing statement — that
   only makes the next check stricter, never wrong, since it can't land earlier
   than the real closing-statement commit), then check `git log --oneline
-  <that-SHA>..origin/vps-loop/item-<N>` is empty. A non-empty result — e.g. an
-  interrupted `main`-resync merge from a prior 6.6 attempt, or any other later
-  commit — means commits exist that the closing statement never covered;
-  treat this exactly like an ambiguous entry and fall through to the
-  skip-as-in-progress behavior, do NOT resume at 6.5. Only once that log is
-  empty does the closing statement still describe the branch's actual current
-  tip. Next, confirm the worktree Steps 6.1–6.4 used still exists (`git
-  worktree list`) — mirroring Step 2b/3b's own "worktree exists vs. branch
-  only" fork: if it's gone, this is not safely resumable from here; log `-
-  <UTC timestamp>: item N's PR #<number> is OPEN and refactor-log shows the
-  review pass clean, but its worktree no longer exists — needs a human to
-  reattach one before Step 6 can be resumed.
+  <that-SHA>..origin/vps-loop/item-<N>` is empty.
+
+  **Log empty (closing statement still describes the current tip):** confirm
+  the worktree Steps 6.1–6.4 used still exists (`git worktree list`) —
+  mirroring Step 2b/3b's own "worktree exists vs. branch only" fork: if it's
+  gone, this is not safely resumable from here; log `- <UTC timestamp>: item
+  N's PR #<number> is OPEN and refactor-log shows the review pass clean, but
+  its worktree no longer exists — needs a human to reattach one before Step 6
+  can be resumed.
   **Blocker-tag:** branch-without-worktree` and stop this tick — a tick stop,
   not an ordinary item skip, for the same reason Step 3b's own "branch only,
   no worktree" case stops rather than continuing to a different item: moving
@@ -403,10 +400,52 @@ Walk items top to bottom:
   could silently resolve to a `main` SHA more recent than what Step 5 actually
   reviewed, masking a real "main advanced" case. 6.5 itself still re-verifies
   identity, and 6.6 still re-derives whether `main` has advanced since that
-  reconstructed baseline, exactly as it would for a same-tick completion. If
-  the refactor-log entry does NOT show the review pass clean (review genuinely
-  still in progress, mid fix-iteration, or never started), the original
-  behavior applies: skip item N this tick as in-progress, same as before.
+  reconstructed baseline, exactly as it would for a same-tick completion.
+
+  **Log non-empty (closing statement is stale — a later commit exists that it
+  never covered, e.g. an interrupted `main`-resync merge from a prior 6.6
+  attempt):** do NOT resume at 6.5 on the strength of that stale statement —
+  but this is not automatically an ambiguous, skip-forever case either.
+  Confirm the worktree still exists (`git worktree list`): if it does, this is
+  resumable. Unlike Step 3b's own "real commits exist, worktree exists" case
+  (which has no PR yet, so its "run Step 6 as written" instruction correctly
+  starts at 6.3's `gh pr create`), this PR already exists — `gh pr create`
+  would simply fail against an existing head branch. So: run Step 5's full
+  review fresh against the branch's *current* diff (not the stale closing
+  statement), with the same fix-and-reverify cycle capped at 2 iterations on
+  a Major that Step 3b's procedure uses — that cycle's own fix commits are
+  local-only (Step 3b's Agent dispatch commits but never pushes). Once
+  clean, resume the same way the log-empty case above does for 6.1, 6.3, and
+  6.4 (skip them: the PR and its real number already exist) — but still run
+  **6.2's push** before proceeding, even though the log-empty case doesn't
+  need to: log-empty's own precondition (an unchanged tip) guarantees origin
+  already has nothing new, whereas this branch's fresh review may have just
+  added local fix commits that were never pushed. A push here is always safe
+  regardless of whether a fix iteration actually happened — "everything
+  up-to-date" is a harmless no-op when the reviewed tip already matches
+  origin, e.g. when the fresh review was clean on the first try. Skipping
+  this push would silently ship whatever stale, possibly-still-Major commit
+  origin already has instead of the just-reviewed one, since 6.5 reads
+  `headRefOid` from `origin`, not the local worktree. Then go straight to
+  **Step 6.5**, reconstructing `MAIN_SHA_AT_REVIEW` as `git -C
+  <worktree-path> merge-base origin/main vps-loop/item-<N>` from the
+  branch's state right after this fresh review (and its push), the same
+  reconstruction the log-empty case uses. Without this whole path, an item
+  stuck in exactly this shape would sit open indefinitely: every future tick
+  reads the same stale closing statement, finds the same uncovered later
+  commit, and skips it again, forever, because nothing else in this file
+  ever re-reviews just the new delta and resumes it. If the worktree is gone
+  instead, this is not safely resumable from here either — same stop as the
+  log-empty case above: log `- <UTC timestamp>: item N's PR #<number> is
+  OPEN with an unreviewed commit after its refactor-log closing statement,
+  but its worktree no longer exists — needs a human to reattach one before
+  this can be resumed.
+  **Blocker-tag:** branch-without-worktree` and stop this tick.
+
+  If the refactor-log entry does NOT show the review pass clean at all
+  (review genuinely still in progress, mid fix-iteration, or never started),
+  the original behavior applies: skip item N this tick as in-progress, same
+  as before.
 - If the item text has `Depends on: item <M>`, run the same exact-head query for M with
   `--state merged`. Empty → skip N this tick (dependency unmet) and keep walking;
   don't stall the run on it.
