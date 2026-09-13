@@ -1,6 +1,8 @@
 export const design = {
   ja: {
     overview: "概況", analysis: "路線分析", reports: "レポート", live: "現在の運行",
+    aggregateDate: "最新集計日", excluded: "除外した異常値", lastObserved: "最新の観測日時",
+    mapUnavailable: "この環境では地図を表示できません。観測データは引き続き確認できます。",
     investigate: "遅れが増えた区間を調べる", reportTitle: "運行の傾向を、一枚にまとめる",
     line: "路線", pattern: "系統", allLines: "すべての路線", allPatterns: "すべての系統",
     from: "開始日", to: "終了日", days: "曜日", allDays: "すべての曜日", weekday: "平日", weekend: "土日祝",
@@ -26,6 +28,8 @@ export const design = {
   },
   en: {
     overview: "Overview", analysis: "Route analysis", reports: "Reports", live: "Current observations",
+    aggregateDate: "Latest aggregate date", excluded: "Excluded implausible observations", lastObserved: "Latest observation timestamp",
+    mapUnavailable: "The map is unavailable in this environment. Observation data remains available.",
     investigate: "Where does delay build up?", reportTitle: "Summarize service performance in one page",
     line: "Route", pattern: "Service pattern", allLines: "All routes", allPatterns: "All patterns",
     from: "From", to: "To", days: "Days", allDays: "All days", weekday: "Weekdays", weekend: "Weekends / holidays",

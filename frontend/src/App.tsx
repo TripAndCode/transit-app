@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet, useMatch } from "react-router-dom";
+import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
@@ -32,12 +32,14 @@ export default function App() {
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   const agencyIdNum = agencyId ? Number(agencyId) : null;
+  const { pathname } = useLocation();
+  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports)$/.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
       <Sidebar />
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
@@ -47,12 +49,12 @@ export default function App() {
             should outrank a suggestion to sign in when more than one banner
             is showing at once. */}
         <div className="app-notice-stack">
-          <DataStalenessBanner />
-          <FeedHealthBanner />
-          <GuestPrompt />
+          {!focused && <DataStalenessBanner />}
+          {!focused && <FeedHealthBanner />}
+          {!focused && <GuestPrompt />}
           <ActivityStrip />
         </div>
-        <HelpHint />
+        {!focused && <HelpHint />}
         {/* flex: 1, not height: "100%" — main is now a flex column whose
             other children (the banners/strip above) take variable height, so
             a percentage here would overflow main's box; flex: 1 fills
@@ -62,7 +64,7 @@ export default function App() {
           <Outlet key={agencyId ?? "root"} />
         </div>
       </main>
-      <CopilotPanel />
+      {!focused && <CopilotPanel />}
     </div>
   );
 }

@@ -48,5 +48,5 @@ export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; sele
       }
     });
   }, [data, selected, i18n.language]);
-  return <section aria-label={t("map")}><div ref={container} style={{ height: 210, borderRadius: 6 }} />{failed && <p>{t("map")} — {t("missing")}</p>}</section>;
+  return <section aria-label={t("map")}><div ref={container} style={{ height: failed ? 0 : 210, borderRadius: 6 }} />{failed && <p className="focus-muted">{t("mapUnavailable")}</p>}</section>;
 }

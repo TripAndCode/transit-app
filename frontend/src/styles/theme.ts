@@ -8,9 +8,9 @@ export type Theme = "light" | "dark";
 const THEME_CHANGE_EVENT = "themechange";
 
 const PREF_KEY = "transit.theme";
-const DEFAULT_THEME: Theme = "dark";
+const DEFAULT_THEME: Theme = "light";
 
-/** Read the persisted theme. Defaults to dark (the new default) when unset
+/** Read the persisted theme. Defaults to light when unset
  *  or invalid — not prefers-color-scheme-based; this is a product choice,
  *  not an OS-driven mode. */
 export function readThemePref(): Theme {

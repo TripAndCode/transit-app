@@ -24,6 +24,7 @@ const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapT
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
 const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
 const RouteAnalysisTab = lazy(() => import("./tabs/RouteAnalysisTab").then((m) => ({ default: m.RouteAnalysisTab })));
+const ReportsHomeTab = lazy(() => import("./tabs/ReportsHomeTab").then((m) => ({ default: m.ReportsHomeTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
@@ -95,7 +96,7 @@ const router = createBrowserRouter([
       // it, respectively, and deliberately left the old URLs 404-ing until
       // this final phase. No Suspense wrapper needed — these render nothing
       // but an immediate <Navigate>, not a lazy-loaded tab.
-      { path: "agencies/:agencyId/reports", element: <RedirectReportsToAnalysis /> },
+      { path: "agencies/:agencyId/reports", element: el(<ReportsHomeTab />) },
       { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportsToAnalysis /> },
       { path: "agencies/:agencyId/forecast", element: <RedirectForecastToAnalysis /> },
       // Legacy bare /network bookmark, from before the route above existed.
