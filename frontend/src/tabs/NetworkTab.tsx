@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
-import { ErrorBanner } from "../components/ErrorBanner";
+import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
 import type { NetworkAgencyRow } from "../api/types";
@@ -254,16 +254,21 @@ export function NetworkTab() {
 
       {data && <DefinitionMetaBlock definition={data.definition} />}
 
-      {isPending && <Skeleton height={320} />}
-      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
-      {data && data.agencies.length === 0 && (
-        <p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>
-      )}
-      {data && data.agencies.length > 0 && (
-        <div data-testid="network-card-list">
-          {data.agencies.map((a, i) => renderCard(a, i))}
-        </div>
-      )}
+      <AsyncSection
+        loading={isPending}
+        error={error}
+        onRetry={() => refetch()}
+        data={data}
+        hasContent={(summary) => summary.agencies.length > 0}
+        empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
+        skeleton={<Skeleton height={320} />}
+      >
+        {(summary) => (
+          <div data-testid="network-card-list">
+            {summary.agencies.map((a, i) => renderCard(a, i))}
+          </div>
+        )}
+      </AsyncSection>
     </div>
   );
 }
