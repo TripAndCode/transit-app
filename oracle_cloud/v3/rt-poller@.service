@@ -8,6 +8,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=opc
+# COLLECTOR_INGEST_URL/SECRET are configured in /etc/environment on Oracle.
+EnvironmentFile=-/etc/environment
 ExecStart=/home/opc/collector/bin/rt-poller.sh %i
 Restart=always
 RestartSec=10

@@ -129,6 +129,31 @@ stale that specifically is right now — don't trust a date recorded here,
 since this file isn't updated when that staleness changes. Aomori's static
 GTFS still needs its own refresh path if that gap matters.
 
+## 9c. Continuous Oracle -> application ingest
+
+The pollers can stream every successful protobuf to the running API, which is
+the path used when ClickHouse is local today or hosted on Railway later. Set
+the same secret on the API and Oracle, and set the Oracle URL to the API's
+reachable base path (without `/updates`):
+
+    # API environment
+    COLLECTOR_INGEST_SECRET=<generate-a-long-random-secret>
+
+    # Oracle /etc/environment
+    COLLECTOR_INGEST_URL=https://<api-host>/internal/collector
+    COLLECTOR_INGEST_SECRET=<same-secret>
+
+Then reinstall the unit, reload systemd, and restart all active pollers:
+
+    sudo cp /home/opc/rt-poller@.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl restart 'rt-poller@*'
+
+Each 2xx response means the payload was written to ClickHouse. A failed push
+is logged but does not stop polling; the next successful poll supplies a new
+snapshot. The endpoint is authenticated and deduplicates retries by the
+collector's source filename.
+
 ## 10. +1 week: remove old tree
     rm -rf /home/opc/app/transportation_analysis/{poller.sh,poller_static.sh,cron.log,poller.log,static_poller.log,static_cron.log,archive,static_archive}
 

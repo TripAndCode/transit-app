@@ -4,6 +4,9 @@
 # Reads its row from etc/agencies.tsv:
 #   id <TAB> name <TAB> interval_sec <TAB> feed_url <TAB> static_url <TAB> ping_url
 # Writes data/<id>/rt/<UTCDAY>/TripUpdate_HHMMSS.pb atomically (.part + mv).
+# When COLLECTOR_INGEST_URL and COLLECTOR_INGEST_SECRET are set, also pushes
+# each completed protobuf to the app's collector endpoint. A failed push is
+# logged and does not stop polling; the next poll is a fresh source snapshot.
 # Sends a healthchecks.io ping after a successful fetch, at most every ~5 min.
 set -euo pipefail
 
@@ -58,6 +61,21 @@ while true; do
     if [ "$ok" -eq 1 ]; then
         mv "$f.part" "$f"
         echo "OK $(basename "$f") ($(wc -c < "$f" | tr -d ' ') bytes)"
+        if [ -n "${COLLECTOR_INGEST_URL:-}" ] && [ -n "${COLLECTOR_INGEST_SECRET:-}" ]; then
+            source_file="$day/$(basename "$f")"
+            captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            if ! curl -fsS --max-time "${COLLECTOR_INGEST_MAX_TIME:-15}" \
+                --retry 2 --retry-delay 1 --data-binary "@$f" \
+                -H 'Content-Type: application/x-protobuf' \
+                -H "X-Collector-Secret: $COLLECTOR_INGEST_SECRET" \
+                -H "X-Captured-At: $captured_at" \
+                -H "X-Source-File: $source_file" \
+                "${COLLECTOR_INGEST_URL%/}/updates/$AGENCY_ID"; then
+                echo "WARN push failed agency=$AGENCY_ID source=$source_file" >&2
+            else
+                echo "PUSHED $source_file"
+            fi
+        fi
         if [ -n "$PING_URL" ] && [ $(( i % PING_EVERY )) -eq 0 ]; then
             curl -fsS -m 5 -o /dev/null "$PING_URL" || true
         fi

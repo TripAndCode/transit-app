@@ -13,17 +13,23 @@ the cron caller gets a fast 202 and doesn't block on the multi-minute
 DB writes.
 """
 
+import asyncio
 import hmac
 import logging
 import os
+import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline.locks import try_lock_ingest_analyze
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
+collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
 
 _log = logging.getLogger(__name__)
+_SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
+_MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
 
 
 def _check_secret(request: Request) -> None:
@@ -35,6 +41,88 @@ def _check_secret(request: Request) -> None:
         raise HTTPException(status_code=503, detail="CRON_SECRET not configured")
     if not hmac.compare_digest(request.headers.get("X-Cron-Secret") or "", expected):
         raise HTTPException(status_code=401, detail="Invalid cron secret")
+
+
+def _check_collector_secret(request: Request) -> None:
+    expected = os.environ.get("COLLECTOR_INGEST_SECRET")
+    if not expected:
+        raise HTTPException(status_code=503, detail="COLLECTOR_INGEST_SECRET not configured")
+    if not hmac.compare_digest(request.headers.get("X-Collector-Secret") or "", expected):
+        raise HTTPException(status_code=401, detail="Invalid collector secret")
+
+
+def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file_name: str) -> int:
+    import psycopg2
+
+    from pipeline.clickhouse import get_client
+    from pipeline.ingest import ingest_live_payload
+    from pipeline.locks import try_lock_ingest_analyze
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    conn = None
+    ch_client = None
+    try:
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+            cur.execute(
+                "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
+                (agency_id,),
+            )
+            if cur.fetchone() is None:
+                raise ValueError(f"Unknown or deleted agency_id={agency_id}")
+        if not try_lock_ingest_analyze(conn):
+            raise HTTPException(status_code=409, detail="A data ingest is already in progress")
+        conn.autocommit = False
+        ch_client = get_client()
+        return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
+    finally:
+        if conn is not None:
+            conn.close()
+        if ch_client is not None:
+            ch_client.close()
+
+
+@collector_router.post("/updates/{agency_id}")
+async def collector_update(agency_id: int, request: Request) -> dict:
+    """Receive one protobuf poll from the Oracle collector.
+
+    The collector keeps polling all agencies and retries delivery; the
+    durable source filename makes retries idempotent. Work is synchronous from
+    the collector's perspective so a 2xx means ClickHouse accepted the data.
+    """
+    _check_collector_secret(request)
+    source_file = request.headers.get("X-Source-File") or ""
+    if not _SOURCE_FILE_RE.fullmatch(source_file):
+        raise HTTPException(status_code=400, detail="Invalid X-Source-File")
+    captured_header = request.headers.get("X-Captured-At") or ""
+    try:
+        captured = datetime.fromisoformat(captured_header.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid X-Captured-At") from exc
+    if captured.tzinfo is None:
+        raise HTTPException(status_code=400, detail="X-Captured-At must include timezone")
+    raw = await request.body()
+    if not raw or len(raw) > _MAX_COLLECTOR_PAYLOAD:
+        raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
+    file_name = f"oracle/{source_file}"
+    try:
+        inserted = await asyncio.to_thread(
+            _ingest_collector_payload,
+            agency_id,
+            raw,
+            captured.astimezone(timezone.utc).isoformat(),
+            file_name,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.exception("collector ingest failed for agency %s", agency_id)
+        raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc
+    return {"status": "accepted", "inserted": inserted}
 
 
 def _run_ingest_and_analyze() -> None:

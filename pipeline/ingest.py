@@ -439,9 +439,7 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     if row is None or not row[0]:
         raise ValueError(f"No feed_url configured for agency_id={agency_id!r}")
     feed_url = row[0]
-
     strategy_name = _resolve_strategy_name(agency_id, conn)
-    strategy = get_ingest_strategy(strategy_name)
 
     logger.info(f"Fetching live feed from {_redact_url(feed_url)} (strategy={strategy_name})")
     with safe_urlopen(feed_url, timeout=30) as resp:
@@ -460,15 +458,32 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     # (not distinct_file_names' unbounded full-partition scan, which would
     # be wasteful to pay on every ~30s poll) mirrors ingest()'s file-level
     # idempotency at this path's much smaller grain.
-    since = datetime.now(timezone.utc) - timedelta(minutes=5)
+    return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
+
+
+def ingest_live_payload(
+    agency_id: int,
+    raw: bytes,
+    captured_at: str,
+    file_name: str,
+    conn,
+    ch_client,
+) -> int:
+    """Decode and store one already-fetched GTFS-RT payload.
+
+    This common path is used by direct-feed pulls and the Oracle collector
+    push path. ``file_name`` is the collector's durable source identity, so a
+    retry after a network timeout is idempotent within a short lookup window.
+    """
+    strategy_name = _resolve_strategy_name(agency_id, conn)
+    strategy = get_ingest_strategy(strategy_name)
+    since = datetime.now(timezone.utc) - timedelta(minutes=10)
     if recent_file_name_exists(ch_client, agency_id, file_name, since):
-        logger.info(f"Skipping duplicate live poll: {file_name} already ingested")
+        logger.info("Skipping duplicate live payload: %s", file_name)
         return 0
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-
     n_inserted = insert_updates(ch_client, agency_id, rows)
     conn.commit()
-
-    logger.info(f"Done: {n_inserted} rows inserted (live)")
+    logger.info("Done: %s rows inserted (live payload)", n_inserted)
     return n_inserted
