@@ -302,6 +302,7 @@ export function AskTab() {
               messages={messages}
               formatRoute={routeNames.format}
             >
+              {({ messages: contextMessages, focus }) => <>
               {(appendMsg.isPending || followup.isPending) && (
                 <div
                   role="status"
@@ -326,7 +327,9 @@ export function AskTab() {
                   answers) to avoid compounding LLM errors. */}
               {followupEnabled && !followup.isPending && !appendMsg.isPending && (
                 <FollowupChipsRow
-                  messages={messages}
+                  messages={contextMessages}
+                  focus={focus}
+                  compact
                   t={t}
                   onFollowup={(ctxMsgId, question, isDraft) => {
                     if (!activeId) return;
@@ -344,6 +347,7 @@ export function AskTab() {
                   maxChars={followupFlag.data?.max_question_chars}
                 />
               )}
+              </>}
             </InvestigationCanvas>
           ) : (
             <AskLandingCards

@@ -7,6 +7,7 @@ import { FollowupChipsRow } from "./FollowupChipsRow";
 import { useTranslation } from "react-i18next";
 import type { ConvMessage } from "../../api/types";
 import { ApiError } from "../../api/client";
+import type { StopFocus } from "./stopEvidence";
 
 const messagesWithResult: ConvMessage[] = [
   {
@@ -27,12 +28,40 @@ function Wrapper(props: {
   onDraftChange: (next: string) => void;
   error?: unknown;
   maxChars?: number;
+  focus?: StopFocus | null;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   return <FollowupChipsRow t={t} {...props} />;
 }
 
 describe("FollowupChipsRow free-text input", () => {
+  it("uses the selected source ID and visible sequence context, without sending on selection", async () => {
+    const onFollowup = vi.fn();
+    const source = { ...messagesWithResult[0], message_id: 22, tool: "segment_hotspots",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
+        rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source, ...messagesWithResult]} onFollowup={onFollowup}
+      draftValue="Explain the sample count" onDraftChange={vi.fn()} compact
+      focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
+    expect(onFollowup).not.toHaveBeenCalled();
+    expect(screen.getByText(/Selected stop-sequence group: 7/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Send"));
+    expect(onFollowup).toHaveBeenCalledWith(22, "Explain the sample count\nSelected stop-sequence group: 7 (representative name: Central).", true);
+  });
+  it("does not fall back to another source when the selected row is unavailable", () => {
+    renderWithProviders(<Wrapper messages={messagesWithResult} onFollowup={vi.fn()}
+      draftValue="Explain" onDraftChange={vi.fn()} focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
+    expect(screen.queryByText("Send")).not.toBeInTheDocument();
+  });
+  it("counts the context prefix toward the server question limit", () => {
+    const source = { ...messagesWithResult[0], tool: "segment_hotspots",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
+        rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="Explain" onDraftChange={vi.fn()}
+      maxChars={20} focus={{ messageId: 1, sequence: 7, name: "Central" }} />);
+    expect(screen.getByText("Send")).toBeDisabled();
+  });
   it("renders nothing when there is no tool result to ground on", () => {
     const { container } = renderWithProviders(
       <Wrapper messages={[]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()} />,

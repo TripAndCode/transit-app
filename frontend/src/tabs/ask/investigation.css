@@ -21,3 +21,7 @@
 .ask-tool-menu { flex-shrink: 0; padding: 8px 16px; border-top: 1px solid var(--border-soft); }
 .investigation-history { margin: 4px 0 12px; }
 .investigation-history[open] .investigation-steps { padding-top: 12px; flex-wrap: wrap; }
+.ask-context-composer { padding: 16px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--bg-surface); }
+.ask-context-composer input { min-width: 0; }
+.ask-context-composer p { margin: 0; }
+.ask-selection-context { font-size: 13px; color: var(--accent); overflow-wrap: anywhere; }

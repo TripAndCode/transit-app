@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
 import { FOLLOWUP_CHIPS } from "../../components/askFollowupChips";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { stopEvidence, type StopFocus } from "./stopEvidence";
 
 // Fallback used only for the brief window before /ask/followup-enabled
 // resolves; the server-supplied `maxChars` (pipeline/query/followup.py's
@@ -22,6 +23,8 @@ export function FollowupChipsRow({
   onDraftChange,
   error,
   maxChars = FOLLOWUP_MAX_CHARS_FALLBACK,
+  focus = null,
+  compact = false,
 }: {
   messages: ConvMessage[];
   t: TFunction;
@@ -33,6 +36,8 @@ export function FollowupChipsRow({
   onDraftChange: (next: string) => void;
   error?: unknown;
   maxChars?: number;
+  focus?: StopFocus | null;
+  compact?: boolean;
 }) {
   // Guards the native Enter-to-submit against IME composition: on some
   // browser/OS combos (notably Safari + macOS), pressing Enter to confirm a
@@ -50,6 +55,11 @@ export function FollowupChipsRow({
   const [lastClickedChip, setLastClickedChip] = useState<{ msgId: number; chipId: string } | null>(null);
 
   const lastResultMsgId = (() => {
+    if (focus) {
+      const source = messages.find((message) => message.message_id === focus.messageId);
+      if (source && stopEvidence(source)?.some((point) => point.sequence === focus.sequence && point.name === focus.name)) return focus.messageId;
+      return null;
+    }
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role === "assistant" && m.tool && m.result) return m.message_id;
@@ -61,18 +71,23 @@ export function FollowupChipsRow({
   // The <input maxLength> below already caps draftValue at maxChars, so
   // trimmed can never exceed it -- only the lower bound needs checking here.
   const trimmed = draftValue.trim();
-  const canSubmit = trimmed.length > 0;
+  const prefix = focus ? t("ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name }) + "\n" : "";
+  const availableChars = Math.max(0, maxChars - prefix.length);
+  const canSubmit = trimmed.length > 0 && prefix.length + trimmed.length <= maxChars;
 
   function submitDraft() {
     // lastResultMsgId is non-null here (the early return above guarantees
     // it), but TS doesn't retain that narrowing across this nested function
     // boundary, so the null check stays for type safety, not defensively.
     if (!canSubmit || lastResultMsgId == null) return;
-    onFollowup(lastResultMsgId, trimmed, true);
+    onFollowup(lastResultMsgId, focus ? `${trimmed}\n${prefix.trimEnd()}` : trimmed, true);
   }
 
   return (
-    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className={compact ? "ask-context-composer" : undefined} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+      {compact && <p className="investigation-caption">{t("ask.evidence.ask_hint")}</p>}
+      {focus && <div className="ask-selection-context">{t("ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name })}</div>}
+      {!compact && !focus && (
       <div
         role="group"
         aria-label={t("ask.followup_chips.panel_aria")}
@@ -121,6 +136,7 @@ export function FollowupChipsRow({
           );
         })}
       </div>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -141,7 +157,7 @@ export function FollowupChipsRow({
             isComposingRef.current = false;
           }}
           placeholder={t("ask.followup_placeholder")}
-          maxLength={maxChars}
+          maxLength={availableChars}
           aria-label={t("ask.followup_placeholder")}
           style={{
             flex: 1,
@@ -171,6 +187,8 @@ export function FollowupChipsRow({
           {t("ask.followup_send")}
         </button>
       </form>
+      {prefix.length + trimmed.length > maxChars && <p role="status">{t("ask.evidence.too_long")}</p>}
+      {compact && <p className="investigation-caption">{t("ask.evidence.ai_notice")}</p>}
 
       {error != null && <ErrorBanner error={error} />}
     </div>

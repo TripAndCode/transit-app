@@ -619,6 +619,10 @@
   },
   "ask": {
     "evidence": {
+      "focus_context": "Selected stop-sequence group: {{sequence}} (representative name: {{name}}).",
+      "ask_hint": "Continue investigating the selected evidence",
+      "ai_notice": "AI runs only when you send. Answers use the stored result; no new data is fetched.",
+      "too_long": "Shorten your question to leave room for the selected context.",
       "title": "Highest average departure delays",
       "scope": "Returned stop-sequence groups, ranked by delay — not every stop along the route.",
       "select": "Select a bar to inspect its observations",
@@ -892,6 +896,10 @@
       }
     },
     "card": {
+      "stop_hotspots": {
+        "title": "Which stops have larger delays?",
+        "summary": "Where are average departure delays largest on {{route}}?"
+      },
       "execute": "Run",
       "param": {
         "route_label": "Route",
