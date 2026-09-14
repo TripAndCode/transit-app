@@ -2,10 +2,11 @@
  * AskTab — conversational analytics interface for an agency.
  *
  * Manages thread selection, filter context, message dispatch, and scroll
- * behaviour for the Ask feature. Renders a two-column layout: {@link ThreadSidebar}
- * on the left, and a scrollable message list with a sticky {@link QuestionDock}
- * on the right. Handles anonymous-to-authenticated conversation migration on
- * first login.
+ * behaviour for the Ask feature. Renders a single-column canvas: an
+ * on-demand {@link ThreadSidebar} disclosure for investigation history above
+ * a scrollable message list, with a sticky {@link QuestionDock} at the
+ * bottom. Handles anonymous-to-authenticated conversation migration on first
+ * login.
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
@@ -300,6 +301,7 @@ export function AskTab() {
               agencyId={id ?? 0}
               messages={messages}
               formatRoute={routeNames.format}
+              onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}
             >
               {(appendMsg.isPending || followup.isPending) && (
                 <div

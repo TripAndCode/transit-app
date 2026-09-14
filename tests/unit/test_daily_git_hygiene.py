@@ -1733,7 +1733,7 @@ def test_run_orphaned_venv_pruning_continues_after_one_delete_error(
     def _flaky_rmtree(path: object, *args: object, **kwargs: object) -> None:
         if Path(str(path)).name == "transit-delay-app-flaky-py3.12":
             raise OSError("simulated transient error")
-        real_rmtree(path, *args, **kwargs)  # type: ignore[arg-type]
+        real_rmtree(path, *args, **kwargs)  # type: ignore[call-overload]
 
     monkeypatch.setattr(hygiene.shutil, "rmtree", _flaky_rmtree)
 

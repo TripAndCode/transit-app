@@ -57,7 +57,7 @@ def test_supported_requires_ingest_strategy_and_realtime_url():
 
 
 def test_pending_feeds_skips_already_configured_agencies():
-    already = {f.realtime_url for f in ALL_FEEDS if f.agency_id in (8, 9, 10)}
+    already = {f.realtime_url for f in ALL_FEEDS if f.agency_id in (8, 9, 10) and f.realtime_url is not None}
     pending = pending_feeds(already)
     assert {f.agency_id for f in pending}.isdisjoint({8, 9, 10})
     assert len(pending) > 0

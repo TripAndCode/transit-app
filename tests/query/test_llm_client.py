@@ -3,6 +3,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import httpx2
 import pytest
 
 from pipeline.query import llm_client
@@ -117,7 +118,7 @@ def test_per_provider_base_url_override(monkeypatch):
 def test_recover_tool_call_valid():
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = {
             "error": {
                 "code": "tool_use_failed",
@@ -135,7 +136,7 @@ def test_recover_tool_call_valid():
 def test_recover_tool_call_not_tool_use_failed():
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = {"error": {"code": "context_length_exceeded", "message": "too long"}}
 
     assert _recover_tool_call(_Exc()) is None
@@ -144,7 +145,7 @@ def test_recover_tool_call_not_tool_use_failed():
 def test_recover_tool_call_malformed_generation():
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = {"error": {"code": "tool_use_failed", "failed_generation": "garbage no function tag"}}
 
     assert _recover_tool_call(_Exc()) is None
@@ -153,7 +154,7 @@ def test_recover_tool_call_malformed_generation():
 def test_recover_tool_call_non_json_args():
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = {"error": {"code": "tool_use_failed", "failed_generation": "<function=top_n(not json)</function>"}}
 
     assert _recover_tool_call(_Exc()) is None
@@ -162,7 +163,7 @@ def test_recover_tool_call_non_json_args():
 def test_recover_tool_call_no_body():
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = None
 
     assert _recover_tool_call(_Exc()) is None
@@ -216,7 +217,7 @@ def test_retry_once_on_transient_then_success(monkeypatch):
     def flaky(*a, **k):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise APIConnectionError(request=None)
+            raise APIConnectionError(request=httpx2.Request("POST", "http://test"))
         return ok
 
     with patch("openai.OpenAI") as mock_openai:
@@ -239,7 +240,7 @@ def test_last_error_kind_connection_exhausted(monkeypatch):
 
     def always_down(*a, **k):
         calls["n"] += 1
-        raise APIConnectionError(request=None)
+        raise APIConnectionError(request=httpx2.Request("POST", "http://test"))
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_down
@@ -295,7 +296,7 @@ def test_recover_tool_call_format_variants(generation):
     """Recovery must handle the paren / tag / bare shapes llama emits."""
     from pipeline.query.llm_client import _recover_tool_call
 
-    class _Exc:
+    class _Exc(Exception):
         body = {"error": {"code": "tool_use_failed", "failed_generation": generation}}
 
     msg = _recover_tool_call(_Exc())
@@ -316,7 +317,7 @@ def test_timeout_does_not_retry(monkeypatch):
 
     def always_timeout(*a, **k):
         calls["n"] += 1
-        raise APITimeoutError(request=None)
+        raise APITimeoutError(request=httpx2.Request("POST", "http://test"))
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = always_timeout
@@ -353,7 +354,8 @@ def test_rate_limit_preferred_over_later_connection(monkeypatch):
         calls["n"] += 1
         if calls["n"] == 1:  # cerebras → 429
             raise RateLimitError(message="429", response=MagicMock(status_code=429), body=None)
-        raise APIConnectionError(request=None)  # groq → connection (retried then descends)
+        # groq → connection (retried then descends)
+        raise APIConnectionError(request=httpx2.Request("POST", "http://test"))
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.side_effect = side
