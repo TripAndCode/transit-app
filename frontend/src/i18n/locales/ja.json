@@ -618,6 +618,16 @@
     }
   },
   "ask": {
+    "workspace": {
+      "title": "調査",
+      "step_count": "{{count}}件の質問",
+      "steps": "調査の経緯",
+      "retained_result": "保存されている結果",
+      "historical": "過去の結果を表示中です。追質問は最新の結果をもとに回答します。",
+      "return_latest": "最新の結果に戻る",
+      "saved_result_notice": "取得済みの結果です。開くだけでは再取得しません。上のフィルターは次の分析用で、この結果の条件とは異なる場合があります。",
+      "full_log": "会話全文を開く"
+    },
     "suggestion": {
       "today_ranking": "今日の遅延ランキング",
       "rain_compare": "雨天時の比較",

@@ -1,0 +1,14 @@
+.investigation { max-width: 1100px; margin-inline: auto; min-width: 0; }
+.investigation-heading { display: flex; align-items: baseline; gap: 16px; }
+.investigation-heading h2 { margin: 4px 0 12px; font-size: 18px; }
+.investigation-heading > span, .investigation-caption { color: var(--text-secondary); font-size: 12px; }
+.investigation-steps { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+.investigation-steps button {
+  flex: 0 0 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; padding: 8px 12px; border: 1px solid var(--border-soft);
+  border-radius: var(--radius); color: var(--text-secondary); background: var(--bg-surface);
+}
+.investigation-steps button[aria-current="step"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.investigation-history-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 13px; margin-top: 12px; }
+.investigation-log { border-top: 1px solid var(--border-soft); margin-top: 24px; padding-top: 12px; }
+.investigation-log > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }

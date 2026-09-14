@@ -34,7 +34,7 @@ import { buildCardTemplates, defaultsFor, type CardTemplate } from "../component
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
-import { MessageList } from "./ask/MessageList";
+import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
 
@@ -119,7 +119,7 @@ export function AskTab() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [convQuery.data?.messages]);
 
   // ── Event handlers ────────────────────────────────────────────────────────
@@ -278,13 +278,11 @@ export function AskTab() {
               <Skeleton height={64} style={{ alignSelf: "flex-end", width: "60%" }} />
             </div>
           ) : hasMessages ? (
-            <>
-              <MessageList
-                messages={messages}
-                formatRoute={routeNames.format}
-                t={t}
-              />
-
+            <InvestigationCanvas
+              key={`${id}:${activeId}`}
+              messages={messages}
+              formatRoute={routeNames.format}
+            >
               {(appendMsg.isPending || followup.isPending) && (
                 <div
                   role="status"
@@ -327,7 +325,7 @@ export function AskTab() {
                   maxChars={followupFlag.data?.max_question_chars}
                 />
               )}
-            </>
+            </InvestigationCanvas>
           ) : (
             <AskLandingCards
               templates={templates}
