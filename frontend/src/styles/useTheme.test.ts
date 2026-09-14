@@ -8,10 +8,10 @@ describe("useTheme", () => {
     delete document.documentElement.dataset.theme;
   });
 
-  it("initializes to dark when nothing stored, and applies data-theme on mount", () => {
+  it("initializes to the module default when nothing stored, and applies data-theme on mount", () => {
     const { result } = renderHook(() => useTheme());
-    expect(result.current[0]).toBe("dark");
-    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(result.current[0]).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("initializes from a stored preference", () => {
