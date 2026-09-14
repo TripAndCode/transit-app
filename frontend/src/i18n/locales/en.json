@@ -619,6 +619,14 @@
   },
   "ask": {
     "evidence": {
+      "search": "Find a stop",
+      "window_size": "View",
+      "all_stops": "All stops",
+      "stop_count": "{{count}} stops",
+      "window": "Showing {{start}}–{{end}} / {{total}} stops",
+      "move_window": "Move the visible stop range",
+      "no_match": "No matching stop in this pattern",
+      "refine_search": "Showing the first 10 matches. Refine your search.",
       "pattern": "Observed stop pattern",
       "complete_title": "Average departure delay · stop order",
       "complete_scope": "Complete stop list of the selected observed pattern, matched to the current schedule. Missing departures are not zero delay.",

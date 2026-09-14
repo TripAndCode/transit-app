@@ -28,7 +28,7 @@ describe("complete stop patterns", () => {
     fireEvent.click(screen.getByRole("button", { name: /Park, sequence 2: no departure/ }));
     expect(onFocus).toHaveBeenLastCalledWith({ messageId: 99, sequence: 2, name: "Park", patternId: "a", stopId: "B", rowIndex: 1 });
     expect(screen.getByText("0 observations")).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "b" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Observed stop pattern" }), { target: { value: "b" } });
     expect(onFocus).toHaveBeenLastCalledWith(null);
     expect(screen.getByRole("button", { name: /Park, sequence 1: 4 minutes/ })).toBeInTheDocument();
   });
