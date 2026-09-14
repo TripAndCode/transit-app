@@ -53,7 +53,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
             onClick={() => selectStep({ id: step.id, latestId: latest.id })}
             title={step.question || t("ask.workspace.retained_result")}
           >
-            {index + 1}. {step.question || t("ask.workspace.retained_result")}
+            {index + 1}. {step.question.split("\n")[0] || t("ask.workspace.retained_result")}
           </button>
         ))}
       </nav>
