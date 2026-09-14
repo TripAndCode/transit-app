@@ -5,15 +5,20 @@ import { MessageList } from "./MessageList";
 import { investigationSteps } from "./investigationSteps";
 import "./investigation.css";
 
-export function InvestigationCanvas({ messages, formatRoute, children }: {
+export function InvestigationCanvas({ messages, formatRoute, onStepChange, children }: {
   messages: ConvMessage[];
   formatRoute: (code: string | null | undefined) => string;
+  onStepChange?: () => void;
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const steps = investigationSteps(messages);
   const latest = steps.at(-1);
   const [selection, setSelection] = useState<{ id: number; latestId: number } | null>(null);
+  function selectStep(next: { id: number; latestId: number } | null) {
+    setSelection(next);
+    onStepChange?.();
+  }
   const selected = selection?.latestId === latest?.id
     ? steps.find((step) => step.id === selection?.id) ?? latest
     : latest;
@@ -32,7 +37,7 @@ export function InvestigationCanvas({ messages, formatRoute, children }: {
             key={step.id}
             type="button"
             aria-current={step.id === selected.id ? "step" : undefined}
-            onClick={() => setSelection({ id: step.id, latestId: latest.id })}
+            onClick={() => selectStep({ id: step.id, latestId: latest.id })}
             title={step.question || t("ask.workspace.retained_result")}
           >
             {index + 1}. {step.question || t("ask.workspace.retained_result")}
@@ -42,7 +47,7 @@ export function InvestigationCanvas({ messages, formatRoute, children }: {
       {!isLatest && (
         <div className="investigation-history-notice">
           <span>{t("ask.workspace.historical")}</span>
-          <button type="button" onClick={() => setSelection(null)}>{t("ask.workspace.return_latest")}</button>
+          <button type="button" onClick={() => selectStep(null)}>{t("ask.workspace.return_latest")}</button>
         </div>
       )}
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>

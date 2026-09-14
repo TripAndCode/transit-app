@@ -282,6 +282,7 @@ export function AskTab() {
               key={`${id}:${activeId}`}
               messages={messages}
               formatRoute={routeNames.format}
+              onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}
             >
               {(appendMsg.isPending || followup.isPending) && (
                 <div
