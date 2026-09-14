@@ -409,7 +409,7 @@ export function MapTab() {
           {mapUnavailable && <div className="ops-map__empty"><p role="status">{td("mapUnavailable")}</p></div>}
           {!getMapStyleOverride() && <MapStyleControl value={styleId} onChange={setStyleId} t={t} />}
           {(liveQuery.isLoading || summaryQuery.isLoading) && <div className="ops-map__loading">{t("operations.loading")}</div>}
-          {!liveQuery.isLoading && liveRows.length === 0 && (
+          {!mapUnavailable && !liveQuery.isLoading && liveRows.length === 0 && (
             <div className="ops-map__empty">
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>
