@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from pipeline.reports.rankings import _weighted_avg_min
@@ -14,7 +16,7 @@ def test_weights_by_samples_not_mean_of_means():
 
 
 def test_null_days_are_skipped_not_counted_as_zero():
-    days = [
+    days: list[dict[str, Any]] = [
         {"avg_min": 4.0, "samples": 100},
         {"avg_min": None, "samples": 0},
     ]

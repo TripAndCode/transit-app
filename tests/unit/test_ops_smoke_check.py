@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from scripts import ops_smoke_check
 from scripts.ops_status import build_status, to_json_dict
@@ -16,7 +17,7 @@ T0 = datetime(2026, 9, 13, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def make_component(component: str, *, state_kwargs: dict | None = None) -> dict:
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         component=component,
         observed_at=T0,
         last_success_at=T0 - timedelta(minutes=5),

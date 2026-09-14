@@ -250,12 +250,14 @@ async def test_disabled_copilot_does_not_consume_anon_quota(copilot_client, monk
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)
 
     consumed: list[str] = []
+
     # Patched where it is looked up, not on the defining module: the router
     # imported the name directly, so its own binding is what runs.
-    monkeypatch.setattr(
-        "api.routers.copilot.check_and_consume_anon_quota",
-        lambda *a, **k: consumed.append("hit") or True,
-    )
+    def _consume_quota(*a, **k):
+        consumed.append("hit")
+        return True
+
+    monkeypatch.setattr("api.routers.copilot.check_and_consume_anon_quota", _consume_quota)
 
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",

@@ -139,6 +139,7 @@ def test_assess_field_coverage_verdicts_are_keyed_by_registry_field_name():
         "schedule_relationship_stop_coverage": 1.0,
     }
     verdicts = assess_field_coverage(cov)
+    assert verdicts is not None
     assert set(verdicts) == set(RT_COVERAGE_FIELDS)
     assert all(verdicts.values())
 
