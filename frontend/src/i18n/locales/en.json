@@ -619,6 +619,8 @@
   },
   "ask": {
     "workspace": {
+      "unavailable": "This investigation could not be opened. Check your connection and account. Guest investigations are available only in the browser where they were saved.",
+      "retry": "Try again",
       "export_snapshot": "Download result (JSON)",
       "export_csv": "Table {{index}} CSV",
       "export_notice": "Exports the selected question and stored answers, without recalculating. Files may contain conversation text; check before sharing. JSON cannot yet be reopened in the app.",

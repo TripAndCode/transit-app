@@ -37,6 +37,7 @@ import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
+import { useInvestigationLocation } from "./ask/useInvestigationLocation";
 
 export function AskTab() {
   const { t } = useTranslation();
@@ -46,7 +47,7 @@ export function AskTab() {
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useInvestigationLocation();
 
   // ── Ask-dock composing state (lifted from QuestionDock so a landing-area
   //    suggestion pill can open a specific chip, not just the bottom dock's
@@ -214,6 +215,7 @@ export function AskTab() {
 
   const messages = convQuery.data?.messages ?? [];
   const hasMessages = messages.length > 0;
+  const unavailable = activeId !== null && !convQuery.isPending && (convQuery.isError || !convQuery.data);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -277,6 +279,12 @@ export function AskTab() {
               <Skeleton height={120} />
               <Skeleton height={64} style={{ alignSelf: "flex-end", width: "60%" }} />
             </div>
+          ) : unavailable ? (
+            <div role="status">
+              <p>{t("ask.workspace.unavailable")}</p>
+              <button type="button" onClick={() => void convQuery.refetch()}>{t("ask.workspace.retry")}</button>
+              <button type="button" onClick={handleNewThread}>{t("ask.sidebar.new_thread")}</button>
+            </div>
           ) : hasMessages ? (
             <InvestigationCanvas
               key={`${id}:${activeId}`}
@@ -339,7 +347,7 @@ export function AskTab() {
         </div>
 
         {/* Bottom dock */}
-        {id != null && (
+        {id != null && !unavailable && !(activeId && convQuery.isPending) && (
           <QuestionDock
             agencyId={id}
             busy={busy}
