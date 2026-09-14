@@ -57,11 +57,7 @@ def main():
     for file_path in sorted(ts_files):
         # Skip locale sources (i18n/locales/*.json, i18n/design.ts) and test files
         # (test names may quote UI labels)
-        if (
-            "i18n/locales" in str(file_path)
-            or str(file_path) == "src/i18n/design.ts"
-            or ".test." in file_path.name
-        ):
+        if "i18n/locales" in str(file_path) or str(file_path) == "src/i18n/design.ts" or ".test." in file_path.name:
             continue
 
         matches = lint_file(file_path)
