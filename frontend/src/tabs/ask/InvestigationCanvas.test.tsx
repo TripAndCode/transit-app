@@ -35,8 +35,14 @@ describe("investigation canvas", () => {
     </InvestigationCanvas>);
     fireEvent.click(screen.getByText(/Investigation steps ·/));
     expect(screen.getByRole("button", { name: "2. Evening?" })).toHaveAttribute("aria-current", "step");
-    const log = screen.getByText("Full conversation").closest("details");
+    const log = screen.getByText("Full conversation").closest("details")!;
     expect(log).not.toHaveAttribute("open");
+    expect(screen.queryByText("First answer")).not.toBeInTheDocument();
+    // jsdom toggles <details>.open on a summary click but doesn't dispatch the
+    // native "toggle" event a real browser would, so drive it directly here.
+    log.open = true;
+    fireEvent(log, new Event("toggle"));
+    expect(screen.getByText("First answer")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "1. Morning?" }));
     expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1. Morning?" })).toHaveAttribute("aria-current", "step");

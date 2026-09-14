@@ -16,6 +16,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, children 
   const steps = investigationSteps(messages);
   const latest = steps.at(-1);
   const [selection, setSelection] = useState<{ id: number; latestId: number } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const selected = selection?.latestId === latest?.id
     ? steps.find((step) => step.id === selection?.id) ?? latest
     : latest;
@@ -53,9 +54,9 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, children 
       <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />
       <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && children}
-      <details className="investigation-log">
+      <details className="investigation-log" onToggle={(event) => setLogOpen(event.currentTarget.open)}>
         <summary>{t("ask.workspace.full_log")}</summary>
-        <MessageList messages={messages} formatRoute={formatRoute} t={t} />
+        {logOpen && <MessageList messages={messages} formatRoute={formatRoute} t={t} />}
       </details>
     </section>
   );

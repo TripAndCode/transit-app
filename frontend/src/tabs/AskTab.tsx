@@ -238,7 +238,6 @@ export function AskTab() {
           <summary>{t("ask.workspace.investigations")}</summary>
           <div className="ask-thread-menu-content">
         <ThreadSidebar
-          embedded
           agencyId={id}
           activeId={activeId}
           onSelect={handleSelectThread}
