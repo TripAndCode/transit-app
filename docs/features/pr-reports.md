@@ -9,15 +9,7 @@ navigation. On the three primary screens, persistent banner stacks and the
 Copilot panel no longer cover the visualizations. Data status is available in
 the sidebar. New browsers default to light; saved theme preferences are retained.
 
-Validation: production build; focused ESLint; 42 passing tests covering CSV,
-route grouping, missing-stop comparisons, saved filters, query scope, sidebar
-and theme behavior. A headless Chrome screenshot against the local API verified
-the report with real observations. Vite reports this machine's Node 21 is outside
-its supported versions, but the build succeeds.
-
 Limitations: route grouping follows the published long/short names, not a new
 curated line taxonomy. Stop means use the existing representative-pattern API.
 Saved analyses are filter bookmarks, not frozen snapshots. Reports use the
 existing ranking endpoint's result limit. Print uses the browser's PDF dialog.
-
-Draft stack: #437 → #438 → #439 → this PR. No CI wait, merge or deployment.
