@@ -430,7 +430,7 @@ export function Sidebar() {
           // 230, not 210 — the brand block's title ("遅延ダッシュボード") needs
           // ~135px alongside the 32px icon + gap; 210 wrapped it to two lines.
           // Collapsed rail is 64: 32px icon + 16px padding each side.
-          width: collapsed ? 64 : 200,
+          width: collapsed ? 64 : 230,
           background: "var(--bg-surface)",
           borderRight: "1px solid var(--border-soft)",
           padding: "16px 0",
