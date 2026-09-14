@@ -20,6 +20,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
   const latest = steps.at(-1);
   const [selection, setSelection] = useState<{ id: number; latestId: number } | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [recordedOpen, setRecordedOpen] = useState(false);
   function selectStep(next: { id: number; latestId: number } | null) {
     setSelection(next);
     onStepChange?.();
@@ -63,9 +64,13 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
         return points ? <StopEvidenceChart key={message.message_id} messageId={message.message_id} points={points} />
           : <MessageList key={message.message_id} messages={[message]} formatRoute={formatRoute} t={t} />;
       })}
-      <details className="investigation-log">
+      <details
+        className="investigation-log"
+        open={recordedOpen}
+        onToggle={(event) => setRecordedOpen(event.currentTarget.open)}
+      >
         <summary>{t("ask.evidence.recorded")}</summary>
-        <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />
+        {recordedOpen && <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />}
       </details>
       <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && children}
