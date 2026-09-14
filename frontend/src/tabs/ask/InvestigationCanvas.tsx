@@ -15,6 +15,7 @@ export function InvestigationCanvas({ messages, formatRoute, onStepChange, child
   const steps = investigationSteps(messages);
   const latest = steps.at(-1);
   const [selection, setSelection] = useState<{ id: number; latestId: number } | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   function selectStep(next: { id: number; latestId: number } | null) {
     setSelection(next);
     onStepChange?.();
@@ -53,9 +54,13 @@ export function InvestigationCanvas({ messages, formatRoute, onStepChange, child
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>
       <MessageList messages={selected.messages} formatRoute={formatRoute} t={t} />
       {isLatest && children}
-      <details className="investigation-log">
+      <details
+        className="investigation-log"
+        open={logOpen}
+        onToggle={(e) => setLogOpen(e.currentTarget.open)}
+      >
         <summary>{t("ask.workspace.full_log")}</summary>
-        <MessageList messages={messages} formatRoute={formatRoute} t={t} />
+        {logOpen && <MessageList messages={messages} formatRoute={formatRoute} t={t} />}
       </details>
     </section>
   );
