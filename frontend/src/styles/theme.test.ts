@@ -60,9 +60,7 @@ describe("useThemeSignal (useSyncExternalStore)", () => {
   });
 
   it("(b) initial value is the module default (light) when data-theme is unset", () => {
-    // data-theme unset (afterEach clears it). The old hand-rolled hook defaulted
-    // to "light" here — contradicting the module's "dark" default; the
-    // useSyncExternalStore rewrite falls back to DEFAULT_THEME consistently.
+    // data-theme unset (afterEach clears it) reflects DEFAULT_THEME.
     const { result } = renderHook(() => useThemeSignal());
     expect(result.current).toBe("light");
   });
