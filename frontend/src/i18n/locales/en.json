@@ -618,6 +618,16 @@
     }
   },
   "ask": {
+    "workspace": {
+      "title": "Investigation",
+      "step_count": "{{count}} questions",
+      "steps": "Investigation steps",
+      "retained_result": "Retained result",
+      "historical": "Viewing an earlier result. Follow-up questions use the latest result.",
+      "return_latest": "Return to latest",
+      "saved_result_notice": "Previously returned results — opening a step does not fetch new data. The filters above apply to your next analysis, not necessarily this result.",
+      "full_log": "Full conversation"
+    },
     "suggestion": {
       "today_ranking": "Today's delay ranking",
       "rain_compare": "Rainy-day comparison",
