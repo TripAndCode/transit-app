@@ -76,11 +76,13 @@ const router = createBrowserRouter([
       // catch-all because /overview is not a registered route.
       { index: true, element: <OnboardingGate /> },
       { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },
-      { path: "agencies/:agencyId/overview", element: el(<OverviewTab />) },
+      { path: "agencies/:agencyId/overview", element: el(<MapTab />) },
+      { path: "agencies/:agencyId/period-overview", element: el(<OverviewTab />) },
       { path: "agencies/:agencyId/map", element: el(<MapTab />) },
       { path: "agencies/:agencyId/ask", element: el(<AskTab />) },
       { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
+      { path: "agencies/:agencyId/route-analysis", element: el(<AnalysisTab />) },
       { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
       // Network was promoted from a standalone /network route into the
       // sidebar's uniform nav (artifact-parity Branch 2) — it needs an

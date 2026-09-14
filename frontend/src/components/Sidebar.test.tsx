@@ -126,7 +126,7 @@ describe("Sidebar", () => {
   it("points the no-data prototype link at a far-future date range on the current agency", () => {
     renderSidebar("/agencies/8/map");
     const link = screen.getByRole("link", { name: "No-data state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2030-01-01&to=2030-01-07");
   });
 
   it("points the feed-stale prototype link at the current agency's overview, preserving the active filter", () => {

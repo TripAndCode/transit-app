@@ -1,7 +1,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Clock3, Maximize2, Radio, RefreshCw, Route as RouteIcon, Wifi } from "lucide-react";
+import { Maximize2, Radio, RefreshCw } from "lucide-react";
+import { PatternFilters } from "../components/analysis/AnalysisFilters";
+import { downloadCsv } from "../components/analysis/csv";
+import "../styles/focusedAnalysis.css";
+import "./map/focusedOverview.css";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/mapOverrides.css";
@@ -27,6 +31,7 @@ import {
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -59,7 +64,7 @@ function freshnessFor(timestamp: string | null | undefined): Freshness {
   const age = Date.now() - new Date(timestamp).getTime();
   if (!Number.isFinite(age) || age < 0) return "unknown";
   if (age <= 2 * 60_000) return "normal";
-  if (age <= 10 * 60_000) return "delayed";
+  if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
 }
 
@@ -91,8 +96,13 @@ export function MapTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const { t, i18n } = useTranslation();
-  const location = useLocation();
-  const [ctx] = useRangeContext();
+  const { t: td } = useTranslation("design");
+  const [ctx, updateCtx] = useRangeContext();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [styleId, setStyleId] = useMapStylePref();
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
@@ -111,12 +121,14 @@ export function MapTab() {
   const liveQuery = useLiveTrips(id);
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
-  const liveRows = liveQuery.data?.rows ?? [];
+  const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
-  const requestedRoute = routeSelection.agencyId === id ? routeSelection.route : null;
-  // Selection only emphasizes matching trip markers and loads that route's
-  // shape; the counters and priority queue continue to describe the whole feed.
+  const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
+  // effectiveRoute only highlights matching markers and loads that route's shape.
+  // It's independent of ctx.routes, which already scoped liveRows (and so every
+  // counter/queue/CSV derived from it) above, whether ctx.routes has one entry
+  // or many.
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;
@@ -259,7 +271,7 @@ export function MapTab() {
   useBasemapDim(mapRef, styleEpoch, true);
   useOperationsMapLayers(
     mapRef,
-    liveQuery.data,
+    liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
     shapeQuery.data,
     effectiveRoute,
     selectedSummary?.avg_delay_sec ?? 0,
@@ -335,43 +347,16 @@ export function MapTab() {
   }
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
-  const delayedTrips = liveRows.filter((trip) => trip.dep_delay >= 60).length;
-  const maxDelay = liveRows.reduce((maximum, trip) => Math.max(maximum, trip.dep_delay), 0);
-  const selectedProgress = progressQuery.data?.stops ?? [];
-  const delayGrowing = selectedProgress.some((stop, index) => index > 0 && stop.dep_delay - selectedProgress[index - 1].dep_delay >= 60);
-  const delayRecovering = selectedProgress.some((stop, index) => index > 0 && selectedProgress[index - 1].dep_delay - stop.dep_delay >= 60);
-  const trendLabel = !effectiveTrip || selectedProgress.length < 2
-    ? t("operations.stats.waiting")
-    : t(delayGrowing ? "operations.stats.growing" : delayRecovering ? "operations.stats.recovering" : "operations.stats.stable");
+  const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
 
   return (
-    <div className="operations-page">
+    <div className="operations-page focused-overview">
       <header className="ops-header">
         <div className="ops-heading">
-          <Radio size={23} aria-hidden="true" />
           <div>
-            <span className="ops-eyebrow">{t("operations.eyebrow")}</span>
-            <h1>{t("operations.title")}</h1>
+            <h1>{td("live")}</h1>
           </div>
         </div>
-        <nav className="ops-mode-switch" aria-label={t("operations.mode_label")}>
-          <span aria-current="page">{t("operations.mode.current")}</span>
-          <Link to={`/agencies/${agencyId}/analysis/trend${location.search}`}>{t("operations.mode.history")}</Link>
-        </nav>
-        <label className="ops-route-filter">
-          <span>{t("operations.route_filter")}</span>
-          <select
-            value={effectiveRoute ?? ""}
-            onChange={(event) => event.target.value
-              ? focusRoute(event.target.value)
-              : (() => { setRouteSelection({ agencyId: id, route: "all" }); setSelectedDirectionKey(null); setSelectedTripId(null); })()}
-          >
-            <option value="">{t("operations.all_routes")}</option>
-            {[...activeRouteCodes].sort().map((routeCode) => (
-              <option key={routeCode} value={routeCode}>{routeNames.format(routeCode)}</option>
-            ))}
-          </select>
-        </label>
         <div className={`ops-freshness ops-freshness--${freshness}`}>
           <span />
           {liveQuery.data?.latest_captured_at
@@ -394,12 +379,17 @@ export function MapTab() {
         )}
       </header>
 
-      <section className="ops-stats" aria-label={t("operations.summary_label")}>
-        <Stat icon={<RouteIcon />} label={t("operations.stats.active")} value={liveRows.length} tone="ok" />
-        <Stat icon={<Clock3 />} label={t("operations.stats.max_delay")} value={signedMin(maxDelay, t)} tone={maxDelay >= 300 ? "danger" : "warn"} />
-        <Stat icon={<AlertTriangle />} label={t("operations.stats.delayed_trips")} value={delayedTrips} tone={delayedTrips > 0 ? "warn" : "ok"} />
-        <Stat icon={<Wifi />} label={t("operations.stats.trend")} value={trendLabel} tone={delayGrowing ? "danger" : "ok"} />
-      </section>
+      <div className="focus-filters">
+        <PatternFilters agencyId={id} codes={ctx.routes} onChange={(routes) => {
+          updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
+        }} />
+        <span className="focus-muted">{td("observed", { count: liveRows.length })} · {td("delayed", { count: delayedRows.length })}</span>
+        <button type="button" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
+          ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
+          ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
+        ])}>{td("csv")}</button>
+      </div>
+      {freshness === "stale" && <p role="status" className="focus-muted">{td("stale")}</p>}
 
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
@@ -437,7 +427,17 @@ export function MapTab() {
           </div>
         </section>
 
-        <OperationsTripPanel
+        <aside className="focus-live-queue">
+          <h2>{td("attention")}</h2>
+          {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
+          {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
+            <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
+              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)} · {trip.headsign} · {trip.stop_name}</small></span>
+              <b>{signedMin(trip.dep_delay, t)}</b>
+            </button>
+            {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}
+          </div>)}
+          <details><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           activeRoutes={activeRouteOptions}
           directions={directions}
@@ -455,18 +455,9 @@ export function MapTab() {
             }
           }}
           t={t}
-        />
+        /></details>
+        </aside>
       </div>
-    </div>
-  );
-}
-
-function Stat({ icon, label, value, tone }: { icon: React.ReactElement<{ size?: number }>; label: string; value: React.ReactNode; tone: "ok" | "warn" | "danger" }) {
-  return (
-    <div className={`ops-stat ops-stat--${tone}`}>
-      {icon}
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
