@@ -31,6 +31,7 @@ import {
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { filterLiveRows } from "./map/liveRowsFilter";
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -120,11 +121,7 @@ export function MapTab() {
   const liveQuery = useLiveTrips(id);
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
-  // Never label old reports as current trips; reception may stop between polls.
-  const liveRows = (liveQuery.data?.rows ?? []).filter((trip) => {
-    const age = now - Date.parse(trip.captured_at);
-    return age >= -60_000 && age <= 10 * 60_000 && (!ctx.routes.length || ctx.routes.includes(trip.route_code ?? ""));
-  });
+  const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
