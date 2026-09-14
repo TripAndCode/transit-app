@@ -23,6 +23,7 @@ const OverviewTab = lazy(() => import("./tabs/OverviewTab").then((m) => ({ defau
 const MapTab = lazy(() => import("./tabs/MapTab").then((m) => ({ default: m.MapTab })));
 const AskTab = lazy(() => import("./tabs/AskTab").then((m) => ({ default: m.AskTab })));
 const AnalysisTab = lazy(() => import("./tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab })));
+const RouteAnalysisTab = lazy(() => import("./tabs/RouteAnalysisTab").then((m) => ({ default: m.RouteAnalysisTab })));
 const NetworkTab = lazy(() => import("./tabs/NetworkTab").then((m) => ({ default: m.NetworkTab })));
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
@@ -82,7 +83,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/ask", element: el(<AskTab />) },
       { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
-      { path: "agencies/:agencyId/route-analysis", element: el(<AnalysisTab />) },
+      { path: "agencies/:agencyId/route-analysis", element: el(<RouteAnalysisTab />) },
       { path: "agencies/:agencyId/analysis/:reportType", element: el(<AnalysisTab />) },
       // Network was promoted from a standalone /network route into the
       // sidebar's uniform nav (artifact-parity Branch 2) — it needs an
