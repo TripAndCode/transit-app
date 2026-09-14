@@ -31,6 +31,7 @@ import {
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -63,7 +64,7 @@ function freshnessFor(timestamp: string | null | undefined): Freshness {
   const age = Date.now() - new Date(timestamp).getTime();
   if (!Number.isFinite(age) || age < 0) return "unknown";
   if (age <= 2 * 60_000) return "normal";
-  if (age <= 10 * 60_000) return "delayed";
+  if (age <= MAX_REPORT_AGE_MS) return "delayed";
   return "stale";
 }
 
@@ -121,16 +122,14 @@ export function MapTab() {
   const liveQuery = useLiveTrips(id);
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
-  // Never label old reports as current trips; reception may stop between polls.
-  const liveRows = (liveQuery.data?.rows ?? []).filter((trip) => {
-    const age = now - Date.parse(trip.captured_at);
-    return age >= -60_000 && age <= 10 * 60_000 && (!ctx.routes.length || ctx.routes.includes(trip.route_code ?? ""));
-  });
+  const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
-  // Selection only emphasizes matching trip markers and loads that route's
-  // shape; the counters and priority queue continue to describe the whole feed.
+  // effectiveRoute only highlights matching markers and loads that route's shape.
+  // It's independent of ctx.routes, which already scoped liveRows (and so every
+  // counter/queue/CSV derived from it) above, whether ctx.routes has one entry
+  // or many.
   const effectiveRoute = requestedRoute && requestedRoute !== "all" && activeRouteCodes.has(requestedRoute)
     ? requestedRoute
     : null;

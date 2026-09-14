@@ -9,6 +9,3 @@ growth for an individual trip or a cause; that limitation is visible.
 
 Saved analyses are browser-local filter bookmarks, not immutable snapshots.
 The existing route-shape endpoint chooses the representative observed pattern.
-
-Validation: TypeScript, focused ESLint, CSV/grouping and stop matching/gap tests.
-Draft stack: depends on #438. CI wait skipped; no deployment or merge.

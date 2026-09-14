@@ -457,14 +457,6 @@
     }
   },
   "operations": {
-    "eyebrow": "リアルタイム運行監視",
-    "title": "運行状況",
-    "mode_label": "運行状況の表示モード",
-    "mode": {
-      "current": "現在",
-      "history": "履歴分析"
-    },
-    "route_filter": "路線",
     "all_routes": "すべての路線",
     "last_updated": "最終更新 {{when}}",
     "no_update": "最終更新なし",
@@ -475,21 +467,7 @@
     "refresh_unchanged": "再取得済み・新しい観測はありません",
     "refresh_failed": "再取得できませんでした",
     "refresh_rate_limited": "更新回数が多すぎます。しばらく待ってから再試行してください",
-    "summary_label": "現在の運行サマリー",
     "loading": "最新の運行状況を取得中...",
-    "stats": {
-      "active": "最新観測便",
-      "anomaly": "異常",
-      "watch": "注意",
-      "freshness": "データ鮮度",
-      "max_delay": "最大遅延",
-      "delayed_trips": "遅延便",
-      "trend": "選択便の傾向",
-      "growing": "遅延拡大",
-      "recovering": "回復傾向",
-      "stable": "変化なし",
-      "waiting": "2地点待ち"
-    },
     "context": {
       "route_selected": "表示中: {{route}}",
       "all_routes": "表示中: 全路線",

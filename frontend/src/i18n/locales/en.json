@@ -457,14 +457,6 @@
     }
   },
   "operations": {
-    "eyebrow": "REAL-TIME OPERATIONS",
-    "title": "Operations",
-    "mode_label": "Operations view",
-    "mode": {
-      "current": "Current",
-      "history": "Historical analysis"
-    },
-    "route_filter": "Route",
     "all_routes": "All routes",
     "last_updated": "Last updated {{when}}",
     "no_update": "No update received",
@@ -475,21 +467,7 @@
     "refresh_unchanged": "Reloaded; no newer observation available",
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
-    "summary_label": "Current operations summary",
     "loading": "Loading the latest operations...",
-    "stats": {
-      "active": "Trips in latest observation",
-      "anomaly": "Anomalies",
-      "watch": "Watch",
-      "freshness": "Data freshness",
-      "max_delay": "Maximum delay",
-      "delayed_trips": "Delayed trips",
-      "trend": "Selected trip trend",
-      "growing": "Delay growing",
-      "recovering": "Recovering",
-      "stable": "No change",
-      "waiting": "Waiting for 2 stops"
-    },
     "context": {
       "route_selected": "Showing: {{route}}",
       "all_routes": "Showing: all routes",

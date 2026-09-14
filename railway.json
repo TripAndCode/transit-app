@@ -9,6 +9,6 @@
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
-    "preDeployCommand": "python gtfs_pipeline.py migrate up"
+    "preDeployCommand": "python gtfs_pipeline.py migrate up && python -c \"from pipeline.clickhouse import get_client; from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())\""
   }
 }
