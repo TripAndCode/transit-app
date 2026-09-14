@@ -105,6 +105,7 @@ export function MapTab() {
   }, []);
   const [styleId, setStyleId] = useMapStylePref();
   const [styleEpoch, setStyleEpoch] = useState(0);
+  const [mapUnavailable, setMapUnavailable] = useState(false);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
   const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
@@ -182,12 +183,16 @@ export function MapTab() {
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({
+    let map: MLMap;
+    try { map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current),
       center: [140.7474, 40.8246],
       zoom: 11,
-    });
+    }); } catch {
+      const frame = requestAnimationFrame(() => setMapUnavailable(true));
+      return () => cancelAnimationFrame(frame);
+    }
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
@@ -401,9 +406,10 @@ export function MapTab() {
       <div className="ops-workspace">
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
           <div ref={mapContainerRef} className="ops-map__canvas" />
+          {mapUnavailable && <div className="ops-map__empty"><p role="status">{td("mapUnavailable")}</p></div>}
           {!getMapStyleOverride() && <MapStyleControl value={styleId} onChange={setStyleId} t={t} />}
           {(liveQuery.isLoading || summaryQuery.isLoading) && <div className="ops-map__loading">{t("operations.loading")}</div>}
-          {!liveQuery.isLoading && liveRows.length === 0 && (
+          {!mapUnavailable && !liveQuery.isLoading && liveRows.length === 0 && (
             <div className="ops-map__empty">
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>

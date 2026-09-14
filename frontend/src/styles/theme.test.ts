@@ -8,8 +8,8 @@ describe("theme preference (localStorage)", () => {
     delete document.documentElement.dataset.theme;
   });
 
-  it("defaults to dark when nothing stored", () => {
-    expect(readThemePref()).toBe("dark");
+  it("defaults to light when nothing stored", () => {
+    expect(readThemePref()).toBe("light");
   });
 
   it("round-trips a stored value", () => {
@@ -19,14 +19,14 @@ describe("theme preference (localStorage)", () => {
 
   it("ignores an invalid stored value and returns the default", () => {
     localStorage.setItem("transit.theme", "sepia");
-    expect(readThemePref()).toBe("dark");
+    expect(readThemePref()).toBe("light");
   });
 
-  it("returns dark when localStorage.getItem throws", () => {
+  it("returns light when localStorage.getItem throws", () => {
     const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("localStorage unavailable");
     });
-    expect(readThemePref()).toBe("dark");
+    expect(readThemePref()).toBe("light");
     spy.mockRestore();
   });
 
@@ -59,12 +59,10 @@ describe("useThemeSignal (useSyncExternalStore)", () => {
     expect(result.current).toBe("light");
   });
 
-  it("(b) initial value is the module default (dark) when data-theme is unset", () => {
-    // data-theme unset (afterEach clears it). The old hand-rolled hook defaulted
-    // to "light" here — contradicting the module's "dark" default; the
-    // useSyncExternalStore rewrite falls back to DEFAULT_THEME consistently.
+  it("(b) initial value is the module default (light) when data-theme is unset", () => {
+    // data-theme unset (afterEach clears it) reflects DEFAULT_THEME.
     const { result } = renderHook(() => useThemeSignal());
-    expect(result.current).toBe("dark");
+    expect(result.current).toBe("light");
   });
 
   it("(c) updates the returned value when applyTheme sets a new theme", () => {

@@ -69,5 +69,5 @@ export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; sele
     // Re-fit only when the stop set itself changes (a new route/direction), not
     // when the user merely picks a different stop to inspect.
   }, [data]);
-  return <section aria-label={t("map")}><div ref={container} style={{ height: 210, borderRadius: 6 }} />{failed && <p>{t("map")} — {t("mapUnavailable")}</p>}</section>;
+  return <section aria-label={t("map")}><div ref={container} style={{ height: failed ? 0 : 210, borderRadius: 6 }} />{failed && <p className="focus-muted">{t("mapUnavailable")}</p>}</section>;
 }

@@ -70,7 +70,8 @@ export function AgencyPicker() {
           border: "1px solid var(--border-subtle)",
           borderRadius: "var(--radius)",
           padding: "6px 12px",
-          minWidth: 200,
+          minWidth: 0,
+          width: "100%",
           textAlign: "left",
         }}
       >

@@ -1,10 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
-  Map as MapIcon,
+  FileText,
   BarChart3,
   LayoutDashboard,
-  GitCompare,
   HelpCircle,
   Clock,
   CircleSlash,
@@ -20,16 +19,16 @@ import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
+import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 
-type Item = { to: string; labelKey: string; subtitleKey: string; Icon: LucideIcon };
+type Item = { to: string; labelKey: string; Icon: LucideIcon };
 
 const ITEMS: Item[] = [
-  { to: "overview", labelKey: "nav.overview", subtitleKey: "nav.overview_subtitle", Icon: LayoutDashboard },
-  { to: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
-  { to: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
-  { to: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
+  { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
+  { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
+  { to: "reports", labelKey: "design:reports", Icon: FileText },
 ];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
@@ -129,9 +128,6 @@ export function Sidebar() {
                 {!collapsedFlag && (
                   <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <span>{t(item.labelKey)}</span>
-                    <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>
-                      {t(item.subtitleKey)}
-                    </span>
                   </span>
                 )}
               </NavLink>
@@ -248,6 +244,7 @@ export function Sidebar() {
             )}
           </>
         )}
+        {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );

@@ -8,9 +8,9 @@ export type Theme = "light" | "dark";
 const THEME_CHANGE_EVENT = "themechange";
 
 const PREF_KEY = "transit.theme";
-const DEFAULT_THEME: Theme = "dark";
+const DEFAULT_THEME: Theme = "light";
 
-/** Read the persisted theme. Defaults to dark (the new default) when unset
+/** Read the persisted theme. Defaults to light when unset
  *  or invalid — not prefers-color-scheme-based; this is a product choice,
  *  not an OS-driven mode. */
 export function readThemePref(): Theme {
@@ -56,9 +56,8 @@ function subscribeThemeSignal(onStoreChange: () => void): () => void {
 }
 
 /** Snapshot of the current theme, read from the DOM (`data-theme` on <html>) —
- *  the single source of truth applyTheme writes. Returns DEFAULT_THEME (dark)
- *  when the attribute is absent or unrecognized, matching the module's default
- *  rather than a hardcoded "light". Returns a stable primitive so
+ *  the single source of truth applyTheme writes. Returns DEFAULT_THEME (light)
+ *  when the attribute is absent or unrecognized. Returns a stable primitive so
  *  useSyncExternalStore won't loop. Doubles as the server snapshot. */
 function themeSnapshot(): Theme {
   if (typeof document === "undefined") return DEFAULT_THEME;

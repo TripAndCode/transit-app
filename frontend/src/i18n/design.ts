@@ -1,6 +1,8 @@
 export const design = {
   ja: {
     overview: "概況", analysis: "路線分析", reports: "レポート", live: "現在の運行",
+    aggregateDate: "最新集計日", excluded: "除外した異常値", lastObserved: "最新の観測日時",
+    mapUnavailable: "この環境では地図を表示できません。観測データは引き続き確認できます。",
     investigate: "遅れが増えた区間を調べる", reportTitle: "運行の傾向を、一枚にまとめる",
     line: "路線", pattern: "系統", allLines: "すべての路線", allPatterns: "すべての系統",
     from: "開始日", to: "終了日", days: "曜日", allDays: "すべての曜日", weekday: "平日", weekend: "土日祝",
@@ -15,7 +17,6 @@ export const design = {
     compare: "1週間前と比較", selectedStop: "選択した停留所", samples: "観測数", missing: "観測なし",
     caveat: "代表的な運行経路の平均値です。停留所ごとの対象便が異なるため、差は個々の便の遅延増加や原因を示すものではありません。",
     details: "観測データ・定義", stop: "停留所", sequence: "停留所順", minutes: "分", map: "位置を地図で確認",
-    mapUnavailable: "地図を表示できませんでした",
     save: "この分析を保存", saved: "保存しました", saveFailed: "このブラウザーには保存できませんでした",
     summary: "期間のまとめ", savedAnalyses: "保存した分析", noSaved: "路線分析で保存した条件がここに表示されます",
     localOnly: "このブラウザーに保存した条件です。開くと最新のデータで再集計します。",
@@ -27,6 +28,8 @@ export const design = {
   },
   en: {
     overview: "Overview", analysis: "Route analysis", reports: "Reports", live: "Current observations",
+    aggregateDate: "Latest aggregate date", excluded: "Excluded implausible observations", lastObserved: "Latest observation timestamp",
+    mapUnavailable: "The map is unavailable in this environment. Observation data remains available.",
     investigate: "Where does delay build up?", reportTitle: "Summarize service performance in one page",
     line: "Route", pattern: "Service pattern", allLines: "All routes", allPatterns: "All patterns",
     from: "From", to: "To", days: "Days", allDays: "All days", weekday: "Weekdays", weekend: "Weekends / holidays",
@@ -41,7 +44,6 @@ export const design = {
     compare: "Compare with one week earlier", selectedStop: "Selected stop", samples: "Observations", missing: "No observation",
     caveat: "Means for the representative service path. Stop samples can contain different trips; differences do not measure individual trip delay growth or establish causes.",
     details: "Observations and definitions", stop: "Stop", sequence: "Stop sequence", minutes: "min", map: "View location on map",
-    mapUnavailable: "The map could not be displayed",
     save: "Save analysis", saved: "Saved", saveFailed: "Cannot save in this browser",
     summary: "Period summary", savedAnalyses: "Saved analyses", noSaved: "Save filters in route analysis to see them here",
     localOnly: "Filters saved in this browser. Opening them queries the latest available data.",

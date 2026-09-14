@@ -34,9 +34,10 @@ export function RouteAnalysisTab() {
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
   return <div className="focus-page">
     <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
-      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
+      <button disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ["agency_id", "route_code", "from", "to", "dow", "time_band", "service", "stop_sequence", "stop_id", "stop_name", "mean_departure_delay_minutes", "observations", "comparison_mean_minutes"],
         ...stops.map((s) => [id, route, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, s.stop_sequence, s.stop_id, s.stop_name, s.avg_min, s.samples, matchedPrevious(s, prevStops)]),
+        [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
       <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => { try { saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare); setNotice(t("saved")); } catch { setNotice(t("saveFailed")); } }}>{t("save")}</button>
     </div></header>
@@ -51,7 +52,7 @@ export function RouteAnalysisTab() {
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous")} …</p>}
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
         <div className="focus-split">
-          <div><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
+          <div><div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
             <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>

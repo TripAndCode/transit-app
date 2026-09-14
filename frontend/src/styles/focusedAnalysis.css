@@ -12,7 +12,7 @@
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--color-danger); }
-.focus-chart { width: 100%; height: auto; min-height: 230px; }
+.focus-chart { width: 100%; height: 300px; min-height: 230px; }
 .focus-table-wrap { overflow-x: auto; }
 .focus-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .focus-table th, .focus-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-soft); }
@@ -23,4 +23,4 @@
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
 @media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
-@media print { body { background: white; } aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack { display: none !important; } main { overflow: visible !important; } .focus-page { color: black; } }
+@media print { body { background: white; } .app-shell { display: block !important; height: auto !important; } .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack { display: none !important; } main { overflow: visible !important; } .focus-page { color: black; } .focus-page svg { break-inside: avoid; } }
