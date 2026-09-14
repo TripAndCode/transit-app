@@ -24,12 +24,10 @@ Cost: ~$10–18/mo usage-based, in exchange for zero server ops and git-push
 deploys — pick this if you'd rather not manage a Linux box yourself.
 
 > **Why not a managed Postgres add-on?** Migration `0001` does
-> `CREATE EXTENSION postgis / vector`, and `0012` adds `pg_trgm`. Render's
-> managed PG supports all three, but the e5-small embedder (torch, ~1–2 GB
-> resident) would then force a 2 GB app instance *plus* a separate paid DB
-> — ~$32/mo, over budget. Running our own `db/Dockerfile` on Railway keeps
-> app + DB on one usage bill and sidesteps any "does the platform have my
-> extension" question entirely.
+> `CREATE EXTENSION postgis / vector`, and `0012` adds `pg_trgm`. Not every
+> managed PG offering supports all three. Running our own `db/Dockerfile` on
+> Railway keeps app + DB on one usage bill and sidesteps any "does the
+> platform have my extension" question entirely.
 
 ---
 
@@ -187,15 +185,17 @@ curl -fsS https://<your>.up.railway.app/health      # → 200
 Open the domain in a browser — SPA loads. Tabs are empty until data lands
 (next step), and Ask works once `GROQ_API_KEY`/`CEREBRAS_API_KEY` is valid.
 
-> **Image spec — embedder is baked in.** The `Dockerfile` downloads the
-> Ask-tab embedder (`intfloat/multilingual-e5-small`, ~470 MB) at **build**
-> time into `HF_HOME=/opt/hf-cache`, so the running container loads it from
-> local disk (~6 s) instead of pulling from HuggingFace on every cold start.
-> This keeps boot fast and removes a runtime dependency on HF being up. Cost:
-> the app image is ~4 GB, and the **build** needs network access to HuggingFace
-> (Railway's builder has it). If you ever bump `EMBEDDING_MODEL_ID` to a model
-> other than the baked default, the container falls back to downloading it at
-> boot — re-bake it in the Dockerfile to keep cold starts fast.
+> **Image spec — the Ask-tab embedder is not in this image.** `sentence-
+> transformers` (and its transitive `torch`/`transformers`/`scikit-learn`/
+> `scipy`) live in poetry's optional `embeddings` group, which the
+> Dockerfile's `--only main` deliberately skips — several GB, unused until a
+> RAG index actually exists. `pipeline.query.embeddings.Embedder`'s import is
+> wrapped in try/except; every caller already falls through to the LLM-only
+> path when it's unavailable, so Ask still works (Stages 1 and 3), just
+> without Stage 2's embedding-nearest-neighbor lookup. To restore it for a
+> given deploy, add the group back to the Dockerfile's `poetry install` line
+> and re-add a build-time bake step for the model (see git history for the
+> previous version of this Dockerfile stage).
 
 ---
 
@@ -415,5 +415,5 @@ Skip entirely if it's only demo data.
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | Cron returns 401 | `CRON_SECRET` mismatch between Railway Variables and the GH repo secret. |
-| Out of memory at boot | The e5-small embedder (torch) is heavy (~1–2 GB resident — the model is baked into the image, but it still loads into RAM). Bump the app service's memory, or set `ASK_ROUTER_ENABLED=false` to skip loading it (Ask falls through to the LLM — Stages 1 & 3 still work). |
-| Slow first boot / `/health` timeout after a redeploy | If boot pauses on `Load pretrained SentenceTransformer`, the baked model isn't being found (e.g. `HF_HOME` changed or `EMBEDDING_MODEL_ID` overridden) so it's downloading from HuggingFace. Confirm the Dockerfile's bake step and `HF_HOME` match the runtime. |
+| Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've re-added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
+| Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
