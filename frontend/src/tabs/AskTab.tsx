@@ -280,6 +280,7 @@ export function AskTab() {
           ) : hasMessages ? (
             <InvestigationCanvas
               key={`${id}:${activeId}`}
+              agencyId={id ?? 0}
               messages={messages}
               formatRoute={routeNames.format}
               onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}

@@ -619,6 +619,10 @@
   },
   "ask": {
     "workspace": {
+      "export_snapshot": "Download result (JSON)",
+      "export_csv": "Table {{index}} CSV",
+      "export_notice": "Exports the selected question and stored answers, without recalculating. Files may contain conversation text; check before sharing. JSON cannot yet be reopened in the app.",
+      "export_failed": "Could not create the download. Please try again.",
       "title": "Investigation",
       "step_count": "{{count}} questions",
       "steps": "Investigation steps",
