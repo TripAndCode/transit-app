@@ -28,7 +28,9 @@ def test_reconstruct_headways_low_noise_fixture_matches_hand_computed():
     gaps = reconstruct_headways(times)
     assert gaps == [483, 478, 477]
     # Within a few seconds of the hand-computed ~480s (8 min) median.
-    assert abs(headway_median_sec(times) - 480) <= 6
+    median = headway_median_sec(times)
+    assert median is not None
+    assert abs(median - 480) <= 6
 
 
 def test_reconstruct_headways_sorts_unordered_input():
@@ -110,7 +112,9 @@ def test_coefficient_of_variation_needs_at_least_two_gaps():
 
 
 def test_coefficient_of_variation_bunched_fixture_is_positive():
-    assert coefficient_of_variation(_BUNCHED_GAPS) > 0
+    cv = coefficient_of_variation(_BUNCHED_GAPS)
+    assert cv is not None
+    assert cv > 0
 
 
 def test_excess_wait_time_even_fixture_is_zero():

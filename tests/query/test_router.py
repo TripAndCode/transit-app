@@ -195,6 +195,7 @@ def test_rule_honors_captured_n():
 
 def test_rule_default_n_when_no_digit():
     d = _match_rules("遅延ワースト")
+    assert d is not None
     assert d.args["n"] == 10
 
 

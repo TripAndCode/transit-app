@@ -91,7 +91,7 @@ def test_direct_url_304_returns_none(tmp_path):
             }
         )
     )
-    err = HTTPError("u", 304, "Not Modified", {}, None)
+    err = HTTPError("u", 304, "Not Modified", {}, None)  # type: ignore[arg-type]
     with patch.object(_opener, "open", side_effect=[err, err]):
         result = direct_url.fetch(8, "https://8.8.8.8/static/8/current_data.zip", tmp_path)
     assert result is None

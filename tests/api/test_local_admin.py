@@ -40,7 +40,7 @@ async def local_client(apply_schema):
     pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        c.pool = pool  # exposed so tests can call seed_local_admin(c.pool) directly
+        c.pool = pool  # type: ignore[attr-defined]  # exposed so tests can call seed_local_admin(c.pool) directly
         yield c
     await pool.close()
 

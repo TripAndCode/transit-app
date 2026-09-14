@@ -1,6 +1,6 @@
 import { ctxToQueryString, type RangeCtx } from "../../api/rangeContext";
 
-export type SavedAnalysis = { id: string; agencyId: number; title: string; query: string; savedAt: string };
+type SavedAnalysis = { id: string; agencyId: number; title: string; query: string; savedAt: string };
 const KEY = "transit.savedAnalyses.v1";
 export function readAnalyses(): SavedAnalysis[] {
   try {
