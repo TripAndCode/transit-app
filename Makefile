@@ -113,7 +113,21 @@ test:
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
+# Keeps dev's `updates` fresh without an Oracle collector or a manual refresh
+# click: re-runs `ingest_live` (all configured agencies) on a fixed interval,
+# backgrounded alongside uvicorn and killed with it. Opt IN per-run with
+# `LOCAL_RT_POLL=1 make serve` — default off, since `ingest_live` with no
+# `--agency-id` fetches every configured agency's real feed_url every
+# interval, and this is a plain dev convenience, not something that should
+# put continuous, uncoordinated load on real third-party agency servers by
+# default. It also holds the same ingest/analyze advisory lock a manual
+# `gtfs_pipeline.py ingest`/`analyze_all` needs, so expect an occasional
+# transient lock-contention exit from either side if both run at once.
 serve:
+	@trap 'kill 0' EXIT; \
+	if [ "$${LOCAL_RT_POLL:-0}" = "1" ]; then \
+		LOCAL_RT_POLL_INTERVAL_SEC=$${LOCAL_RT_POLL_INTERVAL_SEC:-30} bash scripts/dev/local_rt_poller.sh >>/tmp/transit-local-rt-poller.log 2>&1 & \
+	fi; \
 	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
 
 # ── Database ─────────────────────────────────────────────────────────────────
