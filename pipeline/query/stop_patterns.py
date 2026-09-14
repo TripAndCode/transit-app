@@ -3,7 +3,8 @@
 import hashlib
 import json
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 from api.range import RangeCtx
 from pipeline.reports.filters import _dedup_cte_ch, _round2
@@ -13,14 +14,21 @@ MAX_STOPS = 2000
 COLUMNS = ["pattern_id", "pattern_name", "stop_sequence", "stop_id", "stop_name", "avg_min", "samples"]
 
 
+@dataclass
+class _Pattern:
+    stops: list[dict[str, Any]]
+    totals: dict[int, float] = field(default_factory=lambda: defaultdict(float))
+    counts: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+
+
 def assemble_patterns(observations: list, scheduled: list) -> list:
     trips = defaultdict(list)
     for stop in scheduled:
         trips[stop["trip_id"]].append(stop)
-    stats = defaultdict(dict)
+    stats: dict[str, dict[int, tuple[float, int]]] = defaultdict(dict)
     for trip, seq, total, count in observations:
         stats[trip][seq] = (total, count)
-    patterns = {}
+    patterns: dict[str, _Pattern] = {}
     for trip_id in sorted(trips):
         stops = sorted(trips[trip_id], key=lambda row: row["stop_sequence"])
         signature = [(row["stop_sequence"], row["stop_id"]) for row in stops]
@@ -32,24 +40,20 @@ def assemble_patterns(observations: list, scheduled: list) -> list:
         identity = (stops[0]["route_id"], signature)
         key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:20]
         if key not in patterns:
-            patterns[key] = {
-                "stops": stops,
-                "totals": defaultdict(float),
-                "counts": defaultdict(int),
-            }
+            patterns[key] = _Pattern(stops)
         pattern = patterns[key]
         for seq, _ in signature:
             total, count = stats[trip_id].get(seq, (0, 0))
-            pattern["totals"][seq] += total
-            pattern["counts"][seq] += count
+            pattern.totals[seq] += total
+            pattern.counts[seq] += count
     rows = []
     for key, pattern in sorted(patterns.items()):
-        stops = pattern["stops"]
+        stops = pattern.stops
         label = f"{stops[0]['stop_name']} → {stops[-1]['stop_name']} ({len(stops)})"
         for stop in stops:
             seq = stop["stop_sequence"]
-            count = pattern["counts"][seq]
-            minutes = _round2(pattern["totals"][seq] / count / 60) if count else None
+            count = pattern.counts[seq]
+            minutes = _round2(pattern.totals[seq] / count / 60) if count else None
             rows.append([key, label, seq, stop["stop_id"], stop["stop_name"], minutes, count])
     return rows
 

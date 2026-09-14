@@ -619,6 +619,12 @@
   },
   "ask": {
     "evidence": {
+      "pattern_short": "Current-schedule stop order · select a stop to inspect",
+      "selected_detail": "Selected stop evidence",
+      "values": "Recorded identifiers",
+      "sequence": "Stop sequence",
+      "stop_id": "Stop ID",
+      "definition": "Definition and data coverage",
       "search": "Find a stop",
       "window_size": "View",
       "all_stops": "All stops",

@@ -37,4 +37,15 @@ describe("stop evidence", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
     expect(onFocus).toHaveBeenLastCalledWith(null);
   });
+  it("opens only the selected evidence and dismisses with Escape without changing results", () => {
+    renderWithProviders(<StopEvidenceChart messageId={22} points={stopEvidence(message)!} />);
+    expect(screen.queryByRole("region", { name: "Selected stop evidence" })).not.toBeInTheDocument();
+    const bar = screen.getByRole("button", { name: /Central, sequence 7/ });
+    fireEvent.click(bar);
+    expect(screen.getByRole("region", { name: "Selected stop evidence" })).toBeInTheDocument();
+    fireEvent.keyDown(bar, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Selected stop evidence" })).not.toBeInTheDocument();
+    expect(bar).toHaveFocus();
+    expect(screen.getByRole("button", { name: /Park, sequence 2: -1 minutes/ })).toBeInTheDocument();
+  });
 });
