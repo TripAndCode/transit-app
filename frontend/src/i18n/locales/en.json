@@ -788,6 +788,8 @@
       "edit": "Edit"
     },
     "sidebar": {
+      "search": "Search title, pattern or period",
+      "no_matches": "No matching investigations. Try another search.",
       "new_thread": "New conversation",
       "open_threads": "Conversations",
       "pinned": "Pinned",

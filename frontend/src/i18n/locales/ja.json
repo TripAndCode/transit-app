@@ -788,6 +788,8 @@
       "edit": "修正"
     },
     "sidebar": {
+      "search": "タイトル・系統・期間で検索",
+      "no_matches": "一致する調査がありません。検索条件を変えてください。",
       "new_thread": "新しい会話",
       "open_threads": "会話一覧",
       "pinned": "ピン留め",
