@@ -18,6 +18,13 @@ function isThisWeek(iso: string): boolean {
   return now - d < weekMs && d <= now;
 }
 
+function conversationScopeParts(
+  conv: Conversation,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string[] {
+  return [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)];
+}
+
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const parts: string[] = [];
 
@@ -129,10 +136,10 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     }
   }
 
-  // Group conversations
+  // Filter by the search query, then group the surviving conversations
   const query = search.normalize("NFKC").trim().toLocaleLowerCase();
   const matching = conversations.filter((c) =>
-    [c.title, ...(c.filter_ctx.routes ?? []), filterSummary(c.filter_ctx, t)]
+    [c.title, ...conversationScopeParts(c, t)]
       .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
@@ -244,7 +251,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={[...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)].filter(Boolean).join(" ・ ")}
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
                 />
               ))}
             </section>

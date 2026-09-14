@@ -283,6 +283,7 @@ export function AskTab() {
               agencyId={id ?? 0}
               messages={messages}
               formatRoute={routeNames.format}
+              onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}
             >
               {(appendMsg.isPending || followup.isPending) && (
                 <div

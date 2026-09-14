@@ -458,7 +458,7 @@ def ingest_live(agency_id: int, conn, ch_client) -> int:
     # (not distinct_file_names' unbounded full-partition scan, which would
     # be wasteful to pay on every ~30s poll) mirrors ingest()'s file-level
     # idempotency at this path's much smaller grain.
-    return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
+    return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client, strategy_name=strategy_name)
 
 
 def ingest_live_payload(
@@ -468,14 +468,19 @@ def ingest_live_payload(
     file_name: str,
     conn,
     ch_client,
+    strategy_name: str | None = None,
 ) -> int:
     """Decode and store one already-fetched GTFS-RT payload.
 
     This common path is used by direct-feed pulls and the Oracle collector
     push path. ``file_name`` is the collector's durable source identity, so a
     retry after a network timeout is idempotent within a short lookup window.
+    ``strategy_name`` lets a caller that already resolved it (``ingest_live``)
+    skip a second identical lookup; callers without it (the collector push
+    path) get it resolved here.
     """
-    strategy_name = _resolve_strategy_name(agency_id, conn)
+    if strategy_name is None:
+        strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
     if recent_file_name_exists(ch_client, agency_id, file_name, since):
