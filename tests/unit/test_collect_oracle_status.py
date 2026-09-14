@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,7 +25,7 @@ T0 = datetime(2026, 9, 11, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def make_document(observed_at: datetime, *, state_kwargs: dict | None = None) -> dict:
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         component="oracle_crawler",
         observed_at=observed_at,
         last_success_at=observed_at - timedelta(minutes=5),

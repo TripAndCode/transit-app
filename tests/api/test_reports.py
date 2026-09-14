@@ -1885,7 +1885,7 @@ async def test_delay_certificate_requires_a_clickhouse_client():
     from pipeline.reports.council import compute_delay_certificate
 
     with pytest.raises(RuntimeError):
-        await compute_delay_certificate(1, object(), object(), None)
+        await compute_delay_certificate(1, object(), object(), None)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

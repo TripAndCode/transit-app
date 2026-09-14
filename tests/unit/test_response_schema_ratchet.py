@@ -64,7 +64,7 @@ def _schema_routes() -> list[tuple[str, APIRoute]]:
     def _collect(routes: Sequence[BaseRoute]) -> None:
         for route in routes:
             if isinstance(route, APIRoute):
-                if not route.include_in_schema:
+                if not route.include_in_schema or route.methods is None:
                     continue
                 for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
                     out.append((f"{method} {route.path}", route))
