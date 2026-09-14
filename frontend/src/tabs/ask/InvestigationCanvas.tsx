@@ -4,6 +4,8 @@ import type { ConvMessage } from "../../api/types";
 import { MessageList } from "./MessageList";
 import { investigationSteps } from "./investigationSteps";
 import { ResultExports } from "./ResultExports";
+import { stopEvidence } from "./stopEvidence";
+import { StopEvidenceChart } from "./StopEvidenceChart";
 import "./investigation.css";
 
 export function InvestigationCanvas({ agencyId, messages, formatRoute, children }: {
@@ -50,7 +52,15 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, children 
         </div>
       )}
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>
-      <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />
+      {selected.messages.filter((message) => message.role !== "user").map((message) => {
+        const points = stopEvidence(message);
+        return points ? <StopEvidenceChart key={message.message_id} messageId={message.message_id} points={points} />
+          : <MessageList key={message.message_id} messages={[message]} formatRoute={formatRoute} t={t} />;
+      })}
+      <details className="investigation-log">
+        <summary>{t("ask.evidence.recorded")}</summary>
+        <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />
+      </details>
       <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && children}
       <details className="investigation-log">

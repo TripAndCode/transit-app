@@ -1,0 +1,16 @@
+.stop-evidence h3 { font-size: 17px; margin: 16px 0 8px; }
+.stop-evidence-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 28px; margin-top: 20px; }
+.stop-evidence-scroll { overflow-x: auto; }
+.stop-evidence-bars { display: flex; min-width: min-content; padding-top: 32px; gap: 16px; }
+.stop-evidence-column { display: flex; flex: 1; min-width: 90px; flex-direction: column; align-items: stretch; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; padding: 4px; }
+.stop-evidence-column:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.stop-evidence-plot { height: 260px; position: relative; display: block; margin-bottom: 12px; }
+.stop-evidence-bar { position: absolute; left: 25%; width: 50%; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px 4px 0 0; min-height: 1px; }
+.stop-evidence-column[aria-pressed="true"] .stop-evidence-bar { background: var(--accent); }
+.stop-evidence-zero { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--border-soft); }
+.stop-evidence-value { position: absolute; left: 0; right: 0; padding-bottom: 8px; font-variant-numeric: tabular-nums; font-size: 13px; }
+.stop-evidence-name { font-size: 13px; overflow-wrap: anywhere; }
+.stop-evidence-detail { border-left: 1px solid var(--border-soft); padding-left: 24px; }
+.stop-evidence-detail strong { font-size: 36px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.stop-evidence-clear { background: transparent; border: 0; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+@media (max-width: 850px) { .stop-evidence-layout { grid-template-columns: 1fr; } .stop-evidence-detail { border-left: 0; border-top: 1px solid var(--border-soft); padding: 12px 0; } .stop-evidence-plot { height: 200px; } }
