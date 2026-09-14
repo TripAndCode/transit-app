@@ -39,6 +39,8 @@ from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
+from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
+from pipeline.query.stop_patterns import query_stop_patterns
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
@@ -75,6 +77,12 @@ _JST = ZoneInfo("Asia/Tokyo")
 # string-concatenation noise. Add a new template here rather than peppering
 # inline ``if locale == "en"`` conditionals through the handlers.
 _LOCALES: dict[tuple[str, str], str] = {
+    ("stop_patterns", "ja"): "路線{route}：観測便を現在の時刻表に照合した経路別全停留所。未観測の経路は含みません。",
+    ("stop_patterns", "en"): "Route {route}: complete current-schedule stop lists for observed patterns only.",
+    ("stop_patterns_empty", "ja"): "照合できる経路がありません。期間・系統または時刻表との対応を確認してください。",
+    ("stop_patterns_empty", "en"): "No matching pattern. Check the period, route scope and schedule mapping.",
+    ("stop_patterns_large", "ja"): "対象が多いため期間を狭めてください。全停留所を保つため一部だけの表示は行いません。",
+    ("stop_patterns_large", "en"): "Narrow the period. The complete stop list exceeds the limit and was not truncated.",
     ("route_arg_required", "ja"): "route 引数が必要です。",
     ("route_arg_required", "en"): "The route argument is required.",
     ("route_not_registered", "ja"): (
@@ -1051,6 +1059,24 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
     )
 
 
+async def _tool_route_stop_patterns(
+    args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None,
+) -> ToolResult:
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
+    try:
+        rows = await query_stop_patterns(agency_id, ctx, conn, ch, str(route))
+    except ValueError as exc:
+        if str(exc) != "pattern_window_too_large":
+            raise
+        return ToolResult(kind="empty", summary=_summary("stop_patterns_large", lang=locale))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("stop_patterns_empty", lang=locale))
+    return ToolResult(kind="table", summary=_summary("stop_patterns", lang=locale, route=route),
+                      columns=PATTERN_COLUMNS, rows=rows)
+
+
 async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
@@ -1163,6 +1189,7 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,
     "trend_shift": _tool_trend_shift,
@@ -1235,6 +1262,7 @@ async def dispatch(
             "route_meta",
             "time_series",
             "segment_hotspots",
+            "route_stop_patterns",
             "time_pattern",
             "schedule_realism",
             "trend_shift",
