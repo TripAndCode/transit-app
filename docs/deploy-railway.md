@@ -243,7 +243,7 @@ Build the Ask router's RAG index once (optional — Ask degrades gracefully
 without it, falling through to the LLM). `app`'s own image excludes the
 `embeddings` poetry group (see the Image spec note above), so this needs a
 one-off install first — still via `railway run --service app` so the
-command runs inside the private network `db`/`clickhouse` are only
+command runs inside the private network that `db`/`clickhouse` are only
 reachable from:
 
 ```bash
