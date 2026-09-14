@@ -18,6 +18,13 @@ function isThisWeek(iso: string): boolean {
   return now - d < weekMs && d <= now;
 }
 
+function conversationScopeParts(
+  conv: Conversation,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string[] {
+  return [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)];
+}
+
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const parts: string[] = [];
 
@@ -66,6 +73,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const deleteConv = useDeleteConversation(agencyId);
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -128,9 +136,14 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     }
   }
 
-  // Group conversations
-  const pinned = conversations.filter((c) => c.pinned);
-  const unpinned = conversations.filter((c) => !c.pinned);
+  // Filter by the search query, then group the surviving conversations
+  const query = search.normalize("NFKC").trim().toLocaleLowerCase();
+  const matching = conversations.filter((c) =>
+    [c.title, ...conversationScopeParts(c, t)]
+      .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
+  );
+  const pinned = matching.filter((c) => c.pinned);
+  const unpinned = matching.filter((c) => !c.pinned);
 
   const todayList = unpinned.filter((c) => isToday(c.updated_at));
   const yesterdayList = unpinned.filter((c) => isYesterday(c.updated_at));
@@ -192,7 +205,22 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
       </div>
 
       {/* Thread list */}
+      <div style={{ padding: "0 var(--space-3) var(--space-3)" }}>
+        <input
+          type="search"
+          aria-label={t("ask.sidebar.search")}
+          placeholder={t("ask.sidebar.search")}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          style={{ width: "100%", boxSizing: "border-box", padding: 8 }}
+        />
+      </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 0 var(--space-3) 0" }}>
+        {!isLoading && conversations.length > 0 && matching.length === 0 && (
+          <p role="status" style={{ padding: "0 var(--space-3)", fontSize: 13 }}>
+            {t("ask.sidebar.no_matches")}
+          </p>
+        )}
         {isLoading && (
           <div style={{ padding: "var(--space-3) var(--space-4)", color: "var(--text-tertiary)", fontSize: 13 }}>
             {t("common.loading")}
@@ -223,7 +251,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={filterSummary(conv.filter_ctx, t)}
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
                 />
               ))}
             </section>

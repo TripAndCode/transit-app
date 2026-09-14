@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ThreadSidebar } from "./ThreadSidebar";
 import * as hooks from "../api/hooks";
@@ -32,6 +32,22 @@ function render() {
 }
 
 describe("ThreadSidebar", () => {
+  it("searches titles and pattern codes, preserving pinned grouping", () => {
+    mockConversations([
+      conv({ title: "Morning delays", pinned: true, filter_ctx: { routes: ["C10"] } }),
+      conv({ conversation_id: "c2", title: "Evening service" }),
+    ]);
+    render();
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "ｃ１０" } });
+    expect(screen.getByText("Morning delays")).toBeInTheDocument();
+    expect(screen.queryByText("Evening service")).not.toBeInTheDocument();
+    expect(screen.getByText("📌 Pinned")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "missing" } });
+    expect(screen.getByRole("status")).toHaveTextContent("No matching investigations");
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByText("Evening service")).toBeInTheDocument();
+  });
   it("shows the empty state when there are no conversations", () => {
     mockConversations([]);
     render();
