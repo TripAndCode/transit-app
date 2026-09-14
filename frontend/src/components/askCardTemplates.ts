@@ -36,7 +36,7 @@ export type CardTemplate = {
 };
 
 /**
- * Builds the 5 parameterized question card templates for the Ask dashboard.
+ * Builds the parameterized question card templates for the Ask dashboard.
  * Each `buildSummary` closure receives `t` at call-site (from the card
  * component), so the template list itself is locale-independent — safe to
  * call directly on every render (see `QuestionDock.tsx`/`AskTab.tsx`);
@@ -44,6 +44,16 @@ export type CardTemplate = {
  */
 export function buildCardTemplates(): CardTemplate[] {
   return [
+    {
+      id: "stop_hotspots",
+      title_key: "ask.card.stop_hotspots.title",
+      emoji: "▥",
+      tool: "segment_hotspots",
+      params: [{ kind: "route", name: "route", required: true }],
+      buildSummary: (v, t) => v.route
+        ? t("ask.card.stop_hotspots.summary", { route: v.route })
+        : t("ask.card.stop_hotspots.title"),
+    },
     {
       id: "top_delay",
       title_key: "ask.card.top_delay.title",

@@ -29,6 +29,14 @@ describe("investigation steps", () => {
 });
 
 describe("investigation canvas", () => {
+  it("retains the exact source chart beside a grounded follow-up answer", () => {
+    const source: ConvMessage = { ...messages[1], tool: "segment_hotspots",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
+        rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } };
+    const answer = { ...messages[3], args: { context_message_id: source.message_id } };
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={[messages[0], source, messages[2], answer]} formatRoute={formatRoute} />);
+    expect(screen.getByRole("button", { name: /Central, sequence 7/ })).toBeInTheDocument();
+  });
   it("defaults to latest, hides follow-ups on older steps, and preserves the full log", () => {
     renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute}>
       <button>Follow up</button>

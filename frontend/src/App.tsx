@@ -33,7 +33,7 @@ export default function App() {
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   const agencyIdNum = agencyId ? Number(agencyId) : null;
   const { pathname } = useLocation();
-  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports)$/.test(pathname);
+  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports|ask)$/.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (
