@@ -43,6 +43,16 @@ describe("filterLiveRows", () => {
     expect(filterLiveRows([wayAhead], NOW, [])).toEqual([]);
   });
 
+  it("includes a report at exactly the 10-minute cutoff (inclusive bound)", () => {
+    const atCutoff = trip({ captured_at: "2026-09-11T01:00:00Z" }); // exactly 600_000ms old
+    expect(filterLiveRows([atCutoff], NOW, [])).toEqual([atCutoff]);
+  });
+
+  it("includes a report at exactly the 60-second clock-skew bound (inclusive bound)", () => {
+    const atSkewBound = trip({ captured_at: "2026-09-11T01:11:00Z" }); // exactly 60_000ms "in the future"
+    expect(filterLiveRows([atSkewBound], NOW, [])).toEqual([atSkewBound]);
+  });
+
   it("excludes a fresh report whose route isn't in a non-empty route filter", () => {
     const other = trip({ route_code: "R2" });
     expect(filterLiveRows([other], NOW, ["R1"])).toEqual([]);
