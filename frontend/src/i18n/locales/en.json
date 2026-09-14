@@ -619,6 +619,8 @@
   },
   "ask": {
     "workspace": {
+      "investigations": "Your investigations",
+      "new_analysis": "Start another analysis",
       "unavailable": "This investigation could not be opened. Check your connection and account. Guest investigations are available only in the browser where they were saved.",
       "retry": "Try again",
       "export_snapshot": "Download result (JSON)",

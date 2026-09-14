@@ -33,6 +33,7 @@ describe("investigation canvas", () => {
     renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute}>
       <button>Follow up</button>
     </InvestigationCanvas>);
+    fireEvent.click(screen.getByText(/Investigation steps ·/));
     expect(screen.getByRole("button", { name: "2. Evening?" })).toHaveAttribute("aria-current", "step");
     const log = screen.getByText("Full conversation").closest("details");
     expect(log).not.toHaveAttribute("open");
@@ -44,6 +45,7 @@ describe("investigation canvas", () => {
   });
   it("returns to the latest step when a new question arrives", () => {
     const { rerender } = renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
+    fireEvent.click(screen.getByText(/Investigation steps ·/));
     fireEvent.click(screen.getByRole("button", { name: "1. Morning?" }));
     rerender(<InvestigationCanvas agencyId={9} messages={[...messages, message(5, "user", "Weekends?")]} formatRoute={formatRoute} />);
     expect(screen.getByRole("button", { name: "3. Weekends?" })).toHaveAttribute("aria-current", "step");

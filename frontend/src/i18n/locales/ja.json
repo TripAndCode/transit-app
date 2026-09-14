@@ -619,6 +619,8 @@
   },
   "ask": {
     "workspace": {
+      "investigations": "これまでの調査",
+      "new_analysis": "別の分析を始める",
       "unavailable": "調査を開けませんでした。接続とログイン中のアカウントを確認してください。ゲストの調査は保存したブラウザーでのみ開けます。",
       "retry": "再試行",
       "export_snapshot": "結果を保存（JSON）",

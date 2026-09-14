@@ -52,13 +52,14 @@ type MenuState = {
 // ─── main component ──────────────────────────────────────────────────────────
 
 type Props = {
+  embedded?: boolean;
   agencyId: number;
   activeId: string | null;
   onSelect: (conversationId: string | null) => void;
   onNewThread: () => void;
 };
 
-export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
+export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embedded = false }: Props) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const { data: conversations = [], isLoading } = useConversations(agencyId);
@@ -284,6 +285,8 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
       />
     </div>
   );
+
+  if (embedded) return <>{sidebarContent}{contextMenu}</>;
 
   if (!isMobile) {
     return (
