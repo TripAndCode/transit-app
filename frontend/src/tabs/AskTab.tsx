@@ -2,10 +2,11 @@
  * AskTab — conversational analytics interface for an agency.
  *
  * Manages thread selection, filter context, message dispatch, and scroll
- * behaviour for the Ask feature. Renders a two-column layout: {@link ThreadSidebar}
- * on the left, and a scrollable message list with a sticky {@link QuestionDock}
- * on the right. Handles anonymous-to-authenticated conversation migration on
- * first login.
+ * behaviour for the Ask feature. Renders a single-column canvas: an
+ * on-demand {@link ThreadSidebar} disclosure for investigation history above
+ * a scrollable message list, with a sticky {@link QuestionDock} at the
+ * bottom. Handles anonymous-to-authenticated conversation migration on first
+ * login.
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
@@ -23,7 +24,6 @@ import {
   useFollowupEnabled,
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
-import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
@@ -48,6 +48,7 @@ export function AskTab() {
 
   // ── Thread state ──────────────────────────────────────────────────────────
   const [activeId, setActiveId] = useInvestigationLocation();
+  const historyRef = useRef<HTMLDetailsElement>(null);
 
   // ── Ask-dock composing state (lifted from QuestionDock so a landing-area
   //    suggestion pill can open a specific chip, not just the bottom dock's
@@ -126,6 +127,7 @@ export function AskTab() {
   // ── Event handlers ────────────────────────────────────────────────────────
 
   function handleSelectThread(threadId: string | null) {
+    historyRef.current?.removeAttribute("open");
     setActiveId(threadId);
     setFilterEdit(null);
     setFollowupDraft("");
@@ -139,6 +141,7 @@ export function AskTab() {
   }
 
   function handleNewThread() {
+    historyRef.current?.removeAttribute("open");
     setActiveId(null);
     setFilterEdit(null);
     setFollowupDraft("");
@@ -222,22 +225,28 @@ export function AskTab() {
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "240px 1fr",
+        display: "flex",
+        flexDirection: "column",
         height: "100%",
         minHeight: 0,
       }}
-      className="ask-tab-grid"
     >
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <header className="ask-workspace-bar">
+        <span>{t("nav.ask")}</span>
       {id != null && (
+        <details ref={historyRef} className="ask-thread-menu">
+          <summary>{t("ask.workspace.investigations")}</summary>
+          <div className="ask-thread-menu-content">
         <ThreadSidebar
           agencyId={id}
           activeId={activeId}
           onSelect={handleSelectThread}
           onNewThread={handleNewThread}
         />
+          </div>
+        </details>
       )}
+      </header>
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div
@@ -347,6 +356,8 @@ export function AskTab() {
         </div>
 
         {/* Bottom dock */}
+        <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
+          <summary>{t("ask.workspace.new_analysis")}</summary>
         {id != null && !unavailable && !(activeId && convQuery.isPending) && (
           <QuestionDock
             agencyId={id}
@@ -360,16 +371,8 @@ export function AskTab() {
             onRunComplete={handleRunComplete}
           />
         )}
+        </details>
       </div>
-
-      {/* Responsive CSS for the two-column grid */}
-      <style>{`
-        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
-          .ask-tab-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

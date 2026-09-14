@@ -31,9 +31,10 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
   return (
     <section className="investigation" aria-label={t("ask.workspace.title")}>
       <header className="investigation-heading">
-        <h2>{t("ask.workspace.title")}</h2>
-        <span>{t("ask.workspace.step_count", { count: steps.length })}</span>
+        <h2>{selected.question || t("ask.workspace.retained_result")}</h2>
       </header>
+      <details className="investigation-history">
+        <summary>{t("ask.workspace.steps")} · {t("ask.workspace.step_count", { count: steps.length })}</summary>
       <nav className="investigation-steps" aria-label={t("ask.workspace.steps")}>
         {steps.map((step, index) => (
           <button
@@ -47,6 +48,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
           </button>
         ))}
       </nav>
+      </details>
       {!isLatest && (
         <div className="investigation-history-notice">
           <span>{t("ask.workspace.historical")}</span>
@@ -54,13 +56,13 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
         </div>
       )}
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>
-      <MessageList messages={selected.messages} formatRoute={formatRoute} t={t} />
+      <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} />
       <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && children}
       <details
         className="investigation-log"
         open={logOpen}
-        onToggle={(e) => setLogOpen(e.currentTarget.open)}
+        onToggle={(event) => setLogOpen(event.currentTarget.open)}
       >
         <summary>{t("ask.workspace.full_log")}</summary>
         {logOpen && <MessageList messages={messages} formatRoute={formatRoute} t={t} />}
