@@ -92,11 +92,11 @@ const router = createBrowserRouter([
       // user lands here (Sidebar bails with no agencyId, matching every
       // other agency-scoped tab).
       { path: "agencies/:agencyId/network", element: el(<NetworkTab />) },
+      { path: "agencies/:agencyId/reports", element: el(<ReportsHomeTab />) },
       // Phases 1 and 2 renamed Reports -> Analysis and folded Forecast into
-      // it, respectively, and deliberately left the old URLs 404-ing until
+      // it, respectively, and deliberately left these old URLs 404-ing until
       // this final phase. No Suspense wrapper needed — these render nothing
       // but an immediate <Navigate>, not a lazy-loaded tab.
-      { path: "agencies/:agencyId/reports", element: el(<ReportsHomeTab />) },
       { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportsToAnalysis /> },
       { path: "agencies/:agencyId/forecast", element: <RedirectForecastToAnalysis /> },
       // Legacy bare /network bookmark, from before the route above existed.
