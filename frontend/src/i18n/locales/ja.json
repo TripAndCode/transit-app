@@ -618,6 +618,19 @@
     }
   },
   "ask": {
+    "evidence": {
+      "title": "平均出発遅延が大きい停留所順序",
+      "scope": "遅延の大きい順に抽出した停留所順序の集計です。路線の全停留所ではありません。",
+      "select": "棒を選んで観測値を見る",
+      "bar_label": "{{name}}・順序{{sequence}}：{{minutes}}分、観測{{count}}件",
+      "clear": "選択を解除",
+      "minutes": "{{value}}分",
+      "metric": "平均出発遅延",
+      "samples": "観測 {{count}}件",
+      "unit": "単位：分・ゼロより下は早発",
+      "caveat": "停留所順序で集計し、名称は代表便から取得しています。この集計だけでは遅延の原因は分かりません。",
+      "recorded": "取得したデータ・記録された引数を見る"
+    },
     "workspace": {
       "investigations": "これまでの調査",
       "new_analysis": "別の分析を始める",
