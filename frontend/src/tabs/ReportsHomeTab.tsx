@@ -61,7 +61,7 @@ export function ReportsHomeTab() {
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} />}>
         {() => <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("pattern")}</th><th>{t("days")}</th><th>{t("mean")}</th><th>{t("samples")}</th><th /></tr></thead><tbody>
           {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td>{names.format(String(row[0]))}</td><td>{String(row[1] ?? "—")}</td><td>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td>{String(row[5] ?? "—")}</td><td>
-            <Link to={`/agencies/${id}/route-analysis?${(() => { const next = new URLSearchParams(queryString); next.set("routes", String(row[0])); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`}>{t("open")}</Link>
+            <Link to={`/agencies/${id}/route-analysis?${(() => { const next = new URLSearchParams(queryString); next.set("routes", String(row[0])); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`}>{t("open")}</Link>{/* i18n-ignore: query contract */}
           </td></tr>)}
         </tbody></table></div>}
       </AsyncSection></section>

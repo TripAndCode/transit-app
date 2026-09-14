@@ -40,6 +40,6 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
     <label>{t("band")}<select value={ctx.time_band} onChange={(e) => update({ time_band: e.target.value as TimeBand })}>
       {(["all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"] as const).map((v) => <option key={v} value={v}>{t(v === "all" ? "allHours" : v)}</option>)}
     </select></label>
-    {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{t(ctx.service === "平日" ? "weekday" : "weekend")} ×</button>}
+    {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{t(ctx.service === "平日" ? "weekday" : "weekend")} ×</button>} {/* i18n-ignore: query contract */}
   </div>;
 }
