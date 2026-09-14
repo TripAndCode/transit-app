@@ -63,17 +63,16 @@ export function Sidebar() {
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY,
-  // also used by ThreadSidebar) the desktop rail's fixed 230/64px width
-  // would otherwise eat most of a ~390px phone screen, leaving almost no
-  // room for tab content. isMobile conditionally renders only the active
-  // variant — mirroring ThreadSidebar's useMediaQuery-based split — instead
-  // of always mounting both and toggling visibility via CSS `display`,
-  // which used to double the nav's DOM nodes/listeners at every viewport
-  // width. The drawer body itself is additionally only mounted while open
-  // (on top of the desktop/mobile split), so the common case (drawer
-  // closed) doesn't duplicate every nav label/link in the DOM and break
-  // single-match queries in tests or a11y tooling.
+  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY)
+  // the desktop rail's fixed 230/64px width would otherwise eat most of a
+  // ~390px phone screen, leaving almost no room for tab content. isMobile
+  // conditionally renders only the active variant instead of always
+  // mounting both and toggling visibility via CSS `display`, which used to
+  // double the nav's DOM nodes/listeners at every viewport width. The
+  // drawer body itself is additionally only mounted while open (on top of
+  // the desktop/mobile split), so the common case (drawer closed) doesn't
+  // duplicate every nav label/link in the DOM and break single-match
+  // queries in tests or a11y tooling.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const [mobileOpen, setMobileOpen] = useState(false);
 

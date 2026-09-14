@@ -33,6 +33,7 @@ async def test_save_upserts_on_conflict(aconn, user_id):
     await save_user_llm_key(aconn, user_id, "groq", "gsk_first_0000")
     await save_user_llm_key(aconn, user_id, "openai", "sk_second_1111")
     key = await get_user_llm_key(aconn, user_id)
+    assert key is not None
     assert key.provider == "openai"
     assert key.raw_key == "sk_second_1111"
 

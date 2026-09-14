@@ -101,7 +101,7 @@ def test_summary_schedule_realism_padding_exact_strings():
 
 def test_dispatch_unknown_tool_returns_en_message():
     """The dispatcher's bottom-of-the-funnel error is locale-aware too."""
-    result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1, locale="en"))
+    result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1, locale="en"))  # type: ignore[arg-type]
     assert result.kind == "empty"
     assert "Unsupported tool" in result.summary
     assert "nonexistent_tool" in result.summary
@@ -109,7 +109,7 @@ def test_dispatch_unknown_tool_returns_en_message():
 
 def test_dispatch_unknown_tool_defaults_to_ja():
     """Locale defaults to JP so legacy callers stay on the previous behaviour."""
-    result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1))
+    result = asyncio.run(dispatch("nonexistent_tool", {}, ctx=None, conn=None, agency_id=1))  # type: ignore[arg-type]
     assert "未対応のツール" in result.summary
 
 
