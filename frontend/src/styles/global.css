@@ -146,6 +146,14 @@
 input[type="date"] { color-scheme: light; }
 :root[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 
+/* App.tsx's root wrapper and the sidebar's data-status disclosure are always
+   mounted, regardless of route, so their styling lives here rather than in a
+   route-lazy-loaded stylesheet. */
+.app-shell { --accent: #187b80; --accent-soft: #e1f1f1; }
+:root[data-theme="dark"] .app-shell { --accent: #43c5ba; --accent-soft: #183b3d; }
+.focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
+.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); z-index: 410; }
+
 *, *::before, *::after { box-sizing: border-box; }
 
 .definition-meta {
