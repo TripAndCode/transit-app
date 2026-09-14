@@ -31,7 +31,7 @@ export function FollowupChipsRow({
   /** `isDraft` is an explicit source flag, not inferred from text -- a typed
    *  draft that happens to exactly match a canned chip's translated prompt
    *  must not be misattributed to the chip (or vice versa). */
-  onFollowup: (contextMsgId: number, question: string, isDraft: boolean) => void;
+  onFollowup: (contextMsgId: number, question: string, isDraft: boolean, rowIndex?: number) => void;
   draftValue: string;
   onDraftChange: (next: string) => void;
   error?: unknown;
@@ -57,7 +57,8 @@ export function FollowupChipsRow({
   const lastResultMsgId = (() => {
     if (focus) {
       const source = messages.find((message) => message.message_id === focus.messageId);
-      if (source && stopEvidence(source)?.some((point) => point.sequence === focus.sequence && point.name === focus.name)) return focus.messageId;
+      if (source && stopEvidence(source)?.some((point) => point.sequence === focus.sequence && point.name === focus.name &&
+        point.patternId === focus.patternId && point.rowIndex === focus.rowIndex && point.stopId === focus.stopId)) return focus.messageId;
       return null;
     }
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -67,11 +68,14 @@ export function FollowupChipsRow({
     return null;
   })();
   if (lastResultMsgId == null) return null;
+  if (!focus && messages.find((message) => message.message_id === lastResultMsgId)?.tool === "route_stop_patterns") {
+    return <p className="investigation-caption">{t("ask.evidence.select_to_ask")}</p>;
+  }
 
   // The <input maxLength> below already caps draftValue at maxChars, so
   // trimmed can never exceed it -- only the lower bound needs checking here.
   const trimmed = draftValue.trim();
-  const prefix = focus ? t("ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name }) + "\n" : "";
+  const prefix = focus ? t(focus.patternId ? "ask.evidence.pattern_focus" : "ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name, stopId: focus.stopId, patternId: focus.patternId }) + "\n" : "";
   const availableChars = Math.max(0, maxChars - prefix.length);
   const canSubmit = trimmed.length > 0 && prefix.length + trimmed.length <= maxChars;
 
@@ -80,13 +84,14 @@ export function FollowupChipsRow({
     // it), but TS doesn't retain that narrowing across this nested function
     // boundary, so the null check stays for type safety, not defensively.
     if (!canSubmit || lastResultMsgId == null) return;
-    onFollowup(lastResultMsgId, focus ? `${trimmed}\n${prefix.trimEnd()}` : trimmed, true);
+    if (focus?.rowIndex !== undefined) onFollowup(lastResultMsgId, `${trimmed}\n${prefix.trimEnd()}`, true, focus.rowIndex);
+    else onFollowup(lastResultMsgId, focus ? `${trimmed}\n${prefix.trimEnd()}` : trimmed, true);
   }
 
   return (
     <div className={compact ? "ask-context-composer" : undefined} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
       {compact && <p className="investigation-caption">{t("ask.evidence.ask_hint")}</p>}
-      {focus && <div className="ask-selection-context">{t("ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name })}</div>}
+      {focus && <div className="ask-selection-context">{prefix.trimEnd()}</div>}
       {!compact && !focus && (
       <div
         role="group"

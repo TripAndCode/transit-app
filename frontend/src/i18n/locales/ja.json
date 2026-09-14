@@ -619,6 +619,14 @@
   },
   "ask": {
     "evidence": {
+      "pattern": "観測された停車経路",
+      "complete_title": "平均出発遅延・停留所順",
+      "complete_scope": "選んだ観測経路の全停留所を現在の時刻表に照合して表示します。出発観測なしは遅延ゼロではありません。",
+      "missing": "出発観測なし",
+      "missing_label": "{{name}}・順序{{sequence}}：出発観測なし",
+      "pattern_caveat": "現在の時刻表との照合結果です。過去の時刻表改定の再現や、遅延原因の特定は行いません。",
+      "pattern_focus": "選択：{{name}}（順序{{sequence}}）。",
+      "select_to_ask": "停留所を選ぶと、その観測データについて質問できます。",
       "focus_context": "選択した停留所順序：{{sequence}}（代表名称：{{name}}）。",
       "ask_hint": "選択したデータから、調査を続ける",
       "ai_notice": "AIは送信したときだけ動作します。取得済みの結果をもとに回答し、新しいデータは取得しません。",
@@ -896,6 +904,7 @@
       }
     },
     "card": {
+      "stop_patterns": { "title": "経路ごとの全停留所を見る", "summary": "{{route}}の停留所全体で、出発遅延はどう分布している？" },
       "stop_hotspots": {
         "title": "どの停留所で遅れが大きい？",
         "summary": "{{route}}は、どの停留所で平均出発遅延が大きい？"

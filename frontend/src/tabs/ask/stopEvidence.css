@@ -1,4 +1,7 @@
 .stop-evidence h3 { font-size: 17px; margin: 16px 0 8px; }
+.ask-pattern-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.ask-pattern-picker select { max-width: 100%; padding: 6px; }
+.stop-evidence-missing { position: absolute; left: 0; right: 0; bottom: 12px; color: var(--text-secondary); font-size: 12px; }
 .stop-evidence-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 28px; margin-top: 20px; }
 .stop-evidence-scroll { overflow-x: auto; }
 .stop-evidence-bars { display: flex; min-width: min-content; padding-top: 32px; gap: 16px; }

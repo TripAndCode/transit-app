@@ -45,6 +45,14 @@ export type CardTemplate = {
 export function buildCardTemplates(): CardTemplate[] {
   return [
     {
+      id: "stop_patterns",
+      title_key: "ask.card.stop_patterns.title",
+      emoji: "▥",
+      tool: "route_stop_patterns",
+      params: [{ kind: "route", name: "route", required: true }],
+      buildSummary: (v, t) => v.route ? t("ask.card.stop_patterns.summary", { route: v.route }) : t("ask.card.stop_patterns.title"),
+    },
+    {
       id: "stop_hotspots",
       title_key: "ask.card.stop_hotspots.title",
       emoji: "▥",

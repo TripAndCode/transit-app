@@ -6,6 +6,7 @@ import { investigationSteps } from "./investigationSteps";
 import { ResultExports } from "./ResultExports";
 import { stopEvidence, type StopFocus } from "./stopEvidence";
 import { StopEvidenceChart } from "./StopEvidenceChart";
+import { StopPatternResult } from "./StopPatternResult";
 import "./investigation.css";
 
 export function InvestigationCanvas({ agencyId, messages, formatRoute, children }: {
@@ -60,6 +61,9 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, children 
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>
       {visibleAnswers.map((message) => {
         const points = stopEvidence(message);
+        if (points && message.tool === "route_stop_patterns") return <StopPatternResult
+          key={`${selected.id}:${message.message_id}`} messageId={message.message_id} points={points}
+          onFocus={(next) => setFocusEdit({ stepId: selected.id, focus: next })} />;
         return points ? <StopEvidenceChart key={`${selected.id}:${message.message_id}`} messageId={message.message_id} points={points}
           onFocus={(next) => setFocusEdit({ stepId: selected.id, focus: next })} />
           : <MessageList key={message.message_id} messages={[message]} formatRoute={formatRoute} t={t} />;
