@@ -42,14 +42,12 @@ def test_ingest_live_rejects_unsafe_feed_url():
 def test_ingest_live_fetches_and_ingests(tmp_path):
     """Test that ingest_live fetches the URL and calls strategy.parse_feed with raw bytes."""
     mock_conn = MagicMock()
-    # Three fetchone calls: (1) feed_url SELECT, (2) ingest_strategy SELECT in
-    # ingest_live (for the pre-fetch log line), (3) ingest_strategy SELECT again
-    # in ingest_live_payload (which resolves it independently of its caller).
+    # Two fetchone calls: (1) feed_url SELECT, (2) ingest_strategy SELECT —
+    # resolved once in ingest_live and passed through to ingest_live_payload.
     # Public IP literal so validate_feed_url passes without a DNS lookup (hermetic).
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
         ("https://8.8.8.8/feed.pb",),
         (None,),  # ingest_strategy = NULL → falls back to aomori_regex
-        (None,),  # same lookup, repeated inside ingest_live_payload
     ]
 
     fake_bytes = b"fake protobuf data"
@@ -89,11 +87,10 @@ def test_ingest_live_skips_duplicate_poll_within_same_second(tmp_path):
     for free; ClickHouse has no equivalent, so ingest_live must check first
     and skip entirely rather than double-insert the same poll."""
     mock_conn = MagicMock()
-    # Three fetchone calls: feed_url SELECT, then ingest_strategy SELECT resolved
-    # once in ingest_live (log line) and once more in ingest_live_payload.
+    # Two fetchone calls: feed_url SELECT, then ingest_strategy SELECT —
+    # resolved once in ingest_live and passed through to ingest_live_payload.
     mock_conn.cursor.return_value.__enter__.return_value.fetchone.side_effect = [
         ("https://8.8.8.8/feed.pb",),
-        (None,),
         (None,),
     ]
     mock_resp = MagicMock()
