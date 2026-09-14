@@ -30,7 +30,7 @@ describe("investigation steps", () => {
 
 describe("investigation canvas", () => {
   it("defaults to latest, hides follow-ups on older steps, and preserves the full log", () => {
-    renderWithProviders(<InvestigationCanvas messages={messages} formatRoute={formatRoute}>
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute}>
       <button>Follow up</button>
     </InvestigationCanvas>);
     expect(screen.getByRole("button", { name: "2. Evening?" })).toHaveAttribute("aria-current", "step");
@@ -43,9 +43,9 @@ describe("investigation canvas", () => {
     expect(screen.getByRole("button", { name: "Follow up" })).toBeInTheDocument();
   });
   it("returns to the latest step when a new question arrives", () => {
-    const { rerender } = renderWithProviders(<InvestigationCanvas messages={messages} formatRoute={formatRoute} />);
+    const { rerender } = renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
     fireEvent.click(screen.getByRole("button", { name: "1. Morning?" }));
-    rerender(<InvestigationCanvas messages={[...messages, message(5, "user", "Weekends?")]} formatRoute={formatRoute} />);
+    rerender(<InvestigationCanvas agencyId={9} messages={[...messages, message(5, "user", "Weekends?")]} formatRoute={formatRoute} />);
     expect(screen.getByRole("button", { name: "3. Weekends?" })).toHaveAttribute("aria-current", "step");
   });
 });

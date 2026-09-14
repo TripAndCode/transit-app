@@ -619,6 +619,10 @@
   },
   "ask": {
     "workspace": {
+      "export_snapshot": "結果を保存（JSON）",
+      "export_csv": "表{{index}}のCSV",
+      "export_notice": "選択した質問と取得済みの回答を保存します。再計算はしません。会話の内容を含むため共有前に確認してください。JSONのアプリ内再読み込みは未対応です。",
+      "export_failed": "ダウンロードを作成できませんでした。もう一度お試しください。",
       "title": "調査",
       "step_count": "{{count}}件の質問",
       "steps": "調査の経緯",

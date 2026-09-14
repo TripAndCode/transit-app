@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import type { ConvMessage } from "../../api/types";
 import { MessageList } from "./MessageList";
 import { investigationSteps } from "./investigationSteps";
+import { ResultExports } from "./ResultExports";
 import "./investigation.css";
 
-export function InvestigationCanvas({ messages, formatRoute, children }: {
+export function InvestigationCanvas({ agencyId, messages, formatRoute, children }: {
+  agencyId: number;
   messages: ConvMessage[];
   formatRoute: (code: string | null | undefined) => string;
   children?: ReactNode;
@@ -47,6 +49,7 @@ export function InvestigationCanvas({ messages, formatRoute, children }: {
       )}
       <p className="investigation-caption">{t("ask.workspace.saved_result_notice")}</p>
       <MessageList messages={selected.messages} formatRoute={formatRoute} t={t} />
+      <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && children}
       <details className="investigation-log">
         <summary>{t("ask.workspace.full_log")}</summary>

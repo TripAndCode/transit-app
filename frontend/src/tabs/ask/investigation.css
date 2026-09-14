@@ -12,3 +12,5 @@
 .investigation-history-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 13px; margin-top: 12px; }
 .investigation-log { border-top: 1px solid var(--border-soft); margin-top: 24px; padding-top: 12px; }
 .investigation-log > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.investigation-exports > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.investigation-exports button { padding: 6px 10px; font-size: 12px; }
