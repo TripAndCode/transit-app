@@ -4,8 +4,5 @@ than ten minutes expire from the current view even without a successful refetch.
 
 Removed the large KPI strip and history-mode switch. Trip progress and direction
 selection remain available under observed-trip details. The old historical
-overview remains at `/period-overview`. The next PR supplies the dedicated
-route-analysis destination (currently routed to the existing analysis screen).
-
-Validation: frontend typecheck and focused ESLint passed. No CI wait requested.
-Draft stack: depends on #437; do not merge independently of design review.
+overview remains at `/period-overview`. The route-analysis destination is
+routed to the existing analysis screen until its dedicated screen ships.
