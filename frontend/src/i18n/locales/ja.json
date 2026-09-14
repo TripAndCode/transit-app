@@ -468,11 +468,6 @@
     "refresh_failed": "再取得できませんでした",
     "refresh_rate_limited": "更新回数が多すぎます。しばらく待ってから再試行してください",
     "loading": "最新の運行状況を取得中...",
-    "stats": {
-      "anomaly": "異常",
-      "watch": "注意",
-      "freshness": "データ鮮度"
-    },
     "context": {
       "route_selected": "表示中: {{route}}",
       "all_routes": "表示中: 全路線",

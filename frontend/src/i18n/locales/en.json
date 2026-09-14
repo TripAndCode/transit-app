@@ -468,11 +468,6 @@
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
     "loading": "Loading the latest operations...",
-    "stats": {
-      "anomaly": "Anomalies",
-      "watch": "Watch",
-      "freshness": "Data freshness"
-    },
     "context": {
       "route_selected": "Showing: {{route}}",
       "all_routes": "Showing: all routes",
