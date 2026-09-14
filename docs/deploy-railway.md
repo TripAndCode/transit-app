@@ -240,10 +240,14 @@ railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --age
 ```
 
 Build the Ask router's RAG index once (optional — Ask degrades gracefully
-without it, falling through to the LLM):
+without it, falling through to the LLM). `app`'s own image excludes the
+`embeddings` poetry group (see the Image spec note above), so this needs a
+one-off install first — still via `railway run --service app` so the
+command runs inside the private network `db`/`clickhouse` are only
+reachable from:
 
 ```bash
-railway run --service app python gtfs_pipeline.py build_rag_index --agency-id 1
+railway run --service app sh -c "pip install --no-cache-dir sentence-transformers && python gtfs_pipeline.py build_rag_index --agency-id 1"
 ```
 
 ---
