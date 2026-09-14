@@ -230,7 +230,6 @@ export function AskTab() {
         height: "100%",
         minHeight: 0,
       }}
-      className="ask-tab-grid"
     >
       <header className="ask-workspace-bar">
         <span>{t("nav.ask")}</span>
