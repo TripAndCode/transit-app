@@ -21,6 +21,8 @@ import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
+import { LegendChip } from "../components/LegendChip";
+import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
 import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
 import { useBasemapDim } from "./map/useBasemapDim";
@@ -195,7 +197,10 @@ export function MapTab() {
     );
     if (!created.map) return created.cleanup;
     const map: MLMap = created.map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    // top-right, not the default top-left: the legend now occupies top-left
+    // (see .ops-map-legend) and the two used to be squeezed into the same
+    // corner, forcing the legend to offset itself around the zoom buttons.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
     map.on("click", LIVE_TRIPS_LAYER, onTripClick);
@@ -355,6 +360,7 @@ export function MapTab() {
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
+  const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
 
   return (
     <div className="operations-page focused-overview">
@@ -391,7 +397,7 @@ export function MapTab() {
           updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
         }} />
         <span className="focus-muted">{td("observed", { count: liveRows.length })} · {td("delayed", { count: delayedRows.length })}</span>
-        <button type="button" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
+        <button type="button" className="btn-ghost" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
           ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
           ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
         ])}>{td("csv")}</button>
@@ -417,10 +423,10 @@ export function MapTab() {
             </div>
           )}
           <div className="ops-map-legend" aria-label={t("operations.map.legend_label")}>
-            <span><i className="is-current" />{t("operations.map.legend_current")}</span>
-            <span><i className="is-trail" />{t("operations.map.legend_trail")}</span>
-            <span><i className="is-delayed" />{t("operations.map.legend_delay")}</span>
-            <span><i className="is-cluster" />{t("operations.map.legend_cluster")}</span>
+            <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
+            <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
+            <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
+            <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
           </div>
           <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
             <Maximize2 size={14} />{t("operations.map.fit_all")}
@@ -437,6 +443,11 @@ export function MapTab() {
 
         <aside className="focus-live-queue">
           <h2>{td("attention")}</h2>
+          <div className="focus-summary-strip">
+            <StatTile label={td("observed", { count: liveRows.length })} value={String(liveRows.length)} />
+            <StatTile label={td("delayed", { count: delayedRows.length })} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
+            {onTimePct != null && <StatTile label={td("onTimePct")} value={`${onTimePct}%`} />}
+          </div>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
