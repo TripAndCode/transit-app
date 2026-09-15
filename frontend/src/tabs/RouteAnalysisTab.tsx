@@ -65,8 +65,8 @@ export function RouteAnalysisTab() {
               <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
               <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
             </div>}
-            {mapVisited && <div className={`focus-tab-panel focus-tab-panel--map${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
-              <AnalysisMap data={query.data!} selected={selected} height={420} />
+            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
+              <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel">
               <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>

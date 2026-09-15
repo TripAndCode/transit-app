@@ -7,7 +7,7 @@ import type { RouteShapeResponse, RouteShapeStop } from "../../api/types";
 import { whenStyleReady } from "../../tabs/map/styleReady";
 import { createSafeMap } from "../../tabs/map/createSafeMap";
 
-export function AnalysisMap({ data, selected, height = 210 }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined; height?: number }) {
+export function AnalysisMap({ data, selected, height = 210, visible = true }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined; height?: number; visible?: boolean }) {
   const { t, i18n } = useTranslation("design");
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -58,16 +58,20 @@ export function AnalysisMap({ data, selected, height = 210 }: { data: RouteShape
   }, [data, selected, styleEpoch]);
   useEffect(() => {
     const instance = map.current;
-    if (!instance) return;
+    if (!instance || !visible) return;
     const stops = data.stops.filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat));
     if (!stops.length) return;
     return whenStyleReady(instance, () => {
+      instance.resize();
       const bounds = new maplibregl.LngLatBounds();
       stops.forEach((s) => bounds.extend([s.lon, s.lat]));
       instance.fitBounds(bounds, { padding: 30, maxZoom: 14, duration: 0 });
     });
-    // Re-fit only when the stop set itself changes (a new route/direction), not
-    // when the user merely picks a different stop to inspect.
-  }, [data]);
+    // Re-fit when the stop set changes (a new route/direction) or when the
+    // panel becomes visible again -- while hidden (kept mounted, CSS
+    // display:none), the container is zero-size and fitBounds silently
+    // no-ops, so a data change picked up while off-screen must be re-applied
+    // once visible rather than only reacting to `data` itself.
+  }, [data, visible]);
   return <section aria-label={t("map")}><div ref={container} style={{ height: failed ? 0 : height, borderRadius: 6 }} />{failed && <p className="focus-muted">{t("mapUnavailable")}</p>}</section>;
 }
