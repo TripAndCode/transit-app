@@ -14,7 +14,9 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const detailId = useId();
   const selectedButtonRef = useRef<HTMLButtonElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sequence, setSequence] = useState<number | null>(null);
+  const [detailLeft, setDetailLeft] = useState(0);
   useEffect(() => {
     if (sequence === null) return;
     const container = scrollRef.current;
@@ -23,6 +25,20 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       selectedButtonRef.current = button;
       container.scrollLeft = button.offsetLeft - (container.clientWidth - button.offsetWidth) / 2;
     }
+    // The popover is positioned in pixels relative to the actual scrolled
+    // position of the selected button, not a static fraction of the window
+    // size -- scrollLeft above re-centers the button whenever the strip
+    // overflows its container, so a fraction-based left would drift away
+    // from where the bar actually renders on screen.
+    function updateDetailLeft() {
+      const layout = layoutRef.current;
+      const selectedButton = selectedButtonRef.current;
+      if (layout && selectedButton) {
+        setDetailLeft(selectedButton.getBoundingClientRect().left - layout.getBoundingClientRect().left);
+      }
+    }
+    updateDetailLeft();
+    container?.addEventListener("scroll", updateDetailLeft);
     function dismiss(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setSequence(null);
@@ -30,7 +46,10 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       selectedButtonRef.current?.focus();
     }
     document.addEventListener("keydown", dismiss);
-    return () => document.removeEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("keydown", dismiss);
+      container?.removeEventListener("scroll", updateDetailLeft);
+    };
   }, [sequence, onFocus]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
   const [windowStart, setWindowStart] = useState(0);
@@ -38,9 +57,6 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const start = complete ? Math.max(0, Math.min(windowStart, points.length - size)) : 0;
   const visiblePoints = points.slice(start, start + size);
   const selected = points.find((point) => point.sequence === sequence);
-  const selectedIndex = visiblePoints.findIndex((point) => point.sequence === sequence);
-  const detailLeft = selectedIndex >= size / 2
-    ? `calc(${selectedIndex / size * 100}% - 240px)` : `${(selectedIndex + 1) / size * 100}%`;
   const rawLow = Math.min(0, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const rawHigh = Math.max(1, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const roughStep = (rawHigh - rawLow) / 3;
@@ -59,7 +75,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
     <section className="stop-evidence" aria-label={t("ask.evidence.title")}>
       <h3>{t(complete ? "ask.evidence.complete_title" : "ask.evidence.title")}</h3>
       <p className="investigation-caption">{t(complete ? "ask.evidence.pattern_short" : "ask.evidence.scope")}</p>
-      <div className="stop-evidence-layout">
+      <div className="stop-evidence-layout" ref={layoutRef}>
         <div ref={scrollRef} className="stop-evidence-scroll">
           <div className="stop-evidence-grid" aria-hidden="true">{ticks.map((tick) => <span key={tick}
             style={{ bottom: `${(tick - low) / span * 100}%` }}><i>{Number(tick.toPrecision(8))}</i></span>)}</div>
@@ -90,7 +106,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
         </div>
         {selected && <aside id={detailId} className="stop-evidence-detail" role="region"
           aria-label={t("ask.evidence.selected_detail")} aria-live="polite"
-          style={{ left: `clamp(0px, ${detailLeft}, calc(100% - 250px))` }}>
+          style={{ left: `clamp(0px, ${detailLeft}px, calc(100% - 250px))` }}>
             <button className="stop-evidence-clear" type="button" onClick={() => { select(null); selectedButtonRef.current?.focus(); }}>{t("ask.evidence.clear")}</button>
             <h3>{selected.name}</h3>
             <strong>{selected.minutes === null ? "—" : t("ask.evidence.minutes", { value: selected.minutes.toLocaleString() })}</strong>
