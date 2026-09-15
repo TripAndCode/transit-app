@@ -43,7 +43,7 @@ async def test_get_returns_none_when_no_key_stored(aconn, user_id):
 
 
 async def test_delete_removes_the_key(aconn, user_id):
-    await save_user_llm_key(aconn, user_id, "cerebras", "csk_test_2222")
+    await save_user_llm_key(aconn, user_id, "gemini", "csk_test_2222")
     await delete_user_llm_key(aconn, user_id)
     assert await get_user_llm_key(aconn, user_id) is None
 

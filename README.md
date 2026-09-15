@@ -195,7 +195,7 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
+- `GROQ_API_KEY`, `GEMINI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
 - `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
   feature kill switches.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.

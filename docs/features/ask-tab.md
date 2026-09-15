@@ -94,10 +94,11 @@ sentinel:
    calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
-   list, `.env.example` ships `cerebras,groq`; the code's own back-compat
-   default if unset is just `groq`) selects from `cerebras` / `groq` /
-   `openai` / `ollama` — `openai` is a supported but optional paid rung,
-   meant to be placed last. The chosen tool call is dispatched the same
+   list, `.env.example` ships `groq,gemini,openrouter`; the code's own
+   back-compat default if unset is just `groq`) selects from `groq` /
+   `gemini` / `openrouter` / `openai` — `openai` is a supported but
+   optional paid rung, meant to be placed last. The chosen tool call is
+   dispatched the same
    way; out-of-scope questions get a friendly refusal with suggestions.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
@@ -229,7 +230,7 @@ calm sign-in nudge rather than an error state.
 | `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
 | `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
 | `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
-| `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (cerebras/groq/openai/ollama), malformed tool-call recovery |
+| `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (groq/gemini/openrouter/openai), malformed tool-call recovery |
 | `tools.py` | Tool specs (`TOOLS`), `dispatch()`, `render_tool_result()`, the `_LOCALES` string table |
 | `tool_queries.py` | SQL helpers backing several tool handlers |
 | `intent.py` / `intent_cache.py` | Canonical-intent signature/cache (`ASK_INTENT_CACHE_ENABLED`) |
@@ -282,7 +283,7 @@ calm sign-in nudge rather than an error state.
 `make serve` alone for single-origin):
 
 1. `cp .env.example .env`; set a real `GROQ_API_KEY` (and optionally
-   `CEREBRAS_API_KEY` — Cerebras is tried first per `CHAT_PROVIDERS`) to
+   `GEMINI_API_KEY` — Groq is tried first per `CHAT_PROVIDERS`) to
    exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so follow-up chips work out of the
    box; set it `false` to verify the kill-switch (chips hidden,
@@ -319,7 +320,7 @@ calm sign-in nudge rather than an error state.
    ```
    Expect `router_stage: "rules"`. A paraphrase near a golden-set entry
    should return `"embedding"`; a genuinely novel/out-of-scope question
-   should return `"llm"` (needs a working Groq/Cerebras key) or a
+   should return `"llm"` (needs a working Groq/Gemini key) or a
    friendly refusal.
 9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")

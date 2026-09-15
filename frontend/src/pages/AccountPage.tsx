@@ -74,7 +74,8 @@ function LlmKeySection() {
       <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
         <option value="groq">Groq</option>
         <option value="openai">OpenAI</option>
-        <option value="cerebras">Cerebras</option>
+        <option value="gemini">Gemini</option>
+        <option value="openrouter">OpenRouter</option>
       </select>
       <label>
         {t("account.llm_key.input_label")}

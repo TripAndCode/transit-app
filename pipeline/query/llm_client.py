@@ -1,12 +1,19 @@
 """Provider-agnostic LLM adapter with ordered fallback.
 
-Lets the Ask tab try Cerebras first (1M tokens/day free), fall back to
-Groq (100K/day) on rate-limit, optionally bounce to a local Ollama
-instance for offline safety, and finally OpenAI as a paid last resort
-once both free tiers are exhausted. All four speak OpenAI-compatible
-REST, so the openai-python SDK works with each by swapping ``base_url``
-and ``api_key``. Falling back lets a single .env file work locally and
-remotely without code-path divergence.
+Lets the Ask tab try Groq first (100K tokens/day free), fall back to
+Gemini (request-count quota, a different limiting dimension so it
+doesn't exhaust in lockstep with Groq's token-based one), then
+OpenRouter's free-model routing (a different failure domain again --
+one company's capacity issue doesn't take down a whole rung the way it
+does for a single-vendor entry), and finally OpenAI as a paid last
+resort once the free tiers are exhausted. All four speak OpenAI-
+compatible REST, so the openai-python SDK works with each by swapping
+``base_url`` and ``api_key``. Falling back lets a single .env file work
+locally and remotely without code-path divergence.
+
+Cerebras was removed from this ladder: its free tier now requires a
+payment method on file (a policy change made after this adapter was
+first written), which defeats the point of a free-first fallback rung.
 
 Configuration is fully env-driven; see ``.env.example`` for the keys.
 ``chat_completions`` is intentionally a thin wrapper around
@@ -28,36 +35,47 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 # Built-in defaults for each provider we support. Operator overrides
-# any field via env (e.g. CEREBRAS_BASE_URL=...). The "key_env" is the
+# any field via env (e.g. GROQ_BASE_URL=...). The "key_env" is the
 # env-var name that holds the provider's API key.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-    "cerebras": {
-        "key_env": "CEREBRAS_API_KEY",
-        "base_url": "https://api.cerebras.ai/v1",
-        "model": "gpt-oss-120b",
-    },
     "groq": {
         "key_env": "GROQ_API_KEY",
         "base_url": "https://api.groq.com/openai/v1",
         # llama-3.3-70b-versatile was decommissioned by Groq; gpt-oss-120b
-        # matches the Cerebras default so the two ladder rungs behave
-        # consistently. Override via GROQ_MODEL if your account's available
-        # models differ (check `GET /openai/v1/models`).
+        # is the current default. Override via GROQ_MODEL if your account's
+        # available models differ (check `GET /openai/v1/models`).
         "model": "openai/gpt-oss-120b",
+    },
+    "gemini": {
+        "key_env": "GEMINI_API_KEY",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        # Flash-Lite carries the most generous free daily request quota of
+        # Google's OpenAI-compatible tier. Override via GEMINI_MODEL for the
+        # full Flash model if quality matters more than quota headroom.
+        "model": "gemini-3.1-flash-lite",
+    },
+    "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        # Pinned rather than OpenRouter's "openrouter/free" auto-router:
+        # the auto-router silently swaps the underlying model per request,
+        # which would invalidate scripts/followup_eval.py's verification
+        # (tied to a specific model, not the provider name) on every call.
+        # OpenRouter's free catalog rotates without notice (llama-3.3-70b
+        # was free, then wasn't) -- re-verify before re-pinning via
+        # OPENROUTER_MODEL; check
+        # openrouter.ai/models?fmt=cards&supported_parameters=tools for
+        # other free (":free" suffix), tool-calling-capable options.
+        "model": "google/gemma-4-31b-it:free",
     },
     "openai": {
         "key_env": "OPENAI_API_KEY",
         "base_url": "https://api.openai.com/v1",
         # Paid rung, deliberately placed last in CHAT_PROVIDERS so the free
-        # Cerebras/Groq tiers are exhausted first. gpt-5.4-mini is the
+        # Groq/Gemini/OpenRouter tiers are exhausted first. gpt-5.4-mini is the
         # current cost-efficient mini-tier model (confirmed available via
         # GET /v1/models); override via OPENAI_MODEL if needed.
         "model": "gpt-5.4-mini",
-    },
-    "ollama": {
-        "key_env": "OLLAMA_API_KEY",
-        "base_url": "http://localhost:11434/v1",
-        "model": "qwen2.5:7b-instruct",
     },
 }
 
@@ -68,7 +86,7 @@ class ProviderConfig:
 
     Loaded once at startup from env-vars by :func:`_load_providers`.
     ``is_usable`` gates whether the provider enters the ladder at all —
-    Ollama requires no API key; all others need one.
+    every provider needs an API key.
     """
 
     name: str
@@ -79,7 +97,7 @@ class ProviderConfig:
     @property
     def is_usable(self) -> bool:
         """Return True when this provider has enough config to attempt a call."""
-        return bool(self.api_key) or self.name == "ollama"
+        return bool(self.api_key)
 
 
 def _load_provider(name: str) -> ProviderConfig | None:
@@ -89,7 +107,7 @@ def _load_provider(name: str) -> ProviderConfig | None:
         _log.warning("CHAT_PROVIDERS lists unknown provider %r — skipping", name)
         return None
     upper = name.upper()
-    key = os.environ.get(defaults["key_env"]) or ("ollama" if name == "ollama" else None)
+    key = os.environ.get(defaults["key_env"])
     base = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
     cfg = ProviderConfig(name=name, api_key=key, base_url=base, model=model)
@@ -152,6 +170,35 @@ def _recover_tool_call(exc: Exception) -> SimpleNamespace | None:
         function=SimpleNamespace(name=name, arguments=args_json),
     )
     return SimpleNamespace(content=None, tool_calls=[call])
+
+
+def _build_create_kwargs(
+    *,
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    tools: list[dict] | None,
+    tool_choice: str,
+    response_format: dict | None,
+) -> dict[str, Any]:
+    """Build ``chat.completions.create`` kwargs, shared by the ladder and the
+    BYOK one-off path (:func:`pipeline.query.chat._completion_with_key`) so a
+    request-shape fix only ever needs to happen once.
+
+    ``tools``/``tool_choice`` are omitted together when there are no tools,
+    rather than sent as ``tools=None``/``tool_choice="none"``: OpenAI rejects
+    ``tool_choice`` outright when ``tools`` is absent ("tool_choice is only
+    allowed when tools are specified"). Groq/Gemini/OpenRouter tolerate the
+    ``None``/``"none"`` pair, but omitting both keys is the one shape every
+    OpenAI-compatible provider in the ladder accepts.
+    """
+    create_kwargs: dict[str, Any] = dict(model=model, messages=messages, temperature=temperature)
+    if tools:
+        create_kwargs["tools"] = tools
+        create_kwargs["tool_choice"] = tool_choice
+    if response_format is not None:
+        create_kwargs["response_format"] = response_format
+    return create_kwargs
 
 
 class LLMClient:
@@ -228,15 +275,14 @@ class LLMClient:
             client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
             for attempt in (1, 2):
                 try:
-                    create_kwargs: dict[str, Any] = dict(
+                    create_kwargs = _build_create_kwargs(
                         model=model_override or cfg.model,
                         messages=messages,
-                        tools=tools,
-                        tool_choice=tool_choice if tools else "none",
                         temperature=temperature,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        response_format=response_format,
                     )
-                    if response_format is not None:
-                        create_kwargs["response_format"] = response_format
                     resp = client.chat.completions.create(**create_kwargs)
                     return resp.choices[0].message, None
                 except APITimeoutError:

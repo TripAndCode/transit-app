@@ -156,8 +156,8 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    CLICKHOUSE_SECURE=false                 # private network, no TLS needed internally
    GROQ_API_KEY=gsk_...
    CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
-   CHAT_PROVIDERS=cerebras,groq            # add CEREBRAS_API_KEY too if using it
-   CEREBRAS_API_KEY=...                    # optional but recommended (primary rung)
+   CHAT_PROVIDERS=groq,gemini               # add GEMINI_API_KEY too if using it
+   GEMINI_API_KEY=...                      # optional but recommended (second rung)
    CORS_ORIGINS=                           # leave EMPTY — SPA + API are same-origin
    ```
    - `PORT` is injected by Railway automatically; the Dockerfile's
@@ -183,7 +183,7 @@ curl -fsS https://<your>.up.railway.app/health      # → 200
 ```
 
 Open the domain in a browser — SPA loads. Tabs are empty until data lands
-(next step), and Ask works once `GROQ_API_KEY`/`CEREBRAS_API_KEY` is valid.
+(next step), and Ask works once `GROQ_API_KEY`/`GEMINI_API_KEY` is valid.
 
 > **Image spec — the Ask-tab embedder is not in this image.** `sentence-
 > transformers` (and its transitive `torch`/`transformers`/`scikit-learn`/

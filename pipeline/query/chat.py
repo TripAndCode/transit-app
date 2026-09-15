@@ -45,7 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _recover_tool_call, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, _recover_tool_call, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -78,7 +78,7 @@ def _allowed_providers() -> set[str] | None:
     documented historical default — Groq — is unchanged. Some models
     (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
     injected into user text rather than the system prompt (see
-    ``pipeline/query/followup.py``, which defaults to Cerebras-only for
+    ``pipeline/query/followup.py``, which defaults to Groq-only for
     exactly this reason); unlike the follow-up path, restricting the
     primary Ask path by default would change cost/latency/answer-quality
     for the main feature, so operators opt in explicitly here instead.
@@ -223,15 +223,14 @@ def _completion_with_key(
     base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
     one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
-    create_kwargs: dict[str, Any] = dict(
+    create_kwargs = _build_create_kwargs(
         model=model_override or model,
         messages=messages,
-        tools=tools,
-        tool_choice=tool_choice if tools else "none",
         temperature=temperature,
+        tools=tools,
+        tool_choice=tool_choice,
+        response_format=response_format,
     )
-    if response_format is not None:
-        create_kwargs["response_format"] = response_format
     resp = one_off.chat.completions.create(**create_kwargs)
     return resp.choices[0].message
 
@@ -439,7 +438,7 @@ async def chat_with_tools(
     The ``model`` parameter is forwarded to the LLM adapter as a
     per-call override. When ``model=None`` (the default), the adapter
     uses each provider's own configured default (``{PROVIDER}_MODEL``
-    env var, e.g. ``CEREBRAS_MODEL`` / ``GROQ_MODEL``). Passing a
+    env var, e.g. ``GEMINI_MODEL`` / ``GROQ_MODEL``). Passing a
     vendor-specific model name (e.g. ``"llama-3.3-70b-versatile"``) only
     works if every provider in the fallback ladder accepts it.
     """
